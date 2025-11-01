@@ -1,0 +1,64 @@
+# Build directories
+build/
+out/
+bin/
+lib/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.db
+*.VC.db
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+
+# Executables
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dylib
+*.so
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Assets (large files - customize as needed)
+assets/models/*
+# assets/textures/*
+# !assets/models/.gitkeep
+# !assets/textures/.gitkeep
+

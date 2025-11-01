@@ -1,0 +1,2 @@
+without making any edit, or jumping straight to implementation, lets think, analyze the situation and plan what, where is the problem and how to efficiently and professionally solve and enhance it
+dont make any files, just discuss about the problem or idea in chat
