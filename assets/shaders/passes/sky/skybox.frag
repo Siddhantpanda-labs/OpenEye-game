@@ -1,0 +1,21 @@
+#version 450 core
+
+in vec2 v_TexCoord;
+out vec4 FragColor;
+
+uniform samplerCube u_Skybox;
+
+#include "../../common/camera.glsl"
+
+void main() {
+    vec2 ndc = v_TexCoord * 2.0 - 1.0;
+    vec4 clip = vec4(ndc, 1.0, 1.0);
+    vec4 viewDirH = u_InverseProjectionMatrix * clip;
+    viewDirH /= viewDirH.w;
+    vec3 viewDir = normalize(viewDirH.xyz);
+    vec3 worldDir = normalize((u_InverseViewMatrix * vec4(viewDir, 0.0)).xyz);
+    vec3 color = texture(u_Skybox, worldDir).rgb;
+    FragColor = vec4(color, 1.0);
+}
+
+

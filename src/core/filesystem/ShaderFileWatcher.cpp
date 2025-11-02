@@ -66,34 +66,28 @@ bool ShaderFileWatcher::IsShaderFile(const std::filesystem::path& path) {
 
 std::vector<std::filesystem::path> ShaderFileWatcher::GetShaderFiles() {
     std::vector<std::filesystem::path> shaderFiles;
-    
     if (!s_initialized) {
         return shaderFiles;
     }
-    
-    // Find project root by going up from executable directory
+
+    // Locate top-most project root that contains s_sourceDir
     std::filesystem::path currentPath = std::filesystem::current_path();
     std::filesystem::path projectRoot;
-    
-    // Prefer the top-most ancestor that contains assets/shaders (project root),
-    // not the nearest one (which may be the runtime folder next to the exe)
     for (int i = 0; i < 8 && currentPath != currentPath.root_path(); i++) {
         std::filesystem::path testPath = currentPath / s_sourceDir;
         if (std::filesystem::exists(testPath) && std::filesystem::is_directory(testPath)) {
-            projectRoot = currentPath; // keep updating to get the highest one
+            projectRoot = currentPath;
         }
         currentPath = currentPath.parent_path();
     }
-    
     if (projectRoot.empty()) {
         OE_WARN_F("ShaderFileWatcher: Could not find project root with %s directory", s_sourceDir.c_str());
         return shaderFiles;
     }
-    
+
     std::filesystem::path sourceDirPath = projectRoot / s_sourceDir;
-    
     try {
-        for (const auto& entry : std::filesystem::directory_iterator(sourceDirPath)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(sourceDirPath)) {
             if (entry.is_regular_file() && IsShaderFile(entry.path())) {
                 shaderFiles.push_back(entry.path());
             }
@@ -101,7 +95,6 @@ std::vector<std::filesystem::path> ShaderFileWatcher::GetShaderFiles() {
     } catch (const std::filesystem::filesystem_error& e) {
         OE_ERROR_F("ShaderFileWatcher: Error scanning directory: %s", e.what());
     }
-    
     return shaderFiles;
 }
 
@@ -182,23 +175,25 @@ size_t ShaderFileWatcher::SyncShaders() {
     size_t copiedCount = 0;
     
     try {
-        for (const auto& entry : std::filesystem::directory_iterator(sourceDir)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(sourceDir)) {
             if (!entry.is_regular_file() || !IsShaderFile(entry.path())) {
                 continue;
             }
-            
+
             std::filesystem::path sourceFile = entry.path();
-            std::filesystem::path destFile = destDir / sourceFile.filename();
-            
-            // Skip if same file
+            // Preserve subdirectory structure relative to sourceDir
+            std::filesystem::path relativePath = std::filesystem::relative(sourceFile, sourceDir);
+            std::filesystem::path destFile = destDir / relativePath;
+
+            // Skip if same file (defensive)
             try {
                 if (std::filesystem::equivalent(sourceFile, destFile)) {
                     continue;
                 }
             } catch (...) {
-                // If equivalent check fails, continue (might be different)
+                // Ignore equivalence errors
             }
-            
+
             if (NeedsCopy(sourceFile, destFile)) {
                 if (CopyShaderFile(sourceFile, destFile)) {
                     copiedCount++;

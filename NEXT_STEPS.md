@@ -1,188 +1,77 @@
-# Next Steps - Development Roadmap
+Absolutely. To reach “Unity-level” robustness for a AAA shooter/metaverse, we need a professional foundation across rendering, engine systems, content pipeline, and tooling. Here’s a concise, staged plan focused on impact and realism.
 
-## ✅ Completed Phases
+### 0) Non‑negotiables and targets
+- Performance budgets at 1080p/1440p with scalable presets.
+- Deterministic builds, CI, crash telemetry, hotfix pipeline.
+- Offline asset cooking; runtime is read‑only optimized data.
 
-### Phase 0: Bootstrap & Build System - COMPLETE
-- ✅ Window system with OpenGL 4.5
-- ✅ Logging system
-- ✅ Input handling
-- ✅ Time management
-- ✅ Basic ECS foundation
+### 1) Rendering platform (now → production)
+- Framegraph (high priority): Shadow → GBuffer → Skybox → Lighting → Post → UI. Auto manage resources, resize, aliasing, GPU timestamps.
+- Lighting:
+  - Clustered/tiled lighting (compute) for scalable many lights.
+  - PBR + IBL (irradiance, prefiltered env, BRDF LUT), skybox-driven exposure.
+  - CSM solid: stabilizing cascades, per‑cascade bias tuning, debug visualizer.
+- Post stack:
+  - ACES tonemap + exposure (histogram), Bloom (dual‑Kawase), SSAO (GTAO), SSR (later), AA (FXAA now, TAA later).
+- Materials:
+  - PBR set (albedo/normal/metalness/roughness/ao/emissive), keyword variants, material hashing; SRGB correctness end‑to‑end.
+- GPU resource model:
+  - RT pool, texture/buffer allocators, triple‑buffered per‑frame UBO/SSBO, staging/upload queues.
+- Platforms:
+  - GL backend hardened; abstraction layer ready for Vulkan path later.
 
-### Phase 1: Resource & Shader System - COMPLETE
-- ✅ Shader manager with hot-reload
-- ✅ Texture loader (stb_image)
-- ✅ Mesh loader (Assimp) + primitives
-- ✅ Material system (PBR properties)
-- ✅ Basic rendering pipeline
+### 2) Core engine systems
+- ECS + Scenes:
+  - Hierarchy, prefab system, scene streaming, sector/portal support later.
+- Physics:
+  - Bullet/PhysX integration; character controller; hit-scan, ragdolls.
+- Animation:
+  - Skeleton, retargeting, blend trees; aim offsets; additive layers.
+- Audio:
+  - Spatialized mixing, reverb zones, distance curves.
+- Gameplay:
+  - Replication‑ready component design (host-authoritative), prediction/rollback hooks.
 
-### Phase 2: ECS & Scene Basics - IN PROGRESS
-- ✅ ECS Components (Transform, Renderable, Camera, Light, AABB, Tag)
-- ✅ ECS Systems (TransformSystem, RenderSystem, CameraSystem)
-- ✅ Hierarchical transforms
-- 🚧 Integration with rendering (currently working on)
+### 3) Networking and scale
+- Dedicated server build; async I/O; entity replication graph; relevance culling.
+- Lag compensation (server rewind), client prediction, server reconciliation.
+- Anti‑cheat surfaces (movt sanity, aim, secure leaderboards).
 
-## 🎯 Immediate Next Steps
+### 4) Tools/editor (shipping quality)
+- ImGui dockable editor suite: Scene Hierarchy, Inspector, Asset Browser, Profiling, Render Graph Viewer, G‑Buffer/Cascade viewers.
+- Level authoring: gizmos, navmesh bake visualizer, spawner tools, waves/encounters.
+- Live shader recompile with error surfacing; material preview; post stack inspector.
+- Capture/replay: deterministic input replay, frame capture, GPU timings.
 
-### 1. **Complete Phase 2 Integration** (Current Priority)
-**Goal**: Render entities through ECS system
+### 5) Asset pipeline (cook → load fast)
+- Import → cook pipeline:
+  - Mesh (Draco/meshopt), textures (KTX2/BC/ASTC), materials JSON, animations, audio (Ogg/Opus).
+  - GUIDs, dependency graph, cache versioning, hot‑reload.
+- Scene format:
+  - JSON/GLTF + component schema; prefab links; LOD and impostors baked.
 
-Tasks:
-- [ ] Update editor to use ECS Scene and RenderSystem
-- [ ] Create test scene with multiple entities
-- [ ] Verify hierarchical transforms work
-- [ ] Test camera component system
+### 6) Gameplay and content specific to shooter/metaverse
+- Movement/combat:
+  - Controller (walk/run/crouch/sprint/slide), weapon framework (projectile/hitscan, recoil, spread), ADS, inventory.
+- AI:
+  - Behavior trees, navmesh (Recast/Detour), squads, perception (LOS/hearing).
+- World:
+  - Streaming city/biomes; LOD/impostor bake; crowd systems; portals/instances.
+- UX:
+  - HUD/reticle, damage feedback, kill feed, ping system, party/lobby.
 
-**Files to modify**:
-- `src/editor/main.cpp` - Use ECS Scene instead of direct rendering
-- Create test entities with Renderable components
+### 7) Quality, reliability, operations
+- CI/CD: build matrix (dev/staging/release), shader build checks, unit & golden-image render tests.
+- Telemetry: exceptions, perf stats, GPU time per pass, asset load stalls.
+- Crash dumps + symbol server; liveops hooks for events.
 
-**Estimated time**: 30 minutes
+What to do next (practical sequence)
+1. Implement the Framegraph and move current passes under it. Add GPU timestamping per node. This unlocks post stack and stability.
+2. Post‑processing manager with ACES/exposure + Bloom + SSAO + FXAA; editor controls.
+3. Material/IBL upgrade (irradiance/prefilter/BRDF LUT) and proper material textures; unify shader UBOs.
+4. Clustered lighting (compute) with light culling; convert directional/point lists.
+5. Asset cook pipeline (KTX2/Draco) + scene serialization + prefab system; hot‑reload in editor.
+6. Physics/animation integration; CharacterController; basic weapon framework; navmesh bake.
+7. Network foundation for replication and prediction; deterministic replay.
 
-### 2. **Phase 3: Performance Optimization** (Next)
-**Goal**: Handle large scenes efficiently
-
-Tasks:
-- [ ] Frustum culling system
-- [ ] LOD manager
-- [ ] Instance rendering
-- [ ] Mesh batching
-
-**Key files to create**:
-- `src/rendering/optimization/FrustumCuller.h/cpp`
-- `src/rendering/optimization/LODManager.h/cpp`
-- `src/rendering/optimization/InstanceRenderer.h/cpp`
-
-**Estimated time**: 2-3 weeks
-
-### 3. **Phase 4: Deferred Rendering** (Future)
-**Goal**: Efficient lighting for large scenes
-
-Tasks:
-- [ ] G-Buffer creation
-- [ ] Deferred lighting pass
-- [ ] Shadow mapping
-- [ ] Multiple light support
-
-**Key files to create**:
-- `src/rendering/passes/GeometryPass.h/cpp`
-- `src/rendering/passes/LightingPass.h/cpp`
-- `src/rendering/passes/ShadowPass.h/cpp`
-
-**Estimated time**: 2-3 weeks
-
-### 4. **Phase 5: Post-Processing** (Future)
-**Goal**: High-quality visual effects
-
-Tasks:
-- [ ] Post-processing pipeline
-- [ ] HDR tone mapping
-- [ ] Bloom effect
-- [ ] SSAO, SSR, AA
-
-**Key files to create**:
-- `src/rendering/post/PostProcessor.h/cpp`
-- `src/rendering/post/ToneMapping.h/cpp`
-- `src/rendering/post/Bloom.h/cpp`
-
-**Estimated time**: 1-2 weeks
-
-### 5. **Phase 6: Render-to-Texture** (Future)
-**Goal**: Video/browser rendering on quads
-
-Tasks:
-- [ ] RenderTarget system
-- [ ] Video texture integration (FFmpeg)
-- [ ] Quad rendering in 3D space
-- [ ] Multiple video screens support
-
-**Key files to create**:
-- `src/rendering/rtt/RenderTarget.h/cpp`
-- `src/rendering/rtt/VideoTexture.h/cpp`
-- `src/rendering/rtt/QuadRenderer.h/cpp`
-
-**Estimated time**: 2-3 weeks
-
-### 6. **Phase 7: Physics Integration** (Future)
-**Goal**: Bullet physics integration
-
-Tasks:
-- [ ] Bullet world setup
-- [ ] Physics components (RigidBody, Collider)
-- [ ] Character controller
-- [ ] Transform synchronization
-
-**Key files to create**:
-- `src/physics/PhysicsWorld.h/cpp`
-- `src/physics/PhysicsComponents.h`
-
-**Estimated time**: 1-2 weeks
-
-### 7. **Phase 8: Editor Development Environment** (Future)
-**Goal**: Visual world building tools
-
-Tasks:
-- [ ] ImGui docking system
-- [ ] Scene hierarchy panel
-- [ ] Transform editor panel
-- [ ] Asset browser
-- [ ] Scene save/load (JSON)
-
-**Key files to create**:
-- `src/editor/panels/SceneHierarchyPanel.h/cpp`
-- `src/editor/panels/InspectorPanel.h/cpp`
-- `src/editor/panels/AssetBrowser.h/cpp`
-
-**Estimated time**: 2-3 weeks
-
-### 8. **Phase 9: Lua Scripting** (Future)
-**Goal**: Hot-reloadable game logic
-
-Tasks:
-- [ ] Lua 5.4 integration
-- [ ] Script components
-- [ ] C++ API bindings
-- [ ] Hot-reload system
-
-**Key files to create**:
-- `src/scripting/LuaEngine.h/cpp`
-- `src/scripting/Bindings.h/cpp`
-
-**Estimated time**: 2-3 weeks
-
-## 📋 Current Status
-
-**What we have**:
-- ✅ Professional project structure
-- ✅ Core systems (Window, Input, Time, Log)
-- ✅ Complete rendering resource system
-- ✅ Camera with WASD/QE movement and mouse look
-- ✅ ECS foundation with components and systems
-
-**What's next**:
-1. **Right now**: Integrate ECS with editor (Phase 2 completion)
-2. **Then**: Performance optimization (Phase 3)
-3. **After**: Advanced rendering features
-
-## 🎮 Recommended Development Order
-
-1. **Complete Phase 2** - Get ECS rendering working (1 hour)
-2. **Phase 3** - Performance for large scenes (2-3 weeks)
-3. **Phase 4** - Deferred rendering for proper lighting (2-3 weeks)
-4. **Phase 5** - Post-processing for visual quality (1-2 weeks)
-5. **Phase 6** - RTT for video/browser (2-3 weeks)
-6. **Phase 7** - Physics for gameplay (1-2 weeks)
-7. **Phase 8** - Editor tools for content creation (2-3 weeks)
-8. **Phase 9** - Scripting for rapid iteration (2-3 weeks)
-
-## 💡 Key Principles
-
-- **Stay organized** - Keep code clean and professional
-- **Test incrementally** - Verify each feature works before moving on
-- **Performance first** - Optimize as we go, not at the end
-- **Document as we go** - Comments and docs prevent future confusion
-
----
-
-**Current Focus**: Complete Phase 2 ECS integration, then move to Phase 3 for performance.
-
+If you confirm, I’ll start with the Framegraph (small, proven design), migrate current passes, and add a basic render-graph viewer in the tools panel so you can see and profile the chain.

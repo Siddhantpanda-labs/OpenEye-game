@@ -15,9 +15,16 @@
 #include "rendering/GBuffer.h"
 #include "rendering/ShadowMap.h"
 #include "rendering/resources/Shader.h"
+#include "rendering/resources/Cubemap.h"
+#include "rendering/SkyboxRenderer.h"
+#include "rendering/RenderPipeline.h"
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <filesystem>
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
 
 using namespace OpenEye::Core;
 using namespace OpenEye::Rendering;
@@ -49,6 +56,21 @@ int main() {
         return -1;
     }
     
+    // Initialize ImGui (docking + viewports)
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        style.WindowRounding = 0.0f;
+        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+    }
+    ImGui_ImplGlfw_InitForOpenGL(window.GetNativeHandle(), true);
+    ImGui_ImplOpenGL3_Init("#version 450");
+    
     // Initialize time
     Time::Initialize();
     
@@ -57,7 +79,7 @@ int main() {
     
     OE_INFO("Loading shaders and creating resources...");
     auto shader = std::make_shared<Shader>();
-    if (!shader->LoadFromFile("assets/shaders/basic.vert", "assets/shaders/basic.frag")) {
+    if (!shader->LoadFromFile("assets/shaders/passes/forward/basic.vert", "assets/shaders/passes/forward/basic.frag")) {
         OE_ERROR("Failed to load shader");
         Log::Shutdown();
         return -1;
@@ -95,6 +117,27 @@ int main() {
         scene.GetRegistry().emplace<Renderable>(testCube, mesh, testMaterial);
         scene.GetRegistry().emplace<AABB>(testCube);
     }
+    
+    // Add some test point lights for multiple light testing
+    Entity pointLight1 = scene.CreateEntity("PointLight1");
+    auto& light1Transform = scene.GetRegistry().get<Transform>(pointLight1);
+    light1Transform.position = glm::vec3(2.0f, 2.0f, 0.0f);
+    Light light1;
+    light1.type = Light::Type::Point;
+    light1.color = glm::vec3(1.0f, 0.8f, 0.6f); // Warm yellow
+    light1.intensity = 5.0f;
+    light1.range = 10.0f;
+    scene.GetRegistry().emplace<Light>(pointLight1, light1);
+    
+    Entity pointLight2 = scene.CreateEntity("PointLight2");
+    auto& light2Transform = scene.GetRegistry().get<Transform>(pointLight2);
+    light2Transform.position = glm::vec3(-2.0f, 2.0f, -2.0f);
+    Light light2;
+    light2.type = Light::Type::Point;
+    light2.color = glm::vec3(0.6f, 0.8f, 1.0f); // Cool blue
+    light2.intensity = 4.0f;
+    light2.range = 8.0f;
+    scene.GetRegistry().emplace<Light>(pointLight2, light2);
     
     // Count entities with Transform component (all entities should have this)
     size_t entityCount = scene.GetRegistry().view<Transform>().size();
@@ -172,6 +215,18 @@ int main() {
     // Enable depth testing
     glEnable(GL_DEPTH_TEST);
     
+    // Debug and lighting settings (UI-controlled)
+    static int debugOutputMode = 0; // 0=Lighting,1=Albedo,2=Normal,3=Position,4=PBR
+    static glm::vec3 uiLightDir = glm::normalize(glm::vec3(0.5f, 1.0f, 0.3f));
+    static glm::vec3 uiLightColor = glm::vec3(1.0f, 0.95f, 0.9f);
+    static float uiLightIntensity = 3.0f;
+    static glm::vec3 uiAmbient = glm::vec3(0.08f);
+    static float uiExposure = 1.0f;
+    
+    // GBuffer & ShadowMap (deferred path resources)
+    static RenderPipeline renderPipeline;
+    static bool pipelineInitialized = false;
+    
     // Main loop
     while (!window.ShouldClose()) {
         Time::Update();
@@ -209,7 +264,7 @@ int main() {
         frustum.ExtractFromMatrix(viewProj);
         
         // Toggle to compare: forward (basic) vs deferred
-        static const bool useDeferred = false;
+        static const bool useDeferred = true;  // Deferred pipeline enabled
         if (!useDeferred) {
             // Forward path: draw the main cube directly, bypassing culling/ECS
             glm::mat4 view = camera.GetViewMatrix();
@@ -240,62 +295,122 @@ int main() {
             // Optionally render others via ECS forward path (without culling)
             // RenderSystem::Update(scene, camera, view, proj);
         } else {
-            // Deferred rendering pipeline
-            static GBuffer gbuffer;
-            static bool gbufferInitialized = false;
-            if (!gbufferInitialized) {
-                gbuffer.Initialize(static_cast<uint32_t>(window.GetWidth()), 
-                                  static_cast<uint32_t>(window.GetHeight()));
-                gbufferInitialized = true;
-            }
-            
-            // Resize G-Buffer if window size changed
-            if (gbuffer.GetWidth() != static_cast<uint32_t>(window.GetWidth()) || 
-                gbuffer.GetHeight() != static_cast<uint32_t>(window.GetHeight())) {
-                gbuffer.Resize(static_cast<uint32_t>(window.GetWidth()), 
-                             static_cast<uint32_t>(window.GetHeight()));
-            }
-            
-            // Shadow pass: render depth from light's perspective
-            static ShadowMap shadowMap;
-            static bool shadowMapInitialized = false;
-            if (!shadowMapInitialized) {
-                shadowMap.Initialize(2048, 4); // 2048x2048, 4 cascades
-                shadowMapInitialized = true;
-            }
-            
-            glm::vec3 lightDirection = glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f));
-            shadowMap.UpdateMatrices(lightDirection, camera.GetViewMatrix(), 
-                                    camera.GetProjectionMatrix(), camera.GetPosition(),
-                                    0.1f, 100.0f);
-            
-            // Render shadow maps for each cascade
-            for (uint32_t i = 0; i < shadowMap.GetCascadeCount(); i++) {
-                RenderSystem::RenderShadowPass(scene, shadowMap, i, lightDirection);
-            }
-            
-            // Geometry pass: fill G-Buffer
-            RenderSystem::RenderGeometryPass(scene, gbuffer, camera,
-                                             camera.GetViewMatrix(), camera.GetProjectionMatrix(),
-                                             frustum);
-            
-            // Lighting pass: render from G-Buffer
-            static std::shared_ptr<Shader> lightingShader = nullptr;
-            if (!lightingShader) {
-                lightingShader = std::make_shared<Shader>();
-                if (!lightingShader->LoadFromFile("assets/shaders/lighting.vert", "assets/shaders/lighting.frag")) {
-                    OE_ERROR("Failed to load lighting shader");
-                    lightingShader = nullptr;
+            // Deferred rendering pipeline (centralized)
+            if (!pipelineInitialized) {
+                renderPipeline.Initialize(static_cast<uint32_t>(window.GetWidth()), static_cast<uint32_t>(window.GetHeight()));
+                // Load skybox through pipeline cubemap
+                auto resolveAssetPath = [](const std::string& relative) -> std::string {
+                    namespace fs = std::filesystem;
+                    std::error_code ec;
+                    fs::path current = fs::current_path(ec);
+                    fs::path rel(relative);
+                    for (fs::path p = current; !p.empty(); p = p.parent_path()) {
+                        fs::path candidate = p / rel;
+                        if (fs::exists(candidate, ec)) return candidate.string();
+                        if (p == p.parent_path()) break;
+                    }
+                    return relative;
+                };
+                std::vector<std::string> faces = {
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_right.png"),
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_left.png"),
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_up.png"),
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_down.png"),
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_front.png"),
+                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_back.png")
+                };
+                if (auto* skybox = renderPipeline.GetSkyboxCubemap()) {
+                    if (skybox->LoadFromFiles(faces, true)) {
+                        OE_INFO("Skybox loaded: Clear Ocean");
+                    } else {
+                        OE_WARN("Failed to load skybox.");
+                    }
                 }
+                pipelineInitialized = true;
             }
-            
-            if (lightingShader) {
-                // Pass shadow map to lighting pass (it will handle uniform setting)
-                RenderSystem::RenderLightingPass(gbuffer, camera, lightingShader, &shadowMap);
-            }
+            renderPipeline.Resize(static_cast<uint32_t>(window.GetWidth()), static_cast<uint32_t>(window.GetHeight()));
+
+            LightingParams params;
+            params.debugMode = debugOutputMode;
+            params.lightDir = uiLightDir;
+            params.lightColor = uiLightColor;
+            params.lightIntensity = uiLightIntensity;
+            params.ambient = uiAmbient;
+            params.exposure = uiExposure;
+            renderPipeline.RenderFrame(scene, camera, params);
         }
         
-        // TODO: Render UI panels (Phase 9)
+        // --- ImGui UI ---
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        
+        // Tools dockspace (floating window) - main scene stays untouched beneath
+        static bool openToolsDock = true;
+        ImGui::SetNextWindowSize(ImVec2(520, 400), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Tools", &openToolsDock, ImGuiWindowFlags_MenuBar)) {
+            ImGuiID tools_dockspace = ImGui::GetID("ToolsDockSpace");
+            ImGui::DockSpace(tools_dockspace, ImVec2(0.0f, 0.0f));
+            
+            // Renderer Debug docks here on first open
+            ImGui::SetNextWindowDockID(tools_dockspace, ImGuiCond_FirstUseEver);
+        }
+        ImGui::End();
+        
+        // Renderer Debug panel (docked into Tools window)
+        ImGui::Begin("Renderer Debug");
+        const char* modes[] = {"Lighting", "Albedo", "Normal", "Position", "PBR"};
+        ImGui::Combo("Output", &debugOutputMode, modes, IM_ARRAYSIZE(modes));
+        ImGui::Separator();
+        ImGui::Text("Lighting");
+        ImGui::DragFloat3("Dir", &uiLightDir.x, 0.01f, -1.0f, 1.0f);
+        if (glm::length(uiLightDir) < 0.001f) uiLightDir = glm::vec3(0.0f,1.0f,0.0f);
+        ImGui::ColorEdit3("Color", &uiLightColor.x);
+        ImGui::DragFloat("Intensity", &uiLightIntensity, 0.05f, 0.0f, 50.0f);
+        ImGui::DragFloat3("Ambient", &uiAmbient.x, 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Exposure", &uiExposure, 0.05f, 0.01f, 5.0f);
+        if (useDeferred && pipelineInitialized && renderPipeline.GetGBuffer()) {
+            ImGui::Separator();
+            ImGui::Text("G-Buffer");
+            ImGui::Text("Position");
+            ImGui::Image((ImTextureID)(intptr_t)renderPipeline.GetGBuffer()->GetPositionTexture(), ImVec2(256, 256), ImVec2(0,1), ImVec2(1,0));
+            ImGui::SameLine(); ImGui::Text("Normal");
+            ImGui::Image((ImTextureID)(intptr_t)renderPipeline.GetGBuffer()->GetNormalTexture(), ImVec2(256, 256), ImVec2(0,1), ImVec2(1,0));
+            ImGui::SameLine(); ImGui::Text("Albedo");
+            ImGui::Image((ImTextureID)(intptr_t)renderPipeline.GetGBuffer()->GetAlbedoTexture(), ImVec2(256, 256), ImVec2(0,1), ImVec2(1,0));
+        }
+        ImGui::End();
+
+        // FrameGraph panel (execution order and timings)
+        ImGui::Begin("FrameGraph");
+        if (useDeferred && pipelineInitialized) {
+            const auto& passes = renderPipeline.GetFrameGraphPasses();
+            ImGui::Columns(3, nullptr, false);
+            ImGui::Text("Pass"); ImGui::NextColumn();
+            ImGui::Text("GPU ms"); ImGui::NextColumn();
+            ImGui::Text("Status"); ImGui::NextColumn();
+            ImGui::Separator();
+            for (const auto& p : passes) {
+                ImGui::TextUnformatted(p.name.c_str()); ImGui::NextColumn();
+                ImGui::Text("%.3f", p.gpuMs); ImGui::NextColumn();
+                ImGui::TextUnformatted(p.culled ? "culled" : "executed"); ImGui::NextColumn();
+            }
+            ImGui::Columns(1);
+        } else {
+            ImGui::TextUnformatted("Not available (deferred disabled or pipeline not initialized)");
+        }
+        ImGui::End();
+        
+        // Render ImGui
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            GLFWwindow* backup_current_context = glfwGetCurrentContext();
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+            glfwMakeContextCurrent(backup_current_context);
+        }
         
         // Swap buffers
         window.SwapBuffers();
@@ -310,6 +425,10 @@ int main() {
     }
     
     OE_INFO("=== OpenEye Editor Shutting Down ===");
+    // Shutdown ImGui
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     window.Shutdown();
     Log::Shutdown();
     

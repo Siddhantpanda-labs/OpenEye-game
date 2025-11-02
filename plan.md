@@ -3,6 +3,8 @@
 ### Vision
 - Build a multiplayer‑ready VR‑capable urban sandbox with arenas, exploration, media screens, and future AI control.
 - Ship a playable game first; the library grows pragmatically as features are needed.
+- Want it to be proper unity level game, a aaa level proper efficient game, no playing around setup, proper professional functional full fledged metaverse, 3d shooting game like fortnite 
+everything should be up to the mark
 
 ### Non‑negotiables
 - Pure and only OpenGL rendering (no other graphics APIs).

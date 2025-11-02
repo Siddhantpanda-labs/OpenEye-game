@@ -111,6 +111,10 @@ add_library(OpenEyeCore STATIC
     src/rendering/resources/Material.h
     src/rendering/resources/MeshLoader.cpp
     src/rendering/resources/MeshLoader.h
+    src/rendering/resources/UniformBuffer.cpp
+    src/rendering/resources/UniformBuffer.h
+    src/rendering/resources/Cubemap.cpp
+    src/rendering/resources/Cubemap.h
     
     # Rendering systems
     src/rendering/Camera.cpp
@@ -125,8 +129,20 @@ add_library(OpenEyeCore STATIC
     src/rendering/GBuffer.h
     src/rendering/FullscreenQuad.cpp
     src/rendering/FullscreenQuad.h
+    src/rendering/SkyboxRenderer.cpp
+    src/rendering/SkyboxRenderer.h
     src/rendering/ShadowMap.cpp
     src/rendering/ShadowMap.h
+    src/rendering/RenderPipeline.cpp
+    src/rendering/RenderPipeline.h
+    src/rendering/passes/GBufferPass.cpp
+    src/rendering/passes/GBufferPass.h
+    src/rendering/passes/ShadowPass.cpp
+    src/rendering/passes/ShadowPass.h
+    src/rendering/passes/LightingPass.cpp
+    src/rendering/passes/LightingPass.h
+    src/rendering/framegraph/FrameGraph.cpp
+    src/rendering/framegraph/FrameGraph.h
     
     ${IMGUI_SOURCES}
     ${IMGUIZMO_SOURCES}

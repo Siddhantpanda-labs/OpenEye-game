@@ -427,17 +427,15 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
     static std::shared_ptr<Rendering::Shader> gbufferShader = nullptr;
     if (!gbufferShader) {
         gbufferShader = std::make_shared<Rendering::Shader>();
-        if (!gbufferShader->LoadFromFile("assets/shaders/gbuffer.vert", "assets/shaders/gbuffer.frag")) {
+        if (!gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert", "assets/shaders/passes/deferred/gbuffer.frag")) {
             OE_ERROR("Failed to load G-Buffer shader");
             return;
         }
     }
     
     gbufferShader->Bind();
-    gbufferShader->SetMat4("u_View", viewMatrix);
-    gbufferShader->SetMat4("u_Projection", projectionMatrix);
     
-    OE_INFO_F("Geometry pass: Starting render, visibleEntities count: %zu", visibleEntities.size());
+    // Debug log removed to reduce spam
     
     // Render all visible entities
     size_t renderedCount = 0;
@@ -462,6 +460,16 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
         gbufferShader->SetFloat("u_Metallic", renderable.material->GetMetallic());
         gbufferShader->SetFloat("u_Roughness", renderable.material->GetRoughness());
         
+        // Bind textures if available
+        auto albedoTexture = renderable.material->GetTexture("u_AlbedoTexture");
+        if (albedoTexture) {
+            albedoTexture->Bind(10); // Use texture unit 10 for geometry pass textures
+            gbufferShader->SetInt("u_AlbedoTexture", 10);
+            gbufferShader->SetBool("u_HasAlbedoTexture", true);
+        } else {
+            gbufferShader->SetBool("u_HasAlbedoTexture", false);
+        }
+        
         // Render mesh
         renderable.mesh->Bind();
         renderable.mesh->Draw();
@@ -470,21 +478,25 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
         renderedCount++;
     }
     
-    // Debug: Log render count
-    static size_t lastLoggedCount = 999;
-    if (renderedCount != lastLoggedCount) {
-        OE_INFO_F("Geometry pass: Rendered %zu entities to G-Buffer", renderedCount);
-        lastLoggedCount = renderedCount;
-    }
+    // Debug count log removed
     
     gbufferShader->Unbind();
     gbuffer.Unbind();
 }
 
-void RenderSystem::RenderLightingPass(Rendering::GBuffer& gbuffer,
+void RenderSystem::RenderLightingPass(Scene& scene,
+                                     Rendering::GBuffer& gbuffer,
                                      const Rendering::Camera& camera,
                                      std::shared_ptr<Rendering::Shader> lightingShader,
-                                     Rendering::ShadowMap* shadowMap) {
+                                     Rendering::ShadowMap* shadowMap,
+                                     int debugMode,
+                                     const glm::vec3& paramLightDir,
+                                     const glm::vec3& paramLightColor,
+                                     float paramLightIntensity,
+                                     const glm::vec3& paramAmbient,
+                                     float paramExposure,
+                                     Rendering::SkyboxRenderer* skyboxRenderer) {
+    auto& registry = scene.GetRegistry();
     if (!lightingShader) {
         OE_ERROR("RenderLightingPass: Invalid lighting shader");
         return;
@@ -510,6 +522,12 @@ void RenderSystem::RenderLightingPass(Rendering::GBuffer& gbuffer,
         shadowMap->BindTextures(5); // Start at texture unit 5
     }
     
+    // Bind background from skybox pass (if available)
+    if (skyboxRenderer && skyboxRenderer->GetColorTexture() != 0) {
+        glActiveTexture(GL_TEXTURE0 + 9);
+        glBindTexture(GL_TEXTURE_2D, skyboxRenderer->GetColorTexture());
+    }
+
     // Use lighting shader (MUST bind before setting uniforms)
     lightingShader->Bind();
     
@@ -519,19 +537,46 @@ void RenderSystem::RenderLightingPass(Rendering::GBuffer& gbuffer,
     lightingShader->SetInt("g_Albedo", 2);
     lightingShader->SetInt("g_PBRParams", 3);
     
-    // Set camera matrices for shadow calculation
-    glm::mat4 viewMatrix = camera.GetViewMatrix();
-    glm::mat4 projMatrix = camera.GetProjectionMatrix();
-    lightingShader->SetMat4("u_ViewMatrix", viewMatrix);
-    lightingShader->SetMat4("u_ProjectionMatrix", projMatrix);
+    // Directional light, exposure, ambient now via LightUniforms UBO
+    lightingShader->SetInt("u_DebugMode", debugMode);
+    if (skyboxRenderer && skyboxRenderer->GetColorTexture() != 0) {
+        lightingShader->SetInt("u_Background", 9);
+    }
     
-    // Set camera position
-    lightingShader->SetVec3("u_ViewPos", camera.GetPosition());
+    // Collect point lights from scene
+    std::vector<glm::vec3> pointLightPositions;
+    std::vector<glm::vec3> pointLightColors;
+    std::vector<float> pointLightIntensities;
+    std::vector<float> pointLightRanges;
     
-    // Set default directional light
-    lightingShader->SetVec3("u_LightDir", glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
-    lightingShader->SetVec3("u_LightColor", glm::vec3(1.0f, 1.0f, 1.0f));
-    lightingShader->SetFloat("u_LightIntensity", 1.0f);
+    auto lightView = registry.view<Transform, Light>();
+    for (auto entity : lightView) {
+        auto [transform, light] = lightView.get<Transform, Light>(entity);
+        
+        if (light.type == Light::Type::Point) {
+            glm::vec3 worldPos = transform.GetWorldMatrix(registry) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            pointLightPositions.push_back(worldPos);
+            pointLightColors.push_back(light.color);
+            pointLightIntensities.push_back(light.intensity);
+            pointLightRanges.push_back(light.range);
+        }
+    }
+    
+    // Set point lights (limit to MAX_POINT_LIGHTS)
+    size_t pointLightCount = std::min(pointLightPositions.size(), size_t(32));
+    lightingShader->SetInt("u_PointLightCount", static_cast<int>(pointLightCount));
+    
+    for (size_t i = 0; i < pointLightCount; i++) {
+        std::string posName = "u_PointLightPositions[" + std::to_string(i) + "]";
+        std::string colorName = "u_PointLightColors[" + std::to_string(i) + "]";
+        std::string intensityName = "u_PointLightIntensities[" + std::to_string(i) + "]";
+        std::string rangeName = "u_PointLightRanges[" + std::to_string(i) + "]";
+        
+        lightingShader->SetVec3(posName, pointLightPositions[i]);
+        lightingShader->SetVec3(colorName, pointLightColors[i]);
+        lightingShader->SetFloat(intensityName, pointLightIntensities[i]);
+        lightingShader->SetFloat(rangeName, pointLightRanges[i]);
+    }
     
     // Set shadow map uniforms if shadow map is provided
     if (shadowMap) {

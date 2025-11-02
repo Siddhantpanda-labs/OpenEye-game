@@ -7,6 +7,8 @@
 #include "rendering/LODManager.h"
 #include "rendering/GBuffer.h"
 #include "rendering/ShadowMap.h"
+#include "rendering/resources/Cubemap.h"
+#include "rendering/SkyboxRenderer.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <memory>
@@ -68,10 +70,18 @@ public:
                                   const Rendering::Frustum& frustum);
     
     // Deferred rendering: lighting pass (reads from G-Buffer)
-    static void RenderLightingPass(Rendering::GBuffer& gbuffer,
+    static void RenderLightingPass(Scene& scene,
+                                  Rendering::GBuffer& gbuffer,
                                   const Rendering::Camera& camera,
                                   std::shared_ptr<Rendering::Shader> lightingShader,
-                                  Rendering::ShadowMap* shadowMap = nullptr);
+                                  Rendering::ShadowMap* shadowMap = nullptr,
+                                  int debugMode = 0,
+                                  const glm::vec3& lightDir = glm::vec3(0.5f, 1.0f, 0.3f),
+                                  const glm::vec3& lightColor = glm::vec3(1.0f, 0.95f, 0.9f),
+                                  float lightIntensity = 3.0f,
+                                  const glm::vec3& ambientLight = glm::vec3(0.08f),
+                                  float exposure = 1.0f,
+                                  Rendering::SkyboxRenderer* skyboxRenderer = nullptr);
     
     // Shadow pass: render depth from light's perspective
     static void RenderShadowPass(Scene& scene, Rendering::ShadowMap& shadowMap,
