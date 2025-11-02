@@ -145,6 +145,8 @@ add_library(OpenEyeCore STATIC
     src/rendering/passes/ShadowPass.h
     src/rendering/passes/LightingPass.cpp
     src/rendering/passes/LightingPass.h
+    src/rendering/passes/TransparencyPass.cpp
+    src/rendering/passes/TransparencyPass.h
     src/rendering/framegraph/FrameGraph.cpp
     src/rendering/framegraph/FrameGraph.h
     

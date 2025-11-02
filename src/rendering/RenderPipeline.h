@@ -35,7 +35,34 @@ struct RenderOptions {
     bool enableFXAA = true;
     float blurIntensity = 1.0f;
     int blurIterations = 3;
-    float chromaticAberrationIntensity = 0.002f;
+    float chromaticAberrationIntensity = 0.002f; // Range: 0.0-0.05
+    
+    // SSAO
+    bool enableSSAO = false;
+    float ssaoRadius = 0.5f;
+    float ssaoBias = 0.025f;
+    int ssaoSamples = 16;
+    
+    // SSR
+    bool enableSSR = false;
+    float ssrStepSize = 0.1f;
+    int ssrMaxSteps = 32;
+    float ssrThickness = 0.01f;
+    
+    // Motion Blur
+    bool enableMotionBlur = false;
+    float motionBlurIntensity = 1.0f;
+    int motionBlurSamples = 8;
+    
+    // Vignette
+    bool enableVignette = false;
+    float vignetteIntensity = 0.5f;
+    float vignetteRadius = 0.75f;
+    float vignetteSoftness = 0.5f;
+    
+    // Film Grain
+    bool enableFilmGrain = false;
+    float filmGrainIntensity = 0.1f;
 };
 
 class RenderPipeline {

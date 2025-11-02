@@ -8,6 +8,7 @@
 #include "passes/ShadowPass.h"
 #include "passes/GBufferPass.h"
 #include "passes/LightingPass.h"
+#include "passes/TransparencyPass.h"
 #include "resources/Shader.h"
 #include "resources/Cubemap.h"
 #include "framegraph/FrameGraph.h"
@@ -143,10 +144,23 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
             m_ibl && m_ibl->IsValid() ? m_ibl.get() : nullptr);
     }, {}, {}, true);
     
+    // Transparency pass - render transparent objects on top of deferred lighting
+    m_frameGraph->addPass("Transparency", [this, &scene, &camera](const FGPassResources&) {
+        // Keep HDR framebuffer bound
+        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+        glViewport(0, 0, m_width, m_height);
+        
+        Frustum frustum;
+        frustum.ExtractFromMatrix(camera.GetProjectionMatrix() * camera.GetViewMatrix());
+        TransparencyPass tp;
+        tp.Execute(scene, camera, frustum);
+    }, {}, {}, true);
+    
     // Post-processing pass - apply effects and blit to screen
     m_frameGraph->addPass("PostProcessing", [this, params, options](const FGPassResources&) {
         PostProcessor::Settings ppSettings;
         ppSettings.exposure = params.exposure;
+        ppSettings.useACES = true;
         ppSettings.enableBloom = options.enableBloom;
         ppSettings.enableBlur = options.enableBlur;
         ppSettings.enableChromaticAberration = options.enableChromaticAberration;
@@ -154,7 +168,23 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         ppSettings.blurIntensity = options.blurIntensity;
         ppSettings.blurIterations = options.blurIterations;
         ppSettings.chromaticAberrationIntensity = options.chromaticAberrationIntensity;
-        ppSettings.enableSSAO = false; // Disable for now
+        ppSettings.enableSSAO = options.enableSSAO;
+        ppSettings.ssaoRadius = options.ssaoRadius;
+        ppSettings.ssaoBias = options.ssaoBias;
+        ppSettings.ssaoSamples = options.ssaoSamples;
+        ppSettings.enableSSR = options.enableSSR;
+        ppSettings.ssrStepSize = options.ssrStepSize;
+        ppSettings.ssrMaxSteps = options.ssrMaxSteps;
+        ppSettings.ssrThickness = options.ssrThickness;
+        ppSettings.enableMotionBlur = options.enableMotionBlur;
+        ppSettings.motionBlurIntensity = options.motionBlurIntensity;
+        ppSettings.motionBlurSamples = options.motionBlurSamples;
+        ppSettings.enableVignette = options.enableVignette;
+        ppSettings.vignetteIntensity = options.vignetteIntensity;
+        ppSettings.vignetteRadius = options.vignetteRadius;
+        ppSettings.vignetteSoftness = options.vignetteSoftness;
+        ppSettings.enableFilmGrain = options.enableFilmGrain;
+        ppSettings.filmGrainIntensity = options.filmGrainIntensity;
         
         GLuint finalTexture = m_postProcessor->ApplyPostProcessing(m_hdrTexture, *m_gbuffer, ppSettings);
         
@@ -221,7 +251,13 @@ void RenderPipeline::DestroyHDRFramebuffer() {
     }
 }
 
-const std::vector<FrameGraph::PassInfo>& RenderPipeline::GetFrameGraphPasses() const { return m_frameGraph->getPasses(); }
+const std::vector<FrameGraph::PassInfo>& RenderPipeline::GetFrameGraphPasses() const {
+    if (!m_frameGraph) {
+        static std::vector<FrameGraph::PassInfo> empty;
+        return empty;
+    }
+    return m_frameGraph->getPasses();
+}
 
 } // namespace Rendering
 } // namespace OpenEye

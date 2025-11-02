@@ -49,6 +49,11 @@ void Material::SetAO(float value) {
     m_hashDirty = true;
 }
 
+void Material::SetAlpha(float value) {
+    m_alpha = value;
+    m_hashDirty = true;
+}
+
 void Material::SetFloat(const std::string& name, float value) {
     m_floatParams[name] = value;
     m_hashDirty = true;
@@ -99,6 +104,9 @@ void Material::Bind() const {
     // Set PBR properties (only set uniforms that exist in shader)
     m_shader->SetVec3("u_Albedo", m_albedo);
     m_shader->SetVec3("u_Emission", m_emission);
+    if (m_shader->GetUniformInfo("u_Alpha")) {
+        m_shader->SetFloat("u_Alpha", m_alpha);
+    }
     
     // Note: u_Metallic and u_Roughness may be optimized out if not used in shader
     // This is fine - they'll be set when shader actually uses them
@@ -163,6 +171,8 @@ void Material::UpdateHash() const {
     hash ^= floatHash(m_albedo.z) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= floatHash(m_metallic) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= floatHash(m_roughness) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= floatHash(m_ao) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= floatHash(m_alpha) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     
     m_cachedHash = hash;
 }

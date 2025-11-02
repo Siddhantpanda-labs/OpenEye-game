@@ -30,12 +30,14 @@ public:
     void SetRoughness(float value);
     void SetEmission(const glm::vec3& color);
     void SetAO(float value); // Ambient Occlusion
+    void SetAlpha(float value); // Transparency (0.0 = fully transparent, 1.0 = opaque)
     
     glm::vec3 GetAlbedo() const { return m_albedo; }
     float GetMetallic() const { return m_metallic; }
     float GetRoughness() const { return m_roughness; }
     glm::vec3 GetEmission() const { return m_emission; }
     float GetAO() const { return m_ao; }
+    float GetAlpha() const { return m_alpha; }
     
     // Convenience texture setters for PBR workflow
     void SetAlbedoTexture(std::shared_ptr<Texture> texture) { SetTexture("u_AlbedoTexture", texture); }
@@ -81,6 +83,7 @@ private:
     float m_roughness = 0.5f;
     glm::vec3 m_emission = glm::vec3(0.0f);
     float m_ao = 1.0f;
+    float m_alpha = 1.0f; // 1.0 = opaque, < 1.0 = transparent
     
     mutable size_t m_cachedHash = 0;
     mutable bool m_hashDirty = true;

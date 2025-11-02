@@ -46,13 +46,34 @@ public:
         
         // Chromatic Aberration (RGB channel separation)
         bool enableChromaticAberration = false;
-        float chromaticAberrationIntensity = 0.002f; // Offset distance (in screen space)
+        float chromaticAberrationIntensity = 0.002f; // Offset distance (in screen space, range: 0.0-0.05)
         
         // SSAO
         bool enableSSAO = false;
         float ssaoRadius = 0.5f;
         float ssaoBias = 0.025f;
         int ssaoSamples = 16;
+        
+        // SSR (Screen-Space Reflections)
+        bool enableSSR = false;
+        float ssrStepSize = 0.1f;
+        int ssrMaxSteps = 32;
+        float ssrThickness = 0.01f;
+        
+        // Motion Blur
+        bool enableMotionBlur = false;
+        float motionBlurIntensity = 1.0f;
+        int motionBlurSamples = 8;
+        
+        // Vignette
+        bool enableVignette = false;
+        float vignetteIntensity = 0.5f;
+        float vignetteRadius = 0.75f;
+        float vignetteSoftness = 0.5f;
+        
+        // Film Grain
+        bool enableFilmGrain = false;
+        float filmGrainIntensity = 0.1f;
     };
 
     // Apply post-processing chain
@@ -68,6 +89,10 @@ public:
     GLuint ApplyChromaticAberration(GLuint texture, float intensity);
     GLuint ApplyFXAA(GLuint texture);
     GLuint ApplySSAO(const GBuffer& gbuffer, const Settings& settings);
+    GLuint ApplySSR(GLuint sceneTexture, const GBuffer& gbuffer, GLuint skyboxTexture, const Settings& settings);
+    GLuint ApplyMotionBlur(GLuint texture, const GBuffer& gbuffer, const Settings& settings);
+    GLuint ApplyVignette(GLuint texture, const Settings& settings);
+    GLuint ApplyFilmGrain(GLuint texture, const Settings& settings);
 
     // Get output texture (after full chain)
     GLuint GetOutputTexture() const { return m_outputTexture; }
@@ -100,10 +125,14 @@ private:
     std::shared_ptr<Shader> m_bloomExtractShader;
     std::shared_ptr<Shader> m_bloomBlurShader;
     std::shared_ptr<Shader> m_bloomCompositeShader;
-    std::shared_ptr<Shader> m_blurShader; // General blur (same as bloom blur but separate instance)
+    std::shared_ptr<Shader> m_blurShader;
     std::shared_ptr<Shader> m_chromaticAberrationShader;
     std::shared_ptr<Shader> m_fxaaShader;
     std::shared_ptr<Shader> m_ssaoShader;
+    std::shared_ptr<Shader> m_ssrShader;
+    std::shared_ptr<Shader> m_motionBlurShader;
+    std::shared_ptr<Shader> m_vignetteShader;
+    std::shared_ptr<Shader> m_filmGrainShader;
     
     void LoadShaders();
 };

@@ -317,9 +317,26 @@ int main() {
     static bool uiEnableBlur = false;
     static bool uiEnableChromaticAberration = false;
     static bool uiEnableFXAA = true;
+    static bool uiEnableSSAO = false;
+    static bool uiEnableSSR = false;
+    static bool uiEnableMotionBlur = false;
+    static bool uiEnableVignette = false;
+    static bool uiEnableFilmGrain = false;
     static float uiBlurIntensity = 1.0f;
     static int uiBlurIterations = 3;
-    static float uiChromaticAberrationIntensity = 0.002f;
+    static float uiChromaticAberrationIntensity = 0.002f; // Default, can go up to 0.05
+    static float uiSSAORadius = 0.5f;
+    static float uiSSAOBias = 0.025f;
+    static int uiSSAOSamples = 16;
+    static float uiSSRStepSize = 0.1f;
+    static int uiSSRMaxSteps = 32;
+    static float uiSSRThickness = 0.01f;
+    static float uiMotionBlurIntensity = 1.0f;
+    static int uiMotionBlurSamples = 8;
+    static float uiVignetteIntensity = 0.5f;
+    static float uiVignetteRadius = 0.75f;
+    static float uiVignetteSoftness = 0.5f;
+    static float uiFilmGrainIntensity = 0.1f;
     static glm::vec3 uiLightDir = glm::normalize(glm::vec3(0.5f, 1.0f, 0.3f));
     static glm::vec3 uiLightColor = glm::vec3(1.0f, 0.95f, 0.9f);
     static float uiLightIntensity = 3.0f;
@@ -452,6 +469,23 @@ int main() {
             renderOptions.blurIntensity = uiBlurIntensity;
             renderOptions.blurIterations = uiBlurIterations;
             renderOptions.chromaticAberrationIntensity = uiChromaticAberrationIntensity;
+            renderOptions.enableSSAO = uiEnableSSAO;
+            renderOptions.ssaoRadius = uiSSAORadius;
+            renderOptions.ssaoBias = uiSSAOBias;
+            renderOptions.ssaoSamples = uiSSAOSamples;
+            renderOptions.enableSSR = uiEnableSSR;
+            renderOptions.ssrStepSize = uiSSRStepSize;
+            renderOptions.ssrMaxSteps = uiSSRMaxSteps;
+            renderOptions.ssrThickness = uiSSRThickness;
+            renderOptions.enableMotionBlur = uiEnableMotionBlur;
+            renderOptions.motionBlurIntensity = uiMotionBlurIntensity;
+            renderOptions.motionBlurSamples = uiMotionBlurSamples;
+            renderOptions.enableVignette = uiEnableVignette;
+            renderOptions.vignetteIntensity = uiVignetteIntensity;
+            renderOptions.vignetteRadius = uiVignetteRadius;
+            renderOptions.vignetteSoftness = uiVignetteSoftness;
+            renderOptions.enableFilmGrain = uiEnableFilmGrain;
+            renderOptions.filmGrainIntensity = uiFilmGrainIntensity;
             
             renderPipeline.RenderFrame(scene, camera, params, renderOptions);
         }
@@ -505,9 +539,49 @@ int main() {
         ImGui::Checkbox("Chromatic Aberration", &uiEnableChromaticAberration);
         if (uiEnableChromaticAberration) {
             ImGui::Indent();
-            ImGui::DragFloat("CA Intensity", &uiChromaticAberrationIntensity, 0.0001f, 0.0f, 0.01f, "%.4f");
+            ImGui::DragFloat("CA Intensity", &uiChromaticAberrationIntensity, 0.001f, 0.0f, 0.05f, "%.4f");
             ImGui::Unindent();
         }
+        ImGui::Separator();
+        ImGui::Text("Advanced Effects");
+        ImGui::Checkbox("SSAO", &uiEnableSSAO);
+        if (uiEnableSSAO) {
+            ImGui::Indent();
+            ImGui::DragFloat("Radius", &uiSSAORadius, 0.01f, 0.1f, 2.0f);
+            ImGui::DragFloat("Bias", &uiSSAOBias, 0.001f, 0.001f, 0.1f);
+            ImGui::DragInt("Samples", &uiSSAOSamples, 1, 8, 32);
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("SSR", &uiEnableSSR);
+        if (uiEnableSSR) {
+            ImGui::Indent();
+            ImGui::DragFloat("Step Size", &uiSSRStepSize, 0.01f, 0.01f, 0.5f);
+            ImGui::DragInt("Max Steps", &uiSSRMaxSteps, 1, 8, 64);
+            ImGui::DragFloat("Thickness", &uiSSRThickness, 0.001f, 0.001f, 0.1f);
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("Motion Blur", &uiEnableMotionBlur);
+        if (uiEnableMotionBlur) {
+            ImGui::Indent();
+            ImGui::DragFloat("Intensity", &uiMotionBlurIntensity, 0.1f, 0.1f, 5.0f);
+            ImGui::DragInt("Samples", &uiMotionBlurSamples, 1, 4, 16);
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("Vignette", &uiEnableVignette);
+        if (uiEnableVignette) {
+            ImGui::Indent();
+            ImGui::DragFloat("Intensity", &uiVignetteIntensity, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Radius", &uiVignetteRadius, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Softness", &uiVignetteSoftness, 0.01f, 0.0f, 1.0f);
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("Film Grain", &uiEnableFilmGrain);
+        if (uiEnableFilmGrain) {
+            ImGui::Indent();
+            ImGui::DragFloat("Intensity", &uiFilmGrainIntensity, 0.01f, 0.0f, 0.5f);
+            ImGui::Unindent();
+        }
+        ImGui::Separator();
         ImGui::Checkbox("FXAA", &uiEnableFXAA);
         if (useDeferred && pipelineInitialized && renderPipeline.GetGBuffer()) {
             ImGui::Separator();

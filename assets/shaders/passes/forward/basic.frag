@@ -11,6 +11,7 @@ uniform vec3 u_Emission;
 uniform vec3 u_LightDir;
 uniform vec3 u_LightColor;
 uniform vec3 u_ViewPos;
+uniform float u_Alpha = 1.0; // Transparency support
 
 out vec4 FragColor;
 
@@ -22,7 +23,7 @@ void main() {
     vec3 diffuse = u_Albedo * u_LightColor * NdotL;
     vec3 ambient = u_Albedo * 0.1;
     vec3 color = ambient + diffuse + u_Emission;
-    FragColor = vec4(color, 1.0);
+    FragColor = vec4(color, u_Alpha);
 }
 
 
