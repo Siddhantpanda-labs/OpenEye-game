@@ -52,7 +52,11 @@ void main(){
     for (int i=0;i<u_PointLightCount && i<MAX_POINT_LIGHTS;i++){ vec3 lp=u_PointLightPositions[i]; vec3 L=normalize(lp-position); float d=length(lp-position); if (d>u_PointLightRanges[i]) continue; float att=1.0/(1.0+0.09*d+0.032*d*d); float rf=1.0 - smoothstep(0.0,u_PointLightRanges[i],d); float ndl=max(dot(normal,L),0.0); if (ndl>0.0){ vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,L); lighting += brdf * (u_PointLightColors[i]*u_PointLightIntensities[i]) * ndl * att * rf; } }
     
     // IBL (Image-Based Lighting)
-    vec3 ambient = albedo * u_AmbientLight;
+    vec3 ambient = vec3(0.0);
+    
+    // Base ambient contribution (always applied)
+    vec3 baseAmbient = albedo * u_AmbientLight;
+    
     if (u_UseIBL) {
         vec3 F0 = mix(vec3(0.04), albedo, metallic);
         vec3 F = FresnelSchlickRoughness(max(dot(normal, V), 0.0), F0, roughness);
@@ -68,7 +72,13 @@ void main(){
         vec2 brdfSample = texture(u_BRDFLUT, vec2(max(dot(normal, V), 0.0), roughness)).rg;
         vec3 specular = prefilteredColor * (F * brdfSample.x + brdfSample.y);
         
-        ambient = (kD * diffuse + specular) * u_AmbientLight;
+        // IBL provides ambient, blend with base ambient for fallback
+        vec3 iblAmbient = kD * diffuse + specular;
+        // Blend IBL with base ambient (IBL dominant when present, base ambient as fallback)
+        ambient = mix(baseAmbient, iblAmbient, 0.95) + baseAmbient * 0.05;
+    } else {
+        // No IBL - use base ambient only
+        ambient = baseAmbient;
     }
     
     vec3 color = lighting + ambient;
