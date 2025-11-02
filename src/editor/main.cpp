@@ -520,10 +520,10 @@ int main() {
         ImGui::DragInt("Min Instances for Batch", &uiMinInstancesForBatch, 1, 1, 1024);
         ImGui::Separator();
         ImGui::Text("Lighting");
-        ImGui::DragFloat3("Dir", &uiLightDir.x, 0.01f, -1.0f, 1.0f);
+        ImGui::DragFloat3("Light Dir", &uiLightDir.x, 0.01f, -1.0f, 1.0f);
         if (glm::length(uiLightDir) < 0.001f) uiLightDir = glm::vec3(0.0f,1.0f,0.0f);
-        ImGui::ColorEdit3("Color", &uiLightColor.x);
-        ImGui::DragFloat("Intensity", &uiLightIntensity, 0.05f, 0.0f, 50.0f);
+        ImGui::ColorEdit3("Light Color", &uiLightColor.x);
+        ImGui::DragFloat("Light Intensity", &uiLightIntensity, 0.05f, 0.0f, 50.0f);
         ImGui::DragFloat3("Ambient", &uiAmbient.x, 0.01f, 0.0f, 1.0f);
         ImGui::DragFloat("Exposure", &uiExposure, 0.05f, 0.01f, 5.0f);
         ImGui::Separator();
@@ -547,38 +547,38 @@ int main() {
         ImGui::Checkbox("SSAO", &uiEnableSSAO);
         if (uiEnableSSAO) {
             ImGui::Indent();
-            ImGui::DragFloat("Radius", &uiSSAORadius, 0.01f, 0.1f, 2.0f);
-            ImGui::DragFloat("Bias", &uiSSAOBias, 0.001f, 0.001f, 0.1f);
-            ImGui::DragInt("Samples", &uiSSAOSamples, 1, 8, 32);
+            ImGui::DragFloat("SSAO Radius", &uiSSAORadius, 0.01f, 0.1f, 2.0f);
+            ImGui::DragFloat("SSAO Bias", &uiSSAOBias, 0.001f, 0.001f, 0.1f);
+            ImGui::DragInt("SSAO Samples", &uiSSAOSamples, 1, 8, 32);
             ImGui::Unindent();
         }
         ImGui::Checkbox("SSR", &uiEnableSSR);
         if (uiEnableSSR) {
             ImGui::Indent();
-            ImGui::DragFloat("Step Size", &uiSSRStepSize, 0.01f, 0.01f, 0.5f);
-            ImGui::DragInt("Max Steps", &uiSSRMaxSteps, 1, 8, 64);
-            ImGui::DragFloat("Thickness", &uiSSRThickness, 0.001f, 0.001f, 0.1f);
+            ImGui::DragFloat("SSR Step Size", &uiSSRStepSize, 0.01f, 0.01f, 0.5f);
+            ImGui::DragInt("SSR Max Steps", &uiSSRMaxSteps, 1, 8, 64);
+            ImGui::DragFloat("SSR Thickness", &uiSSRThickness, 0.001f, 0.001f, 0.1f);
             ImGui::Unindent();
         }
         ImGui::Checkbox("Motion Blur", &uiEnableMotionBlur);
         if (uiEnableMotionBlur) {
             ImGui::Indent();
-            ImGui::DragFloat("Intensity", &uiMotionBlurIntensity, 0.1f, 0.1f, 5.0f);
-            ImGui::DragInt("Samples", &uiMotionBlurSamples, 1, 4, 16);
+            ImGui::DragFloat("Motion Blur Intensity", &uiMotionBlurIntensity, 0.1f, 0.1f, 5.0f);
+            ImGui::DragInt("Motion Blur Samples", &uiMotionBlurSamples, 1, 4, 16);
             ImGui::Unindent();
         }
         ImGui::Checkbox("Vignette", &uiEnableVignette);
         if (uiEnableVignette) {
             ImGui::Indent();
-            ImGui::DragFloat("Intensity", &uiVignetteIntensity, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Radius", &uiVignetteRadius, 0.01f, 0.0f, 1.0f);
-            ImGui::DragFloat("Softness", &uiVignetteSoftness, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Vignette Intensity", &uiVignetteIntensity, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Vignette Radius", &uiVignetteRadius, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Vignette Softness", &uiVignetteSoftness, 0.01f, 0.0f, 1.0f);
             ImGui::Unindent();
         }
         ImGui::Checkbox("Film Grain", &uiEnableFilmGrain);
         if (uiEnableFilmGrain) {
             ImGui::Indent();
-            ImGui::DragFloat("Intensity", &uiFilmGrainIntensity, 0.01f, 0.0f, 0.5f);
+            ImGui::DragFloat("Film Grain Intensity", &uiFilmGrainIntensity, 0.01f, 0.0f, 0.5f);
             ImGui::Unindent();
         }
         ImGui::Separator();
