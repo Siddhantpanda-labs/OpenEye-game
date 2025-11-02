@@ -3,6 +3,7 @@
 #include "FullscreenQuad.h"
 #include "Camera.h"
 #include "resources/Cubemap.h"
+#include <glm/glm.hpp>
 
 namespace OpenEye {
 namespace Rendering {
@@ -63,6 +64,16 @@ void SkyboxRenderer::Render(const Camera& camera, const Cubemap& cubemap) {
 
     m_shader->Unbind();
     cubemap.Unbind(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glEnable(GL_DEPTH_TEST);
+}
+
+void SkyboxRenderer::RenderSolidColor(const glm::vec3& skyColor) {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    glViewport(0, 0, m_width, m_height);
+    glDisable(GL_DEPTH_TEST);
+    glClearColor(skyColor.r, skyColor.g, skyColor.b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glEnable(GL_DEPTH_TEST);
 }

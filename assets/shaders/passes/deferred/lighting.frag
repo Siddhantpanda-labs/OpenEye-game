@@ -40,7 +40,14 @@ void main(){
     vec3 albedo = texture(g_Albedo, v_TexCoord).rgb;
     vec2 pbr = texture(g_PBRParams, v_TexCoord).rg;
     float metallic=pbr.r; float roughness=max(pbr.g,0.04);
-    if (length(position)<0.001){ vec3 sky = texture(u_Background, v_TexCoord).rgb; FragColor=vec4(sky,1.0); return; }
+    
+    // Show skybox where there's no geometry (check if position is near origin/invalid)
+    // Position texture should have invalid positions at (0,0,0) where depth test failed
+    if (length(position) < 0.001) {
+        vec3 sky = texture(u_Background, v_TexCoord).rgb;
+        FragColor = vec4(sky, 1.0);
+        return;
+    }
     vec3 V = normalize(u_ViewPos - position);
     if (u_DebugMode==1){ FragColor=vec4(albedo,1.0); return; }
     if (u_DebugMode==2){ FragColor=vec4(normal*0.5+0.5,1.0); return; }
@@ -82,8 +89,10 @@ void main(){
     }
     
     vec3 color = lighting + ambient;
-    color = vec3(1.0) - exp(-color * max(u_Exposure,0.0001));
-    FragColor=vec4(color,1.0);
+    // Apply exposure (but don't tone map - that's done in post-processing)
+    color *= max(u_Exposure, 0.0001);
+    // Output HDR values (raw, no clamping)
+    FragColor = vec4(color, 1.0);
 }
 
 

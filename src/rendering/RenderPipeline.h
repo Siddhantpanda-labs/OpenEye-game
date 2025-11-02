@@ -7,7 +7,7 @@
 
 namespace OpenEye {
 namespace ECS { class Scene; }
-namespace Rendering { class Camera; class GBuffer; class ShadowMap; class Shader; class Cubemap; class SkyboxRenderer; class IBL; }
+namespace Rendering { class Camera; class GBuffer; class ShadowMap; class Shader; class Cubemap; class SkyboxRenderer; class IBL; class PostProcessor; }
 }
 
 namespace OpenEye {
@@ -27,12 +27,21 @@ struct RenderOptions {
     bool enableLOD = true;
     bool enableInstancing = false;
     int  minInstancesForBatch = 3;
+    
+    // Post-processing options (passed from UI)
+    bool enableBloom = true;
+    bool enableBlur = false;
+    bool enableChromaticAberration = false;
+    bool enableFXAA = true;
+    float blurIntensity = 1.0f;
+    int blurIterations = 3;
+    float chromaticAberrationIntensity = 0.002f;
 };
 
 class RenderPipeline {
 public:
     RenderPipeline();
-    ~RenderPipeline() = default;
+    ~RenderPipeline();
 
     bool Initialize(uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
@@ -46,6 +55,10 @@ public:
     Cubemap* GetSkyboxCubemap() { return m_skybox.get(); }
     GBuffer* GetGBuffer() { return m_gbuffer.get(); }
     IBL* GetIBL() { return m_ibl.get(); }
+    
+    // Set sky color (bright greyish)
+    void SetSkyColor(const glm::vec3& color) { m_skyColor = color; }
+    glm::vec3 GetSkyColor() const { return m_skyColor; }
 
 private:
     void EnsureResources(uint32_t width, uint32_t height);
@@ -57,14 +70,23 @@ private:
     std::unique_ptr<SkyboxRenderer> m_skyboxRenderer;
     std::unique_ptr<Cubemap> m_skybox;
     std::unique_ptr<IBL> m_ibl;
+    std::unique_ptr<PostProcessor> m_postProcessor;
     UniformBuffer m_frameUBO; // binding 0
     UniformBuffer m_lightUBO; // binding 1
 
+    // HDR intermediate texture for lighting pass
+    GLuint m_hdrFBO = 0;
+    GLuint m_hdrTexture = 0;
+
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    glm::vec3 m_skyColor = glm::vec3(0.5f, 0.7f, 0.8f); // Bright greyish sky color
 
     // FrameGraph instance
     FrameGraph* m_frameGraph = nullptr;
+    
+    void CreateHDRFramebuffer();
+    void DestroyHDRFramebuffer();
 };
 
 } // namespace Rendering

@@ -1,6 +1,7 @@
 #include "Cubemap.h"
 #include "core/log/Log.h"
 #include <stb_image.h>
+#include <vector>
 
 namespace OpenEye {
 namespace Rendering {
@@ -63,6 +64,36 @@ bool Cubemap::LoadFromFiles(const std::vector<std::string>& facePaths, bool srgb
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    return true;
+}
+
+bool Cubemap::CreateSolidColor(float r, float g, float b, uint32_t resolution) {
+    if (m_textureID == 0) {
+        glGenTextures(1, &m_textureID);
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_textureID);
+    
+    // Create solid color data for all 6 faces
+    std::vector<float> colorData(resolution * resolution * 3);
+    for (size_t i = 0; i < resolution * resolution * 3; i += 3) {
+        colorData[i]     = r;
+        colorData[i + 1] = g;
+        colorData[i + 2] = b;
+    }
+    
+    // Upload to all 6 faces
+    for (unsigned int i = 0; i < 6; ++i) {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB16F, 
+                     resolution, resolution, 0, GL_RGB, GL_FLOAT, colorData.data());
+    }
+    
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    
     glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
     return true;
 }

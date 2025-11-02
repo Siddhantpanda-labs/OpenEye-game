@@ -22,6 +22,9 @@ public:
 
     // Renders the cubemap to the offscreen color texture
     void Render(const Camera& camera, const Cubemap& cubemap);
+    
+    // Render simple sky color (no cubemap, just clear color)
+    void RenderSolidColor(const glm::vec3& skyColor);
 
     GLuint GetColorTexture() const { return m_colorTex; }
     uint32_t GetWidth() const { return m_width; }

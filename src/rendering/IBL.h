@@ -9,6 +9,7 @@ namespace Rendering {
 
 class Cubemap;
 class Shader;
+class Mesh;
 
 // Image-Based Lighting system
 // Generates: Irradiance map (diffuse IBL), Prefiltered environment map (specular IBL), BRDF LUT
@@ -37,6 +38,7 @@ private:
     GLuint m_brdfLUT = 0;
     GLuint m_captureFBO = 0;
     GLuint m_captureRBO = 0;
+    std::shared_ptr<Mesh> m_cubeMesh; // Cube mesh for cubemap rendering
 
     void GenerateIrradianceMap(GLuint environmentCubemapID, uint32_t resolution);
     void GeneratePrefilterMap(GLuint environmentCubemapID, uint32_t resolution);

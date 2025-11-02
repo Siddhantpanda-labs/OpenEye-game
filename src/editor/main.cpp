@@ -311,6 +311,15 @@ int main() {
     
     // Debug and lighting settings (UI-controlled)
     static int debugOutputMode = 0; // 0=Lighting,1=Albedo,2=Normal,3=Position,4=PBR
+    
+    // Post-processing UI controls (declared here so they're accessible in render loop)
+    static bool uiEnableBloom = true;
+    static bool uiEnableBlur = false;
+    static bool uiEnableChromaticAberration = false;
+    static bool uiEnableFXAA = true;
+    static float uiBlurIntensity = 1.0f;
+    static int uiBlurIterations = 3;
+    static float uiChromaticAberrationIntensity = 0.002f;
     static glm::vec3 uiLightDir = glm::normalize(glm::vec3(0.5f, 1.0f, 0.3f));
     static glm::vec3 uiLightColor = glm::vec3(1.0f, 0.95f, 0.9f);
     static float uiLightIntensity = 3.0f;
@@ -397,41 +406,26 @@ int main() {
             // Deferred rendering pipeline (centralized)
             if (!pipelineInitialized) {
                 renderPipeline.Initialize(static_cast<uint32_t>(window.GetWidth()), static_cast<uint32_t>(window.GetHeight()));
-                // Load skybox through pipeline cubemap
-                auto resolveSkyboxPath = [](const std::string& relative) -> std::string {
-                    namespace fs = std::filesystem;
-                    std::error_code ec;
-                    fs::path current = fs::current_path(ec);
-                    fs::path rel(relative);
-                    for (fs::path p = current; !p.empty(); p = p.parent_path()) {
-                        fs::path candidate = p / rel;
-                        if (fs::exists(candidate, ec)) return candidate.string();
-                        if (p == p.parent_path()) break;
-                    }
-                    return relative;
-                };
-                std::vector<std::string> faces = {
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_right.png"),
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_left.png"),
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_up.png"),
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_down.png"),
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_front.png"),
-                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_back.png")
-                };
-                if (auto* skybox = renderPipeline.GetSkyboxCubemap()) {
-                    if (skybox->LoadFromFiles(faces, true)) {
-                        OE_INFO("Skybox loaded: Clear Ocean");
-                        // Initialize IBL from skybox
+                
+                // Set sky color (bright greyish)
+                renderPipeline.SetSkyColor(glm::vec3(0.5f, 0.7f, 0.8f));
+                
+                // Create procedural environment cubemap for IBL (solid color matching sky)
+                glm::vec3 skyColor = renderPipeline.GetSkyColor();
+                if (auto* envCubemap = renderPipeline.GetSkyboxCubemap()) {
+                    if (envCubemap->CreateSolidColor(skyColor.r, skyColor.g, skyColor.b, 256)) {
+                        OE_INFO("Procedural environment cubemap created for IBL");
+                        // Initialize IBL from procedural environment
                         if (auto* ibl = renderPipeline.GetIBL()) {
-                            GLuint skyboxTexID = skybox->GetID();
-                            if (!ibl->Initialize(skyboxTexID, 32, 512)) {
-                                OE_WARN("Failed to initialize IBL from skybox");
+                            GLuint envTexID = envCubemap->GetID();
+                            if (!ibl->Initialize(envTexID, 32, 512)) {
+                                OE_WARN("Failed to initialize IBL from procedural environment");
                             } else {
-                                OE_INFO("IBL initialized from skybox");
+                                OE_INFO("IBL initialized from procedural environment");
                             }
                         }
                     } else {
-                        OE_WARN("Failed to load skybox.");
+                        OE_WARN("Failed to create procedural environment cubemap.");
                     }
                 }
                 pipelineInitialized = true;
@@ -445,13 +439,21 @@ int main() {
             params.lightIntensity = uiLightIntensity;
             params.ambient = uiAmbient;
             params.exposure = uiExposure;
-            // Build render options
-            RenderOptions opts;
-            opts.enableCulling = uiEnableCulling;
-            opts.enableLOD = uiEnableLOD;
-            opts.enableInstancing = uiEnableInstancing;
-            opts.minInstancesForBatch = uiMinInstancesForBatch;
-            renderPipeline.RenderFrame(scene, camera, params, opts);
+            
+            RenderOptions renderOptions;
+            renderOptions.enableCulling = uiEnableCulling;
+            renderOptions.enableLOD = uiEnableLOD;
+            renderOptions.enableInstancing = uiEnableInstancing;
+            renderOptions.minInstancesForBatch = uiMinInstancesForBatch;
+            renderOptions.enableBloom = uiEnableBloom;
+            renderOptions.enableBlur = uiEnableBlur;
+            renderOptions.enableChromaticAberration = uiEnableChromaticAberration;
+            renderOptions.enableFXAA = uiEnableFXAA;
+            renderOptions.blurIntensity = uiBlurIntensity;
+            renderOptions.blurIterations = uiBlurIterations;
+            renderOptions.chromaticAberrationIntensity = uiChromaticAberrationIntensity;
+            
+            renderPipeline.RenderFrame(scene, camera, params, renderOptions);
         }
         
         // --- ImGui UI ---
@@ -490,6 +492,23 @@ int main() {
         ImGui::DragFloat("Intensity", &uiLightIntensity, 0.05f, 0.0f, 50.0f);
         ImGui::DragFloat3("Ambient", &uiAmbient.x, 0.01f, 0.0f, 1.0f);
         ImGui::DragFloat("Exposure", &uiExposure, 0.05f, 0.01f, 5.0f);
+        ImGui::Separator();
+        ImGui::Text("Post-Processing");
+        ImGui::Checkbox("Bloom", &uiEnableBloom);
+        ImGui::Checkbox("Blur", &uiEnableBlur);
+        if (uiEnableBlur) {
+            ImGui::Indent();
+            ImGui::DragFloat("Blur Intensity", &uiBlurIntensity, 0.1f, 0.1f, 5.0f);
+            ImGui::DragInt("Blur Iterations", &uiBlurIterations, 1, 1, 10);
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("Chromatic Aberration", &uiEnableChromaticAberration);
+        if (uiEnableChromaticAberration) {
+            ImGui::Indent();
+            ImGui::DragFloat("CA Intensity", &uiChromaticAberrationIntensity, 0.0001f, 0.0f, 0.01f, "%.4f");
+            ImGui::Unindent();
+        }
+        ImGui::Checkbox("FXAA", &uiEnableFXAA);
         if (useDeferred && pipelineInitialized && renderPipeline.GetGBuffer()) {
             ImGui::Separator();
             ImGui::Text("G-Buffer");

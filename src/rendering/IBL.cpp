@@ -1,6 +1,8 @@
 #include "IBL.h"
 #include "resources/Cubemap.h"
 #include "resources/Shader.h"
+#include "resources/Mesh.h"
+#include "resources/MeshLoader.h"
 #include "FullscreenQuad.h"
 #include "core/log/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
@@ -9,7 +11,14 @@
 namespace OpenEye {
 namespace Rendering {
 
-IBL::IBL() = default;
+IBL::IBL() {
+    // Create static cube mesh for cubemap rendering (shared across all IBL instances)
+    static std::shared_ptr<Mesh> s_cubeMesh = nullptr;
+    if (!s_cubeMesh) {
+        s_cubeMesh = MeshLoader::CreateCube();
+    }
+    m_cubeMesh = s_cubeMesh;
+}
 
 IBL::~IBL() {
     if (m_irradianceMap) glDeleteTextures(1, &m_irradianceMap);
@@ -25,14 +34,21 @@ bool IBL::Initialize(GLuint environmentCubemapID, uint32_t irradianceRes, uint32
         return false;
     }
 
-    // Create capture FBO
+    // Create capture FBO for cubemap rendering
     glGenFramebuffers(1, &m_captureFBO);
     glGenRenderbuffers(1, &m_captureRBO);
     
     glBindFramebuffer(GL_FRAMEBUFFER, m_captureFBO);
     glBindRenderbuffer(GL_RENDERBUFFER, m_captureRBO);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, 512, 512);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, prefilterRes, prefilterRes);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_captureRBO);
+    
+    // Ensure cube mesh is ready
+    if (!m_cubeMesh) {
+        OE_ERROR("IBL: Failed to create cube mesh");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return false;
+    }
 
     // Generate IBL maps
     GenerateIrradianceMap(environmentCubemapID, irradianceRes);
@@ -51,7 +67,18 @@ bool IBL::Initialize(GLuint environmentCubemapID, uint32_t irradianceRes, uint32
 }
 
 void IBL::GenerateIrradianceMap(GLuint environmentCubemapID, uint32_t resolution) {
-    // Create cubemap for irradiance (placeholder - full implementation requires cube mesh renderer)
+    if (!m_cubeMesh) {
+        OE_ERROR("IBL: Cube mesh not available for irradiance generation");
+        return;
+    }
+    
+    auto irradianceShader = CreateIrradianceShader();
+    if (!irradianceShader) {
+        OE_ERROR("IBL: Failed to create irradiance shader");
+        return;
+    }
+    
+    // Create cubemap for irradiance
     glGenTextures(1, &m_irradianceMap);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_irradianceMap);
     for (unsigned int i = 0; i < 6; ++i) {
@@ -63,14 +90,60 @@ void IBL::GenerateIrradianceMap(GLuint environmentCubemapID, uint32_t resolution
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     
-    // TODO: Full implementation requires:
-    // - Cube mesh renderer
-    // - Irradiance convolution shader
-    // - Render cube 6 times from each face
-    OE_INFO("IBL: Irradiance map created (placeholder - generation will be implemented)");
+    // Create projection matrix for cubemap (90-degree FOV, 1:1 aspect)
+    glm::mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    
+    // Set environment map
+    irradianceShader->Bind();
+    irradianceShader->SetInt("u_EnvironmentMap", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, environmentCubemapID);
+    
+    // Render all 6 faces
+    for (unsigned int i = 0; i < 6; ++i) {
+        // View matrices for each cubemap face
+        glm::mat4 captureViews[] = {
+            glm::lookAt(glm::vec3(0.0f), glm::vec3( 1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // +X
+            glm::lookAt(glm::vec3(0.0f), glm::vec3(-1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // -X
+            glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  1.0f,  0.0f), glm::vec3(0.0f,  0.0f,  1.0f)), // +Y
+            glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f, -1.0f,  0.0f), glm::vec3(0.0f,  0.0f, -1.0f)), // -Y
+            glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  0.0f,  1.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // +Z
+            glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  0.0f, -1.0f), glm::vec3(0.0f, -1.0f,  0.0f))  // -Z
+        };
+        
+        irradianceShader->SetMat4("u_View", captureViews[i]);
+        irradianceShader->SetMat4("u_Projection", captureProjection);
+        
+        glViewport(0, 0, resolution, resolution);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_captureFBO);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, 
+                              GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, m_irradianceMap, 0);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        
+        m_cubeMesh->Bind();
+        m_cubeMesh->Draw();
+        m_cubeMesh->Unbind();
+    }
+    
+    irradianceShader->Unbind();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    OE_INFO_F("IBL: Irradiance map generated at %ux%u", resolution, resolution);
 }
 
 void IBL::GeneratePrefilterMap(GLuint environmentCubemapID, uint32_t resolution) {
+    if (!m_cubeMesh) {
+        OE_ERROR("IBL: Cube mesh not available for prefilter generation");
+        return;
+    }
+    
+    auto prefilterShader = CreatePrefilterShader();
+    if (!prefilterShader) {
+        OE_ERROR("IBL: Failed to create prefilter shader");
+        return;
+    }
+    
+    // Create cubemap for prefilter with mipmaps
     glGenTextures(1, &m_prefilterMap);
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_prefilterMap);
     for (unsigned int i = 0; i < 6; ++i) {
@@ -83,8 +156,56 @@ void IBL::GeneratePrefilterMap(GLuint environmentCubemapID, uint32_t resolution)
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
     
-    // TODO: Full implementation requires prefilter shader and rendering with varying roughness
-    OE_INFO("IBL: Prefilter map created (placeholder - generation will be implemented)");
+    // Create projection matrix
+    glm::mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    
+    // View matrices for each cubemap face
+    glm::mat4 captureViews[] = {
+        glm::lookAt(glm::vec3(0.0f), glm::vec3( 1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // +X
+        glm::lookAt(glm::vec3(0.0f), glm::vec3(-1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // -X
+        glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  1.0f,  0.0f), glm::vec3(0.0f,  0.0f,  1.0f)), // +Y
+        glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f, -1.0f,  0.0f), glm::vec3(0.0f,  0.0f, -1.0f)), // -Y
+        glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  0.0f,  1.0f), glm::vec3(0.0f, -1.0f,  0.0f)), // +Z
+        glm::lookAt(glm::vec3(0.0f), glm::vec3( 0.0f,  0.0f, -1.0f), glm::vec3(0.0f, -1.0f,  0.0f))  // -Z
+    };
+    
+    prefilterShader->Bind();
+    prefilterShader->SetInt("u_EnvironmentMap", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, environmentCubemapID);
+    
+    // Render each mip level with different roughness
+    unsigned int maxMipLevels = 5;
+    for (unsigned int mip = 0; mip < maxMipLevels; ++mip) {
+        unsigned int mipWidth = static_cast<unsigned int>(resolution * std::pow(0.5, mip));
+        unsigned int mipHeight = mipWidth;
+        
+        glBindRenderbuffer(GL_RENDERBUFFER, m_captureRBO);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, mipWidth, mipHeight);
+        glViewport(0, 0, mipWidth, mipHeight);
+        
+        float roughness = static_cast<float>(mip) / static_cast<float>(maxMipLevels - 1);
+        prefilterShader->SetFloat("u_Roughness", roughness);
+        
+        for (unsigned int i = 0; i < 6; ++i) {
+            prefilterShader->SetMat4("u_View", captureViews[i]);
+            prefilterShader->SetMat4("u_Projection", captureProjection);
+            
+            glBindFramebuffer(GL_FRAMEBUFFER, m_captureFBO);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                  GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, m_prefilterMap, mip);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            
+            m_cubeMesh->Bind();
+            m_cubeMesh->Draw();
+            m_cubeMesh->Unbind();
+        }
+    }
+    
+    prefilterShader->Unbind();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    OE_INFO_F("IBL: Prefilter map generated at %ux%u with %u mip levels", resolution, resolution, maxMipLevels);
 }
 
 void IBL::GenerateBRDFLUT(uint32_t resolution) {
@@ -141,14 +262,22 @@ std::shared_ptr<Shader> IBL::CreateEquirectangularToCubemapShader() {
 
 std::shared_ptr<Shader> IBL::CreateIrradianceShader() {
     auto shader = std::make_shared<Shader>();
-    // Simplified: For now return null, full implementation would load irradiance shader
-    // This requires a cube mesh renderer and proper shader files
-    return shader;
+    if (shader->LoadFromFile("assets/shaders/passes/ibl/irradiance_convolution.vert",
+                             "assets/shaders/passes/ibl/irradiance_convolution.frag")) {
+        return shader;
+    }
+    OE_ERROR("IBL: Failed to load irradiance convolution shader");
+    return nullptr;
 }
 
 std::shared_ptr<Shader> IBL::CreatePrefilterShader() {
     auto shader = std::make_shared<Shader>();
-    return shader;
+    if (shader->LoadFromFile("assets/shaders/passes/ibl/prefilter.vert",
+                             "assets/shaders/passes/ibl/prefilter.frag")) {
+        return shader;
+    }
+    OE_ERROR("IBL: Failed to load prefilter shader");
+    return nullptr;
 }
 
 std::shared_ptr<Shader> IBL::CreateBRDFShader() {

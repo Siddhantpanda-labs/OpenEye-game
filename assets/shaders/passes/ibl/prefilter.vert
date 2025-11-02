@@ -1,0 +1,16 @@
+#version 450 core
+
+layout(location = 0) in vec3 a_Position;
+
+out vec3 v_WorldPos;
+
+uniform mat4 u_Projection;
+uniform mat4 u_View;
+
+void main() {
+    v_WorldPos = a_Position;
+    mat4 rotView = mat4(mat3(u_View)); // Remove translation for skybox
+    vec4 clipPos = u_Projection * rotView * vec4(a_Position, 1.0);
+    gl_Position = clipPos.xyww; // Force z to w so after perspective divide z = 1.0 (far plane)
+}
+

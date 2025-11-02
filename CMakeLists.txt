@@ -135,6 +135,8 @@ add_library(OpenEyeCore STATIC
     src/rendering/IBL.h
     src/rendering/ShadowMap.cpp
     src/rendering/ShadowMap.h
+    src/rendering/PostProcessor.cpp
+    src/rendering/PostProcessor.h
     src/rendering/RenderPipeline.cpp
     src/rendering/RenderPipeline.h
     src/rendering/passes/GBufferPass.cpp

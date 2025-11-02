@@ -4,6 +4,7 @@
 #include "FullscreenQuad.h"
 #include "SkyboxRenderer.h"
 #include "IBL.h"
+#include "PostProcessor.h"
 #include "passes/ShadowPass.h"
 #include "passes/GBufferPass.h"
 #include "passes/LightingPass.h"
@@ -13,11 +14,18 @@
 #include "../ecs/Scene.h"
 #include "../ecs/Systems.h"
 #include "Camera.h"
+#include "core/log/Log.h"
+#include <glad/glad.h>
 
 namespace OpenEye {
 namespace Rendering {
 
 RenderPipeline::RenderPipeline() = default;
+
+RenderPipeline::~RenderPipeline() {
+    DestroyHDRFramebuffer();
+    if (m_frameGraph) delete m_frameGraph;
+}
 
 bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
     m_width = width; m_height = height;
@@ -31,9 +39,14 @@ bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
     m_skyboxRenderer->Initialize(width, height);
     m_skybox = std::make_unique<Cubemap>();
     m_ibl = std::make_unique<IBL>();
+    m_postProcessor = std::make_unique<PostProcessor>();
+    if (!m_postProcessor->Initialize(width, height)) {
+        OE_WARN("RenderPipeline: Failed to initialize PostProcessor");
+    }
     // Create UBOs (std140 slabs)
     m_frameUBO.Create(1024, 0); // 1KB safe slab for std140 alignment
     m_lightUBO.Create(256, 1);
+    CreateHDRFramebuffer();
     m_frameGraph = new FrameGraph();
     return true;
 }
@@ -43,6 +56,9 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     m_width = width; m_height = height;
     if (m_gbuffer) m_gbuffer->Resize(width, height);
     if (m_skyboxRenderer) m_skyboxRenderer->Resize(width, height);
+    if (m_postProcessor) m_postProcessor->Resize(width, height);
+    DestroyHDRFramebuffer();
+    CreateHDRFramebuffer();
 }
 
 void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
@@ -109,17 +125,100 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         GBufferPass gp; gp.Execute(scene, *m_gbuffer, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix(), frustum, options.enableCulling, options.enableLOD, options.enableInstancing, static_cast<size_t>(options.minInstancesForBatch));
     }, {}, {}, true);
 
-    // Skybox pass
-    m_frameGraph->addPass("Skybox", [this, &camera](const FGPassResources&) {
-        if (m_skybox && m_skybox->IsValid()) m_skyboxRenderer->Render(camera, *m_skybox);
+    // Skybox pass (render solid sky color)
+    m_frameGraph->addPass("Skybox", [this](const FGPassResources&) {
+        if (m_skyboxRenderer) m_skyboxRenderer->RenderSolidColor(m_skyColor);
     }, {}, {}, true);
 
-    // Lighting pass
+    // Lighting pass - render to HDR texture
     m_frameGraph->addPass("Lighting", [this, &scene, &camera, params](const FGPassResources&) {
+        // Bind HDR framebuffer
+        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+        glViewport(0, 0, m_width, m_height);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
         LightingPass lp; lp.Execute(scene, *m_gbuffer, camera, m_lightingShader, m_shadowMap.get(), params,
             m_skybox && m_skybox->IsValid() ? m_skyboxRenderer.get() : nullptr,
             m_ibl && m_ibl->IsValid() ? m_ibl.get() : nullptr);
     }, {}, {}, true);
+    
+    // Post-processing pass - apply effects and blit to screen
+    m_frameGraph->addPass("PostProcessing", [this, params, options](const FGPassResources&) {
+        PostProcessor::Settings ppSettings;
+        ppSettings.exposure = params.exposure;
+        ppSettings.enableBloom = options.enableBloom;
+        ppSettings.enableBlur = options.enableBlur;
+        ppSettings.enableChromaticAberration = options.enableChromaticAberration;
+        ppSettings.enableFXAA = options.enableFXAA;
+        ppSettings.blurIntensity = options.blurIntensity;
+        ppSettings.blurIterations = options.blurIterations;
+        ppSettings.chromaticAberrationIntensity = options.chromaticAberrationIntensity;
+        ppSettings.enableSSAO = false; // Disable for now
+        
+        GLuint finalTexture = m_postProcessor->ApplyPostProcessing(m_hdrTexture, *m_gbuffer, ppSettings);
+        
+        // Render final post-processed texture to screen
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, m_width, m_height);
+        glDisable(GL_DEPTH_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        // Use simple copy shader to render final texture to screen
+        static std::shared_ptr<Shader> copyShader = nullptr;
+        if (!copyShader) {
+            copyShader = std::make_shared<Shader>();
+            copyShader->LoadFromFile("assets/shaders/passes/post/copy.vert", "assets/shaders/passes/post/copy.frag");
+        }
+        
+        if (copyShader && copyShader->IsValid() && finalTexture != 0) {
+            copyShader->Bind();
+            copyShader->SetInt("u_Texture", 0);
+            
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, finalTexture);
+            
+            static FullscreenQuad quad;
+            quad.Render();
+            
+            copyShader->Unbind();
+        }
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }, {}, {}, true);
+}
+
+void RenderPipeline::CreateHDRFramebuffer() {
+    glGenFramebuffers(1, &m_hdrFBO);
+    glGenTextures(1, &m_hdrTexture);
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+    glBindTexture(GL_TEXTURE_2D, m_hdrTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, m_width, m_height, 0, GL_RGB, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hdrTexture, 0);
+    
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        OE_ERROR_F("RenderPipeline: HDR FBO incomplete: 0x%x", status);
+    }
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void RenderPipeline::DestroyHDRFramebuffer() {
+    if (m_hdrFBO) {
+        glDeleteFramebuffers(1, &m_hdrFBO);
+        m_hdrFBO = 0;
+    }
+    if (m_hdrTexture) {
+        glDeleteTextures(1, &m_hdrTexture);
+        m_hdrTexture = 0;
+    }
 }
 
 const std::vector<FrameGraph::PassInfo>& RenderPipeline::GetFrameGraphPasses() const { return m_frameGraph->getPasses(); }

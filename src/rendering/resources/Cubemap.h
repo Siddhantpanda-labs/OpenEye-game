@@ -23,6 +23,9 @@ public:
     // Load from 6 file paths in order:
     // +X (right), -X (left), +Y (up), -Y (down), +Z (front), -Z (back)
     bool LoadFromFiles(const std::vector<std::string>& facePaths, bool srgb = false);
+    
+    // Create a solid color cubemap (for procedural environments)
+    bool CreateSolidColor(float r, float g, float b, uint32_t resolution = 256);
 
     void Bind(GLuint unit = 0) const;
     void Unbind(GLuint unit = 0) const;

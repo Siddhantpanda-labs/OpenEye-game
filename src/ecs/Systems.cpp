@@ -616,14 +616,12 @@ void RenderSystem::RenderLightingPass(Scene& scene,
         return;
     }
     
-    // IMPORTANT: Bind default framebuffer (0) for output to screen
-    // This ensures we render the lighting result to the screen, not back to G-Buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // IMPORTANT: Assume framebuffer is already bound (for HDR rendering or screen)
+    // If caller wants screen output, they should bind framebuffer 0 before calling
+    // For HDR post-processing, the HDR FBO should be bound
     glViewport(0, 0, gbuffer.GetWidth(), gbuffer.GetHeight());
     
-    // Clear the default framebuffer
-    glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // Clear is handled by caller (if needed)
     
     // Disable depth testing for fullscreen quad (we're compositing, not depth-testing)
     glDisable(GL_DEPTH_TEST);
