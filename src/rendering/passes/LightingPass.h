@@ -4,7 +4,7 @@
 #include <memory>
 
 namespace OpenEye { namespace ECS { class Scene; } }
-namespace OpenEye { namespace Rendering { class GBuffer; class Camera; class Shader; class ShadowMap; class SkyboxRenderer; } }
+namespace OpenEye { namespace Rendering { class GBuffer; class Camera; class Shader; class ShadowMap; class SkyboxRenderer; class IBL; } }
 
 namespace OpenEye { namespace Rendering {
 
@@ -18,7 +18,8 @@ public:
                  std::shared_ptr<Shader> lightingShader,
                  ShadowMap* shadowMap,
                  const LightingParams& params,
-                 SkyboxRenderer* skyboxRenderer);
+                 SkyboxRenderer* skyboxRenderer,
+                 IBL* ibl = nullptr);
 };
 
 } }

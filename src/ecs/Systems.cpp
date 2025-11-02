@@ -395,19 +395,35 @@ void RenderSystem::UpdateWithInstancing(Scene& scene, const Rendering::Camera& c
 void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
                                      const Rendering::Camera& camera,
                                      const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix,
-                                     const Rendering::Frustum& frustum) {
+                                     const Rendering::Frustum& frustum,
+                                     bool enableCulling,
+                                     bool enableLOD,
+                                     bool enableInstancing,
+                                     size_t minInstancesForBatch) {
     auto& registry = scene.GetRegistry();
     
-    // Perform culling first
-    CullingSystem::CullEntities(scene, frustum);
-    auto visibleEntities = CullingSystem::GetVisibleEntities(registry);
-    
-    // Debug: If no visible entities found, try rendering all entities with Renderable (bypass culling temporarily)
-    if (visibleEntities.empty()) {
-        OE_WARN("No visible entities from culling - rendering all entities with Renderable component");
-        // Get all entities with Renderable (bypass culling)
+    // Optional LOD update
+    if (enableLOD) {
+        LODSystem::Update(scene, camera.GetPosition());
+    }
+
+    // Build visible list
+    std::vector<entt::entity> visibleEntities;
+    if (enableCulling) {
+        CullingSystem::CullEntities(scene, frustum);
+        visibleEntities = CullingSystem::GetVisibleEntities(registry);
+        if (visibleEntities.empty()) {
+            // Fallback to all renderables if culling produced none (debug)
+            auto allRenderableView = registry.view<Transform, Renderable>();
+            for (auto entity : allRenderableView) {
+                const auto& renderable = allRenderableView.get<Renderable>(entity);
+                if (renderable.visible && renderable.mesh && renderable.material) {
+                    visibleEntities.push_back(entity);
+                }
+            }
+        }
+    } else {
         auto allRenderableView = registry.view<Transform, Renderable>();
-        visibleEntities.clear();
         for (auto entity : allRenderableView) {
             const auto& renderable = allRenderableView.get<Renderable>(entity);
             if (renderable.visible && renderable.mesh && renderable.material) {
@@ -435,47 +451,144 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
     
     gbufferShader->Bind();
     
-    // Debug log removed to reduce spam
-    
-    // Render all visible entities
-    size_t renderedCount = 0;
-    for (auto entity : visibleEntities) {
-        if (!registry.all_of<Transform, Renderable>(entity)) {
-            continue;
+    // Render entities (instanced or individual)
+    if (enableInstancing) {
+        // Group by mesh/material
+        struct BatchKey { void* meshPtr; void* materialPtr; bool operator==(const BatchKey& o) const { return meshPtr==o.meshPtr && materialPtr==o.materialPtr; } };
+        struct BatchKeyHash { size_t operator()(const BatchKey& k) const { return std::hash<void*>()(k.meshPtr) ^ (std::hash<void*>()(k.materialPtr)<<1); } };
+        std::unordered_map<BatchKey, std::vector<glm::mat4>, BatchKeyHash> batches;
+        for (auto entity : visibleEntities) {
+            const auto& transform = registry.get<Transform>(entity);
+            const auto& renderable = registry.get<Renderable>(entity);
+            if (!renderable.mesh || !renderable.material) continue;
+            BatchKey key{renderable.mesh.get(), renderable.material.get()};
+            batches[key].push_back(transform.GetWorldMatrix(registry));
         }
-        
-        const auto& transform = registry.get<Transform>(entity);
-        const auto& renderable = registry.get<Renderable>(entity);
-        
-        if (!renderable.mesh || !renderable.material) {
-            continue;
+        gbufferShader->SetBool("u_IsInstanced", true);
+        for (const auto& [key, models] : batches) {
+            auto meshPtr = static_cast<Rendering::Mesh*>(key.meshPtr);
+            auto materialPtr = static_cast<Rendering::Material*>(key.materialPtr);
+            if (!meshPtr || !materialPtr) continue;
+            // Set material once
+            gbufferShader->SetVec3("u_Albedo", materialPtr->GetAlbedo());
+            gbufferShader->SetFloat("u_Metallic", materialPtr->GetMetallic());
+            gbufferShader->SetFloat("u_Roughness", materialPtr->GetRoughness());
+            gbufferShader->SetFloat("u_AO", materialPtr->GetAO());
+            
+            int texUnit = 10;
+            auto albedoTex = materialPtr->GetTexture("u_AlbedoTexture");
+            if (albedoTex) { albedoTex->Bind(texUnit); gbufferShader->SetInt("u_AlbedoTexture", texUnit); gbufferShader->SetBool("u_HasAlbedoTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasAlbedoTexture", false); }
+            
+            auto normalTex = materialPtr->GetTexture("u_NormalTexture");
+            if (normalTex) { normalTex->Bind(texUnit); gbufferShader->SetInt("u_NormalTexture", texUnit); gbufferShader->SetBool("u_HasNormalTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasNormalTexture", false); }
+            
+            auto metallicRoughTex = materialPtr->GetTexture("u_MetallicRoughnessTexture");
+            if (metallicRoughTex) { metallicRoughTex->Bind(texUnit); gbufferShader->SetInt("u_MetallicRoughnessTexture", texUnit); gbufferShader->SetBool("u_HasMetallicRoughnessTexture", true); texUnit++; }
+            else {
+                gbufferShader->SetBool("u_HasMetallicRoughnessTexture", false);
+                auto metallicTex = materialPtr->GetTexture("u_MetallicTexture");
+                if (metallicTex) { metallicTex->Bind(texUnit); gbufferShader->SetInt("u_MetallicTexture", texUnit); gbufferShader->SetBool("u_HasMetallicTexture", true); texUnit++; }
+                else { gbufferShader->SetBool("u_HasMetallicTexture", false); }
+                
+                auto roughnessTex = materialPtr->GetTexture("u_RoughnessTexture");
+                if (roughnessTex) { roughnessTex->Bind(texUnit); gbufferShader->SetInt("u_RoughnessTexture", texUnit); gbufferShader->SetBool("u_HasRoughnessTexture", true); texUnit++; }
+                else { gbufferShader->SetBool("u_HasRoughnessTexture", false); }
+            }
+            
+            auto aoTex = materialPtr->GetTexture("u_AOTexture");
+            if (aoTex) { aoTex->Bind(texUnit); gbufferShader->SetInt("u_AOTexture", texUnit); gbufferShader->SetBool("u_HasAOTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasAOTexture", false); }
+            
+            // Create instance buffer
+            GLuint instanceVBO = 0; glGenBuffers(1, &instanceVBO);
+            glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+            glBufferData(GL_ARRAY_BUFFER, models.size()*sizeof(glm::mat4), models.data(), GL_DYNAMIC_DRAW);
+            
+            // Setup instance attributes on mesh VAO
+            meshPtr->Bind();
+            GLuint vao = meshPtr->GetVAO();
+            glBindVertexArray(vao);
+            glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+            // locations 5..8 as mat4
+            std::size_t baseOffset = 0;
+            glEnableVertexAttribArray(5);
+            glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), reinterpret_cast<void*>(baseOffset + 0*sizeof(glm::vec4)));
+            glVertexAttribDivisor(5, 1);
+            glEnableVertexAttribArray(6);
+            glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), reinterpret_cast<void*>(baseOffset + 1*sizeof(glm::vec4)));
+            glVertexAttribDivisor(6, 1);
+            glEnableVertexAttribArray(7);
+            glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), reinterpret_cast<void*>(baseOffset + 2*sizeof(glm::vec4)));
+            glVertexAttribDivisor(7, 1);
+            glEnableVertexAttribArray(8);
+            glVertexAttribPointer(8, 4, GL_FLOAT, GL_FALSE, sizeof(glm::mat4), reinterpret_cast<void*>(baseOffset + 3*sizeof(glm::vec4)));
+            glVertexAttribDivisor(8, 1);
+            
+            // Draw instanced
+            GLsizei instanceCount = static_cast<GLsizei>(models.size());
+            GLsizei indexCount = static_cast<GLsizei>(meshPtr->GetIndexCount());
+            if (indexCount > 0) {
+                glDrawElementsInstanced(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0, instanceCount);
+            } else {
+                GLsizei vertexCount = static_cast<GLsizei>(meshPtr->GetVertexCount());
+                glDrawArraysInstanced(GL_TRIANGLES, 0, vertexCount, instanceCount);
+            }
+            
+            // Disable instance attributes and cleanup
+            glDisableVertexAttribArray(5);
+            glDisableVertexAttribArray(6);
+            glDisableVertexAttribArray(7);
+            glDisableVertexAttribArray(8);
+            meshPtr->Unbind();
+            glDeleteBuffers(1, &instanceVBO);
         }
-        
-        // Get world matrix
-        glm::mat4 modelMatrix = transform.GetWorldMatrix(registry);
-        gbufferShader->SetMat4("u_Model", modelMatrix);
-        
-        // Set material properties
-        gbufferShader->SetVec3("u_Albedo", renderable.material->GetAlbedo());
-        gbufferShader->SetFloat("u_Metallic", renderable.material->GetMetallic());
-        gbufferShader->SetFloat("u_Roughness", renderable.material->GetRoughness());
-        
-        // Bind textures if available
-        auto albedoTexture = renderable.material->GetTexture("u_AlbedoTexture");
-        if (albedoTexture) {
-            albedoTexture->Bind(10); // Use texture unit 10 for geometry pass textures
-            gbufferShader->SetInt("u_AlbedoTexture", 10);
-            gbufferShader->SetBool("u_HasAlbedoTexture", true);
-        } else {
-            gbufferShader->SetBool("u_HasAlbedoTexture", false);
+    } else {
+        gbufferShader->SetBool("u_IsInstanced", false);
+        for (auto entity : visibleEntities) {
+            if (!registry.all_of<Transform, Renderable>(entity)) continue;
+            const auto& transform = registry.get<Transform>(entity);
+            const auto& renderable = registry.get<Renderable>(entity);
+            if (!renderable.mesh || !renderable.material) continue;
+
+            glm::mat4 modelMatrix = transform.GetWorldMatrix(registry);
+            gbufferShader->SetMat4("u_Model", modelMatrix);
+            gbufferShader->SetVec3("u_Albedo", renderable.material->GetAlbedo());
+            gbufferShader->SetFloat("u_Metallic", renderable.material->GetMetallic());
+            gbufferShader->SetFloat("u_Roughness", renderable.material->GetRoughness());
+            gbufferShader->SetFloat("u_AO", renderable.material->GetAO());
+            
+            // Bind PBR textures (texture unit 10+)
+            int texUnit = 10;
+            auto albedoTex = renderable.material->GetTexture("u_AlbedoTexture");
+            if (albedoTex) { albedoTex->Bind(texUnit); gbufferShader->SetInt("u_AlbedoTexture", texUnit); gbufferShader->SetBool("u_HasAlbedoTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasAlbedoTexture", false); }
+            
+            auto normalTex = renderable.material->GetTexture("u_NormalTexture");
+            if (normalTex) { normalTex->Bind(texUnit); gbufferShader->SetInt("u_NormalTexture", texUnit); gbufferShader->SetBool("u_HasNormalTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasNormalTexture", false); }
+            
+            auto metallicRoughTex = renderable.material->GetTexture("u_MetallicRoughnessTexture");
+            if (metallicRoughTex) { metallicRoughTex->Bind(texUnit); gbufferShader->SetInt("u_MetallicRoughnessTexture", texUnit); gbufferShader->SetBool("u_HasMetallicRoughnessTexture", true); texUnit++; }
+            else {
+                gbufferShader->SetBool("u_HasMetallicRoughnessTexture", false);
+                auto metallicTex = renderable.material->GetTexture("u_MetallicTexture");
+                if (metallicTex) { metallicTex->Bind(texUnit); gbufferShader->SetInt("u_MetallicTexture", texUnit); gbufferShader->SetBool("u_HasMetallicTexture", true); texUnit++; }
+                else { gbufferShader->SetBool("u_HasMetallicTexture", false); }
+                
+                auto roughnessTex = renderable.material->GetTexture("u_RoughnessTexture");
+                if (roughnessTex) { roughnessTex->Bind(texUnit); gbufferShader->SetInt("u_RoughnessTexture", texUnit); gbufferShader->SetBool("u_HasRoughnessTexture", true); texUnit++; }
+                else { gbufferShader->SetBool("u_HasRoughnessTexture", false); }
+            }
+            
+            auto aoTex = renderable.material->GetTexture("u_AOTexture");
+            if (aoTex) { aoTex->Bind(texUnit); gbufferShader->SetInt("u_AOTexture", texUnit); gbufferShader->SetBool("u_HasAOTexture", true); texUnit++; }
+            else { gbufferShader->SetBool("u_HasAOTexture", false); }
+            renderable.mesh->Bind();
+            renderable.mesh->Draw();
+            renderable.mesh->Unbind();
         }
-        
-        // Render mesh
-        renderable.mesh->Bind();
-        renderable.mesh->Draw();
-        renderable.mesh->Unbind();
-        
-        renderedCount++;
     }
     
     // Debug count log removed
@@ -495,7 +608,8 @@ void RenderSystem::RenderLightingPass(Scene& scene,
                                      float paramLightIntensity,
                                      const glm::vec3& paramAmbient,
                                      float paramExposure,
-                                     Rendering::SkyboxRenderer* skyboxRenderer) {
+                                     Rendering::SkyboxRenderer* skyboxRenderer,
+                                     Rendering::IBL* ibl) {
     auto& registry = scene.GetRegistry();
     if (!lightingShader) {
         OE_ERROR("RenderLightingPass: Invalid lighting shader");
@@ -541,6 +655,17 @@ void RenderSystem::RenderLightingPass(Scene& scene,
     lightingShader->SetInt("u_DebugMode", debugMode);
     if (skyboxRenderer && skyboxRenderer->GetColorTexture() != 0) {
         lightingShader->SetInt("u_Background", 9);
+    }
+    
+    // Bind IBL textures if available
+    if (ibl && ibl->IsValid()) {
+        ibl->BindForLighting(11, 12, 13);
+        lightingShader->SetInt("u_IrradianceMap", 11);
+        lightingShader->SetInt("u_PrefilterMap", 12);
+        lightingShader->SetInt("u_BRDFLUT", 13);
+        lightingShader->SetBool("u_UseIBL", true);
+    } else {
+        lightingShader->SetBool("u_UseIBL", false);
     }
     
     // Collect point lights from scene

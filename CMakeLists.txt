@@ -131,6 +131,8 @@ add_library(OpenEyeCore STATIC
     src/rendering/FullscreenQuad.h
     src/rendering/SkyboxRenderer.cpp
     src/rendering/SkyboxRenderer.h
+    src/rendering/IBL.cpp
+    src/rendering/IBL.h
     src/rendering/ShadowMap.cpp
     src/rendering/ShadowMap.h
     src/rendering/RenderPipeline.cpp

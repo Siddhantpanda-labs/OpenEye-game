@@ -3,6 +3,7 @@
 #include "ShadowMap.h"
 #include "FullscreenQuad.h"
 #include "SkyboxRenderer.h"
+#include "IBL.h"
 #include "passes/ShadowPass.h"
 #include "passes/GBufferPass.h"
 #include "passes/LightingPass.h"
@@ -29,6 +30,7 @@ bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
     m_skyboxRenderer = std::make_unique<SkyboxRenderer>();
     m_skyboxRenderer->Initialize(width, height);
     m_skybox = std::make_unique<Cubemap>();
+    m_ibl = std::make_unique<IBL>();
     // Create UBOs (std140 slabs)
     m_frameUBO.Create(1024, 0); // 1KB safe slab for std140 alignment
     m_lightUBO.Create(256, 1);
@@ -48,7 +50,7 @@ void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
     Resize(width, height);
 }
 
-void RenderPipeline::RenderFrame(ECS::Scene& scene, const Camera& camera, const LightingParams& params) {
+void RenderPipeline::RenderFrame(ECS::Scene& scene, const Camera& camera, const LightingParams& params, const RenderOptions& options) {
     EnsureResources(m_width, m_height);
 
     // Update UBOs (Frame + Light) first – used by all passes
@@ -84,12 +86,12 @@ void RenderPipeline::RenderFrame(ECS::Scene& scene, const Camera& camera, const 
     m_lightUBO.Update(&light, sizeof(LightBlock));
     m_lightUBO.Bind();
 
-    BuildFrameGraph(scene, camera, params);
+    BuildFrameGraph(scene, camera, params, options);
     m_frameGraph->compile();
     m_frameGraph->execute();
 }
 
-void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, const LightingParams& params) {
+void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, const LightingParams& params, const RenderOptions& options) {
     m_frameGraph->clear();
     m_frameGraph->setFrameSize(m_width, m_height);
 
@@ -102,9 +104,9 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
     }, {}, {}, true);
 
     // GBuffer pass
-    m_frameGraph->addPass("GBuffer", [this, &scene, &camera](const FGPassResources&) {
+    m_frameGraph->addPass("GBuffer", [this, &scene, &camera, options](const FGPassResources&) {
         Frustum frustum; frustum.ExtractFromMatrix(camera.GetProjectionMatrix() * camera.GetViewMatrix());
-        GBufferPass gp; gp.Execute(scene, *m_gbuffer, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix(), frustum);
+        GBufferPass gp; gp.Execute(scene, *m_gbuffer, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix(), frustum, options.enableCulling, options.enableLOD, options.enableInstancing, static_cast<size_t>(options.minInstancesForBatch));
     }, {}, {}, true);
 
     // Skybox pass
@@ -115,7 +117,8 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
     // Lighting pass
     m_frameGraph->addPass("Lighting", [this, &scene, &camera, params](const FGPassResources&) {
         LightingPass lp; lp.Execute(scene, *m_gbuffer, camera, m_lightingShader, m_shadowMap.get(), params,
-            m_skybox && m_skybox->IsValid() ? m_skyboxRenderer.get() : nullptr);
+            m_skybox && m_skybox->IsValid() ? m_skyboxRenderer.get() : nullptr,
+            m_ibl && m_ibl->IsValid() ? m_ibl.get() : nullptr);
     }, {}, {}, true);
 }
 

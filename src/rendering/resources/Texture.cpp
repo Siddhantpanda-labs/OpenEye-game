@@ -57,7 +57,9 @@ Texture& Texture::operator=(Texture&& other) noexcept {
 }
 
 bool Texture::LoadFromFile(const std::string& path, bool isSRGB, bool generateMipmaps) {
-    stbi_set_flip_vertically_on_load(true);
+    // Don't flip images - they should match the UV coordinates from the model
+    // If textures appear flipped, it's usually because the model format uses different conventions
+    stbi_set_flip_vertically_on_load(false);
     
     int width, height, channels;
     unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
@@ -100,7 +102,8 @@ bool Texture::LoadFromFile(const std::string& path, bool isSRGB, bool generateMi
         glGenerateMipmap(GL_TEXTURE_2D);
     }
     
-    // Set default parameters
+    // Set default parameters (these will be overridden if SetWrap/SetFilter called later)
+    // Use REPEAT for UV coordinates (standard for texture atlases)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, generateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);

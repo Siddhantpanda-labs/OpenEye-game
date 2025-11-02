@@ -3,7 +3,11 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <assimp/material.h>
 #include <cmath>
+#include <algorithm>
+#include <cctype>
+#include <unordered_map>
 
 namespace OpenEye {
 namespace Rendering {
@@ -19,12 +23,29 @@ std::shared_ptr<LoadedMesh> MeshLoader::LoadFromFile(const std::string& path) {
 std::vector<std::shared_ptr<LoadedMesh>> MeshLoader::LoadSceneFromFile(const std::string& path) {
     Assimp::Importer importer;
     
-    const aiScene* scene = importer.ReadFile(path,
-        aiProcess_Triangulate |
-        aiProcess_GenNormals |
-        aiProcess_CalcTangentSpace |
-        aiProcess_FlipUVs |
-        aiProcess_JoinIdenticalVertices);
+    // For glTF files, don't flip UVs (OpenGL convention is already correct)
+    // For other formats, may need aiProcess_FlipUVs
+    bool isGLTF = path.length() >= 4 && 
+                   (path.substr(path.length() - 5) == ".gltf" || 
+                    path.substr(path.length() - 5) == ".glb" ||
+                    path.find(".gltf") != std::string::npos ||
+                    path.find(".glb") != std::string::npos);
+    
+    unsigned int flags = aiProcess_Triangulate |
+                         aiProcess_GenNormals |
+                         aiProcess_CalcTangentSpace;
+    
+    // For glTF: Don't flip UVs (already OpenGL convention), don't generate UVs (model has them)
+    // Also don't join identical vertices for glTF - preserve vertex order and separate vertices
+    // that might have different UVs but same positions (important for texture mapping)
+    // For other formats: May need UV flipping and generation
+    if (!isGLTF) {
+        flags |= aiProcess_FlipUVs;
+        flags |= aiProcess_GenUVCoords; // Generate UV coordinates if missing (only for non-glTF)
+        flags |= aiProcess_JoinIdenticalVertices; // Only join for non-glTF
+    }
+    
+    const aiScene* scene = importer.ReadFile(path, flags);
     
     if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
         OE_ERROR_F("Failed to load model: %s - %s", path.c_str(), importer.GetErrorString());
@@ -74,8 +95,13 @@ void MeshLoader::ProcessNode(aiNode* node, const aiScene* scene,
 std::shared_ptr<Mesh> MeshLoader::ProcessMesh(aiMesh* mesh, const aiScene* scene) {
     auto processedMesh = std::make_shared<Mesh>();
     
+    // Extract vertices using face-based indexing (preserves UV mapping)
     std::vector<Vertex> vertices = ExtractVertices(mesh);
-    std::vector<uint32_t> indices = ExtractIndices(mesh);
+    // Generate sequential indices since ExtractVertices now creates one vertex per face index
+    std::vector<uint32_t> indices(vertices.size());
+    for (size_t i = 0; i < vertices.size(); i++) {
+        indices[i] = static_cast<uint32_t>(i);
+    }
     
     processedMesh->SetVertices(vertices);
     processedMesh->SetIndices(indices);
@@ -94,22 +120,130 @@ std::shared_ptr<Mesh> MeshLoader::ProcessMesh(aiMesh* mesh, const aiScene* scene
     return processedMesh;
 }
 
+// Helper function to load texture from Assimp material
+static std::shared_ptr<Texture> LoadMaterialTexture(aiMaterial* material, aiTextureType type, const std::string& basePath, bool isSRGB = true) {
+    if (material->GetTextureCount(type) > 0) {
+        aiString str;
+        if (material->GetTexture(type, 0, &str) == AI_SUCCESS) {
+            std::string texturePath = basePath + std::string(str.C_Str());
+            // Normalize path separators
+            std::replace(texturePath.begin(), texturePath.end(), '\\', '/');
+            
+            auto texture = std::make_shared<Texture>();
+            if (texture->LoadFromFile(texturePath, isSRGB)) {
+                // Ensure texture uses REPEAT wrap mode (standard for UV maps)
+                texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                return texture;
+            } else {
+                OE_WARN_F("Failed to load texture: %s", texturePath.c_str());
+            }
+        }
+    }
+    return nullptr;
+}
+
 std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const aiScene* scene, const std::string& basePath) {
     auto mat = std::make_shared<Material>();
     
-    // Load textures
-    if (material->GetTextureCount(aiTextureType_DIFFUSE) > 0) {
-        aiString str;
-        material->GetTexture(aiTextureType_DIFFUSE, 0, &str);
-        std::string texturePath = basePath + std::string(str.C_Str());
-        
-        auto texture = std::make_shared<Texture>();
-        if (texture->LoadFromFile(texturePath, true)) {
-            mat->SetTexture("u_AlbedoTexture", texture);
+    // Load Albedo/Diffuse texture (SRGB)
+    if (auto albedoTexture = LoadMaterialTexture(material, aiTextureType_DIFFUSE, basePath, true)) {
+        mat->SetAlbedoTexture(albedoTexture);
+    }
+    // Also check BASE_COLOR (glTF/glTF2)
+    if (!mat->GetTexture("u_AlbedoTexture")) {
+        if (auto baseColorTexture = LoadMaterialTexture(material, aiTextureType_BASE_COLOR, basePath, true)) {
+            mat->SetAlbedoTexture(baseColorTexture);
         }
     }
     
-    // Load material properties
+    // Load Normal map (linear, not SRGB)
+    if (auto normalTexture = LoadMaterialTexture(material, aiTextureType_NORMALS, basePath, false)) {
+        mat->SetNormalTexture(normalTexture);
+    }
+    // Also check HEIGHT (sometimes used as normal)
+    if (!mat->GetTexture("u_NormalTexture")) {
+        if (auto heightTexture = LoadMaterialTexture(material, aiTextureType_HEIGHT, basePath, false)) {
+            mat->SetNormalTexture(heightTexture);
+        }
+    }
+    
+    // Load Metallic-Roughness texture (combined, glTF format: B=metallic, G=roughness)
+    // Check all texture types to find metallic-roughness by name pattern
+    for (int texType = 1; texType < AI_TEXTURE_TYPE_MAX; ++texType) {
+        if (material->GetTextureCount(static_cast<aiTextureType>(texType)) > 0) {
+            aiString texPath;
+            if (material->GetTexture(static_cast<aiTextureType>(texType), 0, &texPath) == AI_SUCCESS) {
+                std::string pathStr = std::string(texPath.C_Str());
+                std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
+                
+                // Check if this looks like a metallic-roughness texture
+                if (pathStr.find("metallicroughness") != std::string::npos ||
+                    (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") != std::string::npos)) {
+                    if (auto metallicRoughTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                        mat->SetMetallicRoughnessTexture(metallicRoughTexture);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Try to load separate metallic and roughness textures
+    if (!mat->GetTexture("u_MetallicRoughnessTexture")) {
+        // Check for separate metallic texture (newer Assimp versions)
+        for (int texType = 1; texType < AI_TEXTURE_TYPE_MAX; ++texType) {
+            if (material->GetTextureCount(static_cast<aiTextureType>(texType)) > 0) {
+                aiString texPath;
+                if (material->GetTexture(static_cast<aiTextureType>(texType), 0, &texPath) == AI_SUCCESS) {
+                    std::string pathStr = std::string(texPath.C_Str());
+                    std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
+                    
+                    if (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") == std::string::npos) {
+                        if (auto metallicTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                            mat->SetMetallicTexture(metallicTexture);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check for separate roughness texture
+        for (int texType = 1; texType < AI_TEXTURE_TYPE_MAX; ++texType) {
+            if (material->GetTextureCount(static_cast<aiTextureType>(texType)) > 0) {
+                aiString texPath;
+                if (material->GetTexture(static_cast<aiTextureType>(texType), 0, &texPath) == AI_SUCCESS) {
+                    std::string pathStr = std::string(texPath.C_Str());
+                    std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
+                    
+                    if (pathStr.find("roughness") != std::string::npos && pathStr.find("metallic") == std::string::npos) {
+                        if (auto roughnessTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                            mat->SetRoughnessTexture(roughnessTexture);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Load AO texture
+    if (auto aoTexture = LoadMaterialTexture(material, aiTextureType_AMBIENT_OCCLUSION, basePath, false)) {
+        mat->SetAOTexture(aoTexture);
+    }
+    // Also check LIGHTMAP (sometimes used for AO)
+    if (!mat->GetTexture("u_AOTexture")) {
+        if (auto lightmapTexture = LoadMaterialTexture(material, aiTextureType_LIGHTMAP, basePath, false)) {
+            mat->SetAOTexture(lightmapTexture);
+        }
+    }
+    
+    // Load Emissive texture
+    if (auto emissiveTexture = LoadMaterialTexture(material, aiTextureType_EMISSIVE, basePath, true)) {
+        mat->SetEmissiveTexture(emissiveTexture);
+    }
+    
+    // Load material properties (fallback values if textures not available)
     aiColor3D color;
     if (material->Get(AI_MATKEY_COLOR_DIFFUSE, color) == AI_SUCCESS) {
         mat->SetAlbedo(glm::vec3(color.r, color.g, color.b));
@@ -125,59 +259,91 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
         mat->SetRoughness(roughness);
     }
     
+    aiColor3D emissiveColor;
+    if (material->Get(AI_MATKEY_COLOR_EMISSIVE, emissiveColor) == AI_SUCCESS) {
+        mat->SetEmission(glm::vec3(emissiveColor.r, emissiveColor.g, emissiveColor.b));
+    }
+    
+    float ao = 1.0f;
+    // AO factor is not standard in Assimp, but we can check
+    mat->SetAO(ao);
+    
     return mat;
 }
 
 std::vector<Vertex> MeshLoader::ExtractVertices(aiMesh* mesh) {
+    // Extract vertices following face indices exactly
+    // This preserves the exact relationship between position, normal, UV per vertex
+    // Important for glTF models where same position can have different UVs at seams
+    // This matches how the Vulkan engine handles indexed vertices
     std::vector<Vertex> vertices;
-    vertices.reserve(mesh->mNumVertices);
     
-    for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
-        Vertex vertex;
+    // Reserve space (typically 3 vertices per face)
+    vertices.reserve(mesh->mNumFaces * 3);
+    
+    // Process each face and create vertices based on face indices
+    // This ensures each vertex attribute combination is preserved correctly
+    for (unsigned int faceIdx = 0; faceIdx < mesh->mNumFaces; faceIdx++) {
+        const aiFace& face = mesh->mFaces[faceIdx];
         
-        // Position
-        vertex.position = glm::vec3(
-            mesh->mVertices[i].x,
-            mesh->mVertices[i].y,
-            mesh->mVertices[i].z
-        );
-        
-        // Normal
-        if (mesh->mNormals) {
-            vertex.normal = glm::vec3(
-                mesh->mNormals[i].x,
-                mesh->mNormals[i].y,
-                mesh->mNormals[i].z
+        // Process each vertex index in this face
+        for (unsigned int j = 0; j < face.mNumIndices; j++) {
+            unsigned int index = face.mIndices[j];
+            
+            // Create vertex from the indexed data
+            Vertex vertex;
+            
+            // Position
+            vertex.position = glm::vec3(
+                mesh->mVertices[index].x,
+                mesh->mVertices[index].y,
+                mesh->mVertices[index].z
             );
+            
+            // Normal
+            if (mesh->mNormals) {
+                vertex.normal = glm::vec3(
+                    mesh->mNormals[index].x,
+                    mesh->mNormals[index].y,
+                    mesh->mNormals[index].z
+                );
+            }
+            
+            // Texture coordinates (use first set, TEXCOORD_0 in glTF)
+            // Check if this UV channel exists and has 2 components
+            if (mesh->mTextureCoords[0] && mesh->mNumUVComponents[0] >= 2) {
+                vertex.texCoord = glm::vec2(
+                    mesh->mTextureCoords[0][index].x,
+                    mesh->mTextureCoords[0][index].y
+                );
+            } else if (mesh->mTextureCoords[0] && mesh->mNumUVComponents[0] == 1) {
+                // Handle 1D texture coordinates (unlikely but possible)
+                vertex.texCoord = glm::vec2(mesh->mTextureCoords[0][index].x, 0.0f);
+            } else {
+                // No texture coordinates - set default
+                vertex.texCoord = glm::vec2(0.0f);
+            }
+            
+            // Tangent
+            if (mesh->mTangents) {
+                vertex.tangent = glm::vec3(
+                    mesh->mTangents[index].x,
+                    mesh->mTangents[index].y,
+                    mesh->mTangents[index].z
+                );
+            }
+            
+            // Bitangent
+            if (mesh->mBitangents) {
+                vertex.bitangent = glm::vec3(
+                    mesh->mBitangents[index].x,
+                    mesh->mBitangents[index].y,
+                    mesh->mBitangents[index].z
+                );
+            }
+            
+            vertices.push_back(vertex);
         }
-        
-        // Texture coordinates (use first set)
-        if (mesh->mTextureCoords[0]) {
-            vertex.texCoord = glm::vec2(
-                mesh->mTextureCoords[0][i].x,
-                mesh->mTextureCoords[0][i].y
-            );
-        }
-        
-        // Tangent
-        if (mesh->mTangents) {
-            vertex.tangent = glm::vec3(
-                mesh->mTangents[i].x,
-                mesh->mTangents[i].y,
-                mesh->mTangents[i].z
-            );
-        }
-        
-        // Bitangent
-        if (mesh->mBitangents) {
-            vertex.bitangent = glm::vec3(
-                mesh->mBitangents[i].x,
-                mesh->mBitangents[i].y,
-                mesh->mBitangents[i].z
-            );
-        }
-        
-        vertices.push_back(vertex);
     }
     
     return vertices;

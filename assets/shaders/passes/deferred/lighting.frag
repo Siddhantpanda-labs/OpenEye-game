@@ -28,6 +28,12 @@ uniform vec3 u_PointLightColors[MAX_POINT_LIGHTS];
 uniform float u_PointLightIntensities[MAX_POINT_LIGHTS];
 uniform float u_PointLightRanges[MAX_POINT_LIGHTS];
 
+// IBL uniforms
+uniform samplerCube u_IrradianceMap;
+uniform samplerCube u_PrefilterMap;
+uniform sampler2D u_BRDFLUT;
+uniform bool u_UseIBL = true;
+
 void main(){
     vec3 position = texture(g_Position, v_TexCoord).rgb;
     vec3 normal = normalize(texture(g_Normal, v_TexCoord).rgb);
@@ -44,8 +50,29 @@ void main(){
     vec3 lighting=vec3(0.0);
     if (u_LightIntensity>0.0 && NdotL>0.0){ float vis=CalculateShadow(position,normal,Ld,u_ShadowMaps,u_ShadowMatrices,u_CascadeSplits,u_ViewMatrix); vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,Ld); lighting += brdf * (u_LightColor*u_LightIntensity) * NdotL * vis; }
     for (int i=0;i<u_PointLightCount && i<MAX_POINT_LIGHTS;i++){ vec3 lp=u_PointLightPositions[i]; vec3 L=normalize(lp-position); float d=length(lp-position); if (d>u_PointLightRanges[i]) continue; float att=1.0/(1.0+0.09*d+0.032*d*d); float rf=1.0 - smoothstep(0.0,u_PointLightRanges[i],d); float ndl=max(dot(normal,L),0.0); if (ndl>0.0){ vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,L); lighting += brdf * (u_PointLightColors[i]*u_PointLightIntensities[i]) * ndl * att * rf; } }
+    
+    // IBL (Image-Based Lighting)
     vec3 ambient = albedo * u_AmbientLight;
-    vec3 color = lighting + ambient; color = vec3(1.0) - exp(-color * max(u_Exposure,0.0001));
+    if (u_UseIBL) {
+        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F = FresnelSchlickRoughness(max(dot(normal, V), 0.0), F0, roughness);
+        vec3 kS = F;
+        vec3 kD = (1.0 - kS) * (1.0 - metallic);
+        vec3 irradiance = texture(u_IrradianceMap, normal).rgb;
+        vec3 diffuse = irradiance * albedo;
+        
+        vec3 R = reflect(-V, normal);
+        float maxMipLevel = 4.0;
+        float mipLevel = roughness * maxMipLevel;
+        vec3 prefilteredColor = textureLod(u_PrefilterMap, R, mipLevel).rgb;
+        vec2 brdfSample = texture(u_BRDFLUT, vec2(max(dot(normal, V), 0.0), roughness)).rg;
+        vec3 specular = prefilteredColor * (F * brdfSample.x + brdfSample.y);
+        
+        ambient = (kD * diffuse + specular) * u_AmbientLight;
+    }
+    
+    vec3 color = lighting + ambient;
+    color = vec3(1.0) - exp(-color * max(u_Exposure,0.0001));
     FragColor=vec4(color,1.0);
 }
 

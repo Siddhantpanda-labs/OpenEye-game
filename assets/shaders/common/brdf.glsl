@@ -24,4 +24,9 @@ vec3 EvaluateBurleyBRDF(vec3 albedo, float metallic, float roughness, vec3 N, ve
     return diffuse + specular;
 }
 
+// Fresnel-Schlick with roughness for IBL
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
 

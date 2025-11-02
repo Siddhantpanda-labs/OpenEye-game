@@ -44,6 +44,11 @@ void Material::SetEmission(const glm::vec3& color) {
     m_hashDirty = true;
 }
 
+void Material::SetAO(float value) {
+    m_ao = value;
+    m_hashDirty = true;
+}
+
 void Material::SetFloat(const std::string& name, float value) {
     m_floatParams[name] = value;
     m_hashDirty = true;

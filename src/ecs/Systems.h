@@ -9,6 +9,7 @@
 #include "rendering/ShadowMap.h"
 #include "rendering/resources/Cubemap.h"
 #include "rendering/SkyboxRenderer.h"
+#include "rendering/IBL.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <memory>
@@ -67,7 +68,11 @@ public:
     static void RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
                                   const Rendering::Camera& camera,
                                   const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix,
-                                  const Rendering::Frustum& frustum);
+                                  const Rendering::Frustum& frustum,
+                                  bool enableCulling,
+                                  bool enableLOD,
+                                  bool enableInstancing,
+                                  size_t minInstancesForBatch);
     
     // Deferred rendering: lighting pass (reads from G-Buffer)
     static void RenderLightingPass(Scene& scene,
@@ -81,7 +86,8 @@ public:
                                   float lightIntensity = 3.0f,
                                   const glm::vec3& ambientLight = glm::vec3(0.08f),
                                   float exposure = 1.0f,
-                                  Rendering::SkyboxRenderer* skyboxRenderer = nullptr);
+                                  Rendering::SkyboxRenderer* skyboxRenderer = nullptr,
+                                  Rendering::IBL* ibl = nullptr);
     
     // Shadow pass: render depth from light's perspective
     static void RenderShadowPass(Scene& scene, Rendering::ShadowMap& shadowMap,

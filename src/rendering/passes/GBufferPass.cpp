@@ -12,8 +12,13 @@ void GBufferPass::Execute(ECS::Scene& scene,
                           const Camera& camera,
                           const glm::mat4& view,
                           const glm::mat4& projection,
-                          const Frustum& frustum) {
-    ECS::RenderSystem::RenderGeometryPass(scene, gbuffer, camera, view, projection, frustum);
+                          const Frustum& frustum,
+                          bool enableCulling,
+                          bool enableLOD,
+                          bool enableInstancing,
+                          size_t minInstancesForBatch) {
+    ECS::RenderSystem::RenderGeometryPass(scene, gbuffer, camera, view, projection, frustum,
+        enableCulling, enableLOD, enableInstancing, minInstancesForBatch);
 }
 
 } }

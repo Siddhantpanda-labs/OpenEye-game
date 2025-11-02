@@ -29,11 +29,24 @@ public:
     void SetMetallic(float value);
     void SetRoughness(float value);
     void SetEmission(const glm::vec3& color);
+    void SetAO(float value); // Ambient Occlusion
     
     glm::vec3 GetAlbedo() const { return m_albedo; }
     float GetMetallic() const { return m_metallic; }
     float GetRoughness() const { return m_roughness; }
     glm::vec3 GetEmission() const { return m_emission; }
+    float GetAO() const { return m_ao; }
+    
+    // Convenience texture setters for PBR workflow
+    void SetAlbedoTexture(std::shared_ptr<Texture> texture) { SetTexture("u_AlbedoTexture", texture); }
+    void SetNormalTexture(std::shared_ptr<Texture> texture) { SetTexture("u_NormalTexture", texture); }
+    void SetMetallicTexture(std::shared_ptr<Texture> texture) { SetTexture("u_MetallicTexture", texture); }
+    void SetRoughnessTexture(std::shared_ptr<Texture> texture) { SetTexture("u_RoughnessTexture", texture); }
+    void SetAOTexture(std::shared_ptr<Texture> texture) { SetTexture("u_AOTexture", texture); }
+    void SetEmissiveTexture(std::shared_ptr<Texture> texture) { SetTexture("u_EmissiveTexture", texture); }
+    
+    // Combined metallic-roughness texture (common in GLTF)
+    void SetMetallicRoughnessTexture(std::shared_ptr<Texture> texture) { SetTexture("u_MetallicRoughnessTexture", texture); }
     
     // Custom float parameters
     void SetFloat(const std::string& name, float value);
@@ -67,6 +80,7 @@ private:
     float m_metallic = 0.0f;
     float m_roughness = 0.5f;
     glm::vec3 m_emission = glm::vec3(0.0f);
+    float m_ao = 1.0f;
     
     mutable size_t m_cachedHash = 0;
     mutable bool m_hashDirty = true;

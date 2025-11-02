@@ -3,6 +3,7 @@
 namespace OpenEye { namespace ECS { class Scene; } }
 namespace OpenEye { namespace Rendering { class Camera; class GBuffer; class Frustum; } }
 #include <glm/glm.hpp>
+#include <cstddef>
 
 namespace OpenEye { namespace Rendering {
 
@@ -13,7 +14,11 @@ public:
                  const Camera& camera,
                  const glm::mat4& view,
                  const glm::mat4& projection,
-                 const Frustum& frustum);
+                 const Frustum& frustum,
+                 bool enableCulling,
+                 bool enableLOD,
+                 bool enableInstancing,
+                 size_t minInstancesForBatch);
 };
 
 } }

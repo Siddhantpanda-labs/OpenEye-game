@@ -10,6 +10,7 @@
 #include "rendering/resources/Mesh.h"
 #include "rendering/resources/Material.h"
 #include "rendering/resources/MeshLoader.h"
+#include <filesystem>
 #include "rendering/Camera.h"
 #include "rendering/Frustum.h"
 #include "rendering/GBuffer.h"
@@ -18,6 +19,7 @@
 #include "rendering/resources/Cubemap.h"
 #include "rendering/SkyboxRenderer.h"
 #include "rendering/RenderPipeline.h"
+#include "rendering/IBL.h"
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -139,6 +141,98 @@ int main() {
     light2.range = 8.0f;
     scene.GetRegistry().emplace<Light>(pointLight2, light2);
     
+    // Load glTF model with textures
+    auto resolveAssetPath = [](const std::string& relative) -> std::string {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path current = fs::current_path(ec);
+        fs::path rel(relative);
+        for (fs::path p = current; !p.empty(); p = p.parent_path()) {
+            fs::path candidate = p / rel;
+            if (fs::exists(candidate, ec)) return candidate.string();
+            if (p == p.parent_path()) break;
+        }
+        return relative;
+    };
+    
+    std::string modelPath = resolveAssetPath("assets/models/dess_holiday_hb_juan_deltarune/scene.gltf");
+    if (std::filesystem::exists(modelPath)) {
+        OE_INFO("Loading model: " + modelPath);
+        auto loadedMeshes = MeshLoader::LoadSceneFromFile(modelPath);
+        
+        if (!loadedMeshes.empty()) {
+            OE_INFO("Loaded " + std::to_string(loadedMeshes.size()) + " meshes from model");
+            
+            for (size_t i = 0; i < loadedMeshes.size(); ++i) {
+                const auto& loadedMesh = loadedMeshes[i];
+                if (!loadedMesh->mesh || loadedMeshes[i]->materials.empty()) continue;
+                
+                // Check if mesh has multiple submeshes with different materials
+                size_t submeshCount = loadedMesh->mesh->GetSubmeshCount();
+                size_t materialCount = loadedMesh->materials.size();
+                
+                OE_INFO("Mesh '" + loadedMesh->name + "': " + 
+                       std::to_string(submeshCount) + " submeshes, " + 
+                       std::to_string(materialCount) + " materials");
+                
+                // For now, create one entity per mesh (with first material)
+                // TODO: If mesh has multiple submeshes with different materials, 
+                // we should create separate entities or handle submesh rendering per-material
+                Entity modelEntity = scene.CreateEntity(loadedMesh->name.empty() ? "ModelMesh_" + std::to_string(i) : loadedMesh->name);
+                auto& modelTransform = scene.GetRegistry().get<Transform>(modelEntity);
+                
+                // Position model - center it and scale down if needed
+                modelTransform.position = glm::vec3(0.0f, 0.0f, -5.0f); // Place in front of camera
+                modelTransform.scale = glm::vec3(1.0f); // Adjust scale if model is too large
+                
+                // Use the material from loaded mesh (which should have textures)
+                auto modelMaterial = loadedMesh->materials[0];
+                if (!modelMaterial) {
+                    modelMaterial = std::make_shared<Material>(shader);
+                }
+                // Ensure material has the correct shader for deferred rendering
+                if (modelMaterial && !modelMaterial->GetShader()) {
+                    // Load gbuffer shader for deferred rendering
+                    auto gbufferShader = std::make_shared<Shader>();
+                    gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert", 
+                                                "assets/shaders/passes/deferred/gbuffer.frag");
+                    modelMaterial->SetShader(gbufferShader);
+                }
+                
+                scene.GetRegistry().emplace<Renderable>(modelEntity, loadedMesh->mesh, modelMaterial);
+                scene.GetRegistry().emplace<AABB>(modelEntity);
+                
+                // Log loaded textures for debugging
+                OE_INFO("Model entity '" + loadedMesh->name + "' created");
+                if (modelMaterial->GetTexture("u_AlbedoTexture")) {
+                    OE_INFO("  - Albedo texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_NormalTexture")) {
+                    OE_INFO("  - Normal texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_MetallicRoughnessTexture")) {
+                    OE_INFO("  - MetallicRoughness texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_MetallicTexture")) {
+                    OE_INFO("  - Metallic texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_RoughnessTexture")) {
+                    OE_INFO("  - Roughness texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_AOTexture")) {
+                    OE_INFO("  - AO texture loaded");
+                }
+                if (modelMaterial->GetTexture("u_EmissiveTexture")) {
+                    OE_INFO("  - Emissive texture loaded");
+                }
+            }
+        } else {
+            OE_WARN("Failed to load model from: " + modelPath);
+        }
+    } else {
+        OE_WARN("Model file not found: " + modelPath);
+    }
+    
     // Count entities with Transform component (all entities should have this)
     size_t entityCount = scene.GetRegistry().view<Transform>().size();
     OE_INFO_F("Created %zu entities in scene", entityCount);
@@ -222,6 +316,11 @@ int main() {
     static float uiLightIntensity = 3.0f;
     static glm::vec3 uiAmbient = glm::vec3(0.08f);
     static float uiExposure = 1.0f;
+    // Render toggles
+    static bool uiEnableCulling = true;
+    static bool uiEnableLOD = true;
+    static bool uiEnableInstancing = false;
+    static int uiMinInstancesForBatch = 3;
     
     // GBuffer & ShadowMap (deferred path resources)
     static RenderPipeline renderPipeline;
@@ -299,7 +398,7 @@ int main() {
             if (!pipelineInitialized) {
                 renderPipeline.Initialize(static_cast<uint32_t>(window.GetWidth()), static_cast<uint32_t>(window.GetHeight()));
                 // Load skybox through pipeline cubemap
-                auto resolveAssetPath = [](const std::string& relative) -> std::string {
+                auto resolveSkyboxPath = [](const std::string& relative) -> std::string {
                     namespace fs = std::filesystem;
                     std::error_code ec;
                     fs::path current = fs::current_path(ec);
@@ -312,16 +411,25 @@ int main() {
                     return relative;
                 };
                 std::vector<std::string> faces = {
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_right.png"),
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_left.png"),
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_up.png"),
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_down.png"),
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_front.png"),
-                    resolveAssetPath("assets/Clear Ocean/vz_clear_ocean_back.png")
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_right.png"),
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_left.png"),
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_up.png"),
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_down.png"),
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_front.png"),
+                    resolveSkyboxPath("assets/Clear Ocean/vz_clear_ocean_back.png")
                 };
                 if (auto* skybox = renderPipeline.GetSkyboxCubemap()) {
                     if (skybox->LoadFromFiles(faces, true)) {
                         OE_INFO("Skybox loaded: Clear Ocean");
+                        // Initialize IBL from skybox
+                        if (auto* ibl = renderPipeline.GetIBL()) {
+                            GLuint skyboxTexID = skybox->GetID();
+                            if (!ibl->Initialize(skyboxTexID, 32, 512)) {
+                                OE_WARN("Failed to initialize IBL from skybox");
+                            } else {
+                                OE_INFO("IBL initialized from skybox");
+                            }
+                        }
                     } else {
                         OE_WARN("Failed to load skybox.");
                     }
@@ -337,7 +445,13 @@ int main() {
             params.lightIntensity = uiLightIntensity;
             params.ambient = uiAmbient;
             params.exposure = uiExposure;
-            renderPipeline.RenderFrame(scene, camera, params);
+            // Build render options
+            RenderOptions opts;
+            opts.enableCulling = uiEnableCulling;
+            opts.enableLOD = uiEnableLOD;
+            opts.enableInstancing = uiEnableInstancing;
+            opts.minInstancesForBatch = uiMinInstancesForBatch;
+            renderPipeline.RenderFrame(scene, camera, params, opts);
         }
         
         // --- ImGui UI ---
@@ -362,6 +476,12 @@ int main() {
         ImGui::Begin("Renderer Debug");
         const char* modes[] = {"Lighting", "Albedo", "Normal", "Position", "PBR"};
         ImGui::Combo("Output", &debugOutputMode, modes, IM_ARRAYSIZE(modes));
+        ImGui::Separator();
+        ImGui::Text("Render Options");
+        ImGui::Checkbox("Frustum Culling", &uiEnableCulling);
+        ImGui::Checkbox("LOD", &uiEnableLOD);
+        ImGui::Checkbox("Instancing (deferred)", &uiEnableInstancing);
+        ImGui::DragInt("Min Instances for Batch", &uiMinInstancesForBatch, 1, 1, 1024);
         ImGui::Separator();
         ImGui::Text("Lighting");
         ImGui::DragFloat3("Dir", &uiLightDir.x, 0.01f, -1.0f, 1.0f);

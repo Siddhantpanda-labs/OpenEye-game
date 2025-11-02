@@ -7,7 +7,7 @@
 
 namespace OpenEye {
 namespace ECS { class Scene; }
-namespace Rendering { class Camera; class GBuffer; class ShadowMap; class Shader; class Cubemap; class SkyboxRenderer; }
+namespace Rendering { class Camera; class GBuffer; class ShadowMap; class Shader; class Cubemap; class SkyboxRenderer; class IBL; }
 }
 
 namespace OpenEye {
@@ -22,6 +22,13 @@ struct LightingParams {
     int debugMode = 0; // 0 lighting, 1 albedo, 2 normal, 3 position, 4 pbr
 };
 
+struct RenderOptions {
+    bool enableCulling = true;
+    bool enableLOD = true;
+    bool enableInstancing = false;
+    int  minInstancesForBatch = 3;
+};
+
 class RenderPipeline {
 public:
     RenderPipeline();
@@ -31,23 +38,25 @@ public:
     void Resize(uint32_t width, uint32_t height);
 
     // Execute full frame: Shadow → GBuffer → Skybox → Lighting
-    void RenderFrame(ECS::Scene& scene, const Camera& camera, const LightingParams& params);
+    void RenderFrame(ECS::Scene& scene, const Camera& camera, const LightingParams& params, const RenderOptions& options);
     const std::vector<FrameGraph::PassInfo>& GetFrameGraphPasses() const;
 
     // Expose skybox for loading
     SkyboxRenderer* GetSkyboxRenderer() { return m_skyboxRenderer.get(); }
     Cubemap* GetSkyboxCubemap() { return m_skybox.get(); }
     GBuffer* GetGBuffer() { return m_gbuffer.get(); }
+    IBL* GetIBL() { return m_ibl.get(); }
 
 private:
     void EnsureResources(uint32_t width, uint32_t height);
-    void BuildFrameGraph(ECS::Scene& scene, const Camera& camera, const LightingParams& params);
+    void BuildFrameGraph(ECS::Scene& scene, const Camera& camera, const LightingParams& params, const RenderOptions& options);
 
     std::unique_ptr<GBuffer> m_gbuffer;
     std::unique_ptr<ShadowMap> m_shadowMap;
     std::shared_ptr<Shader> m_lightingShader;
     std::unique_ptr<SkyboxRenderer> m_skyboxRenderer;
     std::unique_ptr<Cubemap> m_skybox;
+    std::unique_ptr<IBL> m_ibl;
     UniformBuffer m_frameUBO; // binding 0
     UniformBuffer m_lightUBO; // binding 1
 
