@@ -4,6 +4,7 @@
 #include "CullingSystem.h"
 #include "LODSystem.h"
 #include "core/log/Log.h"
+#include "core/time/Time.h"
 #include "rendering/Frustum.h"
 #include "rendering/LODManager.h"
 #include "rendering/InstancedRenderer.h"
@@ -11,6 +12,7 @@
 #include "rendering/FullscreenQuad.h"
 #include "rendering/ShadowMap.h"
 #include "rendering/resources/Shader.h"
+#include "animation/Skeleton.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <vector>
@@ -277,13 +279,25 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
     
     gbufferShader->Bind();
     
+    // Separate animated and static entities
+    std::vector<entt::entity> animatedEntities;
+    std::vector<entt::entity> staticEntities;
+    
+    for (auto entity : visibleEntities) {
+        if (registry.all_of<ECS::AnimationComponent>(entity)) {
+            animatedEntities.push_back(entity);
+        } else {
+            staticEntities.push_back(entity);
+        }
+    }
+    
     // Render entities (instanced or individual)
     if (enableInstancing) {
-        // Group by mesh/material
+        // Group by mesh/material (only static entities can be instanced)
         struct BatchKey { void* meshPtr; void* materialPtr; bool operator==(const BatchKey& o) const { return meshPtr==o.meshPtr && materialPtr==o.materialPtr; } };
         struct BatchKeyHash { size_t operator()(const BatchKey& k) const { return std::hash<void*>()(k.meshPtr) ^ (std::hash<void*>()(k.materialPtr)<<1); } };
         std::unordered_map<BatchKey, std::vector<glm::mat4>, BatchKeyHash> batches;
-        for (auto entity : visibleEntities) {
+        for (auto entity : staticEntities) {
             const auto& transform = registry.get<Transform>(entity);
             const auto& renderable = registry.get<Renderable>(entity);
             if (!renderable.mesh || !renderable.material) continue;
@@ -372,7 +386,8 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
         }
     } else {
         gbufferShader->SetBool("u_IsInstanced", false);
-        for (auto entity : visibleEntities) {
+        // Render static entities
+        for (auto entity : staticEntities) {
             if (!registry.all_of<Transform, Renderable>(entity)) continue;
             const auto& transform = registry.get<Transform>(entity);
             const auto& renderable = registry.get<Renderable>(entity);
@@ -414,6 +429,138 @@ void RenderSystem::RenderGeometryPass(Scene& scene, Rendering::GBuffer& gbuffer,
             renderable.mesh->Bind();
             renderable.mesh->Draw();
             renderable.mesh->Unbind();
+        }
+    }
+    
+    // Render animated entities with skinned shader
+    if (!animatedEntities.empty()) {
+        // Load skinned shader
+        static std::shared_ptr<Rendering::Shader> skinnedShader = nullptr;
+        if (!skinnedShader) {
+            skinnedShader = std::make_shared<Rendering::Shader>();
+            if (!skinnedShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer_skinned.vert", 
+                                            "assets/shaders/passes/deferred/gbuffer_skinned.frag")) {
+                OE_ERROR("Failed to load skinned G-Buffer shader");
+            }
+        }
+        
+        if (skinnedShader) {
+            skinnedShader->Bind();
+            skinnedShader->SetBool("u_IsInstanced", false);
+            
+            // Use a UBO for bone matrices (binding = 3) to avoid vertex uniform limits
+            constexpr int MAX_BONES = 512; // Matches shader
+            static GLuint s_boneUBO = 0;
+            if (s_boneUBO == 0) {
+                glGenBuffers(1, &s_boneUBO);
+                glBindBuffer(GL_UNIFORM_BUFFER, s_boneUBO);
+                glBufferData(GL_UNIFORM_BUFFER, MAX_BONES * sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW);
+                glBindBuffer(GL_UNIFORM_BUFFER, 0);
+            }
+            
+            for (auto entity : animatedEntities) {
+                if (!registry.all_of<Transform, Renderable, ECS::AnimationComponent>(entity)) continue;
+                const auto& transform = registry.get<Transform>(entity);
+                const auto& renderable = registry.get<Renderable>(entity);
+                const auto& animComponent = registry.get<ECS::AnimationComponent>(entity);
+                
+                if (!renderable.mesh || !renderable.material) continue;
+                if (!animComponent.skeleton) continue;
+                
+                // Upload bone matrices to UBO and bind at binding point 3
+                auto skeleton = std::static_pointer_cast<Animation::Skeleton>(animComponent.skeleton);
+                if (skeleton && !animComponent.finalBoneMatrices.empty()) {
+                    size_t boneCount = std::min(animComponent.finalBoneMatrices.size(), static_cast<size_t>(MAX_BONES));
+                    
+                    // Debug: Check if bone matrices are valid (non-zero, non-identity)
+                    bool hasNonIdentity = false;
+                    bool hasInvalid = false;
+                    for (size_t i = 0; i < std::min(boneCount, static_cast<size_t>(10)); i++) { // Check first 10
+                        const auto& m = animComponent.finalBoneMatrices[i];
+                        if (m != glm::mat4(1.0f)) {
+                            hasNonIdentity = true;
+                        }
+                        // Check for NaN or invalid values
+                        if (std::isnan(m[0][0]) || std::isinf(m[0][0])) {
+                            hasInvalid = true;
+                        }
+                    }
+                    
+                    // Debug log once per second
+                    static float lastLogTime = 0.0f;
+                    float currentTime = OpenEye::Core::Time::TotalTime();
+                    if (currentTime - lastLogTime >= 1.0f) {
+                        OE_INFO_F("Animated entity: bones=%zu, matrices=%zu, non-identity=%s, invalid=%s, clip=%d, playing=%s, time=%.2f",
+                                 skeleton->GetBoneCount(), animComponent.finalBoneMatrices.size(),
+                                 hasNonIdentity ? "yes" : "no",
+                                 hasInvalid ? "yes" : "no",
+                                 animComponent.currentClipIndex,
+                                 animComponent.isPlaying ? "yes" : "no",
+                                 animComponent.currentTime);
+                        lastLogTime = currentTime;
+                    }
+                    
+                    glBindBuffer(GL_UNIFORM_BUFFER, s_boneUBO);
+                    glBufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr>(boneCount * sizeof(glm::mat4)), animComponent.finalBoneMatrices.data());
+                    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+                    glBindBufferBase(GL_UNIFORM_BUFFER, 3, s_boneUBO);
+                } else {
+                    OE_WARN_F("Animated entity has invalid bone matrices: skeleton=%s, matrixCount=%zu",
+                             skeleton ? "yes" : "no", animComponent.finalBoneMatrices.size());
+                }
+                
+                glm::mat4 modelMatrix = transform.GetWorldMatrix(registry);
+                skinnedShader->SetMat4("u_Model", modelMatrix);
+                skinnedShader->SetVec3("u_Albedo", renderable.material->GetAlbedo());
+                skinnedShader->SetFloat("u_Metallic", renderable.material->GetMetallic());
+                skinnedShader->SetFloat("u_Roughness", renderable.material->GetRoughness());
+                skinnedShader->SetFloat("u_AO", renderable.material->GetAO());
+                
+                // Bind PBR textures (texture unit 10+)
+                int texUnit = 10;
+                auto albedoTex = renderable.material->GetTexture("u_AlbedoTexture");
+                if (albedoTex) { 
+                    albedoTex->Bind(texUnit); 
+                    skinnedShader->SetInt("u_AlbedoTexture", texUnit); 
+                    skinnedShader->SetBool("u_HasAlbedoTexture", true); 
+                    texUnit++; 
+                } else { 
+                    skinnedShader->SetBool("u_HasAlbedoTexture", false); 
+                    // Debug: Log missing texture once
+                    static bool loggedMissingAlbedo = false;
+                    if (!loggedMissingAlbedo) {
+                        OE_WARN("Animated entity missing Albedo texture");
+                        loggedMissingAlbedo = true;
+                    }
+                }
+                
+                auto normalTex = renderable.material->GetTexture("u_NormalTexture");
+                if (normalTex) { normalTex->Bind(texUnit); skinnedShader->SetInt("u_NormalTexture", texUnit); skinnedShader->SetBool("u_HasNormalTexture", true); texUnit++; }
+                else { skinnedShader->SetBool("u_HasNormalTexture", false); }
+                
+                auto metallicRoughTex = renderable.material->GetTexture("u_MetallicRoughnessTexture");
+                if (metallicRoughTex) { metallicRoughTex->Bind(texUnit); skinnedShader->SetInt("u_MetallicRoughnessTexture", texUnit); skinnedShader->SetBool("u_HasMetallicRoughnessTexture", true); texUnit++; }
+                else {
+                    skinnedShader->SetBool("u_HasMetallicRoughnessTexture", false);
+                    auto metallicTex = renderable.material->GetTexture("u_MetallicTexture");
+                    if (metallicTex) { metallicTex->Bind(texUnit); skinnedShader->SetInt("u_MetallicTexture", texUnit); skinnedShader->SetBool("u_HasMetallicTexture", true); texUnit++; }
+                    else { skinnedShader->SetBool("u_HasMetallicTexture", false); }
+                    
+                    auto roughnessTex = renderable.material->GetTexture("u_RoughnessTexture");
+                    if (roughnessTex) { roughnessTex->Bind(texUnit); skinnedShader->SetInt("u_RoughnessTexture", texUnit); skinnedShader->SetBool("u_HasRoughnessTexture", true); texUnit++; }
+                    else { skinnedShader->SetBool("u_HasRoughnessTexture", false); }
+                }
+                
+                auto aoTex = renderable.material->GetTexture("u_AOTexture");
+                if (aoTex) { aoTex->Bind(texUnit); skinnedShader->SetInt("u_AOTexture", texUnit); skinnedShader->SetBool("u_HasAOTexture", true); texUnit++; }
+                else { skinnedShader->SetBool("u_HasAOTexture", false); }
+                
+                renderable.mesh->Bind();
+                renderable.mesh->Draw();
+                renderable.mesh->Unbind();
+            }
+            
+            skinnedShader->Unbind();
         }
     }
     

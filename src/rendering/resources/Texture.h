@@ -62,6 +62,12 @@ public:
     
     // Load from file
     bool LoadFromFile(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
+
+    // Load from compressed image memory (e.g., embedded PNG/JPG in FBX via Assimp)
+    bool LoadFromMemory(const unsigned char* data, int sizeBytes, bool isSRGB = false, bool generateMipmaps = true);
+
+    // Load from raw RGBA8 pixel buffer (e.g., uncompressed Assimp embedded textures)
+    bool LoadFromPixelsRGBA8(int width, int height, const unsigned char* rgbaData, bool isSRGB = false, bool generateMipmaps = true);
     
     // Create from data
     bool Create(const TextureSpec& spec, const void* data = nullptr);

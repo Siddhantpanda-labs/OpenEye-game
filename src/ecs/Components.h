@@ -12,6 +12,14 @@
 #include "rendering/Camera.h"
 #include "rendering/LODManager.h"
 
+// Forward declarations for animation
+namespace OpenEye {
+namespace Animation {
+    class Skeleton;
+    class AnimationClip;
+}
+}
+
 namespace OpenEye {
 namespace ECS {
 
@@ -123,6 +131,33 @@ struct Tag {
     void AddTag(const std::string& tag);
     void RemoveTag(const std::string& tag);
     bool HasTag(const std::string& tag) const;
+};
+
+// Animation component (for skeletal animation)
+struct AnimationComponent {
+    // Skeleton reference (shared across instances of same model)
+    std::shared_ptr<void> skeleton;  // Actually std::shared_ptr<Animation::Skeleton>
+    
+    // Animation clips (all clips from the model)
+    std::vector<std::shared_ptr<void>> clips;  // Actually std::shared_ptr<Animation::AnimationClip>
+    
+    // Playback state
+    int currentClipIndex = -1;  // -1 if no clip playing
+    float currentTime = 0.0f;   // Current time in seconds
+    float playbackSpeed = 1.0f; // Playback speed multiplier (1.0 = normal)
+    bool isPlaying = false;      // Is animation currently playing
+    bool loop = true;            // Should animation loop when finished
+    
+    // Blending state (for crossfade between animations)
+    int blendFromClipIndex = -1; // Index of clip to blend from (-1 if not blending)
+    float blendTime = 0.0f;      // Current blend time
+    float blendDuration = 0.2f;  // Total blend duration in seconds
+    
+    // GPU-ready bone matrices (final matrices for skinning)
+    std::vector<glm::mat4> finalBoneMatrices;
+    
+    // Optimization flag (set to true when bone matrices need recalculation)
+    bool boneMatricesDirty = true;
 };
 
 } // namespace ECS

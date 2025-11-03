@@ -1,5 +1,6 @@
 #include "MeshLoader.h"
 #include "core/log/Log.h"
+#include "animation/AnimationLoader.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
+#include <filesystem>
 
 namespace OpenEye {
 namespace Rendering {
@@ -52,11 +54,55 @@ std::vector<std::shared_ptr<LoadedMesh>> MeshLoader::LoadSceneFromFile(const std
         return {};
     }
     
+    // Log embedded textures for debugging
+    if (scene->mNumTextures > 0) {
+        OE_INFO_F("Scene has %u embedded textures", scene->mNumTextures);
+        for (unsigned int i = 0; i < scene->mNumTextures; i++) {
+            if (scene->mTextures[i]) {
+                OE_INFO_F("  Embedded texture %u: '%s' (size: %u, height: %u)", 
+                         i, 
+                         scene->mTextures[i]->mFilename.C_Str(),
+                         scene->mTextures[i]->mWidth,
+                         scene->mTextures[i]->mHeight);
+            }
+        }
+    }
+    
     std::vector<std::shared_ptr<LoadedMesh>> loadedMeshes;
     
     std::string basePath = path.substr(0, path.find_last_of("/\\") + 1);
     
-    ProcessNode(scene->mRootNode, scene, loadedMeshes, basePath);
+    // Check if scene has bones (for skeletal animation)
+    std::shared_ptr<Animation::Skeleton> skeleton = nullptr;
+    std::vector<std::shared_ptr<Animation::AnimationClip>> animations;
+    
+    bool hasBones = false;
+    if (scene->HasMeshes()) {
+        for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
+            if (scene->mMeshes[i]->HasBones()) {
+                hasBones = true;
+                break;
+            }
+        }
+    }
+    
+    // Extract skeleton and animations if model has bones
+    if (hasBones && scene->mNumMeshes > 0) {
+        skeleton = Animation::AnimationLoader::ExtractSkeleton(scene, 0);
+        if (skeleton) {
+            animations = Animation::AnimationLoader::ExtractAnimations(scene, *skeleton);
+            OE_INFO_F("Extracted skeleton with %zu bones and %zu animation clips", 
+                     skeleton->GetBoneCount(), animations.size());
+        }
+    }
+    
+    ProcessNode(scene->mRootNode, scene, loadedMeshes, basePath, skeleton);
+    
+    // Assign skeleton and animations to all loaded meshes (shared across meshes)
+    for (auto& loadedMesh : loadedMeshes) {
+        loadedMesh->skeleton = skeleton;
+        loadedMesh->animations = animations;
+    }
     
     OE_INFO_F("Loaded %zu meshes from: %s", loadedMeshes.size(), path.c_str());
     return loadedMeshes;
@@ -64,11 +110,12 @@ std::vector<std::shared_ptr<LoadedMesh>> MeshLoader::LoadSceneFromFile(const std
 
 void MeshLoader::ProcessNode(aiNode* node, const aiScene* scene,
                              std::vector<std::shared_ptr<LoadedMesh>>& meshes,
-                             const std::string& basePath) {
+                             const std::string& basePath,
+                             std::shared_ptr<Animation::Skeleton> skeleton) {
     // Process all meshes in this node
     for (unsigned int i = 0; i < node->mNumMeshes; i++) {
         aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
-        auto processedMesh = ProcessMesh(mesh, scene);
+        auto processedMesh = ProcessMesh(mesh, scene, skeleton);
         
         auto loadedMesh = std::make_shared<LoadedMesh>();
         loadedMesh->mesh = processedMesh;
@@ -88,15 +135,60 @@ void MeshLoader::ProcessNode(aiNode* node, const aiScene* scene,
     
     // Process children
     for (unsigned int i = 0; i < node->mNumChildren; i++) {
-        ProcessNode(node->mChildren[i], scene, meshes, basePath);
+        ProcessNode(node->mChildren[i], scene, meshes, basePath, skeleton);
     }
 }
 
-std::shared_ptr<Mesh> MeshLoader::ProcessMesh(aiMesh* mesh, const aiScene* scene) {
+std::shared_ptr<Mesh> MeshLoader::ProcessMesh(aiMesh* mesh, const aiScene* scene, 
+                                              std::shared_ptr<Animation::Skeleton> skeleton) {
     auto processedMesh = std::make_shared<Mesh>();
     
+    // Extract bone weights first (in original Assimp vertex order) if skeleton exists
+    std::vector<glm::ivec4> boneIndicesPerVertex;  // Per original vertex index
+    std::vector<glm::vec4> boneWeightsPerVertex;    // Per original vertex index
+    
+    if (skeleton && mesh->HasBones()) {
+        Animation::AnimationLoader::ExtractBoneWeights(mesh, *skeleton, 
+                                                       boneIndicesPerVertex, 
+                                                       boneWeightsPerVertex);
+    }
+    
     // Extract vertices using face-based indexing (preserves UV mapping)
-    std::vector<Vertex> vertices = ExtractVertices(mesh);
+    // This creates vertices in face order, not original vertex order
+    std::vector<Vertex> vertices = ExtractVertices(mesh, skeleton);
+    
+    // Map bone weights from original vertex order to face-ordered vertices
+    if (skeleton && mesh->HasBones() && !boneIndicesPerVertex.empty()) {
+        // Bone weights were extracted per original vertex index
+        // Now map them to face-ordered vertices by looking up the original vertex index from each face
+        std::vector<glm::ivec4> mappedBoneIndices;
+        std::vector<glm::vec4> mappedBoneWeights;
+        mappedBoneIndices.reserve(vertices.size());
+        mappedBoneWeights.reserve(vertices.size());
+        
+        for (unsigned int faceIdx = 0; faceIdx < mesh->mNumFaces; faceIdx++) {
+            const aiFace& face = mesh->mFaces[faceIdx];
+            for (unsigned int j = 0; j < face.mNumIndices; j++) {
+                unsigned int originalVertexIndex = face.mIndices[j];
+                if (originalVertexIndex < boneIndicesPerVertex.size()) {
+                    mappedBoneIndices.push_back(boneIndicesPerVertex[originalVertexIndex]);
+                    mappedBoneWeights.push_back(boneWeightsPerVertex[originalVertexIndex]);
+                } else {
+                    mappedBoneIndices.push_back(glm::ivec4(0));
+                    mappedBoneWeights.push_back(glm::vec4(0.0f));
+                }
+            }
+        }
+        
+        // Apply mapped bone data to vertices
+        if (mappedBoneIndices.size() == vertices.size()) {
+            for (size_t i = 0; i < vertices.size(); i++) {
+                vertices[i].boneIndices = mappedBoneIndices[i];
+                vertices[i].boneWeights = mappedBoneWeights[i];
+            }
+        }
+    }
+    
     // Generate sequential indices since ExtractVertices now creates one vertex per face index
     std::vector<uint32_t> indices(vertices.size());
     for (size_t i = 0; i < vertices.size(); i++) {
@@ -120,22 +212,149 @@ std::shared_ptr<Mesh> MeshLoader::ProcessMesh(aiMesh* mesh, const aiScene* scene
     return processedMesh;
 }
 
+// Helper function to extract filename from path (handles both Windows and Unix paths)
+static std::string GetFilename(const std::string& path) {
+    size_t lastSlash = path.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        return path.substr(lastSlash + 1);
+    }
+    return path;
+}
+
+// Helper function to load embedded texture from scene by name/index
+static const aiTexture* FindEmbeddedTexture(const aiScene* scene, const std::string& texturePath) {
+    if (!scene || scene->mNumTextures == 0) {
+        return nullptr;
+    }
+    
+    // First check if it's an index reference ("*0", "*1", etc.)
+    if (texturePath.length() > 0 && texturePath[0] == '*') {
+        try {
+            unsigned int index = std::stoul(texturePath.substr(1));
+            if (index < scene->mNumTextures) {
+                return scene->mTextures[index];
+            }
+        } catch (...) {
+            // Invalid index, continue to name matching
+        }
+    }
+    
+    // Try to find by filename (case-insensitive, path-normalized)
+    std::string searchFilename = GetFilename(texturePath);
+    std::transform(searchFilename.begin(), searchFilename.end(), searchFilename.begin(), ::tolower);
+    
+    for (unsigned int i = 0; i < scene->mNumTextures; i++) {
+        if (scene->mTextures[i]) {
+            std::string embeddedFilename = GetFilename(scene->mTextures[i]->mFilename.C_Str());
+            std::transform(embeddedFilename.begin(), embeddedFilename.end(), embeddedFilename.begin(), ::tolower);
+            
+            if (embeddedFilename == searchFilename) {
+                return scene->mTextures[i];
+            }
+        }
+    }
+    
+    // Try Assimp's GetEmbeddedTexture helper (if available)
+    #ifdef __cplusplus
+    const aiTexture* embeddedByName = scene->GetEmbeddedTexture(texturePath.c_str());
+    if (embeddedByName) {
+        return embeddedByName;
+    }
+    #endif
+    
+    return nullptr;
+}
+
 // Helper function to load texture from Assimp material
-static std::shared_ptr<Texture> LoadMaterialTexture(aiMaterial* material, aiTextureType type, const std::string& basePath, bool isSRGB = true) {
+static std::shared_ptr<Texture> LoadMaterialTexture(aiMaterial* material, aiTextureType type, const aiScene* scene, const std::string& basePath, bool isSRGB = true) {
     if (material->GetTextureCount(type) > 0) {
         aiString str;
-        if (material->GetTexture(type, 0, &str) == AI_SUCCESS) {
-            std::string texturePath = basePath + std::string(str.C_Str());
-            // Normalize path separators
-            std::replace(texturePath.begin(), texturePath.end(), '\\', '/');
+        aiTextureMapMode mapMode[3];
+        
+        // Get texture path and mapping mode
+        if (material->GetTexture(type, 0, &str, nullptr, nullptr, nullptr, nullptr, mapMode) == AI_SUCCESS) {
+            std::string texturePath = std::string(str.C_Str());
             
-            auto texture = std::make_shared<Texture>();
-            if (texture->LoadFromFile(texturePath, isSRGB)) {
-                // Ensure texture uses REPEAT wrap mode (standard for UV maps)
-                texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
-                return texture;
-            } else {
-                OE_WARN_F("Failed to load texture: %s", texturePath.c_str());
+            // First, try to find embedded texture (by index or by name)
+            const aiTexture* embeddedTex = FindEmbeddedTexture(scene, texturePath);
+            if (embeddedTex) {
+                auto texture = std::make_shared<Texture>();
+                if (embeddedTex->mHeight == 0) {
+                    // Compressed data (e.g., PNG/JPG). mWidth is data size in bytes
+                    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(embeddedTex->pcData);
+                    int sizeBytes = static_cast<int>(embeddedTex->mWidth);
+                    if (texture->LoadFromMemory(bytes, sizeBytes, isSRGB)) {
+                        texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                        OE_INFO_F("Loaded embedded compressed texture: '%s' (%d bytes)", texturePath.c_str(), sizeBytes);
+                        return texture;
+                    } else {
+                        OE_WARN_F("Failed to decode embedded compressed texture: '%s'", texturePath.c_str());
+                    }
+                } else {
+                    // Uncompressed ARGB data (mWidth x mHeight)
+                    int width = static_cast<int>(embeddedTex->mWidth);
+                    int height = static_cast<int>(embeddedTex->mHeight);
+                    const unsigned char* pixels = reinterpret_cast<const unsigned char*>(embeddedTex->pcData);
+                    if (texture->LoadFromPixelsRGBA8(width, height, pixels, isSRGB)) {
+                        texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                        OE_INFO_F("Loaded embedded raw texture: '%s' (%dx%d)", texturePath.c_str(), width, height);
+                        return texture;
+                    } else {
+                        OE_WARN_F("Failed to upload embedded raw texture: '%s'", texturePath.c_str());
+                    }
+                }
+            }
+            
+            // If not found as embedded, try external file paths
+            // (Only if texturePath doesn't start with '*' - meaning it's not an embedded reference)
+            if (texturePath.length() == 0 || texturePath[0] != '*') {
+                // External texture file - try multiple path resolutions
+                auto texture = std::make_shared<Texture>();
+                
+                // Try paths in order:
+                // 1. Relative to base path (original path)
+                std::string fullPath = basePath + texturePath;
+                std::replace(fullPath.begin(), fullPath.end(), '\\', '/');
+                if (texture->LoadFromFile(fullPath, isSRGB)) {
+                    texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                    OE_INFO_F("Loaded texture: %s", fullPath.c_str());
+                    return texture;
+                }
+                
+                // 2. Try just the filename in base path (sometimes paths are absolute or relative to model)
+                std::filesystem::path pathObj(texturePath);
+                std::string filename = pathObj.filename().string();
+                std::string filenamePath = basePath + filename;
+                std::replace(filenamePath.begin(), filenamePath.end(), '\\', '/');
+                if (texture->LoadFromFile(filenamePath, isSRGB)) {
+                    texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                    OE_INFO_F("Loaded texture (filename): %s", filenamePath.c_str());
+                    return texture;
+                }
+                
+                // 2b. Try searching in subdirectories common names (fbm, textures, maps, etc.)
+                std::vector<std::string> subdirs = {"fbm", "textures", "maps", "tex", "images", "img"};
+                for (const auto& subdir : subdirs) {
+                    std::string subdirPath = basePath + subdir + "/" + filename;
+                    std::replace(subdirPath.begin(), subdirPath.end(), '\\', '/');
+                    if (texture->LoadFromFile(subdirPath, isSRGB)) {
+                        texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                        OE_INFO_F("Loaded texture (subdirectory): %s", subdirPath.c_str());
+                        return texture;
+                    }
+                }
+                
+                // 3. Try absolute path (if texturePath is already absolute)
+                if (std::filesystem::exists(texturePath)) {
+                    if (texture->LoadFromFile(texturePath, isSRGB)) {
+                        texture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+                        OE_INFO_F("Loaded texture (absolute): %s", texturePath.c_str());
+                        return texture;
+                    }
+                }
+                
+                OE_WARN_F("Failed to load external texture: '%s' (tried: %s, %s, %s)", 
+                         texturePath.c_str(), fullPath.c_str(), filenamePath.c_str(), texturePath.c_str());
             }
         }
     }
@@ -146,23 +365,23 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
     auto mat = std::make_shared<Material>();
     
     // Load Albedo/Diffuse texture (SRGB)
-    if (auto albedoTexture = LoadMaterialTexture(material, aiTextureType_DIFFUSE, basePath, true)) {
+    if (auto albedoTexture = LoadMaterialTexture(material, aiTextureType_DIFFUSE, scene, basePath, true)) {
         mat->SetAlbedoTexture(albedoTexture);
     }
     // Also check BASE_COLOR (glTF/glTF2)
     if (!mat->GetTexture("u_AlbedoTexture")) {
-        if (auto baseColorTexture = LoadMaterialTexture(material, aiTextureType_BASE_COLOR, basePath, true)) {
+        if (auto baseColorTexture = LoadMaterialTexture(material, aiTextureType_BASE_COLOR, scene, basePath, true)) {
             mat->SetAlbedoTexture(baseColorTexture);
         }
     }
     
     // Load Normal map (linear, not SRGB)
-    if (auto normalTexture = LoadMaterialTexture(material, aiTextureType_NORMALS, basePath, false)) {
+    if (auto normalTexture = LoadMaterialTexture(material, aiTextureType_NORMALS, scene, basePath, false)) {
         mat->SetNormalTexture(normalTexture);
     }
     // Also check HEIGHT (sometimes used as normal)
     if (!mat->GetTexture("u_NormalTexture")) {
-        if (auto heightTexture = LoadMaterialTexture(material, aiTextureType_HEIGHT, basePath, false)) {
+        if (auto heightTexture = LoadMaterialTexture(material, aiTextureType_HEIGHT, scene, basePath, false)) {
             mat->SetNormalTexture(heightTexture);
         }
     }
@@ -179,7 +398,7 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
                 // Check if this looks like a metallic-roughness texture
                 if (pathStr.find("metallicroughness") != std::string::npos ||
                     (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") != std::string::npos)) {
-                    if (auto metallicRoughTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                    if (auto metallicRoughTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), scene, basePath, false)) {
                         mat->SetMetallicRoughnessTexture(metallicRoughTexture);
                         break;
                     }
@@ -199,7 +418,7 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
                     std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
                     
                     if (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") == std::string::npos) {
-                        if (auto metallicTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                        if (auto metallicTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), scene, basePath, false)) {
                             mat->SetMetallicTexture(metallicTexture);
                             break;
                         }
@@ -217,7 +436,7 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
                     std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
                     
                     if (pathStr.find("roughness") != std::string::npos && pathStr.find("metallic") == std::string::npos) {
-                        if (auto roughnessTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), basePath, false)) {
+                        if (auto roughnessTexture = LoadMaterialTexture(material, static_cast<aiTextureType>(texType), scene, basePath, false)) {
                             mat->SetRoughnessTexture(roughnessTexture);
                             break;
                         }
@@ -228,18 +447,18 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
     }
     
     // Load AO texture
-    if (auto aoTexture = LoadMaterialTexture(material, aiTextureType_AMBIENT_OCCLUSION, basePath, false)) {
+    if (auto aoTexture = LoadMaterialTexture(material, aiTextureType_AMBIENT_OCCLUSION, scene, basePath, false)) {
         mat->SetAOTexture(aoTexture);
     }
     // Also check LIGHTMAP (sometimes used for AO)
     if (!mat->GetTexture("u_AOTexture")) {
-        if (auto lightmapTexture = LoadMaterialTexture(material, aiTextureType_LIGHTMAP, basePath, false)) {
+        if (auto lightmapTexture = LoadMaterialTexture(material, aiTextureType_LIGHTMAP, scene, basePath, false)) {
             mat->SetAOTexture(lightmapTexture);
         }
     }
     
     // Load Emissive texture
-    if (auto emissiveTexture = LoadMaterialTexture(material, aiTextureType_EMISSIVE, basePath, true)) {
+    if (auto emissiveTexture = LoadMaterialTexture(material, aiTextureType_EMISSIVE, scene, basePath, true)) {
         mat->SetEmissiveTexture(emissiveTexture);
     }
     
@@ -271,7 +490,8 @@ std::shared_ptr<Material> MeshLoader::LoadMaterial(aiMaterial* material, const a
     return mat;
 }
 
-std::vector<Vertex> MeshLoader::ExtractVertices(aiMesh* mesh) {
+std::vector<Vertex> MeshLoader::ExtractVertices(aiMesh* mesh, 
+                                                std::shared_ptr<Animation::Skeleton> skeleton) {
     // Extract vertices following face indices exactly
     // This preserves the exact relationship between position, normal, UV per vertex
     // Important for glTF models where same position can have different UVs at seams

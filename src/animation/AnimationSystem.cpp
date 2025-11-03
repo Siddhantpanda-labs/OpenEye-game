@@ -19,16 +19,12 @@ void AnimationSystem::Update(ECS::Scene& scene, float deltaTime) {
 void AnimationSystem::UpdateEntity(entt::registry& registry, entt::entity entity, float deltaTime) {
     auto& animComponent = registry.get<ECS::AnimationComponent>(entity);
     
-    if (!animComponent.skeleton || animComponent.currentClipIndex < 0) {
+    if (!animComponent.skeleton) {
         return;
     }
     
-    if (!animComponent.isPlaying) {
-        return;
-    }
-    
-    // Update animation time
-    if (animComponent.currentClipIndex >= 0 && 
+    // Update animation time (only if playing and has a clip)
+    if (animComponent.isPlaying && animComponent.currentClipIndex >= 0 && 
         animComponent.currentClipIndex < static_cast<int>(animComponent.clips.size())) {
         
         auto clip = std::static_pointer_cast<AnimationClip>(animComponent.clips[animComponent.currentClipIndex]);
@@ -43,6 +39,9 @@ void AnimationSystem::UpdateEntity(entt::registry& registry, entt::entity entity
                 animComponent.currentTime = duration;
                 animComponent.isPlaying = false;
             }
+            
+            // Mark matrices as dirty when time changes
+            animComponent.boneMatricesDirty = true;
         }
     }
     
@@ -53,9 +52,12 @@ void AnimationSystem::UpdateEntity(entt::registry& registry, entt::entity entity
             animComponent.blendFromClipIndex = -1;
             animComponent.blendTime = 0.0f;
         }
+        animComponent.boneMatricesDirty = true;
     }
     
-    // Calculate bone matrices
+    // Always calculate bone matrices (even if paused/stopped, to show current pose)
+    // This ensures the model is rendered with correct pose regardless of playback state
+    // Force calculation every frame to ensure animation is applied
     CalculateBoneMatrices(registry, entity);
 }
 
@@ -81,12 +83,17 @@ void AnimationSystem::CalculateBoneMatrices(entt::registry& registry, entt::enti
         animComponent.finalBoneMatrices.resize(boneCount, glm::mat4(1.0f));
     }
     
-    // Sample current animation
+    // Sample current animation (even if not playing, use bind pose or current time)
     std::vector<glm::mat4> localTransforms(boneCount, glm::mat4(1.0f));
     SampleAnimation(animComponent, localTransforms);
     
     // Build final bone matrices from skeleton hierarchy
     BuildBoneMatrices(*skeleton, localTransforms, animComponent.finalBoneMatrices);
+    
+    // Debug: Verify matrices are being calculated
+    if (animComponent.finalBoneMatrices.empty()) {
+        OE_WARN_F("CalculateBoneMatrices: finalBoneMatrices is empty! boneCount=%zu", boneCount);
+    }
     
     animComponent.boneMatricesDirty = false;
 }
@@ -130,13 +137,23 @@ void AnimationSystem::SetPlaybackSpeed(entt::registry& registry, entt::entity en
 void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
                                       std::vector<glm::mat4>& outLocalTransforms) {
     auto skeleton = std::static_pointer_cast<Skeleton>(animComponent.skeleton);
-    if (!skeleton || animComponent.currentClipIndex < 0) {
-        // No animation, use bind pose
-        size_t boneCount = skeleton ? skeleton->GetBoneCount() : 0;
-        for (size_t i = 0; i < boneCount; ++i) {
-            const auto& bone = skeleton->GetBone(i);
-            outLocalTransforms[i] = bone.GetBindLocalMatrix();
-        }
+    if (!skeleton) {
+        return;
+    }
+    
+    size_t boneCount = skeleton->GetBoneCount();
+    if (boneCount == 0) {
+        return;
+    }
+    
+    // Initialize all transforms to bind pose (fallback)
+    for (size_t i = 0; i < boneCount; ++i) {
+        const auto& bone = skeleton->GetBone(i);
+        outLocalTransforms[i] = bone.GetBindLocalMatrix();
+    }
+    
+    if (animComponent.currentClipIndex < 0) {
+        // No animation selected, use bind pose (already set above)
         return;
     }
     
@@ -149,8 +166,7 @@ void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
         return;
     }
     
-    // Build bone index list for sampling
-    size_t boneCount = skeleton->GetBoneCount();
+    // Build bone index list for sampling (boneCount already defined above at function start)
     std::vector<int> boneIndices(boneCount);
     for (size_t i = 0; i < boneCount; ++i) {
         boneIndices[i] = static_cast<int>(i);

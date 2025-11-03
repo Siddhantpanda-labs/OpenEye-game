@@ -20,6 +20,8 @@
 #include "rendering/SkyboxRenderer.h"
 #include "rendering/RenderPipeline.h"
 #include "rendering/IBL.h"
+#include "physics/PhysicsWorld.h"
+#include "animation/AnimationSystem.h"
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -78,6 +80,12 @@ int main() {
     
     OE_INFO("Creating ECS Scene...");
     Scene scene;
+    
+    // Initialize Physics World
+    OE_INFO("Initializing Physics World...");
+    auto physicsWorld = std::make_unique<OpenEye::Physics::PhysicsWorld>();
+    physicsWorld->Initialize(glm::vec3(0.0f, -9.81f, 0.0f));
+    OE_INFO("Physics World initialized successfully");
     
     OE_INFO("Loading shaders and creating resources...");
     auto shader = std::make_shared<Shader>();
@@ -155,7 +163,19 @@ int main() {
         return relative;
     };
     
-    std::string modelPath = resolveAssetPath("assets/models/dess_holiday_hb_juan_deltarune/scene.gltf");
+    // Try to load animated FBX model first (target: "Kick To The Groin.fbx")
+    std::string fbxPath = resolveAssetPath("assets/models/Kick To The Groin.fbx");
+    std::string modelPath = "";
+    
+    if (std::filesystem::exists(fbxPath)) {
+        modelPath = fbxPath;
+        OE_INFO("Found FBX model: " + fbxPath);
+    } else {
+        // Fallback to glTF model
+        modelPath = resolveAssetPath("assets/models/dess_holiday_hb_juan_deltarune/scene.gltf");
+        OE_INFO("FBX model not found, trying glTF: " + modelPath);
+    }
+    
     if (std::filesystem::exists(modelPath)) {
         OE_INFO("Loading model: " + modelPath);
         auto loadedMeshes = MeshLoader::LoadSceneFromFile(modelPath);
@@ -183,24 +203,63 @@ int main() {
                 
                 // Position model - center it and scale down if needed
                 modelTransform.position = glm::vec3(0.0f, 0.0f, -5.0f); // Place in front of camera
-                modelTransform.scale = glm::vec3(1.0f); // Adjust scale if model is too large
+                modelTransform.scale = glm::vec3(0.1f); // Scale down 10x (0.1 = 10 times smaller)
                 
                 // Use the material from loaded mesh (which should have textures)
                 auto modelMaterial = loadedMesh->materials[0];
                 if (!modelMaterial) {
                     modelMaterial = std::make_shared<Material>(shader);
                 }
-                // Ensure material has the correct shader for deferred rendering
-                if (modelMaterial && !modelMaterial->GetShader()) {
-                    // Load gbuffer shader for deferred rendering
+                // Check if model has animation (determine shader type)
+                bool hasAnimation = loadedMesh->skeleton && !loadedMesh->animations.empty();
+                
+                // Always set the correct shader for deferred rendering (replace any existing shader)
+                // This ensures animated models use skinned shader and static models use regular gbuffer shader
+                if (modelMaterial) {
                     auto gbufferShader = std::make_shared<Shader>();
-                    gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert", 
-                                                "assets/shaders/passes/deferred/gbuffer.frag");
+                    if (hasAnimation) {
+                        // Use skinned shader for animated models
+                        gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer_skinned.vert", 
+                                                    "assets/shaders/passes/deferred/gbuffer_skinned.frag");
+                    } else {
+                        // Use regular shader for static models
+                        gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert", 
+                                                    "assets/shaders/passes/deferred/gbuffer.frag");
+                    }
                     modelMaterial->SetShader(gbufferShader);
                 }
                 
                 scene.GetRegistry().emplace<Renderable>(modelEntity, loadedMesh->mesh, modelMaterial);
                 scene.GetRegistry().emplace<AABB>(modelEntity);
+                
+                // Attach AnimationComponent if model has skeleton/animation
+                if (hasAnimation) {
+                    AnimationComponent animComp;
+                    animComp.skeleton = std::static_pointer_cast<void>(loadedMesh->skeleton);
+                    
+                    // Convert AnimationClip pointers to void pointers for storage
+                    animComp.clips.clear();
+                    animComp.clips.reserve(loadedMesh->animations.size());
+                    for (const auto& clip : loadedMesh->animations) {
+                        animComp.clips.push_back(std::static_pointer_cast<void>(clip));
+                    }
+                    
+                    // Auto-play first animation clip
+                    animComp.currentClipIndex = 0;  // Play first clip automatically
+                    animComp.isPlaying = true;       // Start playing automatically
+                    animComp.loop = true;
+                    animComp.playbackSpeed = 1.0f;
+                    animComp.boneMatricesDirty = true;
+                    
+                    scene.GetRegistry().emplace<AnimationComponent>(modelEntity, animComp);
+                    
+                    // Initialize bone matrices immediately
+                    auto& registry = scene.GetRegistry();
+                    OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, modelEntity);
+                    
+                    OE_INFO("  - Animation component attached (skeleton: " + std::to_string(loadedMesh->skeleton->GetBoneCount()) + " bones, " + std::to_string(loadedMesh->animations.size()) + " clips)");
+                    OE_INFO("  - Auto-playing first animation clip");
+                }
                 
                 // Log loaded textures for debugging
                 OE_INFO("Model entity '" + loadedMesh->name + "' created");
@@ -368,6 +427,12 @@ int main() {
         
         // Update ECS systems
         TransformSystem::Update(scene);
+        
+        // Update Physics (step simulation)
+        physicsWorld->Step(deltaTime);
+        
+        // Update Animations (must be called after physics, before rendering)
+        OpenEye::Animation::AnimationSystem::Update(scene, deltaTime);
         
         // Rotate the main cube
         float time = Time::TotalTime();
@@ -615,6 +680,122 @@ int main() {
         }
         ImGui::End();
         
+        // Animation Timeline panel
+        ImGui::Begin("Animation Timeline");
+        auto& registry = scene.GetRegistry();
+        auto animView = registry.view<AnimationComponent>();
+        
+        if (animView.empty()) {
+            ImGui::Text("No animated entities in scene");
+            ImGui::Text("Load an FBX model with animation to use this panel");
+        } else {
+            // Get first animated entity (can be extended to support multiple)
+            entt::entity animEntity = *animView.begin();
+            auto& animComp = registry.get<AnimationComponent>(animEntity);
+            
+            if (!animComp.skeleton) {
+                ImGui::Text("Entity has AnimationComponent but no skeleton");
+            } else {
+                auto skeleton = std::static_pointer_cast<OpenEye::Animation::Skeleton>(animComp.skeleton);
+                size_t boneCount = skeleton ? skeleton->GetBoneCount() : 0;
+                
+                // Display skeleton info
+                ImGui::Text("Skeleton: %zu bones", boneCount);
+                
+                // Display available clips
+                ImGui::Separator();
+                ImGui::Text("Available Clips: %zu", animComp.clips.size());
+                
+                if (animComp.clips.empty()) {
+                    ImGui::Text("No animation clips loaded");
+                } else {
+                    // Clip selection dropdown
+                    static int selectedClipIndex = -1;
+                    if (selectedClipIndex == -1 && animComp.currentClipIndex >= 0) {
+                        selectedClipIndex = animComp.currentClipIndex;
+                    }
+                    
+                    // Build clip names list
+                    std::vector<std::string> clipNames;
+                    for (size_t i = 0; i < animComp.clips.size(); i++) {
+                        auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[i]);
+                        if (clip) {
+                            clipNames.push_back("Clip " + std::to_string(i) + " (" + std::to_string(clip->GetDuration()) + "s)");
+                        } else {
+                            clipNames.push_back("Clip " + std::to_string(i));
+                        }
+                    }
+                    
+                    std::vector<const char*> clipNamesPtrs;
+                    for (const auto& name : clipNames) {
+                        clipNamesPtrs.push_back(name.c_str());
+                    }
+                    
+                    if (!clipNamesPtrs.empty()) {
+                        int oldSelected = selectedClipIndex;
+                        ImGui::Combo("Select Clip", &selectedClipIndex, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
+                        if (oldSelected != selectedClipIndex && selectedClipIndex >= 0 && selectedClipIndex < static_cast<int>(animComp.clips.size())) {
+                            OpenEye::Animation::AnimationSystem::PlayAnimation(registry, animEntity, selectedClipIndex, 0.2f);
+                        }
+                    }
+                    
+                    // Current clip info
+                    if (animComp.currentClipIndex >= 0 && animComp.currentClipIndex < static_cast<int>(animComp.clips.size())) {
+                        auto currentClip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[animComp.currentClipIndex]);
+                        if (currentClip) {
+                            float duration = currentClip->GetDuration();
+                            
+                            ImGui::Separator();
+                            ImGui::Text("Current Clip: %d", animComp.currentClipIndex);
+                            ImGui::Text("Duration: %.2f seconds", duration);
+                            
+                            // Playback controls
+                            ImGui::Separator();
+                            if (ImGui::Button(animComp.isPlaying ? "Pause" : "Play")) {
+                                animComp.isPlaying = !animComp.isPlaying;
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::Button("Stop")) {
+                                OpenEye::Animation::AnimationSystem::StopAnimation(registry, animEntity);
+                                selectedClipIndex = -1;
+                            }
+                            ImGui::SameLine();
+                            ImGui::Checkbox("Loop", &animComp.loop);
+                            
+                            // Timeline scrubbing
+                            ImGui::Separator();
+                            float currentTime = animComp.currentTime;
+                            if (ImGui::SliderFloat("Time", &currentTime, 0.0f, duration, "%.2f s")) {
+                                animComp.currentTime = currentTime;
+                                animComp.boneMatricesDirty = true;
+                                // Force update bone matrices
+                                OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, animEntity);
+                            }
+                            
+                            // Time display
+                            ImGui::Text("%.2f / %.2f seconds", currentTime, duration);
+                            float progress = duration > 0.0f ? (currentTime / duration) : 0.0f;
+                            ImGui::ProgressBar(progress, ImVec2(0.0f, 0.0f));
+                            
+                            // Playback speed
+                            ImGui::Separator();
+                            ImGui::DragFloat("Playback Speed", &animComp.playbackSpeed, 0.1f, 0.0f, 5.0f, "%.1fx");
+                            
+                            // Blend info
+                            if (animComp.blendFromClipIndex >= 0) {
+                                ImGui::Separator();
+                                ImGui::Text("Blending from clip %d", animComp.blendFromClipIndex);
+                                ImGui::Text("Blend progress: %.2f / %.2f", animComp.blendTime, animComp.blendDuration);
+                            }
+                        }
+                    } else {
+                        ImGui::Text("No clip selected");
+                    }
+                }
+            }
+        }
+        ImGui::End();
+        
         // Render ImGui
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -638,6 +819,14 @@ int main() {
     }
     
     OE_INFO("=== OpenEye Editor Shutting Down ===");
+    
+    // Shutdown Physics World
+    if (physicsWorld) {
+        physicsWorld->Shutdown();
+        physicsWorld.reset();
+        OE_INFO("Physics World shut down");
+    }
+    
     // Shutdown ImGui
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

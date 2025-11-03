@@ -215,6 +215,16 @@ void Mesh::CreateVAO() {
     glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex),
                          reinterpret_cast<void*>(offsetof(Vertex, bitangent)));
     
+    // Bone Indices (location 5) - ivec4 for 4 bone indices per vertex
+    glEnableVertexAttribArray(5);
+    glVertexAttribIPointer(5, 4, GL_INT, sizeof(Vertex),
+                          reinterpret_cast<void*>(offsetof(Vertex, boneIndices)));
+    
+    // Bone Weights (location 6) - vec4 for 4 bone weights per vertex
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                         reinterpret_cast<void*>(offsetof(Vertex, boneWeights)));
+    
     // EBO binding will happen in UploadToGPU() when data is uploaded
     // But we can set it up here too
     if (!m_indices.empty()) {

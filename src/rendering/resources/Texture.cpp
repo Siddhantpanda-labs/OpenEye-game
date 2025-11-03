@@ -117,6 +117,79 @@ bool Texture::LoadFromFile(const std::string& path, bool isSRGB, bool generateMi
     return true;
 }
 
+bool Texture::LoadFromMemory(const unsigned char* data, int sizeBytes, bool isSRGB, bool generateMipmaps) {
+    if (!data || sizeBytes <= 0) {
+        OE_ERROR("LoadFromMemory: invalid buffer");
+        return false;
+    }
+    
+    stbi_set_flip_vertically_on_load(false);
+    int width = 0, height = 0, channels = 0;
+    unsigned char* decoded = stbi_load_from_memory(data, sizeBytes, &width, &height, &channels, 0);
+    if (!decoded) {
+        OE_ERROR_F("LoadFromMemory: stbi failed - %s", stbi_failure_reason());
+        return false;
+    }
+    
+    // Determine format
+    TextureFormat format = TextureFormat::RGBA8;
+    if (channels == 1) format = TextureFormat::R8;
+    else if (channels == 2) format = TextureFormat::RG8;
+    else if (channels == 3) format = TextureFormat::RGB8;
+    else format = TextureFormat::RGBA8;
+    
+    // Create GL texture from decoded pixels
+    m_width = width;
+    m_height = height;
+    m_channels = channels;
+    m_isSRGB = isSRGB;
+    m_format = format;
+    m_internalFormat = GetGLInternalFormat(format, isSRGB);
+    m_dataFormat = GetGLDataFormat(format);
+    m_dataType = GetGLDataType(format);
+
+    glGenTextures(1, &m_textureID);
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, m_internalFormat, m_width, m_height, 0, m_dataFormat, m_dataType, decoded);
+    if (generateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, generateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    stbi_image_free(decoded);
+    return true;
+}
+
+bool Texture::LoadFromPixelsRGBA8(int width, int height, const unsigned char* rgbaData, bool isSRGB, bool generateMipmaps) {
+    if (!rgbaData || width <= 0 || height <= 0) {
+        OE_ERROR("LoadFromPixelsRGBA8: invalid parameters");
+        return false;
+    }
+
+    m_width = width;
+    m_height = height;
+    m_channels = 4;
+    m_isSRGB = isSRGB;
+    m_format = TextureFormat::RGBA8;
+    m_internalFormat = GetGLInternalFormat(m_format, isSRGB);
+    m_dataFormat = GetGLDataFormat(m_format);
+    m_dataType = GetGLDataType(m_format);
+
+    glGenTextures(1, &m_textureID);
+    glBindTexture(GL_TEXTURE_2D, m_textureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, m_internalFormat, m_width, m_height, 0, m_dataFormat, m_dataType, rgbaData);
+    if (generateMipmaps) glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, generateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    return true;
+}
+
 bool Texture::Create(const TextureSpec& spec, const void* data) {
     m_width = spec.width;
     m_height = spec.height;

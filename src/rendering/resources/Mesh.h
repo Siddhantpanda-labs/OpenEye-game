@@ -14,6 +14,10 @@ struct Vertex {
     glm::vec2 texCoord;
     glm::vec3 tangent;
     glm::vec3 bitangent;
+    
+    // Bone data for skeletal animation (default to no bone influence)
+    glm::ivec4 boneIndices = glm::ivec4(0, 0, 0, 0);  // 4 bone indices per vertex
+    glm::vec4 boneWeights = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);  // 4 bone weights per vertex
 };
 
 struct Submesh {
