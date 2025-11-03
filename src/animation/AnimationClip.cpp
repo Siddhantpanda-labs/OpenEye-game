@@ -49,25 +49,25 @@ void AnimationClip::Sample(float time, std::vector<glm::mat4>& outLocalTransform
     
     // Sample each channel
     for (const auto& channel : m_channels) {
-        if (channel.boneIndex < 0 || channel.boneIndex >= static_cast<int>(boneIndices.size())) {
+        // channel.boneIndex is the skeleton bone index (already mapped in ExtractAnimations)
+        // Validate it's within bounds
+        if (channel.boneIndex < 0 || channel.boneIndex >= static_cast<int>(outLocalTransforms.size())) {
             continue;
         }
         
         int boneIdx = channel.boneIndex;
-        if (boneIdx >= static_cast<int>(outLocalTransforms.size())) {
-            continue;
-        }
         
         // Sample transforms
         glm::vec3 position = channel.SamplePosition(time, m_loop);
         glm::quat rotation = channel.SampleRotation(time, m_loop);
         glm::vec3 scale = channel.SampleScale(time, m_loop);
         
-        // Build local transform matrix
+        // Build local transform matrix (TRS order: Translate * Rotate * Scale)
         glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
         transform = transform * glm::mat4_cast(rotation);
         transform = glm::scale(transform, scale);
         
+        // Apply to the bone's local transform
         outLocalTransforms[boneIdx] = transform;
     }
 }

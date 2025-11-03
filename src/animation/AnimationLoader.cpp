@@ -3,6 +3,7 @@
 #include <assimp/scene.h>
 #include <assimp/mesh.h>
 #include <algorithm>
+#include <unordered_set>
 
 namespace OpenEye {
 namespace Animation {
@@ -34,6 +35,11 @@ std::shared_ptr<Skeleton> AnimationLoader::ExtractSkeleton(const aiScene* scene,
     if (!skeleton->IsValid()) {
         OE_WARN("Extracted skeleton failed validation");
     }
+    
+    // Set global inverse transform from scene root (brings scene space to model space)
+    // This helps fix FBX unit/axis/pivot differences and prevents stretching
+    glm::mat4 sceneRoot = AssimpToGlm(scene->mRootNode->mTransformation);
+    skeleton->SetGlobalInverseTransform(glm::inverse(sceneRoot));
     
     return skeleton;
 }
@@ -120,6 +126,8 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
         auto clip = std::make_shared<AnimationClip>(animName, duration);
         
         // Process each channel (each channel animates one bone)
+        size_t matchedChannels = 0;
+        size_t skippedChannels = 0;
         for (unsigned int j = 0; j < anim->mNumChannels; ++j) {
             const aiNodeAnim* channel = anim->mChannels[j];
             std::string boneName = std::string(channel->mNodeName.C_Str());
@@ -127,11 +135,19 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
             int boneIndex = skeleton.FindBoneIndex(boneName);
             if (boneIndex < 0) {
                 // Bone not in skeleton, skip this channel
+                skippedChannels++;
+                // Debug: Log once per unique missing bone (limit to first 10)
+                static std::unordered_set<std::string> loggedMissingBones;
+                if (loggedMissingBones.size() < 10 && loggedMissingBones.find(boneName) == loggedMissingBones.end()) {
+                    OE_WARN_F("Animation channel references bone '%s' not found in skeleton (skipping channel)", boneName.c_str());
+                    loggedMissingBones.insert(boneName);
+                }
                 continue;
             }
             
+            matchedChannels++;
             AnimationChannel animChannel;
-            animChannel.boneIndex = boneIndex;
+            animChannel.boneIndex = boneIndex;  // This is the skeleton bone index
             
             // Extract position keyframes
             for (unsigned int k = 0; k < channel->mNumPositionKeys; ++k) {
@@ -160,6 +176,9 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
             clip->AddChannel(animChannel);
         }
         
+        OE_INFO_F("Animation clip '%s': %zu channels total, %zu matched to skeleton bones, %zu skipped (unmatched bones)",
+                 animName.c_str(), anim->mNumChannels, matchedChannels, skippedChannels);
+        
         clips.push_back(clip);
     }
     
@@ -182,11 +201,37 @@ void AnimationLoader::ProcessBoneHierarchy(aiNode* node,
     auto it = nodeToBoneIndex.find(nodeName);
     if (it != nodeToBoneIndex.end()) {
         boneIndex = it->second;
-        // Update parent if needed
         Bone& bone = skeleton.GetBone(boneIndex);
+        
+        // Update parent if needed
         if (bone.parentIndex == -1 && parentBoneIndex >= 0) {
             bone.parentIndex = parentBoneIndex;
         }
+        
+        // IMPORTANT: Update bind pose local transform from node hierarchy
+        // The offsetMatrix from mesh extraction is NOT the local transform
+        // Extract correct local transform from node->mTransformation
+        glm::mat4 nodeTransform = AssimpToGlm(node->mTransformation);
+        
+        // Decompose into position, rotation, scale (manual decomposition)
+        glm::mat4 m = nodeTransform;
+        glm::vec3 scale(
+            glm::length(glm::vec3(m[0])),
+            glm::length(glm::vec3(m[1])),
+            glm::length(glm::vec3(m[2]))
+        );
+        glm::mat3 rotMat(
+            glm::vec3(m[0]) / scale.x,
+            glm::vec3(m[1]) / scale.y,
+            glm::vec3(m[2]) / scale.z
+        );
+        glm::quat rotation = glm::quat_cast(rotMat);
+        glm::vec3 translation = glm::vec3(m[3]);
+        
+        // Update bind pose local transform (this is the correct one from hierarchy)
+        bone.bindPosition = translation;
+        bone.bindRotation = rotation;
+        bone.bindScale = scale;
     } else {
         // Create new bone from node
         Bone bone;
@@ -248,30 +293,23 @@ void AnimationLoader::ExtractBonesFromMesh(const aiMesh* mesh,
         newBone.name = boneName;
         newBone.parentIndex = -1; // Will be set by hierarchy processing
         
-        // Extract bind pose from bone offset matrix
+        // Extract inverse bind matrix from bone offset matrix
+        // IMPORTANT: Assimp's mOffsetMatrix transforms from bone space to mesh space (bind pose)
+        // This is NOT the bone's local transform - it's a world-space transform
+        // We only use it to calculate the inverse bind matrix for skinning
         glm::mat4 offsetMatrix = AssimpToGlm(bone->mOffsetMatrix);
         
-        // Inverse bind matrix (used for skinning)
-        newBone.inverseBindMatrix = glm::inverse(offsetMatrix);
+        // aiBone::mOffsetMatrix already transforms from mesh bind pose to bone space (inverse bind)
+        // Use it directly for skinning
+        newBone.inverseBindMatrix = offsetMatrix;
         
-        // Extract local bind transform (manual decomposition)
-        glm::mat4 m = offsetMatrix;
-        glm::vec3 scale(
-            glm::length(glm::vec3(m[0])),
-            glm::length(glm::vec3(m[1])),
-            glm::length(glm::vec3(m[2]))
-        );
-        glm::mat3 rotMat(
-            glm::vec3(m[0]) / scale.x,
-            glm::vec3(m[1]) / scale.y,
-            glm::vec3(m[2]) / scale.z
-        );
-        glm::quat rotation = glm::quat_cast(rotMat);
-        glm::vec3 translation = glm::vec3(m[3]);
-        
-        newBone.bindPosition = translation;
-        newBone.bindRotation = rotation;
-        newBone.bindScale = scale;
+        // DO NOT extract bind pose local transform from offsetMatrix!
+        // The bind pose local transform will be extracted from the node hierarchy
+        // in ProcessBoneHierarchy, which uses node->mTransformation (correct local transform)
+        // Initialize to identity for now - will be set by ProcessBoneHierarchy
+        newBone.bindPosition = glm::vec3(0.0f);
+        newBone.bindRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        newBone.bindScale = glm::vec3(1.0f);
         
         int boneIndex = static_cast<int>(skeleton.GetBoneCount());
         skeleton.AddBone(newBone);

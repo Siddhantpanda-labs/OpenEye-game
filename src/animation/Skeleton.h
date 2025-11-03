@@ -78,10 +78,15 @@ public:
     // Validate skeleton (check for cycles, valid parent indices)
     bool IsValid() const;
 
+    // Global inverse transform (from scene/model root). Needed for FBX/mixed roots
+    void SetGlobalInverseTransform(const glm::mat4& m) { m_globalInverseTransform = m; }
+    const glm::mat4& GetGlobalInverseTransform() const { return m_globalInverseTransform; }
+
 private:
     std::vector<Bone> m_bones;
     std::unordered_map<std::string, int> m_boneNameToIndex;
     bool m_boneMapBuilt = false;
+    glm::mat4 m_globalInverseTransform = glm::mat4(1.0f);
 };
 
 } // namespace Animation

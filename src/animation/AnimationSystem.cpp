@@ -2,6 +2,7 @@
 #include "ecs/Components.h"
 #include "core/log/Log.h"
 #include <algorithm>
+#include <functional>
 #include <glm/gtc/type_ptr.hpp>
 
 namespace OpenEye {
@@ -167,13 +168,41 @@ void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
     }
     
     // Build bone index list for sampling (boneCount already defined above at function start)
+    // This is just a sequential mapping [0, 1, 2, ..., boneCount-1]
+    // The animation channels already have boneIndex set to skeleton indices
     std::vector<int> boneIndices(boneCount);
     for (size_t i = 0; i < boneCount; ++i) {
         boneIndices[i] = static_cast<int>(i);
     }
     
-    // Sample current animation
+    // Sample current animation (channels will directly index into outLocalTransforms)
     currentClip->Sample(animComponent.currentTime, outLocalTransforms, boneIndices);
+    
+    // Debug: Check if animation actually modified transforms (not just bind pose)
+    static float lastDebugTime = 0.0f;
+    float currentTime = animComponent.currentTime;
+    if (std::abs(currentTime - lastDebugTime) > 0.5f) { // Log every 0.5 seconds
+        size_t animatedBoneCount = 0;
+        size_t totalAnimatedBoneCount = 0;
+        size_t checkedCount = std::min(boneCount, static_cast<size_t>(50)); // Check first 50 bones
+        for (size_t i = 0; i < checkedCount; i++) {
+            const auto& bone = skeleton->GetBone(i);
+            if (outLocalTransforms[i] != bone.GetBindLocalMatrix()) {
+                animatedBoneCount++;
+            }
+        }
+        // Count total animated bones (check all bones)
+        for (size_t i = 0; i < boneCount; i++) {
+            const auto& bone = skeleton->GetBone(i);
+            if (outLocalTransforms[i] != bone.GetBindLocalMatrix()) {
+                totalAnimatedBoneCount++;
+            }
+        }
+        OE_INFO_F("Animation sampling: time=%.2f/%.2f, clip='%s', animatedBones=%zu/%zu (first 50), totalAnimated=%zu/%zu, channels=%zu",
+                 animComponent.currentTime, currentClip->GetDuration(), currentClip->GetName().c_str(),
+                 animatedBoneCount, checkedCount, totalAnimatedBoneCount, boneCount, currentClip->GetChannelCount());
+        lastDebugTime = currentTime;
+    }
     
     // If blending, blend with previous animation
     if (animComponent.blendFromClipIndex >= 0 &&
@@ -214,25 +243,62 @@ void AnimationSystem::BuildBoneMatrices(const Skeleton& skeleton,
     size_t boneCount = skeleton.GetBoneCount();
     
     // First pass: build world-space transforms by traversing hierarchy
+    // We need to process bones in hierarchical order (parents before children)
+    // Use a recursive approach: process roots first, then children
     std::vector<glm::mat4> worldTransforms(boneCount);
     
+    // Helper lambda to recursively build world transforms
+    std::function<void(int, glm::mat4)> buildWorldTransform = [&](int boneIndex, glm::mat4 parentWorld) {
+        if (boneIndex < 0 || boneIndex >= static_cast<int>(boneCount)) {
+            return;
+        }
+        
+        const auto& bone = skeleton.GetBone(boneIndex);
+        glm::mat4 localTransform = localTransforms[boneIndex];
+        
+        // Calculate world transform: parent world * local
+        glm::mat4 worldTransform = parentWorld * localTransform;
+        worldTransforms[boneIndex] = worldTransform;
+        
+        // Process all children (find children by checking parentIndex)
+        for (size_t i = 0; i < boneCount; ++i) {
+            const auto& childBone = skeleton.GetBone(i);
+            if (childBone.parentIndex == boneIndex) {
+                buildWorldTransform(static_cast<int>(i), worldTransform);
+            }
+        }
+    };
+    
+    // Find all root bones (parentIndex == -1) and process them
     for (size_t i = 0; i < boneCount; ++i) {
         const auto& bone = skeleton.GetBone(i);
-        glm::mat4 localTransform = localTransforms[i];
-        
-        if (bone.parentIndex >= 0 && bone.parentIndex < static_cast<int>(boneCount)) {
-            // Multiply by parent's world transform
-            worldTransforms[i] = worldTransforms[bone.parentIndex] * localTransform;
-        } else {
-            // Root bone
+        if (bone.parentIndex < 0) {
+            // Root bone: world = local
+            glm::mat4 localTransform = localTransforms[i];
             worldTransforms[i] = localTransform;
+            
+            // Process children recursively
+            for (size_t j = 0; j < boneCount; ++j) {
+                const auto& childBone = skeleton.GetBone(j);
+                if (childBone.parentIndex == static_cast<int>(i)) {
+                    buildWorldTransform(static_cast<int>(j), localTransform);
+                }
+            }
         }
     }
     
     // Second pass: multiply by inverse bind matrix for skinning
+    // Standard skinning formula: finalMatrix = currentTransform * inverseBindMatrix
+    // IMPORTANT: Bone matrices should be in MODEL SPACE, not world space
+    // The shader will apply the model matrix separately (u_Model)
+    // So bone matrices transform from mesh bind pose space to animated MODEL space
+    // The inverse bind matrix transforms from mesh bind pose space to bone bind pose space
+    // The world transform (in model space) transforms from bone space to animated model space
+    const glm::mat4& globalInverse = skeleton.GetGlobalInverseTransform();
     for (size_t i = 0; i < boneCount; ++i) {
         const auto& bone = skeleton.GetBone(i);
-        outFinalMatrices[i] = worldTransforms[i] * bone.inverseBindMatrix;
+        // Multiply with global inverse to bring scene/world to model space, then apply offset
+        outFinalMatrices[i] = globalInverse * worldTransforms[i] * bone.inverseBindMatrix;
     }
 }
 
