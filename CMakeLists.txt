@@ -92,13 +92,23 @@ add_library(OpenEyeCore STATIC
     src/core/filesystem/ShaderFileWatcher.cpp
     src/core/filesystem/ShaderFileWatcher.h
     
-    # ECS
+    # ECS (Refactored - Modular Structure)
     src/ecs/Scene.cpp
     src/ecs/Scene.h
     src/ecs/Components.cpp
     src/ecs/Components.h
-    src/ecs/Systems.cpp
     src/ecs/Systems.h
+    # ECS Systems (Modular)
+    src/ecs/systems/TransformSystem.cpp
+    src/ecs/systems/TransformSystem.h
+    src/ecs/systems/LODSystem.cpp
+    src/ecs/systems/LODSystem.h
+    src/ecs/systems/CullingSystem.cpp
+    src/ecs/systems/CullingSystem.h
+    src/ecs/systems/CameraSystem.cpp
+    src/ecs/systems/CameraSystem.h
+    src/ecs/systems/RenderSystem.cpp
+    src/ecs/systems/RenderSystem.h
     
     # Rendering resources
     src/rendering/resources/Shader.cpp
