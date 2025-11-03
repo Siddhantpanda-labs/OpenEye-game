@@ -82,8 +82,9 @@ void main() {
     vec4 worldPos = modelMatrix * skinnedPosition;
     v_Position = worldPos.xyz;
     v_Normal = normalize(normalMatrix * skinnedNormal);
-    // Match Vulkan engine: flip V to account for image origin conventions
-    v_TexCoord = vec2(a_TexCoord.x, 1.0 - a_TexCoord.y);
+    // For FBX files, Assimp already flips UVs with aiProcess_FlipUVs, so don't flip again
+    // For glTF files, we would need to flip, but since we're mainly using FBX, we don't flip
+    v_TexCoord = a_TexCoord;
     
     // Build TBN matrix for normal mapping
     vec3 T = normalize(normalMatrix * skinnedTangent);
