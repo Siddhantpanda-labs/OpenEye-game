@@ -689,9 +689,28 @@ int main() {
             ImGui::Text("No animated entities in scene");
             ImGui::Text("Load an FBX model with animation to use this panel");
         } else {
-            // Get first animated entity (can be extended to support multiple)
+            // Get first animated entity (will be used as the controller)
             entt::entity animEntity = *animView.begin();
             auto& animComp = registry.get<AnimationComponent>(animEntity);
+
+            // Helper: propagate current controller state to all components sharing the same skeleton
+            auto syncToAllWithSkeleton = [&](const AnimationComponent& source, bool forceRecalc) {
+                for (auto e : animView) {
+                    if (e == animEntity) continue;
+                    auto& other = registry.get<AnimationComponent>(e);
+                    if (other.skeleton == source.skeleton) {
+                        other.currentClipIndex = source.currentClipIndex;
+                        other.currentTime = source.currentTime;
+                        other.playbackSpeed = source.playbackSpeed;
+                        other.isPlaying = source.isPlaying;
+                        other.loop = source.loop;
+                        other.boneMatricesDirty = true;
+                        if (forceRecalc) {
+                            OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, e);
+                        }
+                    }
+                }
+            };
             
             if (!animComp.skeleton) {
                 ImGui::Text("Entity has AnimationComponent but no skeleton");
@@ -735,7 +754,13 @@ int main() {
                         int oldSelected = selectedClipIndex;
                         ImGui::Combo("Select Clip", &selectedClipIndex, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
                         if (oldSelected != selectedClipIndex && selectedClipIndex >= 0 && selectedClipIndex < static_cast<int>(animComp.clips.size())) {
-                            OpenEye::Animation::AnimationSystem::PlayAnimation(registry, animEntity, selectedClipIndex, 0.2f);
+                            // Apply selection to all components sharing the same skeleton
+                            for (auto e : animView) {
+                                auto& ac = registry.get<AnimationComponent>(e);
+                                if (ac.skeleton == animComp.skeleton) {
+                                    OpenEye::Animation::AnimationSystem::PlayAnimation(registry, e, selectedClipIndex, 0.2f);
+                                }
+                            }
                         }
                     }
                     
@@ -753,14 +778,26 @@ int main() {
                             ImGui::Separator();
                             if (ImGui::Button(animComp.isPlaying ? "Pause" : "Play")) {
                                 animComp.isPlaying = !animComp.isPlaying;
+                                syncToAllWithSkeleton(animComp, false);
                             }
                             ImGui::SameLine();
                             if (ImGui::Button("Stop")) {
-                                OpenEye::Animation::AnimationSystem::StopAnimation(registry, animEntity);
+                                // Stop all sharing the same skeleton
+                                for (auto e : animView) {
+                                    auto& ac = registry.get<AnimationComponent>(e);
+                                    if (ac.skeleton == animComp.skeleton) {
+                                        OpenEye::Animation::AnimationSystem::StopAnimation(registry, e);
+                                    }
+                                }
                                 selectedClipIndex = -1;
                             }
                             ImGui::SameLine();
-                            ImGui::Checkbox("Loop", &animComp.loop);
+                            {
+                                bool loopChanged = ImGui::Checkbox("Loop", &animComp.loop);
+                                if (loopChanged) {
+                                    syncToAllWithSkeleton(animComp, false);
+                                }
+                            }
                             
                             // Timeline scrubbing
                             ImGui::Separator();
@@ -768,7 +805,8 @@ int main() {
                             if (ImGui::SliderFloat("Time", &currentTime, 0.0f, duration, "%.2f s")) {
                                 animComp.currentTime = currentTime;
                                 animComp.boneMatricesDirty = true;
-                                // Force update bone matrices
+                                // Force update bone matrices for all sharing the same skeleton
+                                syncToAllWithSkeleton(animComp, true);
                                 OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, animEntity);
                             }
                             
@@ -779,7 +817,9 @@ int main() {
                             
                             // Playback speed
                             ImGui::Separator();
-                            ImGui::DragFloat("Playback Speed", &animComp.playbackSpeed, 0.1f, 0.0f, 5.0f, "%.1fx");
+                            if (ImGui::DragFloat("Playback Speed", &animComp.playbackSpeed, 0.1f, 0.0f, 5.0f, "%.1fx")) {
+                                syncToAllWithSkeleton(animComp, false);
+                            }
                             
                             // Blend info
                             if (animComp.blendFromClipIndex >= 0) {
