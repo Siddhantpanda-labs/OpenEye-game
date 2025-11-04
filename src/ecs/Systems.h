@@ -9,4 +9,5 @@
 #include "systems/RenderSystem.h"
 #include "systems/CameraSystem.h"
 #include "systems/PhysicsSystem.h"
+#include "systems/ParticleSystem.h"
 

@@ -164,6 +164,8 @@ add_library(OpenEyeCore STATIC
     src/ecs/systems/RenderSystem.h
     src/ecs/systems/PhysicsSystem.cpp
     src/ecs/systems/PhysicsSystem.h
+    src/ecs/systems/ParticleSystem.cpp
+    src/ecs/systems/ParticleSystem.h
     
     # Rendering resources
     src/rendering/resources/Shader.cpp
@@ -224,6 +226,12 @@ add_library(OpenEyeCore STATIC
     src/animation/AnimationLoader.h
     src/animation/AnimationSystem.cpp
     src/animation/AnimationSystem.h
+    
+    # Particle systems
+    src/particles/ParticleEmitter.cpp
+    src/particles/ParticleEmitter.h
+    src/particles/ParticleRenderer.cpp
+    src/particles/ParticleRenderer.h
     
     # Physics systems
     src/physics/PhysicsWorld.cpp

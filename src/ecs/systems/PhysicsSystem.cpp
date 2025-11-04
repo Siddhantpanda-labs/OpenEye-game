@@ -13,7 +13,7 @@ namespace ECS {
 
 void PhysicsSystem::Update(Scene& scene, Physics::PhysicsWorld* physicsWorld, float deltaTime) {
     if (!physicsWorld) {
-        OE_WARN("PhysicsSystem::Update: PhysicsWorld is null!");
+        Core::Log::Warn("PhysicsSystem::Update: PhysicsWorld is null!");
         return;
     }
     
@@ -133,18 +133,18 @@ bool PhysicsSystem::AttachPhysicsBody(
     bool isKinematic
 ) {
     if (!physicsWorld || !shape) {
-        OE_WARN("PhysicsSystem::AttachPhysicsBody: Invalid parameters");
+        Core::Log::Warn("PhysicsSystem::AttachPhysicsBody: Invalid parameters");
         return false;
     }
     
     if (!scene.GetRegistry().valid(entity)) {
-        OE_WARN("PhysicsSystem::AttachPhysicsBody: Invalid entity");
+        Core::Log::Warn("PhysicsSystem::AttachPhysicsBody: Invalid entity");
         return false;
     }
     
     // Ensure entity has Transform component
     if (!scene.GetRegistry().all_of<Transform>(entity)) {
-        OE_WARN("PhysicsSystem::AttachPhysicsBody: Entity must have Transform component");
+        Core::Log::Warn("PhysicsSystem::AttachPhysicsBody: Entity must have Transform component");
         return false;
     }
     
@@ -164,7 +164,7 @@ bool PhysicsSystem::AttachPhysicsBody(
     );
     
     if (!rigidBody) {
-        OE_ERROR("PhysicsSystem::AttachPhysicsBody: Failed to create rigid body");
+        Core::Log::Error("PhysicsSystem::AttachPhysicsBody: Failed to create rigid body");
         return false;
     }
     
@@ -188,7 +188,7 @@ bool PhysicsSystem::AttachPhysicsBody(
     // Attach to entity
     scene.GetRegistry().emplace<PhysicsBody>(entity, physicsBody);
     
-    OE_INFO("PhysicsSystem: Attached physics body to entity (mass=" + std::to_string(mass) + 
+    Core::Log::Info("PhysicsSystem: Attached physics body to entity (mass=" + std::to_string(mass) + 
             ", isKinematic=" + (isKinematic ? "true" : "false") + ")");
     
     return true;
@@ -252,7 +252,7 @@ Entity PhysicsSystem::CreateGroundPlane(
     // Attach physics body (static, mass = 0)
     AttachPhysicsBody(scene, groundEntity, physicsWorld, groundShape, 0.0f, false);
     
-    OE_INFO("PhysicsSystem: Created ground plane at (" + 
+    Core::Log::Info("PhysicsSystem: Created ground plane at (" + 
             std::to_string(position.x) + ", " + 
             std::to_string(position.y) + ", " + 
             std::to_string(position.z) + ") with size (" + 

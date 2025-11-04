@@ -2,6 +2,8 @@
 #include "Components.h"
 #include "core/log/Log.h"
 
+using namespace OpenEye::Core;
+
 namespace OpenEye {
 namespace ECS {
 

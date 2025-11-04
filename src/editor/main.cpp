@@ -22,6 +22,7 @@
 #include "rendering/IBL.h"
 #include "physics/PhysicsWorld.h"
 #include "animation/AnimationSystem.h"
+#include "particles/ParticleEmitter.h"
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -33,6 +34,7 @@
 using namespace OpenEye::Core;
 using namespace OpenEye::Rendering;
 using namespace OpenEye::ECS;
+using namespace OpenEye::Particles;
 
 int main() {
     // Initialize logging
@@ -322,6 +324,90 @@ int main() {
     );
     OE_INFO("Ground plane created successfully");
     
+    // Create test particle emitters (positioned near the model)
+    // Model is at (0.0f, 5.0f, -5.0f) with scale 0.1f
+    glm::vec3 modelBasePos = glm::vec3(0.0f, 5.0f, -5.0f);
+    
+    OE_INFO("Creating test particle emitters...");
+    
+    // Fire effect (to the left of model, at ground level)
+    ParticleEmitterConfig fireConfig;
+    fireConfig.position = modelBasePos + glm::vec3(-2.0f, -4.0f, 0.0f);  // Left side, ground level
+    fireConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
+    fireConfig.spread = 20.0f;
+    fireConfig.minSpeed = 0.5f;
+    fireConfig.maxSpeed = 2.0f;
+    fireConfig.minLifetime = 0.5f;
+    fireConfig.maxLifetime = 1.5f;
+    fireConfig.minSize = 0.2f;
+    fireConfig.maxSize = 0.5f;
+    fireConfig.startColor = glm::vec4(1.0f, 0.3f, 0.0f, 1.0f);  // Orange-red
+    fireConfig.endColor = glm::vec4(0.8f, 0.8f, 0.2f, 0.0f);    // Yellow fade
+    fireConfig.particlesPerSecond = 150.0f;
+    fireConfig.maxParticles = 500;
+    fireConfig.useGravity = false;  // Fire rises
+    fireConfig.gravity = glm::vec3(0.0f, 2.0f, 0.0f);  // Upward force
+    fireConfig.damping = 0.95f;
+    
+    auto fireEmitter = std::make_shared<ParticleEmitter>(fireConfig);
+    Entity fireEntity = scene.CreateEntity("FireParticles");
+    auto& fireTransform = scene.GetRegistry().get<Transform>(fireEntity);
+    fireTransform.position = fireConfig.position;
+    scene.GetRegistry().emplace<ParticleEmitterComponent>(fireEntity, fireEmitter);
+    
+    // Smoke effect (to the right of model, slightly above ground)
+    ParticleEmitterConfig smokeConfig;
+    smokeConfig.position = modelBasePos + glm::vec3(2.0f, -3.0f, 0.0f);  // Right side, slightly above ground
+    smokeConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
+    smokeConfig.spread = 30.0f;
+    smokeConfig.minSpeed = 0.3f;
+    smokeConfig.maxSpeed = 1.0f;
+    smokeConfig.minLifetime = 3.0f;
+    smokeConfig.maxLifetime = 5.0f;
+    smokeConfig.minSize = 0.5f;
+    smokeConfig.maxSize = 1.5f;
+    smokeConfig.startColor = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);  // Dark gray
+    smokeConfig.endColor = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);    // Fade to black
+    smokeConfig.particlesPerSecond = 50.0f;
+    smokeConfig.maxParticles = 300;
+    smokeConfig.useGravity = false;
+    smokeConfig.gravity = glm::vec3(0.0f, 1.5f, 0.0f);  // Gentle upward drift
+    smokeConfig.damping = 0.98f;
+    
+    auto smokeEmitter = std::make_shared<ParticleEmitter>(smokeConfig);
+    Entity smokeEntity = scene.CreateEntity("SmokeParticles");
+    auto& smokeTransform = scene.GetRegistry().get<Transform>(smokeEntity);
+    smokeTransform.position = smokeConfig.position;
+    scene.GetRegistry().emplace<ParticleEmitterComponent>(smokeEntity, smokeEmitter);
+    
+    // Dust effect (behind model, at ground level)
+    ParticleEmitterConfig dustConfig;
+    dustConfig.position = modelBasePos + glm::vec3(0.0f, -4.0f, 1.0f);  // Behind model, ground level
+    dustConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
+    dustConfig.spread = 45.0f;
+    dustConfig.minSpeed = 0.1f;
+    dustConfig.maxSpeed = 0.5f;
+    dustConfig.minLifetime = 2.0f;
+    dustConfig.maxLifetime = 4.0f;
+    dustConfig.minSize = 0.1f;
+    dustConfig.maxSize = 0.3f;
+    dustConfig.startColor = glm::vec4(0.6f, 0.5f, 0.4f, 0.6f);  // Brownish
+    dustConfig.endColor = glm::vec4(0.5f, 0.4f, 0.3f, 0.0f);
+    dustConfig.particlesPerSecond = 80.0f;
+    dustConfig.maxParticles = 400;
+    dustConfig.useGravity = true;
+    dustConfig.gravity = glm::vec3(0.0f, -2.0f, 0.0f);  // Gentle downward
+    dustConfig.damping = 0.9f;
+    
+    auto dustEmitter = std::make_shared<ParticleEmitter>(dustConfig);
+    Entity dustEntity = scene.CreateEntity("DustParticles");
+    auto& dustTransform = scene.GetRegistry().get<Transform>(dustEntity);
+    dustTransform.position = dustConfig.position;
+    scene.GetRegistry().emplace<ParticleEmitterComponent>(dustEntity, dustEmitter);
+    
+    OE_INFO("Particle emitters created: Fire, Smoke, Dust");
+    
+    // Store particle entity references for debug UI (declare static outside function scope)
     // Count entities with Transform component (all entities should have this)
     size_t entityCount = scene.GetRegistry().view<Transform>().size();
     OE_INFO_F("Created %zu entities in scene", entityCount);
@@ -464,6 +550,9 @@ int main() {
         // Update Animations (must be called after physics, before rendering)
         OpenEye::Animation::AnimationSystem::Update(scene, deltaTime);
         
+        // Update Particle System
+        ParticleSystem::Update(scene, deltaTime);
+        
         // Rotate the main cube
         float time = Time::TotalTime();
         auto& cubeTransform = scene.GetRegistry().get<Transform>(cubeEntity);
@@ -584,6 +673,9 @@ int main() {
             
             renderPipeline.RenderFrame(scene, camera, params, renderOptions);
         }
+        
+        // Render particles (after main rendering, before UI)
+        ParticleSystem::Render(scene, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix());
         
         // --- ImGui UI ---
         ImGui_ImplOpenGL3_NewFrame();
@@ -861,6 +953,222 @@ int main() {
                     } else {
                         ImGui::Text("No clip selected");
                     }
+                }
+            }
+        }
+        ImGui::End();
+        
+        // Particle System Debug panel
+        ImGui::Begin("Particle System");
+        {
+            auto& particleRegistry = scene.GetRegistry();
+            
+            // Find particle entities by name
+            Entity fireParticleEntity = entt::null;
+            Entity smokeParticleEntity = entt::null;
+            Entity dustParticleEntity = entt::null;
+            
+            auto nameView = particleRegistry.view<Name>();
+            for (auto e : nameView) {
+                const auto& name = particleRegistry.get<Name>(e);
+                if (name.name == "FireParticles") fireParticleEntity = e;
+                else if (name.name == "SmokeParticles") smokeParticleEntity = e;
+                else if (name.name == "DustParticles") dustParticleEntity = e;
+            }
+            
+            // Fire Particles
+            if (fireParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(fireParticleEntity)) {
+                auto& fireComp = particleRegistry.get<ParticleEmitterComponent>(fireParticleEntity);
+                if (fireComp.emitter) {
+                    ImGui::PushID("Fire");
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Fire Particles");
+                    ImGui::Separator();
+                    
+                    auto& fireParticleConfig = fireComp.emitter->GetConfig();
+                    auto& fireParticleTransform = particleRegistry.get<Transform>(fireParticleEntity);
+                    
+                    // Position
+                    ImGui::DragFloat3("Position", &fireParticleTransform.position.x, 0.1f);
+                    fireComp.emitter->SetPosition(fireParticleTransform.position);
+                    
+                    // Direction
+                    ImGui::DragFloat3("Direction", &fireParticleConfig.direction.x, 0.01f);
+                    
+                    // Spread
+                    ImGui::DragFloat("Spread (deg)", &fireParticleConfig.spread, 1.0f, 0.0f, 180.0f);
+                    
+                    // Speed
+                    ImGui::DragFloatRange2("Speed", &fireParticleConfig.minSpeed, &fireParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
+                    
+                    // Lifetime
+                    ImGui::DragFloatRange2("Lifetime", &fireParticleConfig.minLifetime, &fireParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
+                    
+                    // Size
+                    ImGui::DragFloatRange2("Size", &fireParticleConfig.minSize, &fireParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
+                    
+                    // Colors
+                    ImGui::ColorEdit4("Start Color", &fireParticleConfig.startColor.x);
+                    ImGui::ColorEdit4("End Color", &fireParticleConfig.endColor.x);
+                    
+                    // Emission
+                    ImGui::DragFloat("Particles/Second", &fireParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
+                    ImGui::DragInt("Max Particles", &fireParticleConfig.maxParticles, 1, 0, 10000);
+                    
+                    // Physics
+                    ImGui::Checkbox("Use Gravity", &fireParticleConfig.useGravity);
+                    ImGui::DragFloat3("Gravity", &fireParticleConfig.gravity.x, 0.1f);
+                    ImGui::DragFloat("Damping", &fireParticleConfig.damping, 0.01f, 0.0f, 1.0f);
+                    
+                    // Control
+                    bool isPlaying = fireComp.emitter->IsPlaying();
+                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
+                        if (isPlaying) fireComp.emitter->Stop();
+                        else fireComp.emitter->Start();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Reset")) {
+                        fireComp.emitter->Reset();
+                    }
+                    
+                    // Stats
+                    ImGui::Separator();
+                    ImGui::Text("Active Particles: %zu / %d", 
+                               fireComp.emitter->GetActiveParticleCount(), 
+                               fireParticleConfig.maxParticles);
+                    
+                    ImGui::PopID();
+                }
+            }
+            
+            ImGui::Separator();
+            
+            // Smoke Particles
+            if (smokeParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(smokeParticleEntity)) {
+                auto& smokeComp = particleRegistry.get<ParticleEmitterComponent>(smokeParticleEntity);
+                if (smokeComp.emitter) {
+                    ImGui::PushID("Smoke");
+                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Smoke Particles");
+                    ImGui::Separator();
+                    
+                    auto& smokeParticleConfig = smokeComp.emitter->GetConfig();
+                    auto& smokeParticleTransform = particleRegistry.get<Transform>(smokeParticleEntity);
+                    
+                    // Position
+                    ImGui::DragFloat3("Position", &smokeParticleTransform.position.x, 0.1f);
+                    smokeComp.emitter->SetPosition(smokeParticleTransform.position);
+                    
+                    // Direction
+                    ImGui::DragFloat3("Direction", &smokeParticleConfig.direction.x, 0.01f);
+                    
+                    // Spread
+                    ImGui::DragFloat("Spread (deg)", &smokeParticleConfig.spread, 1.0f, 0.0f, 180.0f);
+                    
+                    // Speed
+                    ImGui::DragFloatRange2("Speed", &smokeParticleConfig.minSpeed, &smokeParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
+                    
+                    // Lifetime
+                    ImGui::DragFloatRange2("Lifetime", &smokeParticleConfig.minLifetime, &smokeParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
+                    
+                    // Size
+                    ImGui::DragFloatRange2("Size", &smokeParticleConfig.minSize, &smokeParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
+                    
+                    // Colors
+                    ImGui::ColorEdit4("Start Color", &smokeParticleConfig.startColor.x);
+                    ImGui::ColorEdit4("End Color", &smokeParticleConfig.endColor.x);
+                    
+                    // Emission
+                    ImGui::DragFloat("Particles/Second", &smokeParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
+                    ImGui::DragInt("Max Particles", &smokeParticleConfig.maxParticles, 1, 0, 10000);
+                    
+                    // Physics
+                    ImGui::Checkbox("Use Gravity", &smokeParticleConfig.useGravity);
+                    ImGui::DragFloat3("Gravity", &smokeParticleConfig.gravity.x, 0.1f);
+                    ImGui::DragFloat("Damping", &smokeParticleConfig.damping, 0.01f, 0.0f, 1.0f);
+                    
+                    // Control
+                    bool isPlaying = smokeComp.emitter->IsPlaying();
+                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
+                        if (isPlaying) smokeComp.emitter->Stop();
+                        else smokeComp.emitter->Start();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Reset")) {
+                        smokeComp.emitter->Reset();
+                    }
+                    
+                    // Stats
+                    ImGui::Separator();
+                    ImGui::Text("Active Particles: %zu / %d", 
+                               smokeComp.emitter->GetActiveParticleCount(), 
+                               smokeParticleConfig.maxParticles);
+                    
+                    ImGui::PopID();
+                }
+            }
+            
+            ImGui::Separator();
+            
+            // Dust Particles
+            if (dustParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(dustParticleEntity)) {
+                auto& dustComp = particleRegistry.get<ParticleEmitterComponent>(dustParticleEntity);
+                if (dustComp.emitter) {
+                    ImGui::PushID("Dust");
+                    ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.4f, 1.0f), "Dust Particles");
+                    ImGui::Separator();
+                    
+                    auto& dustParticleConfig = dustComp.emitter->GetConfig();
+                    auto& dustParticleTransform = particleRegistry.get<Transform>(dustParticleEntity);
+                    
+                    // Position
+                    ImGui::DragFloat3("Position", &dustParticleTransform.position.x, 0.1f);
+                    dustComp.emitter->SetPosition(dustParticleTransform.position);
+                    
+                    // Direction
+                    ImGui::DragFloat3("Direction", &dustParticleConfig.direction.x, 0.01f);
+                    
+                    // Spread
+                    ImGui::DragFloat("Spread (deg)", &dustParticleConfig.spread, 1.0f, 0.0f, 180.0f);
+                    
+                    // Speed
+                    ImGui::DragFloatRange2("Speed", &dustParticleConfig.minSpeed, &dustParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
+                    
+                    // Lifetime
+                    ImGui::DragFloatRange2("Lifetime", &dustParticleConfig.minLifetime, &dustParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
+                    
+                    // Size
+                    ImGui::DragFloatRange2("Size", &dustParticleConfig.minSize, &dustParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
+                    
+                    // Colors
+                    ImGui::ColorEdit4("Start Color", &dustParticleConfig.startColor.x);
+                    ImGui::ColorEdit4("End Color", &dustParticleConfig.endColor.x);
+                    
+                    // Emission
+                    ImGui::DragFloat("Particles/Second", &dustParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
+                    ImGui::DragInt("Max Particles", &dustParticleConfig.maxParticles, 1, 0, 10000);
+                    
+                    // Physics
+                    ImGui::Checkbox("Use Gravity", &dustParticleConfig.useGravity);
+                    ImGui::DragFloat3("Gravity", &dustParticleConfig.gravity.x, 0.1f);
+                    ImGui::DragFloat("Damping", &dustParticleConfig.damping, 0.01f, 0.0f, 1.0f);
+                    
+                    // Control
+                    bool isPlaying = dustComp.emitter->IsPlaying();
+                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
+                        if (isPlaying) dustComp.emitter->Stop();
+                        else dustComp.emitter->Start();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Reset")) {
+                        dustComp.emitter->Reset();
+                    }
+                    
+                    // Stats
+                    ImGui::Separator();
+                    ImGui::Text("Active Particles: %zu / %d", 
+                               dustComp.emitter->GetActiveParticleCount(), 
+                               dustParticleConfig.maxParticles);
+                    
+                    ImGui::PopID();
                 }
             }
         }

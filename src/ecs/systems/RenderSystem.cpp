@@ -5,6 +5,8 @@
 #include "LODSystem.h"
 #include "core/log/Log.h"
 #include "core/time/Time.h"
+
+using namespace OpenEye::Core;
 #include "rendering/Frustum.h"
 #include "rendering/LODManager.h"
 #include "rendering/InstancedRenderer.h"

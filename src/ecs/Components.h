@@ -25,6 +25,9 @@ namespace OpenEye {
 namespace Physics {
     class PhysicsWorld;
 }
+namespace Particles {
+    class ParticleEmitter;
+}
 }
 
 // Forward declarations for Bullet
@@ -191,6 +194,14 @@ struct PhysicsBody {
     bool isKinematic = false;
     
     PhysicsBody() = default;
+};
+
+// Particle emitter component
+struct ParticleEmitterComponent {
+    std::shared_ptr<OpenEye::Particles::ParticleEmitter> emitter;
+    
+    ParticleEmitterComponent() = default;
+    explicit ParticleEmitterComponent(std::shared_ptr<OpenEye::Particles::ParticleEmitter> e) : emitter(e) {}
 };
 
 } // namespace ECS
