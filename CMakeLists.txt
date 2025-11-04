@@ -162,6 +162,8 @@ add_library(OpenEyeCore STATIC
     src/ecs/systems/CameraSystem.h
     src/ecs/systems/RenderSystem.cpp
     src/ecs/systems/RenderSystem.h
+    src/ecs/systems/PhysicsSystem.cpp
+    src/ecs/systems/PhysicsSystem.h
     
     # Rendering resources
     src/rendering/resources/Shader.cpp

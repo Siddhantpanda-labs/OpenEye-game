@@ -284,6 +284,26 @@ int main() {
                 if (modelMaterial->GetTexture("u_EmissiveTexture")) {
                     OE_INFO("  - Emissive texture loaded");
                 }
+                
+                // Attach physics body to model (dynamic, with mass)
+                // Use convex hull shape from mesh for collision
+                if (loadedMesh->mesh) {
+                    auto collisionShape = physicsWorld->CreateConvexHullShape(loadedMesh->mesh);
+                    if (collisionShape) {
+                        // Position model above ground for physics test
+                        modelTransform.position = glm::vec3(0.0f, 5.0f, -5.0f); // Start 5 units above ground
+                        modelTransform.scale = glm::vec3(0.1f);
+                        
+                        // Attach physics body with mass (dynamic)
+                        if (PhysicsSystem::AttachPhysicsBody(scene, modelEntity, physicsWorld.get(), collisionShape, 1.0f, false)) {
+                            OE_INFO("  - Physics body attached (dynamic, mass=1.0)");
+                        } else {
+                            OE_WARN("  - Failed to attach physics body to model");
+                        }
+                    } else {
+                        OE_WARN("  - Failed to create collision shape for model");
+                    }
+                }
             }
         } else {
             OE_WARN("Failed to load model from: " + modelPath);
@@ -291,6 +311,16 @@ int main() {
     } else {
         OE_WARN("Model file not found: " + modelPath);
     }
+    
+    // Create ground plane for physics test
+    OE_INFO("Creating ground plane for physics test...");
+    Entity groundEntity = PhysicsSystem::CreateGroundPlane(
+        scene,
+        physicsWorld.get(),
+        glm::vec3(0.0f, -1.0f, 0.0f),  // Position ground at y=-1
+        glm::vec2(50.0f, 50.0f)         // 50x50 ground plane
+    );
+    OE_INFO("Ground plane created successfully");
     
     // Count entities with Transform component (all entities should have this)
     size_t entityCount = scene.GetRegistry().view<Transform>().size();
@@ -428,8 +458,8 @@ int main() {
         // Update ECS systems
         TransformSystem::Update(scene);
         
-        // Update Physics (step simulation)
-        physicsWorld->Step(deltaTime);
+        // Update Physics System (syncs Transform <-> PhysicsBody and steps simulation)
+        PhysicsSystem::Update(scene, physicsWorld.get(), deltaTime);
         
         // Update Animations (must be called after physics, before rendering)
         OpenEye::Animation::AnimationSystem::Update(scene, deltaTime);

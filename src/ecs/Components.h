@@ -20,6 +20,17 @@ namespace Animation {
 }
 }
 
+// Forward declarations for physics
+namespace OpenEye {
+namespace Physics {
+    class PhysicsWorld;
+}
+}
+
+// Forward declarations for Bullet
+class btRigidBody;
+class btCollisionShape;
+
 namespace OpenEye {
 namespace ECS {
 
@@ -158,6 +169,28 @@ struct AnimationComponent {
     
     // Optimization flag (set to true when bone matrices need recalculation)
     bool boneMatricesDirty = true;
+};
+
+// Physics body component (for physics simulation)
+struct PhysicsBody {
+    // Bullet physics objects (owned by PhysicsWorld, but we keep references)
+    btRigidBody* rigidBody = nullptr;  // Raw pointer - PhysicsWorld manages lifetime
+    
+    // Collision shape (shared_ptr to keep shape alive while component exists)
+    std::shared_ptr<btCollisionShape> collisionShape;
+    
+    // Physics properties
+    float mass = 0.0f;  // 0 = static/kinematic, > 0 = dynamic
+    glm::vec3 inertia = glm::vec3(0.0f);  // Auto-calculated if not set
+    
+    // Sync flags
+    bool syncTransformToPhysics = true;  // Sync Transform -> PhysicsBody before step
+    bool syncPhysicsToTransform = true;  // Sync PhysicsBody -> Transform after step
+    
+    // Kinematic flag (if true, physics doesn't affect transform, but can be moved manually)
+    bool isKinematic = false;
+    
+    PhysicsBody() = default;
 };
 
 } // namespace ECS

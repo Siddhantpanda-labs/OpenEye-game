@@ -8,4 +8,5 @@
 #include "systems/CullingSystem.h"
 #include "systems/RenderSystem.h"
 #include "systems/CameraSystem.h"
+#include "systems/PhysicsSystem.h"
 
