@@ -337,10 +337,10 @@ int main() {
     fireConfig.spread = 20.0f;
     fireConfig.minSpeed = 0.5f;
     fireConfig.maxSpeed = 2.0f;
-    fireConfig.minLifetime = 0.5f;
-    fireConfig.maxLifetime = 1.5f;
-    fireConfig.minSize = 0.2f;
-    fireConfig.maxSize = 0.5f;
+    fireConfig.minLifetime = 1.0f;  // Increased minimum lifetime
+    fireConfig.maxLifetime = 2.0f;  // Increased maximum lifetime
+    fireConfig.minSize = 0.5f;  // Increased size for visibility
+    fireConfig.maxSize = 1.0f;
     fireConfig.startColor = glm::vec4(1.0f, 0.3f, 0.0f, 1.0f);  // Orange-red
     fireConfig.endColor = glm::vec4(0.8f, 0.8f, 0.2f, 0.0f);    // Yellow fade
     fireConfig.particlesPerSecond = 150.0f;
@@ -364,8 +364,8 @@ int main() {
     smokeConfig.maxSpeed = 1.0f;
     smokeConfig.minLifetime = 3.0f;
     smokeConfig.maxLifetime = 5.0f;
-    smokeConfig.minSize = 0.5f;
-    smokeConfig.maxSize = 1.5f;
+    smokeConfig.minSize = 1.0f;  // Increased size for visibility
+    smokeConfig.maxSize = 2.0f;
     smokeConfig.startColor = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);  // Dark gray
     smokeConfig.endColor = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);    // Fade to black
     smokeConfig.particlesPerSecond = 50.0f;
@@ -389,8 +389,8 @@ int main() {
     dustConfig.maxSpeed = 0.5f;
     dustConfig.minLifetime = 2.0f;
     dustConfig.maxLifetime = 4.0f;
-    dustConfig.minSize = 0.1f;
-    dustConfig.maxSize = 0.3f;
+    dustConfig.minSize = 0.3f;  // Increased size for visibility
+    dustConfig.maxSize = 0.6f;
     dustConfig.startColor = glm::vec4(0.6f, 0.5f, 0.4f, 0.6f);  // Brownish
     dustConfig.endColor = glm::vec4(0.5f, 0.4f, 0.3f, 0.0f);
     dustConfig.particlesPerSecond = 80.0f;

@@ -2,6 +2,7 @@
 #include "../rendering/resources/Texture.h"
 #include <random>
 #include <cmath>
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -31,6 +32,9 @@ void ParticleEmitter::Update(float deltaTime) {
     if (!m_isPlaying) {
         return;
     }
+    
+    // Clamp deltaTime to prevent huge jumps that kill particles instantly
+    deltaTime = std::min(deltaTime, 0.1f);
     
     // Update existing particles
     for (size_t i = 0; i < m_activeParticleCount; ++i) {
@@ -75,13 +79,17 @@ void ParticleEmitter::SpawnParticle() {
     // Find or create particle slot
     int index = FindDeadParticle();
     if (index < 0) {
+        // Create new particle at the end
         if (m_particles.size() < m_config.maxParticles) {
             m_particles.resize(m_particles.size() + 1);
             index = static_cast<int>(m_particles.size() - 1);
+            // New particle is beyond active range, so increment count
+            m_activeParticleCount = index + 1;
         } else {
             return; // Max particles reached
         }
     }
+    // else: reusing dead particle at 'index' (already in active range)
     
     Particle& p = m_particles[index];
     
@@ -128,11 +136,6 @@ void ParticleEmitter::SpawnParticle() {
     p.rotation = 0.0f;
     std::uniform_real_distribution<float> rotSpeedDist(m_config.minRotationSpeed, m_config.maxRotationSpeed);
     p.rotationSpeed = rotSpeedDist(gen);
-    
-    // Mark as active
-    if (index >= static_cast<int>(m_activeParticleCount)) {
-        m_activeParticleCount = index + 1;
-    }
 }
 
 void ParticleEmitter::UpdateParticle(Particle& particle, float deltaTime) {

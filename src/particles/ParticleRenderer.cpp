@@ -28,11 +28,11 @@ bool ParticleRenderer::Initialize() {
         return false;
     }
     
+    // Create instance buffer BEFORE configuring attributes
+    glGenBuffers(1, &m_instanceVBO);
+    
     // Create quad mesh
     CreateQuad();
-    
-    // Create instance buffer
-    glGenBuffers(1, &m_instanceVBO);
     
     OE_INFO("ParticleRenderer initialized");
     return true;
@@ -106,8 +106,14 @@ void ParticleRenderer::Render(const std::vector<std::shared_ptr<ParticleEmitter>
     m_shader->Bind();
     m_shader->SetMat4("u_View", viewMatrix);
     m_shader->SetMat4("u_Projection", projectionMatrix);
-    m_shader->SetVec3("u_CameraRight", glm::vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
-    m_shader->SetVec3("u_CameraUp", glm::vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
+    
+    // Extract camera right and up vectors from view matrix (inverse of model matrix)
+    // View matrix columns represent camera axes in world space
+    glm::mat4 invView = glm::inverse(viewMatrix);
+    glm::vec3 cameraRight = glm::normalize(glm::vec3(invView[0][0], invView[1][0], invView[2][0]));
+    glm::vec3 cameraUp = glm::normalize(glm::vec3(invView[0][1], invView[1][1], invView[2][1]));
+    m_shader->SetVec3("u_CameraRight", cameraRight);
+    m_shader->SetVec3("u_CameraUp", cameraUp);
     
     glBindVertexArray(m_quadVAO);
     
