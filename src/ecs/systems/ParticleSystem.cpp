@@ -38,7 +38,10 @@ void ParticleSystem::Update(Scene& scene, float deltaTime) {
 }
 
 void ParticleSystem::Render(Scene& scene, const Rendering::Camera& camera,
-                           const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) {
+                           const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix,
+                           GLuint sceneDepthTexture,
+                           std::uint32_t viewportWidth,
+                           std::uint32_t viewportHeight) {
     if (!s_rendererInitialized) {
         InitializeRenderer();
     }
@@ -65,7 +68,7 @@ void ParticleSystem::Render(Scene& scene, const Rendering::Camera& camera,
     }
     
     // Render all particles
-    s_renderer->Render(emitters, camera, viewMatrix, projectionMatrix);
+    s_renderer->Render(emitters, camera, viewMatrix, projectionMatrix, sceneDepthTexture, viewportWidth, viewportHeight);
 }
 
 void ParticleSystem::InitializeRenderer() {

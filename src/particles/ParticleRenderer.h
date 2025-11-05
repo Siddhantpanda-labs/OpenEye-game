@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <memory>
+#include <cstdint>
 #include <vector>
 #include "ParticleEmitter.h"
 
@@ -26,7 +27,10 @@ public:
     void Render(const std::vector<std::shared_ptr<ParticleEmitter>>& emitters,
                 const Rendering::Camera& camera,
                 const glm::mat4& viewMatrix,
-                const glm::mat4& projectionMatrix);
+                const glm::mat4& projectionMatrix,
+                unsigned int sceneDepthTexture,
+                std::uint32_t viewportWidth,
+                std::uint32_t viewportHeight);
     
     // Shutdown
     void Shutdown();
@@ -46,6 +50,7 @@ private:
         float size;
         glm::vec4 color;
         float rotation;
+        float ageNorm; // 0..1 (0 = just spawned, 1 = end of life)
     };
     
     void CreateQuad();

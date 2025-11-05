@@ -22,7 +22,7 @@
 #include "rendering/IBL.h"
 #include "physics/PhysicsWorld.h"
 #include "animation/AnimationSystem.h"
-#include "particles/ParticleEmitter.h"
+#include <btBulletDynamicsCommon.h>
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,11 +30,14 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#include "animation/AnimationLoader.h"
 
 using namespace OpenEye::Core;
 using namespace OpenEye::Rendering;
 using namespace OpenEye::ECS;
-using namespace OpenEye::Particles;
 
 int main() {
     // Initialize logging
@@ -112,11 +115,11 @@ int main() {
     scene.GetRegistry().emplace<Renderable>(cubeEntity, mesh, material);
     scene.GetRegistry().emplace<AABB>(cubeEntity); // AABB for culling (future)
     
-    // Create a few more test cubes
+    // Create a few more test cubes with physics (so they don't pass through ground)
     for (int i = 0; i < 3; i++) {
         Entity testCube = scene.CreateEntity("TestCube_" + std::to_string(i));
         auto& transform = scene.GetRegistry().get<Transform>(testCube);
-        transform.position = glm::vec3((i - 1) * 2.0f, 0.0f, -2.0f);
+        transform.position = glm::vec3((i - 1) * 2.0f, 2.0f, -2.0f); // Position above ground
         
         auto testMaterial = std::make_shared<Material>(shader);
         float hue = i / 3.0f;
@@ -128,6 +131,12 @@ int main() {
         
         scene.GetRegistry().emplace<Renderable>(testCube, mesh, testMaterial);
         scene.GetRegistry().emplace<AABB>(testCube);
+        
+        // Add physics body to test cubes (cube shape, 1 unit size)
+        auto boxShape = physicsWorld->CreateBoxShape(glm::vec3(0.5f, 0.5f, 0.5f)); // Half-extents for 1x1x1 cube
+        if (boxShape) {
+            PhysicsSystem::AttachPhysicsBody(scene, testCube, physicsWorld.get(), boxShape, 1.0f, false);
+        }
     }
     
     // Add some test point lights for multiple light testing
@@ -165,21 +174,27 @@ int main() {
         return relative;
     };
     
-    // Try to load animated FBX model first (target: "Kick To The Groin.fbx")
-    std::string fbxPath = resolveAssetPath("assets/models/Kick To The Groin.fbx");
+    // Load character model (Kick To The Groin.fbx) - this is the main animated character
+    Entity characterEntity = entt::null;
+    std::string characterFbxPath = resolveAssetPath("assets/models/Kick To The Groin.fbx");
     std::string modelPath = "";
     
-    if (std::filesystem::exists(fbxPath)) {
-        modelPath = fbxPath;
-        OE_INFO("Found FBX model: " + fbxPath);
+    if (std::filesystem::exists(characterFbxPath)) {
+        modelPath = characterFbxPath;
+        OE_INFO("Found character FBX model: " + characterFbxPath);
     } else {
         // Fallback to glTF model
         modelPath = resolveAssetPath("assets/models/dess_holiday_hb_juan_deltarune/scene.gltf");
         OE_INFO("FBX model not found, trying glTF: " + modelPath);
     }
     
+    // Store animation clips for keypress mapping (m/n/o/p)
+    std::vector<std::pair<int, std::string>> keyAnimationMap; // key code -> clip index in character's AnimationComponent
+    int idleClipIndex = 0; // Default idle animation (first clip from character model)
+    size_t additionalClipsCount = 0; // Count of additional clips loaded (for mapping calculation)
+    
     if (std::filesystem::exists(modelPath)) {
-        OE_INFO("Loading model: " + modelPath);
+        OE_INFO("Loading character model: " + modelPath);
         auto loadedMeshes = MeshLoader::LoadSceneFromFile(modelPath);
         
         if (!loadedMeshes.empty()) {
@@ -198,8 +213,6 @@ int main() {
                        std::to_string(materialCount) + " materials");
                 
                 // For now, create one entity per mesh (with first material)
-                // TODO: If mesh has multiple submeshes with different materials, 
-                // we should create separate entities or handle submesh rendering per-material
                 Entity modelEntity = scene.CreateEntity(loadedMesh->name.empty() ? "ModelMesh_" + std::to_string(i) : loadedMesh->name);
                 auto& modelTransform = scene.GetRegistry().get<Transform>(modelEntity);
                 
@@ -216,15 +229,12 @@ int main() {
                 bool hasAnimation = loadedMesh->skeleton && !loadedMesh->animations.empty();
                 
                 // Always set the correct shader for deferred rendering (replace any existing shader)
-                // This ensures animated models use skinned shader and static models use regular gbuffer shader
                 if (modelMaterial) {
                     auto gbufferShader = std::make_shared<Shader>();
                     if (hasAnimation) {
-                        // Use skinned shader for animated models
                         gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer_skinned.vert", 
                                                     "assets/shaders/passes/deferred/gbuffer_skinned.frag");
                     } else {
-                        // Use regular shader for static models
                         gbufferShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert", 
                                                     "assets/shaders/passes/deferred/gbuffer.frag");
                     }
@@ -236,6 +246,8 @@ int main() {
                 
                 // Attach AnimationComponent if model has skeleton/animation
                 if (hasAnimation) {
+                    characterEntity = modelEntity; // Store reference to character entity
+                    
                     AnimationComponent animComp;
                     animComp.skeleton = std::static_pointer_cast<void>(loadedMesh->skeleton);
                     
@@ -246,9 +258,9 @@ int main() {
                         animComp.clips.push_back(std::static_pointer_cast<void>(clip));
                     }
                     
-                    // Auto-play first animation clip
-                    animComp.currentClipIndex = 0;  // Play first clip automatically
-                    animComp.isPlaying = true;       // Start playing automatically
+                    // Start with idle (first clip, looping)
+                    animComp.currentClipIndex = 0;
+                    animComp.isPlaying = true;
                     animComp.loop = true;
                     animComp.playbackSpeed = 1.0f;
                     animComp.boneMatricesDirty = true;
@@ -260,50 +272,21 @@ int main() {
                     OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, modelEntity);
                     
                     OE_INFO("  - Animation component attached (skeleton: " + std::to_string(loadedMesh->skeleton->GetBoneCount()) + " bones, " + std::to_string(loadedMesh->animations.size()) + " clips)");
-                    OE_INFO("  - Auto-playing first animation clip");
+                    OE_INFO("  - Starting with idle animation (clip 0)");
                 }
                 
                 // Log loaded textures for debugging
                 OE_INFO("Model entity '" + loadedMesh->name + "' created");
-                if (modelMaterial->GetTexture("u_AlbedoTexture")) {
-                    OE_INFO("  - Albedo texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_NormalTexture")) {
-                    OE_INFO("  - Normal texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_MetallicRoughnessTexture")) {
-                    OE_INFO("  - MetallicRoughness texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_MetallicTexture")) {
-                    OE_INFO("  - Metallic texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_RoughnessTexture")) {
-                    OE_INFO("  - Roughness texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_AOTexture")) {
-                    OE_INFO("  - AO texture loaded");
-                }
-                if (modelMaterial->GetTexture("u_EmissiveTexture")) {
-                    OE_INFO("  - Emissive texture loaded");
-                }
                 
-                // Attach physics body to model (dynamic, with mass)
-                // Use convex hull shape from mesh for collision
+                // Attach physics body to model (using convex hull)
                 if (loadedMesh->mesh) {
                     auto collisionShape = physicsWorld->CreateConvexHullShape(loadedMesh->mesh);
                     if (collisionShape) {
-                        // Position model above ground for physics test
-                        modelTransform.position = glm::vec3(0.0f, 5.0f, -5.0f); // Start 5 units above ground
+                        modelTransform.position = glm::vec3(0.0f, 2.0f, -5.0f); // Position above ground
                         modelTransform.scale = glm::vec3(0.1f);
-                        
-                        // Attach physics body with mass (dynamic)
                         if (PhysicsSystem::AttachPhysicsBody(scene, modelEntity, physicsWorld.get(), collisionShape, 1.0f, false)) {
                             OE_INFO("  - Physics body attached (dynamic, mass=1.0)");
-                        } else {
-                            OE_WARN("  - Failed to attach physics body to model");
                         }
-                    } else {
-                        OE_WARN("  - Failed to create collision shape for model");
                     }
                 }
             }
@@ -314,108 +297,175 @@ int main() {
         OE_WARN("Model file not found: " + modelPath);
     }
     
+    // Load additional animation files (Dying.fbx) and collect their clips
+    // IMPORTANT: Extract animations using the character's skeleton, not Dying.fbx's skeleton
+    std::string dyingFbxPath = resolveAssetPath("assets/models/Dying.fbx");
+    std::vector<std::shared_ptr<OpenEye::Animation::AnimationClip>> additionalClips;
+    
+    // Get character skeleton to use for extracting animations from Dying.fbx
+    std::shared_ptr<OpenEye::Animation::Skeleton> characterSkeleton = nullptr;
+    if (characterEntity != entt::null) {
+        auto& animComp = scene.GetRegistry().get<AnimationComponent>(characterEntity);
+        if (animComp.skeleton) {
+            characterSkeleton = std::static_pointer_cast<OpenEye::Animation::Skeleton>(animComp.skeleton);
+            OE_INFO("Using character skeleton to extract animations from Dying.fbx");
+        }
+    }
+    
+    if (std::filesystem::exists(dyingFbxPath) && characterSkeleton) {
+        OE_INFO("Loading additional animation file: " + dyingFbxPath);
+        
+        // Load the Assimp scene directly to extract animations
+        Assimp::Importer importer;
+        const aiScene* dyingScene = importer.ReadFile(
+            dyingFbxPath,
+            aiProcess_Triangulate | aiProcess_GenSmoothNormals | aiProcess_FlipUVs | aiProcess_CalcTangentSpace
+        );
+        
+        if (dyingScene && dyingScene->HasAnimations()) {
+            OE_INFO("  - Found " + std::to_string(dyingScene->mNumAnimations) + " animations in Dying.fbx");
+            
+            // Extract animations using character's skeleton (not Dying.fbx's skeleton)
+            auto dyingClips = OpenEye::Animation::AnimationLoader::ExtractAnimations(dyingScene, *characterSkeleton);
+            
+            for (const auto& clip : dyingClips) {
+                // Check if clip has any channels (only add if it has valid animation data)
+                size_t channelCount = clip->GetChannelCount();
+                if (channelCount > 0) {
+                    additionalClips.push_back(clip);
+                    OE_INFO("    - Extracted animation clip: " + clip->GetName() + 
+                           " (duration: " + std::to_string(clip->GetDuration()) + "s, " + 
+                           std::to_string(channelCount) + " channels)");
+                } else {
+                    OE_WARN("    - Skipping clip '" + clip->GetName() + "': no valid channels (0 channels)");
+                }
+            }
+            
+            OE_INFO("  - Successfully extracted " + std::to_string(additionalClips.size()) + " valid clips (out of " + std::to_string(dyingClips.size()) + " total) using character skeleton");
+        } else {
+            OE_WARN("  - Dying.fbx has no animations or failed to load");
+        }
+    } else {
+        if (!std::filesystem::exists(dyingFbxPath)) {
+            OE_WARN("Dying.fbx file not found at: " + dyingFbxPath);
+        }
+        if (!characterSkeleton) {
+            OE_WARN("Cannot extract animations: character skeleton not available");
+        }
+    }
+    
+    additionalClipsCount = additionalClips.size();
+    OE_INFO("Total additional clips collected: " + std::to_string(additionalClipsCount));
+    
+    // Merge Dying.fbx clips into existing list for all entities sharing the Kick skeleton
+    // This keeps original Kick clips and adds Dying clips, so both appear in the dropdown
+    if (characterEntity != entt::null) {
+        auto& registry = scene.GetRegistry();
+        auto& animCompRef = registry.get<AnimationComponent>(characterEntity);
+        if (!additionalClips.empty() && animCompRef.skeleton) {
+            auto targetSkeleton = animCompRef.skeleton;
+            auto animView = registry.view<AnimationComponent>();
+            size_t totalAppended = 0;
+            for (auto e : animView) {
+                auto& ac = registry.get<AnimationComponent>(e);
+                if (ac.skeleton == targetSkeleton) {
+                    size_t before = ac.clips.size();
+                    for (const auto& clip : additionalClips) {
+                        ac.clips.push_back(std::static_pointer_cast<void>(clip));
+                    }
+                    size_t appended = ac.clips.size() - before;
+                    totalAppended += appended;
+                    ac.boneMatricesDirty = true;
+                    OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, e);
+                }
+            }
+            OE_INFO("Appended Dying.fbx clips to entities sharing the character skeleton (added " + std::to_string(totalAppended) + " clips across entities)");
+        } else {
+            OE_WARN("No additional clips from Dying.fbx or missing character skeleton; showing existing clips only");
+        }
+    }
+    
     // Create ground plane for physics test
     OE_INFO("Creating ground plane for physics test...");
+    // Position ground top surface at y=0.0 (physics will auto-adjust center)
     Entity groundEntity = PhysicsSystem::CreateGroundPlane(
         scene,
         physicsWorld.get(),
-        glm::vec3(0.0f, -1.0f, 0.0f),  // Position ground at y=-1
+        glm::vec3(0.0f, 0.0f, 0.0f),  // Top surface position (physics center will be adjusted)
         glm::vec2(50.0f, 50.0f)         // 50x50 ground plane
     );
-    OE_INFO("Ground plane created successfully");
+    OE_INFO("Ground plane created successfully (top surface at y=0.0)");
     
-    // Create test particle emitters (positioned near the model)
-    // Model is at (0.0f, 5.0f, -5.0f) with scale 0.1f
-    glm::vec3 modelBasePos = glm::vec3(0.0f, 5.0f, -5.0f);
-    
-    OE_INFO("Creating test particle emitters...");
-    
-    // Fire effect (to the left of model, at ground level)
-    ParticleEmitterConfig fireConfig;
-    fireConfig.position = modelBasePos + glm::vec3(-2.0f, -4.0f, 0.0f);  // Left side, ground level
-    fireConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-    fireConfig.spread = 20.0f;
-    fireConfig.minSpeed = 0.5f;
-    fireConfig.maxSpeed = 2.0f;
-    fireConfig.minLifetime = 1.0f;  // Increased minimum lifetime
-    fireConfig.maxLifetime = 2.0f;  // Increased maximum lifetime
-    fireConfig.minSize = 0.5f;  // Increased size for visibility
-    fireConfig.maxSize = 1.0f;
-    fireConfig.startColor = glm::vec4(1.0f, 0.3f, 0.0f, 1.0f);  // Orange-red
-    fireConfig.endColor = glm::vec4(0.8f, 0.8f, 0.2f, 0.0f);    // Yellow fade
-    fireConfig.particlesPerSecond = 150.0f;
-    fireConfig.maxParticles = 500;
-    fireConfig.useGravity = false;  // Fire rises
-    fireConfig.gravity = glm::vec3(0.0f, 2.0f, 0.0f);  // Upward force
-    fireConfig.damping = 0.95f;
-    
-    auto fireEmitter = std::make_shared<ParticleEmitter>(fireConfig);
-    Entity fireEntity = scene.CreateEntity("FireParticles");
-    auto& fireTransform = scene.GetRegistry().get<Transform>(fireEntity);
-    fireTransform.position = fireConfig.position;
-    scene.GetRegistry().emplace<ParticleEmitterComponent>(fireEntity, fireEmitter);
-    
-    // Smoke effect (to the right of model, slightly above ground)
-    ParticleEmitterConfig smokeConfig;
-    smokeConfig.position = modelBasePos + glm::vec3(2.0f, -3.0f, 0.0f);  // Right side, slightly above ground
-    smokeConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-    smokeConfig.spread = 30.0f;
-    smokeConfig.minSpeed = 0.3f;
-    smokeConfig.maxSpeed = 1.0f;
-    smokeConfig.minLifetime = 3.0f;
-    smokeConfig.maxLifetime = 5.0f;
-    smokeConfig.minSize = 1.0f;  // Increased size for visibility
-    smokeConfig.maxSize = 2.0f;
-    smokeConfig.startColor = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);  // Dark gray
-    smokeConfig.endColor = glm::vec4(0.1f, 0.1f, 0.1f, 0.0f);    // Fade to black
-    smokeConfig.particlesPerSecond = 50.0f;
-    smokeConfig.maxParticles = 300;
-    smokeConfig.useGravity = false;
-    smokeConfig.gravity = glm::vec3(0.0f, 1.5f, 0.0f);  // Gentle upward drift
-    smokeConfig.damping = 0.98f;
-    
-    auto smokeEmitter = std::make_shared<ParticleEmitter>(smokeConfig);
-    Entity smokeEntity = scene.CreateEntity("SmokeParticles");
-    auto& smokeTransform = scene.GetRegistry().get<Transform>(smokeEntity);
-    smokeTransform.position = smokeConfig.position;
-    scene.GetRegistry().emplace<ParticleEmitterComponent>(smokeEntity, smokeEmitter);
-    
-    // Dust effect (behind model, at ground level)
-    ParticleEmitterConfig dustConfig;
-    dustConfig.position = modelBasePos + glm::vec3(0.0f, -4.0f, 1.0f);  // Behind model, ground level
-    dustConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-    dustConfig.spread = 45.0f;
-    dustConfig.minSpeed = 0.1f;
-    dustConfig.maxSpeed = 0.5f;
-    dustConfig.minLifetime = 2.0f;
-    dustConfig.maxLifetime = 4.0f;
-    dustConfig.minSize = 0.3f;  // Increased size for visibility
-    dustConfig.maxSize = 0.6f;
-    dustConfig.startColor = glm::vec4(0.6f, 0.5f, 0.4f, 0.6f);  // Brownish
-    dustConfig.endColor = glm::vec4(0.5f, 0.4f, 0.3f, 0.0f);
-    dustConfig.particlesPerSecond = 80.0f;
-    dustConfig.maxParticles = 400;
-    dustConfig.useGravity = true;
-    dustConfig.gravity = glm::vec3(0.0f, -2.0f, 0.0f);  // Gentle downward
-    dustConfig.damping = 0.9f;
-    
-    auto dustEmitter = std::make_shared<ParticleEmitter>(dustConfig);
-    Entity dustEntity = scene.CreateEntity("DustParticles");
-    auto& dustTransform = scene.GetRegistry().get<Transform>(dustEntity);
-    dustTransform.position = dustConfig.position;
-    scene.GetRegistry().emplace<ParticleEmitterComponent>(dustEntity, dustEmitter);
-    
-    OE_INFO("Particle emitters created: Fire, Smoke, Dust");
-    
-    // Store particle entity references for debug UI (declare static outside function scope)
-    // Count entities with Transform component (all entities should have this)
+    // Count entities
     size_t entityCount = scene.GetRegistry().view<Transform>().size();
     OE_INFO_F("Created %zu entities in scene", entityCount);
+
+    // Create a bouncing ball with physics
+    {
+        OE_INFO("Creating bouncing ball with physics...");
+        Entity ballEntity = scene.CreateEntity("BouncingBall");
+        auto& ballTransform = scene.GetRegistry().get<Transform>(ballEntity);
+        ballTransform.position = glm::vec3(0.0f, 5.0f, 0.0f); // Start 5 units above ground
+        ballTransform.scale = glm::vec3(1.0f); // Scale 1.0 (sphere mesh is already 0.5 radius)
+        
+        // Create sphere mesh for rendering
+        auto sphereMesh = MeshLoader::CreateSphere(32);
+        auto ballMaterial = std::make_shared<Material>(shader);
+        ballMaterial->SetAlbedo(glm::vec3(0.2f, 0.6f, 1.0f)); // Blue color
+        ballMaterial->SetMetallic(0.1f);
+        ballMaterial->SetRoughness(0.3f);
+        
+        scene.GetRegistry().emplace<Renderable>(ballEntity, sphereMesh, ballMaterial);
+        scene.GetRegistry().emplace<AABB>(ballEntity);
+        
+        // Create physics sphere shape (radius = 0.5 units)
+        // The sphere mesh from CreateSphere(32) has radius 0.5 by default
+        // Since scale is 1.0, physics radius matches visual radius
+        auto sphereShape = physicsWorld->CreateSphereShape(0.5f);
+        if (sphereShape) {
+            // Attach dynamic rigid body (mass > 0 makes it dynamic/bouncing)
+            if (PhysicsSystem::AttachPhysicsBody(scene, ballEntity, physicsWorld.get(), sphereShape, 1.0f, false)) {
+                // Get the physics body and set restitution (bounciness) for bouncing
+                auto& physicsBody = scene.GetRegistry().get<PhysicsBody>(ballEntity);
+                if (physicsBody.rigidBody) {
+                    // Set restitution BEFORE adding to world (restitution is used during collision response)
+                    physicsBody.rigidBody->setRestitution(0.9f); // 0.9 = very bouncy
+                    physicsBody.rigidBody->setFriction(0.7f);  // Higher friction to prevent sliding
+                    // Ensure the rigid body is active and awake
+                    physicsBody.rigidBody->setActivationState(DISABLE_DEACTIVATION); // Keep it always active
+                    physicsBody.rigidBody->activate(true); // Activate immediately
+                    // Set linear damping to reduce bounciness slightly (more realistic)
+                    physicsBody.rigidBody->setDamping(0.02f, 0.8f); // Very low linear damping (0.02) for maximum bouncy
+                    // Verify restitution was set
+                    float actualRestitution = physicsBody.rigidBody->getRestitution();
+                    OE_INFO("  - Bouncing ball created with physics (mass=1.0, radius=0.5, restitution=" + 
+                            std::to_string(actualRestitution) + ", active=true)");
+                    
+                    // Force update the motion state to ensure initial position is correct
+                    btTransform initialTransform;
+                    initialTransform.setOrigin(btVector3(0.0f, 5.0f, 0.0f));
+                    initialTransform.setRotation(btQuaternion::getIdentity());
+                    physicsBody.rigidBody->getMotionState()->setWorldTransform(initialTransform);
+                    physicsBody.rigidBody->setWorldTransform(initialTransform);
+                }
+            } else {
+                OE_WARN("  - Failed to attach physics body to ball");
+            }
+        } else {
+            OE_WARN("  - Failed to create sphere collision shape");
+        }
+    }
     
     // Camera setup (using standalone camera for now, will integrate with ECS later)
     Camera camera;
     camera.SetPosition(glm::vec3(0.0f, 0.0f, 5.0f));
-    camera.SetPerspective(45.0f, window.GetAspectRatio(), 0.1f, 100.0f);
+    // Ensure aspect ratio is valid (avoid division by zero)
+    float aspect = window.GetAspectRatio();
+    if (aspect <= 0.0f || !std::isfinite(aspect)) {
+        aspect = 16.0f / 9.0f; // Default to 16:9 if invalid
+        OE_WARN("Invalid window aspect ratio, using default 16:9");
+    }
+    camera.SetPerspective(45.0f, aspect, 0.1f, 100.0f);
     camera.SetMovementSpeed(5.0f);
     camera.SetMouseSensitivity(0.1f);
     
@@ -538,8 +588,11 @@ int main() {
         float deltaTime = Time::DeltaTime();
         camera.Update(deltaTime);
         
-        // Update projection if window was resized
-        camera.SetPerspective(camera.GetFOV(), window.GetAspectRatio(), 0.1f, 100.0f);
+        // Update projection if window was resized (with safety check)
+        float newAspect = window.GetAspectRatio();
+        if (newAspect > 0.0f && std::isfinite(newAspect)) {
+            camera.SetPerspective(camera.GetFOV(), newAspect, 0.1f, 100.0f);
+        }
         
         // Update ECS systems
         TransformSystem::Update(scene);
@@ -550,8 +603,107 @@ int main() {
         // Update Animations (must be called after physics, before rendering)
         OpenEye::Animation::AnimationSystem::Update(scene, deltaTime);
         
-        // Update Particle System
-        ParticleSystem::Update(scene, deltaTime);
+        // Handle keypress animation triggers (m/n/o/p)
+        if (characterEntity != entt::null) {
+            auto& animComp = scene.GetRegistry().get<AnimationComponent>(characterEntity);
+            
+            // Check if animation finished (non-looping animation reached end)
+            if (!animComp.loop && animComp.isPlaying && animComp.currentClipIndex >= 0) {
+                if (animComp.currentClipIndex < static_cast<int>(animComp.clips.size())) {
+                    auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[animComp.currentClipIndex]);
+                    if (clip && animComp.currentTime >= clip->GetDuration()) {
+                        // Animation finished, return to idle
+                        animComp.currentClipIndex = idleClipIndex;
+                        animComp.currentTime = 0.0f;
+                        animComp.loop = true;
+                        animComp.isPlaying = true;
+                        animComp.boneMatricesDirty = true;
+                        OE_INFO("Animation finished, returning to idle");
+                    }
+                }
+            }
+            
+            // Handle keypresses for animation switching
+            static int keyToClipMap[4] = {-1, -1, -1, -1}; // m/n/o/p -> clip indices (set once)
+            static bool mapInitialized = false;
+            
+            if (!mapInitialized && animComp.clips.size() > 0) {
+                // Initialize mapping: m=1, n=2, o=first from Dying, p=second from Dying
+                // Find where Dying clips start (assume first clips are from Kick, rest from Dying)
+                size_t kickClipCount = animComp.clips.size() - additionalClipsCount;
+                
+                keyToClipMap[0] = (kickClipCount > 1) ? 1 : 0; // M -> second clip from Kick or first
+                keyToClipMap[1] = (kickClipCount > 2) ? 2 : ((kickClipCount > 1) ? 1 : 0); // N -> third or second
+                keyToClipMap[2] = static_cast<int>(kickClipCount); // O -> first Dying clip
+                keyToClipMap[3] = static_cast<int>(kickClipCount + 1 < animComp.clips.size() ? kickClipCount + 1 : kickClipCount); // P -> second Dying clip
+                
+                mapInitialized = true;
+                OE_INFO("Animation key mapping initialized:");
+                OE_INFO("  M -> clip " + std::to_string(keyToClipMap[0]));
+                OE_INFO("  N -> clip " + std::to_string(keyToClipMap[1]));
+                OE_INFO("  O -> clip " + std::to_string(keyToClipMap[2]));
+                OE_INFO("  P -> clip " + std::to_string(keyToClipMap[3]));
+            }
+            
+            // Check keypresses
+            if (Input::IsKeyJustPressed(GLFW_KEY_M) && keyToClipMap[0] >= 0 && keyToClipMap[0] < static_cast<int>(animComp.clips.size())) {
+                auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[keyToClipMap[0]]);
+                OE_INFO("Playing animation M (clip " + std::to_string(keyToClipMap[0]) + ", name: " + (clip ? clip->GetName() : "unknown") + ")");
+                OpenEye::Animation::AnimationSystem::PlayAnimation(scene.GetRegistry(), characterEntity, keyToClipMap[0], 0.2f);
+                animComp.loop = false; // Play once, then return to idle
+            }
+            if (Input::IsKeyJustPressed(GLFW_KEY_N) && keyToClipMap[1] >= 0 && keyToClipMap[1] < static_cast<int>(animComp.clips.size())) {
+                auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[keyToClipMap[1]]);
+                OE_INFO("Playing animation N (clip " + std::to_string(keyToClipMap[1]) + ", name: " + (clip ? clip->GetName() : "unknown") + ")");
+                OpenEye::Animation::AnimationSystem::PlayAnimation(scene.GetRegistry(), characterEntity, keyToClipMap[1], 0.2f);
+                animComp.loop = false;
+            }
+            if (Input::IsKeyJustPressed(GLFW_KEY_O) && keyToClipMap[2] >= 0 && keyToClipMap[2] < static_cast<int>(animComp.clips.size())) {
+                auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[keyToClipMap[2]]);
+                if (clip) {
+                    size_t channelCount = clip->GetChannelCount();
+                    OE_INFO("Playing animation O (clip " + std::to_string(keyToClipMap[2]) + ", name: " + clip->GetName() + 
+                           ", channels: " + std::to_string(channelCount) + ", duration: " + std::to_string(clip->GetDuration()) + "s)");
+                    if (channelCount == 0) {
+                        OE_WARN("  WARNING: Clip has 0 channels - animation may not play!");
+                    }
+                } else {
+                    OE_WARN("Playing animation O (clip " + std::to_string(keyToClipMap[2]) + "): Invalid clip pointer!");
+                }
+                OpenEye::Animation::AnimationSystem::PlayAnimation(scene.GetRegistry(), characterEntity, keyToClipMap[2], 0.2f);
+                animComp.loop = false;
+            }
+            if (Input::IsKeyJustPressed(GLFW_KEY_P) && keyToClipMap[3] >= 0 && keyToClipMap[3] < static_cast<int>(animComp.clips.size())) {
+                auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[keyToClipMap[3]]);
+                if (clip) {
+                    size_t channelCount = clip->GetChannelCount();
+                    OE_INFO("Playing animation P (clip " + std::to_string(keyToClipMap[3]) + ", name: " + clip->GetName() + 
+                           ", channels: " + std::to_string(channelCount) + ", duration: " + std::to_string(clip->GetDuration()) + "s)");
+                    if (channelCount == 0) {
+                        OE_WARN("  WARNING: Clip has 0 channels - animation may not play!");
+                    }
+                } else {
+                    OE_WARN("Playing animation P (clip " + std::to_string(keyToClipMap[3]) + "): Invalid clip pointer!");
+                }
+                OpenEye::Animation::AnimationSystem::PlayAnimation(scene.GetRegistry(), characterEntity, keyToClipMap[3], 0.2f);
+                animComp.loop = false;
+            }
+            
+            // Debug: Log current animation state
+            static float lastLogTime = 0.0f;
+            float currentTime = OpenEye::Core::Time::TotalTime();
+            if (currentTime - lastLogTime > 2.0f) { // Log every 2 seconds
+                if (animComp.currentClipIndex >= 0 && animComp.currentClipIndex < static_cast<int>(animComp.clips.size())) {
+                    auto currentClip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[animComp.currentClipIndex]);
+                    if (currentClip) {
+                        OE_INFO("Current animation: clip " + std::to_string(animComp.currentClipIndex) + 
+                               " (" + currentClip->GetName() + "), time=" + std::to_string(animComp.currentTime) + 
+                               "/" + std::to_string(currentClip->GetDuration()) + ", loop=" + (animComp.loop ? "yes" : "no"));
+                    }
+                }
+                lastLogTime = currentTime;
+            }
+        }
         
         // Rotate the main cube
         float time = Time::TotalTime();
@@ -674,9 +826,6 @@ int main() {
             renderPipeline.RenderFrame(scene, camera, params, renderOptions);
         }
         
-        // Render particles (after main rendering, before UI)
-        ParticleSystem::Render(scene, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix());
-        
         // --- ImGui UI ---
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -782,6 +931,7 @@ int main() {
         }
         ImGui::End();
 
+
         // FrameGraph panel (execution order and timings)
         ImGui::Begin("FrameGraph");
         if (useDeferred && pipelineInitialized) {
@@ -856,14 +1006,21 @@ int main() {
                         selectedClipIndex = animComp.currentClipIndex;
                     }
                     
-                    // Build clip names list
+                    // Build clip names list (index, name, duration, channels)
                     std::vector<std::string> clipNames;
+                    clipNames.reserve(animComp.clips.size());
                     for (size_t i = 0; i < animComp.clips.size(); i++) {
                         auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[i]);
                         if (clip) {
-                            clipNames.push_back("Clip " + std::to_string(i) + " (" + std::to_string(clip->GetDuration()) + "s)");
+                            std::string name = clip->GetName();
+                            if (name.empty()) name = "Unnamed";
+                            clipNames.push_back(
+                                std::to_string(i) + ": " + name +
+                                " (" + std::to_string(clip->GetDuration()) + "s, " +
+                                std::to_string(clip->GetChannelCount()) + " ch)"
+                            );
                         } else {
-                            clipNames.push_back("Clip " + std::to_string(i));
+                            clipNames.push_back(std::to_string(i) + ": (invalid)");
                         }
                     }
                     
@@ -958,218 +1115,139 @@ int main() {
         }
         ImGui::End();
         
-        // Particle System Debug panel
-        ImGui::Begin("Particle System");
+        // Physics Ball Debug Panel
+        ImGui::Begin("Physics Ball Debug");
         {
-            auto& particleRegistry = scene.GetRegistry();
-            
-            // Find particle entities by name
-            Entity fireParticleEntity = entt::null;
-            Entity smokeParticleEntity = entt::null;
-            Entity dustParticleEntity = entt::null;
-            
-            auto nameView = particleRegistry.view<Name>();
-            for (auto e : nameView) {
-                const auto& name = particleRegistry.get<Name>(e);
-                if (name.name == "FireParticles") fireParticleEntity = e;
-                else if (name.name == "SmokeParticles") smokeParticleEntity = e;
-                else if (name.name == "DustParticles") dustParticleEntity = e;
-            }
-            
-            // Fire Particles
-            if (fireParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(fireParticleEntity)) {
-                auto& fireComp = particleRegistry.get<ParticleEmitterComponent>(fireParticleEntity);
-                if (fireComp.emitter) {
-                    ImGui::PushID("Fire");
-                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Fire Particles");
-                    ImGui::Separator();
-                    
-                    auto& fireParticleConfig = fireComp.emitter->GetConfig();
-                    auto& fireParticleTransform = particleRegistry.get<Transform>(fireParticleEntity);
-                    
-                    // Position
-                    ImGui::DragFloat3("Position", &fireParticleTransform.position.x, 0.1f);
-                    fireComp.emitter->SetPosition(fireParticleTransform.position);
-                    
-                    // Direction
-                    ImGui::DragFloat3("Direction", &fireParticleConfig.direction.x, 0.01f);
-                    
-                    // Spread
-                    ImGui::DragFloat("Spread (deg)", &fireParticleConfig.spread, 1.0f, 0.0f, 180.0f);
-                    
-                    // Speed
-                    ImGui::DragFloatRange2("Speed", &fireParticleConfig.minSpeed, &fireParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
-                    
-                    // Lifetime
-                    ImGui::DragFloatRange2("Lifetime", &fireParticleConfig.minLifetime, &fireParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
-                    
-                    // Size
-                    ImGui::DragFloatRange2("Size", &fireParticleConfig.minSize, &fireParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
-                    
-                    // Colors
-                    ImGui::ColorEdit4("Start Color", &fireParticleConfig.startColor.x);
-                    ImGui::ColorEdit4("End Color", &fireParticleConfig.endColor.x);
-                    
-                    // Emission
-                    ImGui::DragFloat("Particles/Second", &fireParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
-                    ImGui::DragInt("Max Particles", &fireParticleConfig.maxParticles, 1, 0, 10000);
-                    
-                    // Physics
-                    ImGui::Checkbox("Use Gravity", &fireParticleConfig.useGravity);
-                    ImGui::DragFloat3("Gravity", &fireParticleConfig.gravity.x, 0.1f);
-                    ImGui::DragFloat("Damping", &fireParticleConfig.damping, 0.01f, 0.0f, 1.0f);
-                    
-                    // Control
-                    bool isPlaying = fireComp.emitter->IsPlaying();
-                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
-                        if (isPlaying) fireComp.emitter->Stop();
-                        else fireComp.emitter->Start();
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("Reset")) {
-                        fireComp.emitter->Reset();
-                    }
-                    
-                    // Stats
-                    ImGui::Separator();
-                    ImGui::Text("Active Particles: %zu / %d", 
-                               fireComp.emitter->GetActiveParticleCount(), 
-                               fireParticleConfig.maxParticles);
-                    
-                    ImGui::PopID();
+            // Find ball entity by name
+            auto& sceneRegistry = scene.GetRegistry();
+            Entity ballEntity = entt::null;
+            auto nameView = sceneRegistry.view<Name>();
+            for (auto entity : nameView) {
+                const auto& name = nameView.get<Name>(entity);
+                if (name.name == "BouncingBall") {
+                    ballEntity = entity;
+                    break;
                 }
             }
             
-            ImGui::Separator();
-            
-            // Smoke Particles
-            if (smokeParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(smokeParticleEntity)) {
-                auto& smokeComp = particleRegistry.get<ParticleEmitterComponent>(smokeParticleEntity);
-                if (smokeComp.emitter) {
-                    ImGui::PushID("Smoke");
-                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Smoke Particles");
+            if (ballEntity != entt::null && sceneRegistry.all_of<PhysicsBody, Transform>(ballEntity)) {
+                auto& physicsBody = sceneRegistry.get<PhysicsBody>(ballEntity);
+                auto& transform = sceneRegistry.get<Transform>(ballEntity);
+                
+                if (physicsBody.rigidBody) {
+                    // Current state display
+                    ImGui::Text("Ball State:");
+                    ImGui::Text("Position: (%.2f, %.2f, %.2f)", transform.position.x, transform.position.y, transform.position.z);
+                    
+                    btVector3 velocity = physicsBody.rigidBody->getLinearVelocity();
+                    ImGui::Text("Velocity: (%.2f, %.2f, %.2f)", velocity.x(), velocity.y(), velocity.z());
+                    ImGui::Text("Speed: %.2f m/s", velocity.length());
+                    
+                    int activationState = physicsBody.rigidBody->getActivationState();
+                    ImGui::Text("Activation: %s", (activationState == ACTIVE_TAG ? "Active" : "Inactive"));
+                    
                     ImGui::Separator();
                     
-                    auto& smokeParticleConfig = smokeComp.emitter->GetConfig();
-                    auto& smokeParticleTransform = particleRegistry.get<Transform>(smokeParticleEntity);
-                    
-                    // Position
-                    ImGui::DragFloat3("Position", &smokeParticleTransform.position.x, 0.1f);
-                    smokeComp.emitter->SetPosition(smokeParticleTransform.position);
-                    
-                    // Direction
-                    ImGui::DragFloat3("Direction", &smokeParticleConfig.direction.x, 0.01f);
-                    
-                    // Spread
-                    ImGui::DragFloat("Spread (deg)", &smokeParticleConfig.spread, 1.0f, 0.0f, 180.0f);
-                    
-                    // Speed
-                    ImGui::DragFloatRange2("Speed", &smokeParticleConfig.minSpeed, &smokeParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
-                    
-                    // Lifetime
-                    ImGui::DragFloatRange2("Lifetime", &smokeParticleConfig.minLifetime, &smokeParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
-                    
-                    // Size
-                    ImGui::DragFloatRange2("Size", &smokeParticleConfig.minSize, &smokeParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
-                    
-                    // Colors
-                    ImGui::ColorEdit4("Start Color", &smokeParticleConfig.startColor.x);
-                    ImGui::ColorEdit4("End Color", &smokeParticleConfig.endColor.x);
-                    
-                    // Emission
-                    ImGui::DragFloat("Particles/Second", &smokeParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
-                    ImGui::DragInt("Max Particles", &smokeParticleConfig.maxParticles, 1, 0, 10000);
-                    
-                    // Physics
-                    ImGui::Checkbox("Use Gravity", &smokeParticleConfig.useGravity);
-                    ImGui::DragFloat3("Gravity", &smokeParticleConfig.gravity.x, 0.1f);
-                    ImGui::DragFloat("Damping", &smokeParticleConfig.damping, 0.01f, 0.0f, 1.0f);
-                    
-                    // Control
-                    bool isPlaying = smokeComp.emitter->IsPlaying();
-                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
-                        if (isPlaying) smokeComp.emitter->Stop();
-                        else smokeComp.emitter->Start();
+                    // Bounciness controls
+                    ImGui::Text("Bounce Settings:");
+                    static float restitution = 0.9f;
+                    if (ImGui::DragFloat("Restitution", &restitution, 0.01f, 0.0f, 2.0f)) {
+                        physicsBody.rigidBody->setRestitution(restitution);
                     }
                     ImGui::SameLine();
-                    if (ImGui::Button("Reset")) {
-                        smokeComp.emitter->Reset();
+                    if (ImGui::Button("Reset##Rest")) {
+                        restitution = 0.9f;
+                        physicsBody.rigidBody->setRestitution(restitution);
                     }
                     
-                    // Stats
-                    ImGui::Separator();
-                    ImGui::Text("Active Particles: %zu / %d", 
-                               smokeComp.emitter->GetActiveParticleCount(), 
-                               smokeParticleConfig.maxParticles);
-                    
-                    ImGui::PopID();
-                }
-            }
-            
-            ImGui::Separator();
-            
-            // Dust Particles
-            if (dustParticleEntity != entt::null && particleRegistry.all_of<ParticleEmitterComponent>(dustParticleEntity)) {
-                auto& dustComp = particleRegistry.get<ParticleEmitterComponent>(dustParticleEntity);
-                if (dustComp.emitter) {
-                    ImGui::PushID("Dust");
-                    ImGui::TextColored(ImVec4(0.6f, 0.5f, 0.4f, 1.0f), "Dust Particles");
-                    ImGui::Separator();
-                    
-                    auto& dustParticleConfig = dustComp.emitter->GetConfig();
-                    auto& dustParticleTransform = particleRegistry.get<Transform>(dustParticleEntity);
-                    
-                    // Position
-                    ImGui::DragFloat3("Position", &dustParticleTransform.position.x, 0.1f);
-                    dustComp.emitter->SetPosition(dustParticleTransform.position);
-                    
-                    // Direction
-                    ImGui::DragFloat3("Direction", &dustParticleConfig.direction.x, 0.01f);
-                    
-                    // Spread
-                    ImGui::DragFloat("Spread (deg)", &dustParticleConfig.spread, 1.0f, 0.0f, 180.0f);
-                    
-                    // Speed
-                    ImGui::DragFloatRange2("Speed", &dustParticleConfig.minSpeed, &dustParticleConfig.maxSpeed, 0.1f, 0.0f, 10.0f);
-                    
-                    // Lifetime
-                    ImGui::DragFloatRange2("Lifetime", &dustParticleConfig.minLifetime, &dustParticleConfig.maxLifetime, 0.1f, 0.0f, 10.0f);
-                    
-                    // Size
-                    ImGui::DragFloatRange2("Size", &dustParticleConfig.minSize, &dustParticleConfig.maxSize, 0.01f, 0.0f, 5.0f);
-                    
-                    // Colors
-                    ImGui::ColorEdit4("Start Color", &dustParticleConfig.startColor.x);
-                    ImGui::ColorEdit4("End Color", &dustParticleConfig.endColor.x);
-                    
-                    // Emission
-                    ImGui::DragFloat("Particles/Second", &dustParticleConfig.particlesPerSecond, 1.0f, 0.0f, 1000.0f);
-                    ImGui::DragInt("Max Particles", &dustParticleConfig.maxParticles, 1, 0, 10000);
-                    
-                    // Physics
-                    ImGui::Checkbox("Use Gravity", &dustParticleConfig.useGravity);
-                    ImGui::DragFloat3("Gravity", &dustParticleConfig.gravity.x, 0.1f);
-                    ImGui::DragFloat("Damping", &dustParticleConfig.damping, 0.01f, 0.0f, 1.0f);
-                    
-                    // Control
-                    bool isPlaying = dustComp.emitter->IsPlaying();
-                    if (ImGui::Button(isPlaying ? "Pause" : "Play")) {
-                        if (isPlaying) dustComp.emitter->Stop();
-                        else dustComp.emitter->Start();
+                    static float friction = 0.7f;
+                    if (ImGui::DragFloat("Friction", &friction, 0.01f, 0.0f, 2.0f)) {
+                        physicsBody.rigidBody->setFriction(friction);
                     }
+                    
+                    static float linearDamping = 0.02f;
+                    static float angularDamping = 0.8f;
+                    if (ImGui::DragFloat("Linear Damping", &linearDamping, 0.01f, 0.0f, 1.0f)) {
+                        physicsBody.rigidBody->setDamping(linearDamping, angularDamping);
+                    }
+                    if (ImGui::DragFloat("Angular Damping", &angularDamping, 0.01f, 0.0f, 1.0f)) {
+                        physicsBody.rigidBody->setDamping(linearDamping, angularDamping);
+                    }
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Physics Settings:");
+                    
+                    static float mass = 1.0f;
+                    ImGui::Text("Mass: %.2f (read-only)", physicsBody.mass);
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Actions:");
+                    
+                    if (ImGui::Button("Reset Position")) {
+                        transform.position = glm::vec3(0.0f, 5.0f, 0.0f);
+                        btTransform resetTransform;
+                        resetTransform.setOrigin(btVector3(0.0f, 5.0f, 0.0f));
+                        resetTransform.setRotation(btQuaternion::getIdentity());
+                        physicsBody.rigidBody->getMotionState()->setWorldTransform(resetTransform);
+                        physicsBody.rigidBody->setWorldTransform(resetTransform);
+                        physicsBody.rigidBody->setLinearVelocity(btVector3(0, 0, 0));
+                        physicsBody.rigidBody->setAngularVelocity(btVector3(0, 0, 0));
+                        physicsBody.rigidBody->activate(true);
+                        TransformSystem::MarkDirty(sceneRegistry, ballEntity);
+                    }
+                    
                     ImGui::SameLine();
-                    if (ImGui::Button("Reset")) {
-                        dustComp.emitter->Reset();
+                    if (ImGui::Button("Apply Upward Force")) {
+                        physicsBody.rigidBody->applyCentralImpulse(btVector3(0, 10.0f, 0));
+                        physicsBody.rigidBody->activate(true);
                     }
                     
-                    // Stats
-                    ImGui::Separator();
-                    ImGui::Text("Active Particles: %zu / %d", 
-                               dustComp.emitter->GetActiveParticleCount(), 
-                               dustParticleConfig.maxParticles);
+                    if (ImGui::Button("Apply Forward Force")) {
+                        physicsBody.rigidBody->applyCentralImpulse(btVector3(0, 0, -5.0f));
+                        physicsBody.rigidBody->activate(true);
+                    }
                     
-                    ImGui::PopID();
+                    ImGui::SameLine();
+                    if (ImGui::Button("Stop")) {
+                        physicsBody.rigidBody->setLinearVelocity(btVector3(0, 0, 0));
+                        physicsBody.rigidBody->setAngularVelocity(btVector3(0, 0, 0));
+                    }
+                    
+                    if (ImGui::Button("Force Activate")) {
+                        physicsBody.rigidBody->setActivationState(DISABLE_DEACTIVATION);
+                        physicsBody.rigidBody->activate(true);
+                    }
+                    
+                    ImGui::Separator();
+                    ImGui::Text("Ground Restitution:");
+                    // Find ground entity
+                    Entity groundPlaneEntity = entt::null;
+                    for (auto entity : nameView) {
+                        const auto& groundName = nameView.get<Name>(entity);
+                        if (groundName.name == "GroundPlane") {
+                            groundPlaneEntity = entity;
+                            break;
+                        }
+                    }
+                    
+                    if (groundPlaneEntity != entt::null && sceneRegistry.all_of<PhysicsBody>(groundPlaneEntity)) {
+                        auto& groundPhysicsBody = sceneRegistry.get<PhysicsBody>(groundPlaneEntity);
+                        if (groundPhysicsBody.rigidBody) {
+                            static float groundRestitution = 0.0f;
+                            float currentGroundRest = groundPhysicsBody.rigidBody->getRestitution();
+                            if (ImGui::DragFloat("Ground Restitution", &groundRestitution, 0.01f, 0.0f, 2.0f)) {
+                                groundPhysicsBody.rigidBody->setRestitution(groundRestitution);
+                            }
+                            if (currentGroundRest != groundRestitution) {
+                                groundRestitution = currentGroundRest;
+                            }
+                        }
+                    }
+                } else {
+                    ImGui::Text("Ball has no physics body!");
                 }
+            } else {
+                ImGui::Text("Ball entity not found or missing components!");
             }
         }
         ImGui::End();

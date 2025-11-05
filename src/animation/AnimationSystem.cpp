@@ -1,4 +1,5 @@
 #include "AnimationSystem.h"
+#include "AnimationStateMachine.h"
 #include "ecs/Components.h"
 #include "core/log/Log.h"
 #include <algorithm>
@@ -22,6 +23,32 @@ void AnimationSystem::UpdateEntity(entt::registry& registry, entt::entity entity
     
     if (!animComponent.skeleton) {
         return;
+    }
+    
+    // Update state machine if present (this drives animation selection)
+    if (animComponent.stateMachine) {
+        auto stateMachine = std::static_pointer_cast<AnimationStateMachine>(animComponent.stateMachine);
+        if (stateMachine && stateMachine->IsValid()) {
+            // Update state machine (evaluates transitions)
+            stateMachine->Update(deltaTime);
+            
+            // Get current state's clip index and settings
+            int newClipIndex = stateMachine->GetCurrentClipIndex();
+            float newPlaybackSpeed = stateMachine->GetCurrentPlaybackSpeed();
+            bool newLoop = stateMachine->GetCurrentLoop();
+            float blendTime = stateMachine->GetCurrentBlendTime();
+            
+            // If state machine changed the clip, update animation
+            if (newClipIndex >= 0 && newClipIndex != animComponent.currentClipIndex) {
+                PlayAnimation(registry, entity, newClipIndex, blendTime);
+                animComponent.playbackSpeed = newPlaybackSpeed;
+                animComponent.loop = newLoop;
+            } else if (newClipIndex >= 0) {
+                // Update playback speed and loop from state machine
+                animComponent.playbackSpeed = newPlaybackSpeed;
+                animComponent.loop = newLoop;
+            }
+        }
     }
     
     // Update animation time (only if playing and has a clip)

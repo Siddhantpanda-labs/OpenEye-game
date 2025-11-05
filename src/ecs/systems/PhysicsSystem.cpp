@@ -121,6 +121,19 @@ void PhysicsSystem::SyncPhysicsToTransform(Scene& scene) {
             transform.rotation = rotation;
             transform.dirty = true;
         }
+        
+        // Debug: Log first few physics updates for ball to verify it's moving
+        static int ballUpdateCount = 0;
+        static float lastBallY = position.y;
+        if (ballUpdateCount < 10) {
+            Core::Log::Info("PhysicsSystem: Ball position from physics: (" + 
+                std::to_string(position.x) + ", " + 
+                std::to_string(position.y) + ", " + 
+                std::to_string(position.z) + 
+                ") deltaY=" + std::to_string(position.y - lastBallY));
+            lastBallY = position.y;
+            ballUpdateCount++;
+        }
     }
 }
 
@@ -224,13 +237,25 @@ Entity PhysicsSystem::CreateGroundPlane(
     
     // Set transform
     auto& transform = scene.GetRegistry().get<Transform>(groundEntity);
-    transform.position = position;
     transform.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);  // Identity rotation
-    transform.scale = glm::vec3(size.x, 1.0f, size.y);  // Scale for visual representation
+    
+    // Create collision shape (box shape for ground)
+    // Make ground thin (height = 0.2 units) so objects sit on top surface
+    glm::vec3 halfExtents(size.x * 0.5f, 0.1f, size.y * 0.5f); // Height = 0.2 units total
+    auto groundShape = physicsWorld->CreateBoxShape(halfExtents);
+    
+    // Position ground so top surface is at position.y
+    // Physics center should be at position.y - halfExtents.y
+    glm::vec3 physicsCenter = position;
+    physicsCenter.y = position.y - halfExtents.y; // Shift down by half height
+    
+    // Visual: cube mesh is 1x1x1, scale to match physics size
+    // Visual height = 0.2, so scale.y = 0.2
+    transform.scale = glm::vec3(size.x, 0.2f, size.y);
+    // Visual position: top surface at position.y, so center is at position.y - 0.1
+    transform.position = physicsCenter;
     
     // Create visual representation (simple box mesh)
-    // For now, we'll create a simple box mesh for rendering
-    // In the future, this could use a proper plane mesh
     auto groundMesh = Rendering::MeshLoader::CreateCube();
     
     // Create material
@@ -245,12 +270,15 @@ Entity PhysicsSystem::CreateGroundPlane(
     scene.GetRegistry().emplace<Renderable>(groundEntity, groundMesh, groundMaterial);
     scene.GetRegistry().emplace<AABB>(groundEntity);
     
-    // Create collision shape (box shape for ground)
-    glm::vec3 halfExtents(size.x * 0.5f, 0.5f, size.y * 0.5f);
-    auto groundShape = physicsWorld->CreateBoxShape(halfExtents);
-    
-    // Attach physics body (static, mass = 0)
-    AttachPhysicsBody(scene, groundEntity, physicsWorld, groundShape, 0.0f, false);
+    // Attach physics body (static, mass = 0) at physics center
+    if (AttachPhysicsBody(scene, groundEntity, physicsWorld, groundShape, 0.0f, false)) {
+        // Set ground properties (high friction, no bounce for ball to bounce properly)
+        auto& physicsBody = scene.GetRegistry().get<PhysicsBody>(groundEntity);
+        if (physicsBody.rigidBody) {
+            physicsBody.rigidBody->setRestitution(0.0f); // Non-bouncy ground (ball bounces due to its own restitution)
+            physicsBody.rigidBody->setFriction(0.8f);     // High friction for realism
+        }
+    }
     
     Core::Log::Info("PhysicsSystem: Created ground plane at (" + 
             std::to_string(position.x) + ", " + 

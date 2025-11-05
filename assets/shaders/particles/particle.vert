@@ -9,6 +9,7 @@ layout(location = 2) in vec3 a_ParticlePosition;  // Particle world position
 layout(location = 3) in float a_ParticleSize;     // Particle size
 layout(location = 4) in vec4 a_ParticleColor;     // Particle color (RGBA)
 layout(location = 5) in float a_ParticleRotation; // Particle rotation
+layout(location = 6) in float a_ParticleAge;     // Normalized age 0..1
 
 uniform mat4 u_View;
 uniform mat4 u_Projection;
@@ -17,6 +18,7 @@ uniform vec3 u_CameraUp;       // Camera up vector (for billboard)
 
 out vec2 v_TexCoord;
 out vec4 v_Color;
+out float v_AgeNorm;
 
 void main() {
     // Billboard calculation: align quad to face camera
@@ -42,5 +44,6 @@ void main() {
     // Pass through
     v_TexCoord = a_TexCoord;
     v_Color = a_ParticleColor;
+    v_AgeNorm = a_ParticleAge;
 }
 

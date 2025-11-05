@@ -226,12 +226,23 @@ add_library(OpenEyeCore STATIC
     src/animation/AnimationLoader.h
     src/animation/AnimationSystem.cpp
     src/animation/AnimationSystem.h
+    src/animation/AnimationStateMachine.cpp
+    src/animation/AnimationStateMachine.h
     
     # Particle systems
     src/particles/ParticleEmitter.cpp
     src/particles/ParticleEmitter.h
     src/particles/ParticleRenderer.cpp
     src/particles/ParticleRenderer.h
+    
+    # Fluid systems (volumetric)
+    src/fluids/FluidCommon.h
+    src/fluids/FluidSimulation.cpp
+    src/fluids/FluidSimulation.h
+    src/fluids/FluidRenderer.cpp
+    src/fluids/FluidRenderer.h
+    src/ecs/systems/FluidSystem.cpp
+    src/ecs/systems/FluidSystem.h
     
     # Physics systems
     src/physics/PhysicsWorld.cpp

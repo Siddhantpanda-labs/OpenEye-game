@@ -4,6 +4,8 @@
 #include "../Components.h"
 #include "../../rendering/Camera.h"
 #include <memory>
+#include <cstdint>
+#include <glad/glad.h>
 
 // Forward declaration
 namespace OpenEye {
@@ -35,7 +37,10 @@ public:
      * @param projectionMatrix Projection matrix
      */
     static void Render(Scene& scene, const Rendering::Camera& camera,
-                      const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+                      const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix,
+                      GLuint sceneDepthTexture,
+                      std::uint32_t viewportWidth,
+                      std::uint32_t viewportHeight);
 
 private:
     static bool s_rendererInitialized;

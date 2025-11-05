@@ -5,6 +5,13 @@
 #include "Skeleton.h"
 #include "AnimationClip.h"
 
+// Forward declaration
+namespace OpenEye {
+namespace Animation {
+    class AnimationStateMachine;
+}
+}
+
 namespace OpenEye {
 namespace Animation {
 
@@ -62,6 +69,14 @@ public:
      * @param speed Playback speed multiplier (1.0 = normal, 2.0 = double speed)
      */
     static void SetPlaybackSpeed(entt::registry& registry, entt::entity entity, float speed);
+    
+    /**
+     * @brief Create and attach an animation state machine to an entity.
+     * @param registry ECS registry
+     * @param entity Entity with AnimationComponent
+     * @return Shared pointer to the created state machine
+     */
+    static std::shared_ptr<AnimationStateMachine> CreateStateMachine(entt::registry& registry, entt::entity entity);
 
 private:
     // Helper: Sample animation and build local transform matrices

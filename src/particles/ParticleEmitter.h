@@ -4,6 +4,9 @@
 #include <vector>
 #include <memory>
 
+// Forward declare Texture in correct namespace
+namespace OpenEye { namespace Rendering { class Texture; } }
+
 namespace OpenEye {
 namespace Particles {
 
@@ -36,6 +39,8 @@ struct ParticleEmitterConfig {
     float minSize = 0.1f;
     float maxSize = 0.5f;
     float sizeOverLifetime = 0.0f;  // Size change rate (0 = constant)
+    // Spawn volume
+    float spawnRadius = 0.0f;       // Spawn within sphere radius around position
     
     // Color
     glm::vec4 startColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -50,12 +55,36 @@ struct ParticleEmitterConfig {
     glm::vec3 gravity = glm::vec3(0.0f, -9.81f, 0.0f);
     float damping = 0.98f;   // Velocity damping
     
+    // Wind/Turbulence (for realistic smoke motion)
+    glm::vec3 windDirection = glm::vec3(0.0f, 0.0f, 0.0f);  // Global wind direction
+    float windStrength = 0.0f;                               // Wind force strength
+    bool enableTurbulence = false;                          // Enable curl noise turbulence
+    float turbulenceStrength = 0.5f;                        // Turbulence intensity
+    float turbulenceScale = 1.0f;                           // Spatial scale of turbulence
+    float turbulenceSpeed = 1.0f;                           // Time speed of turbulence
+    
     // Rotation
     float minRotationSpeed = -180.0f;
     float maxRotationSpeed = 180.0f;
     
+    // Size curves (exponential growth for smoke puffs)
+    float sizeGrowthRate = 0.0f;                            // Exponential growth: size *= (1.0 + growthRate * dt)
+    float sizeGrowthExponent = 1.0f;                        // Power curve: size = baseSize * (lifeRatio^exponent)
+    
     // Texture (optional - for textured particles)
-    std::shared_ptr<class Texture> texture = nullptr;
+    std::shared_ptr<OpenEye::Rendering::Texture> texture = nullptr;
+
+    // Flipbook settings (for smoke/fire flipbook atlases)
+    int flipbookCols = 0;                 // 0 disables flipbook path
+    int flipbookRows = 0;
+    int flipbookFrameCount = 0;           // if 0, inferred as rows*cols when rows/cols > 0
+    bool flipbookAnimateByLifetime = true;// if true, frame progresses with particle lifetime
+    bool flipbookBlendFrames = true;      // smooth blend between frames
+
+    // Rendering controls
+    bool softParticles = true;            // enable depth-based soft intersection
+    float softParticleFadeDistance = 0.5f;// world units fade thickness near geometry
+    bool premultipliedAlpha = true;       // output premultiplied alpha for better blending
 };
 
 // Particle emitter component

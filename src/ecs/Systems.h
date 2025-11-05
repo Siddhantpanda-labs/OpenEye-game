@@ -10,4 +10,5 @@
 #include "systems/CameraSystem.h"
 #include "systems/PhysicsSystem.h"
 #include "systems/ParticleSystem.h"
+#include "systems/FluidSystem.h"
 

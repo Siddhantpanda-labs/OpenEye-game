@@ -28,6 +28,9 @@ namespace Physics {
 namespace Particles {
     class ParticleEmitter;
 }
+namespace Fluids {
+    class FluidSimulation;
+}
 }
 
 // Forward declarations for Bullet
@@ -167,6 +170,9 @@ struct AnimationComponent {
     float blendTime = 0.0f;      // Current blend time
     float blendDuration = 0.2f;  // Total blend duration in seconds
     
+    // Animation State Machine (optional - for character animation control)
+    std::shared_ptr<void> stateMachine;  // Actually std::shared_ptr<Animation::AnimationStateMachine>
+    
     // GPU-ready bone matrices (final matrices for skinning)
     std::vector<glm::mat4> finalBoneMatrices;
     
@@ -202,6 +208,14 @@ struct ParticleEmitterComponent {
     
     ParticleEmitterComponent() = default;
     explicit ParticleEmitterComponent(std::shared_ptr<OpenEye::Particles::ParticleEmitter> e) : emitter(e) {}
+};
+
+// Fluid volume component (volumetric gas/liquid simulation)
+struct FluidVolumeComponent {
+    std::shared_ptr<OpenEye::Fluids::FluidSimulation> simulation;
+    glm::ivec3 resolution{64, 64, 64};
+    glm::vec3  volumeSize{2.0f, 2.0f, 2.0f};
+    bool enabled = true;
 };
 
 } // namespace ECS

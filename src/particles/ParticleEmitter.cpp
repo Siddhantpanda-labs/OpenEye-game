@@ -1,5 +1,6 @@
 #include "ParticleEmitter.h"
 #include "../rendering/resources/Texture.h"
+#include "../core/time/Time.h"
 #include <random>
 #include <cmath>
 #include <algorithm>
@@ -23,7 +24,10 @@ ParticleEmitter::ParticleEmitter(const ParticleEmitterConfig& config)
     , m_emissionTimer(0.0f)
     , m_isPlaying(true)
 {
-    m_particles.reserve(config.maxParticles);
+    // Lazy allocation: reserve smaller initial pool, grow as needed
+    // This prevents 10-15s freeze during initialization
+    size_t initialReserve = std::min(config.maxParticles, 1000);
+    m_particles.reserve(initialReserve);
 }
 
 ParticleEmitter::~ParticleEmitter() = default;
@@ -79,11 +83,15 @@ void ParticleEmitter::SpawnParticle() {
     // Find or create particle slot
     int index = FindDeadParticle();
     if (index < 0) {
-        // Create new particle at the end
+        // Create new particle at the end (lazy grow pool)
         if (m_particles.size() < m_config.maxParticles) {
+            // Grow vector in chunks to avoid constant reallocation
+            if (m_particles.size() == m_particles.capacity()) {
+                size_t newCapacity = std::min(m_particles.capacity() + 1000, static_cast<size_t>(m_config.maxParticles));
+                m_particles.reserve(newCapacity);
+            }
             m_particles.resize(m_particles.size() + 1);
             index = static_cast<int>(m_particles.size() - 1);
-            // New particle is beyond active range, so increment count
             m_activeParticleCount = index + 1;
         } else {
             return; // Max particles reached
@@ -93,8 +101,20 @@ void ParticleEmitter::SpawnParticle() {
     
     Particle& p = m_particles[index];
     
-    // Initialize position
-    p.position = m_config.position;
+    // Initialize position (spawn within sphere radius if > 0)
+    if (m_config.spawnRadius > 0.0f) {
+        std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+        glm::vec3 offset(0.0f);
+        // Rejection sampling to get point inside unit sphere
+        for (int tries = 0; tries < 8; ++tries) {
+            offset = glm::vec3(dist(gen), dist(gen), dist(gen));
+            if (glm::dot(offset, offset) <= 1.0f) break;
+        }
+        offset = glm::normalize(offset) * (m_config.spawnRadius * std::abs(dist(gen)));
+        p.position = m_config.position + offset;
+    } else {
+        p.position = m_config.position;
+    }
     
     // Initialize velocity (random direction within spread)
     std::uniform_real_distribution<float> spreadDist(-m_config.spread * 0.0174533f, m_config.spread * 0.0174533f); // Convert to radians
@@ -144,6 +164,37 @@ void ParticleEmitter::UpdateParticle(Particle& particle, float deltaTime) {
         particle.velocity += m_config.gravity * deltaTime;
     }
     
+    // Apply wind force
+    if (m_config.windStrength > 0.0f) {
+        glm::vec3 windForce = glm::normalize(m_config.windDirection) * m_config.windStrength * deltaTime;
+        particle.velocity += windForce;
+    }
+    
+    // Apply turbulence (optimized: cache time, simplified calculation)
+    if (m_config.enableTurbulence && m_config.turbulenceStrength > 0.0f) {
+        static float cachedTime = 0.0f;
+        static float lastUpdateTime = 0.0f;
+        float currentTime = OpenEye::Core::Time::TotalTime();
+        
+        // Update cache every 0.1s to reduce expensive Time::TotalTime() calls
+        if (currentTime - lastUpdateTime > 0.1f) {
+            cachedTime = currentTime;
+            lastUpdateTime = currentTime;
+        }
+        
+        glm::vec3 pos = particle.position * m_config.turbulenceScale;
+        float t = cachedTime * m_config.turbulenceSpeed;
+        
+        // Simplified turbulence (faster than full curl calculation)
+        glm::vec3 curl = glm::vec3(
+            sin(pos.y * 0.7f + t) - cos(pos.z * 0.5f + t * 0.8f),
+            sin(pos.z * 0.7f + t) - cos(pos.x * 0.5f + t * 0.8f),
+            sin(pos.x * 0.7f + t) - cos(pos.y * 0.5f + t * 0.8f)
+        );
+        curl = glm::normalize(curl) * m_config.turbulenceStrength * deltaTime;
+        particle.velocity += curl;
+    }
+    
     // Apply damping
     particle.velocity *= m_config.damping;
     
@@ -153,14 +204,26 @@ void ParticleEmitter::UpdateParticle(Particle& particle, float deltaTime) {
     // Update lifetime
     particle.life -= deltaTime;
     
-    // Update size
-    if (m_config.sizeOverLifetime != 0.0f) {
-        float lifeRatio = particle.life / particle.maxLife;
+    // Update size with exponential growth and power curve
+    float lifeRatio = particle.life / particle.maxLife;
+    float ageRatio = 1.0f - lifeRatio; // 0 = just spawned, 1 = end of life
+    
+    if (m_config.sizeGrowthRate > 0.0f) {
+        // Exponential growth over time
+        particle.size *= (1.0f + m_config.sizeGrowthRate * deltaTime);
+    } else if (m_config.sizeOverLifetime != 0.0f) {
+        // Linear growth
         particle.size += m_config.sizeOverLifetime * deltaTime;
     }
     
+    // Apply power curve for size based on age
+    if (m_config.sizeGrowthExponent != 1.0f && ageRatio > 0.0f) {
+        float baseSize = particle.size;
+        float sizeMultiplier = std::pow(ageRatio, m_config.sizeGrowthExponent);
+        particle.size = baseSize * (0.3f + 0.7f * sizeMultiplier); // Start at 30% size, grow to 100%
+    }
+    
     // Update color (lerp from start to end)
-    float lifeRatio = particle.life / particle.maxLife;
     particle.color = glm::mix(m_config.endColor, m_config.startColor, lifeRatio);
     
     // Update rotation

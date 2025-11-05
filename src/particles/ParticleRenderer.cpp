@@ -1,6 +1,7 @@
 #include "ParticleRenderer.h"
 #include "../rendering/Camera.h"
 #include "../rendering/resources/Shader.h"
+#include "../rendering/resources/Texture.h"
 #include "../core/log/Log.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -64,7 +65,7 @@ void ParticleRenderer::CreateQuad() {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     
-    // Instance data (position, size, color, rotation)
+    // Instance data (position, size, color, rotation, ageNorm)
     glBindBuffer(GL_ARRAY_BUFFER, m_instanceVBO);
     
     // Position (vec3)
@@ -86,6 +87,11 @@ void ParticleRenderer::CreateQuad() {
     glEnableVertexAttribArray(5);
     glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(InstanceData), (void*)offsetof(InstanceData, rotation));
     glVertexAttribDivisor(5, 1);
+
+    // Age normalized (float)
+    glEnableVertexAttribArray(6);
+    glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, sizeof(InstanceData), (void*)offsetof(InstanceData, ageNorm));
+    glVertexAttribDivisor(6, 1);
     
     glBindVertexArray(0);
 }
@@ -93,19 +99,35 @@ void ParticleRenderer::CreateQuad() {
 void ParticleRenderer::Render(const std::vector<std::shared_ptr<ParticleEmitter>>& emitters,
                               const Rendering::Camera& camera,
                               const glm::mat4& viewMatrix,
-                              const glm::mat4& projectionMatrix) {
+                              const glm::mat4& projectionMatrix,
+                              unsigned int sceneDepthTexture,
+                              std::uint32_t viewportWidth,
+                              std::uint32_t viewportHeight) {
     if (!m_shader || m_quadVAO == 0) {
         return;
     }
     
-    // Enable blending for transparency
+    // Enable blending for transparency (premultiplied alpha path)
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE); // Don't write to depth (particles are transparent)
+    // Ensure billboards are never culled (winding can flip w.r.t camera)
+    GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    if (cullWasEnabled) glDisable(GL_CULL_FACE);
     
     m_shader->Bind();
     m_shader->SetMat4("u_View", viewMatrix);
     m_shader->SetMat4("u_Projection", projectionMatrix);
+    // Provide inverse projection for soft-particles depth reconstruction
+    glm::mat4 invProj = glm::inverse(projectionMatrix);
+    m_shader->SetMat4("u_InvProjection", invProj);
+    m_shader->SetVec2("u_Viewport", glm::vec2((float)viewportWidth, (float)viewportHeight));
+    // Bind scene depth if available
+    if (sceneDepthTexture != 0) {
+        glActiveTexture(GL_TEXTURE0 + 4);
+        glBindTexture(GL_TEXTURE_2D, sceneDepthTexture);
+        m_shader->SetInt("u_SceneDepth", 4);
+    }
     
     // Extract camera right and up vectors from view matrix (inverse of model matrix)
     // View matrix columns represent camera axes in world space
@@ -129,6 +151,28 @@ void ParticleRenderer::Render(const std::vector<std::shared_ptr<ParticleEmitter>
         if (activeCount == 0) {
             continue;
         }
+
+        const auto& cfg = emitter->GetConfig();
+        // Configure flipbook/texture uniforms per-emitter
+        bool useTex = (bool)cfg.texture;
+        m_shader->SetBool("u_UseTexture", useTex);
+        if (useTex) {
+            // Bind particle flipbook texture to unit 0
+            cfg.texture->Bind(0);
+            m_shader->SetInt("u_ParticleTexture", 0);
+            // Ensure texture uses CLAMP_TO_EDGE to prevent wrapping artifacts
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        int cols = cfg.flipbookCols;
+        int rows = cfg.flipbookRows;
+        int frames = cfg.flipbookFrameCount > 0 ? cfg.flipbookFrameCount : (cols > 0 && rows > 0 ? cols * rows : 0);
+        m_shader->SetInt("u_FlipbookCols", cols);
+        m_shader->SetInt("u_FlipbookRows", rows);
+        m_shader->SetInt("u_FlipbookFrames", frames);
+        m_shader->SetBool("u_FlipbookBlend", cfg.flipbookBlendFrames);
+        m_shader->SetBool("u_SoftParticles", cfg.softParticles && sceneDepthTexture != 0);
+        m_shader->SetFloat("u_SoftParticleFade", cfg.softParticleFadeDistance);
         
         // Prepare instance data
         std::vector<InstanceData> instanceData;
@@ -157,6 +201,7 @@ void ParticleRenderer::Render(const std::vector<std::shared_ptr<ParticleEmitter>
     // Restore state
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+    if (cullWasEnabled) glEnable(GL_CULL_FACE);
 }
 
 void ParticleRenderer::UpdateInstanceData(const Particle& particle, InstanceData& instance) {
@@ -164,6 +209,9 @@ void ParticleRenderer::UpdateInstanceData(const Particle& particle, InstanceData
     instance.size = particle.size;
     instance.color = particle.color;
     instance.rotation = particle.rotation;
+    float maxLife = particle.maxLife > 0.0001f ? particle.maxLife : 1.0f;
+    float lifeRatio = glm::clamp(1.0f - (particle.life / maxLife), 0.0f, 1.0f);
+    instance.ageNorm = lifeRatio;
 }
 
 void ParticleRenderer::Shutdown() {

@@ -154,6 +154,14 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         frustum.ExtractFromMatrix(camera.GetProjectionMatrix() * camera.GetViewMatrix());
         TransparencyPass tp;
         tp.Execute(scene, camera, frustum);
+        // Render GPU particles (flipbook + soft particles) after other transparent objects
+        ECS::ParticleSystem::Render(scene,
+                                    camera,
+                                    camera.GetViewMatrix(),
+                                    camera.GetProjectionMatrix(),
+                                    m_gbuffer->GetDepthTexture(),
+                                    m_width,
+                                    m_height);
     }, {}, {}, true);
     
     // Post-processing pass - apply effects and blit to screen
