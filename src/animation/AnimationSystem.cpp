@@ -4,6 +4,7 @@
 #include "core/log/Log.h"
 #include <algorithm>
 #include <functional>
+#include <unordered_map>
 #include <glm/gtc/type_ptr.hpp>
 
 namespace OpenEye {
@@ -29,22 +30,33 @@ void AnimationSystem::UpdateEntity(entt::registry& registry, entt::entity entity
     if (animComponent.stateMachine) {
         auto stateMachine = std::static_pointer_cast<AnimationStateMachine>(animComponent.stateMachine);
         if (stateMachine && stateMachine->IsValid()) {
+            // Store current state before update to detect changes
+            static std::unordered_map<entt::entity, std::string> lastStateMap;
+            std::string lastState = lastStateMap[entity];
+            
             // Update state machine (evaluates transitions)
             stateMachine->Update(deltaTime);
             
-            // Get current state's clip index and settings
+            // Get current state and clip index
+            std::string currentState = stateMachine->GetCurrentState();
             int newClipIndex = stateMachine->GetCurrentClipIndex();
             float newPlaybackSpeed = stateMachine->GetCurrentPlaybackSpeed();
             bool newLoop = stateMachine->GetCurrentLoop();
             float blendTime = stateMachine->GetCurrentBlendTime();
             
-            // If state machine changed the clip, update animation
-            if (newClipIndex >= 0 && newClipIndex != animComponent.currentClipIndex) {
+            // Check if state changed (even if clip index is the same)
+            bool stateChanged = (currentState != lastState);
+            lastStateMap[entity] = currentState;
+            
+            // If state machine changed the clip OR state changed, update animation
+            if (newClipIndex >= 0 && (newClipIndex != animComponent.currentClipIndex || stateChanged)) {
+                OE_INFO_F("State machine: Transitioning to clip %d (state: %s, blend: %.2fs)", 
+                         newClipIndex, currentState.c_str(), blendTime);
                 PlayAnimation(registry, entity, newClipIndex, blendTime);
                 animComponent.playbackSpeed = newPlaybackSpeed;
                 animComponent.loop = newLoop;
             } else if (newClipIndex >= 0) {
-                // Update playback speed and loop from state machine
+                // Update playback speed and loop from state machine (even if clip didn't change)
                 animComponent.playbackSpeed = newPlaybackSpeed;
                 animComponent.loop = newLoop;
             }
@@ -131,9 +143,18 @@ void AnimationSystem::PlayAnimation(entt::registry& registry, entt::entity entit
     auto& animComponent = registry.get<ECS::AnimationComponent>(entity);
     
     if (clipIndex < 0 || clipIndex >= static_cast<int>(animComponent.clips.size())) {
-        OE_WARN_F("Invalid animation clip index: %d", clipIndex);
+        OE_WARN_F("PlayAnimation: Invalid clip index %d (total clips: %zu)", clipIndex, animComponent.clips.size());
         return;
     }
+    
+    auto clip = std::static_pointer_cast<AnimationClip>(animComponent.clips[clipIndex]);
+    if (!clip) {
+        OE_WARN_F("PlayAnimation: Clip %d is null!", clipIndex);
+        return;
+    }
+    
+    OE_INFO_F("PlayAnimation: Setting clip %d (name: '%s', duration: %.2fs, channels: %zu)", 
+             clipIndex, clip->GetName().c_str(), clip->GetDuration(), clip->GetChannelCount());
     
     // Start blending from current clip
     if (animComponent.currentClipIndex >= 0 && blendTime > 0.0f) {
@@ -149,6 +170,10 @@ void AnimationSystem::PlayAnimation(entt::registry& registry, entt::entity entit
     animComponent.currentTime = 0.0f;
     animComponent.isPlaying = true;
     animComponent.boneMatricesDirty = true;
+    
+    OE_INFO_F("PlayAnimation: Applied - clipIndex=%d, time=%.2f, playing=%d, dirty=%d", 
+             animComponent.currentClipIndex, animComponent.currentTime, 
+             animComponent.isPlaying, animComponent.boneMatricesDirty);
 }
 
 void AnimationSystem::StopAnimation(entt::registry& registry, entt::entity entity) {
@@ -160,6 +185,13 @@ void AnimationSystem::StopAnimation(entt::registry& registry, entt::entity entit
 void AnimationSystem::SetPlaybackSpeed(entt::registry& registry, entt::entity entity, float speed) {
     auto& animComponent = registry.get<ECS::AnimationComponent>(entity);
     animComponent.playbackSpeed = std::max(0.0f, speed);
+}
+
+std::shared_ptr<AnimationStateMachine> AnimationSystem::CreateStateMachine(entt::registry& registry, entt::entity entity) {
+    auto& animComponent = registry.get<ECS::AnimationComponent>(entity);
+    auto stateMachine = std::make_shared<AnimationStateMachine>();
+    animComponent.stateMachine = stateMachine;
+    return stateMachine;
 }
 
 void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
@@ -191,6 +223,7 @@ void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
     
     auto currentClip = std::static_pointer_cast<AnimationClip>(animComponent.clips[animComponent.currentClipIndex]);
     if (!currentClip) {
+        OE_WARN_F("SampleAnimation: Clip %d is null!", animComponent.currentClipIndex);
         return;
     }
     
@@ -204,6 +237,15 @@ void AnimationSystem::SampleAnimation(ECS::AnimationComponent& animComponent,
     
     // Sample current animation (channels will directly index into outLocalTransforms)
     currentClip->Sample(animComponent.currentTime, outLocalTransforms, boneIndices);
+    
+    // Debug: Verify sampling worked
+    static int lastLoggedClipIdx = -1;
+    if (lastLoggedClipIdx != animComponent.currentClipIndex) {
+        OE_INFO_F("SampleAnimation: Sampling clip %d ('%s', %zu channels) at time %.2f", 
+                 animComponent.currentClipIndex, currentClip->GetName().c_str(), 
+                 currentClip->GetChannelCount(), animComponent.currentTime);
+        lastLoggedClipIdx = animComponent.currentClipIndex;
+    }
     
     // Debug: Check if animation actually modified transforms (not just bind pose)
     static float lastDebugTime = 0.0f;

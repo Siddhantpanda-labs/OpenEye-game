@@ -229,6 +229,22 @@ add_library(OpenEyeCore STATIC
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimationStateMachine.h
     
+    # Scene serialization
+    src/ecs/SceneSerializer.cpp
+    src/ecs/SceneSerializer.h
+    
+    # Prefab system
+    src/ecs/Prefab.cpp
+    src/ecs/Prefab.h
+    
+    # Asset management
+    src/assets/AssetGUID.cpp
+    src/assets/AssetGUID.h
+    src/assets/AssetRegistry.cpp
+    src/assets/AssetRegistry.h
+    src/assets/AssetCooker.cpp
+    src/assets/AssetCooker.h
+    
     # Particle systems
     src/particles/ParticleEmitter.cpp
     src/particles/ParticleEmitter.h

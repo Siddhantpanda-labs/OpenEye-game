@@ -30,6 +30,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
+#include "animation/AnimationStateMachine.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -355,6 +356,10 @@ int main() {
     }
     
     additionalClipsCount = additionalClips.size();
+    
+    // Global triggers for Animation State Machine transitions
+    static bool gTriggerKick = false;
+    static bool gTriggerDying = false;
     OE_INFO("Total additional clips collected: " + std::to_string(additionalClipsCount));
     
     // Merge Dying.fbx clips into existing list for all entities sharing the Kick skeleton
@@ -365,6 +370,8 @@ int main() {
         if (!additionalClips.empty() && animCompRef.skeleton) {
             auto targetSkeleton = animCompRef.skeleton;
             auto animView = registry.view<AnimationComponent>();
+            // Remember where the appended Dying clips will start for the character
+            int dyingStartIndexForCharacter = static_cast<int>(animCompRef.clips.size());
             size_t totalAppended = 0;
             for (auto e : animView) {
                 auto& ac = registry.get<AnimationComponent>(e);
@@ -380,6 +387,43 @@ int main() {
                 }
             }
             OE_INFO("Appended Dying.fbx clips to entities sharing the character skeleton (added " + std::to_string(totalAppended) + " clips across entities)");
+
+            // Create a basic Animation State Machine on the character and wire states/transitions
+            auto sm = OpenEye::Animation::AnimationSystem::CreateStateMachine(registry, characterEntity);
+            if (sm) {
+                // Determine indices
+                int smIdleClipIndex = 0; // Use first Kick clip as Idle for now
+                int kickClipIndex = 0; // Kick action is also clip 0 (plays non-loop to simulate action)
+                int dyingClipIndex = dyingStartIndexForCharacter; // First appended Dying clip
+                smIdleClipIndex = (smIdleClipIndex >= 0 && smIdleClipIndex < static_cast<int>(animCompRef.clips.size())) ? smIdleClipIndex : 0;
+                kickClipIndex = smIdleClipIndex;
+                if (dyingClipIndex < 0 || dyingClipIndex >= static_cast<int>(animCompRef.clips.size())) {
+                    // Fallback if something went wrong
+                    dyingClipIndex = static_cast<int>(animCompRef.clips.size()) - 1;
+                }
+
+                // States
+                sm->AddState("Idle", smIdleClipIndex, 1.0f, true);
+                sm->AddState("Kick", kickClipIndex, 1.0f, false);
+                sm->AddState("Dying", dyingClipIndex, 1.0f, false);
+                sm->SetInitialState("Idle");
+
+                // Helper to check if current clip is finished
+                auto isClipFinished = [&](int clipIndex) -> bool {
+                    auto& ac = registry.get<AnimationComponent>(characterEntity);
+                    if (ac.currentClipIndex != clipIndex) return false;
+                    if (clipIndex < 0 || clipIndex >= static_cast<int>(ac.clips.size())) return false;
+                    auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(ac.clips[clipIndex]);
+                    if (!clip) return false;
+                    return ac.currentTime >= (clip->GetDuration() - 0.01f);
+                };
+
+                // Transitions
+                sm->AddTransition({"Idle", "Kick", [&](){ bool t = gTriggerKick; gTriggerKick = false; return t; }, 0.15f});
+                sm->AddTransition({"Kick", "Idle", [&](){ return isClipFinished(kickClipIndex); }, 0.2f});
+                sm->AddTransition({"Idle", "Dying", [&](){ bool t = gTriggerDying; gTriggerDying = false; return t; }, 0.15f});
+                sm->AddTransition({"Dying", "Idle", [&](){ return isClipFinished(dyingClipIndex); }, 0.2f});
+            }
         } else {
             OE_WARN("No additional clips from Dying.fbx or missing character skeleton; showing existing clips only");
         }
@@ -581,6 +625,9 @@ int main() {
     while (!window.ShouldClose()) {
         Time::Update();
         Input::Update();
+        // Update state machine triggers (K = Kick, O = Dying)
+        if (OpenEye::Core::Input::IsKeyJustPressed(GLFW_KEY_K)) gTriggerKick = true;
+        if (OpenEye::Core::Input::IsKeyJustPressed(GLFW_KEY_O)) gTriggerDying = true;
         
         window.PollEvents();
         
@@ -603,8 +650,9 @@ int main() {
         // Update Animations (must be called after physics, before rendering)
         OpenEye::Animation::AnimationSystem::Update(scene, deltaTime);
         
-        // Handle keypress animation triggers (m/n/o/p)
-        if (characterEntity != entt::null) {
+        // Handle keypress animation triggers (legacy m/n/o/p) - disabled when state machine is active
+        static const bool kUseLegacyKeyMapping = false;
+        if (kUseLegacyKeyMapping && characterEntity != entt::null) {
             auto& animComp = scene.GetRegistry().get<AnimationComponent>(characterEntity);
             
             // Check if animation finished (non-looping animation reached end)
@@ -623,7 +671,7 @@ int main() {
                 }
             }
             
-            // Handle keypresses for animation switching
+            // Handle keypresses for animation switching (legacy)
             static int keyToClipMap[4] = {-1, -1, -1, -1}; // m/n/o/p -> clip indices (set once)
             static bool mapInitialized = false;
             
@@ -952,8 +1000,8 @@ int main() {
         }
         ImGui::End();
         
-        // Animation Timeline panel
-        ImGui::Begin("Animation Timeline");
+        // Animation State Debug panel (clean state-driven UI)
+        ImGui::Begin("Animation State Debug");
         auto& registry = scene.GetRegistry();
         auto animView = registry.view<AnimationComponent>();
         
@@ -965,25 +1013,6 @@ int main() {
             entt::entity animEntity = *animView.begin();
             auto& animComp = registry.get<AnimationComponent>(animEntity);
 
-            // Helper: propagate current controller state to all components sharing the same skeleton
-            auto syncToAllWithSkeleton = [&](const AnimationComponent& source, bool forceRecalc) {
-                for (auto e : animView) {
-                    if (e == animEntity) continue;
-                    auto& other = registry.get<AnimationComponent>(e);
-                    if (other.skeleton == source.skeleton) {
-                        other.currentClipIndex = source.currentClipIndex;
-                        other.currentTime = source.currentTime;
-                        other.playbackSpeed = source.playbackSpeed;
-                        other.isPlaying = source.isPlaying;
-                        other.loop = source.loop;
-                        other.boneMatricesDirty = true;
-                        if (forceRecalc) {
-                            OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, e);
-                        }
-                    }
-                }
-            };
-            
             if (!animComp.skeleton) {
                 ImGui::Text("Entity has AnimationComponent but no skeleton");
             } else {
@@ -992,123 +1021,114 @@ int main() {
                 
                 // Display skeleton info
                 ImGui::Text("Skeleton: %zu bones", boneCount);
-                
-                // Display available clips
                 ImGui::Separator();
-                ImGui::Text("Available Clips: %zu", animComp.clips.size());
                 
-                if (animComp.clips.empty()) {
-                    ImGui::Text("No animation clips loaded");
+                // Build clip names list (index, name, duration, channels)
+                std::vector<std::string> clipNames;
+                std::vector<const char*> clipNamesPtrs;
+                clipNames.reserve(animComp.clips.size());
+                for (size_t i = 0; i < animComp.clips.size(); i++) {
+                    auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[i]);
+                    if (clip) {
+                        std::string name = clip->GetName();
+                        if (name.empty()) name = "Unnamed";
+                        clipNames.push_back(std::to_string(i) + ": " + name + " (" + std::to_string(clip->GetDuration()) + "s)" );
+                    } else {
+                        clipNames.push_back(std::to_string(i) + ": (invalid)");
+                    }
+                }
+                for (const auto& s : clipNames) clipNamesPtrs.push_back(s.c_str());
+                
+                // State machine controls
+                auto sm = animComp.stateMachine ? std::static_pointer_cast<OpenEye::Animation::AnimationStateMachine>(animComp.stateMachine) : nullptr;
+                if (!sm) {
+                    if (ImGui::Button("Create State Machine")) {
+                        sm = OpenEye::Animation::AnimationSystem::CreateStateMachine(registry, animEntity);
+                    }
                 } else {
-                    // Clip selection dropdown
-                    static int selectedClipIndex = -1;
-                    if (selectedClipIndex == -1 && animComp.currentClipIndex >= 0) {
-                        selectedClipIndex = animComp.currentClipIndex;
-                    }
-                    
-                    // Build clip names list (index, name, duration, channels)
-                    std::vector<std::string> clipNames;
-                    clipNames.reserve(animComp.clips.size());
-                    for (size_t i = 0; i < animComp.clips.size(); i++) {
-                        auto clip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[i]);
-                        if (clip) {
-                            std::string name = clip->GetName();
-                            if (name.empty()) name = "Unnamed";
-                            clipNames.push_back(
-                                std::to_string(i) + ": " + name +
-                                " (" + std::to_string(clip->GetDuration()) + "s, " +
-                                std::to_string(clip->GetChannelCount()) + " ch)"
-                            );
-                        } else {
-                            clipNames.push_back(std::to_string(i) + ": (invalid)");
+                    // Ensure default states exist if created from this panel
+                    if (!sm->HasState("Idle") || !sm->HasState("Kick") || !sm->HasState("Dying")) {
+                        int defaultIdle = 0;
+                        int defaultKick = 0;
+                        int defaultDying = static_cast<int>(animComp.clips.size()) > 0 ? static_cast<int>(animComp.clips.size()) - 1 : 0;
+                        if (!sm->HasState("Idle")) sm->AddState("Idle", defaultIdle, 1.0f, true);
+                        if (!sm->HasState("Kick")) sm->AddState("Kick", defaultKick, 1.0f, false);
+                        if (!sm->HasState("Dying")) sm->AddState("Dying", defaultDying, 1.0f, false);
+                        if (sm->GetCurrentState().empty() || !sm->HasState(sm->GetCurrentState())) {
+                            sm->SetInitialState("Idle");
                         }
                     }
+                    // Read current state mapping
+                    int idleIdx = 0, kickIdx = 0, dyingIdx = 0;
+                    if (auto* s = sm->GetState("Idle")) idleIdx = s->clipIndex;
+                    if (auto* s = sm->GetState("Kick")) kickIdx = s->clipIndex;
+                    if (auto* s = sm->GetState("Dying")) dyingIdx = s->clipIndex;
                     
-                    std::vector<const char*> clipNamesPtrs;
-                    for (const auto& name : clipNames) {
-                        clipNamesPtrs.push_back(name.c_str());
+                    // Editable mapping
+                    ImGui::Text("States");
+                    ImGui::Separator();
+                    ImGui::Text("Idle"); ImGui::SameLine();
+                    ImGui::Combo("##IdleClip", &idleIdx, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
+                    ImGui::Text("Kick"); ImGui::SameLine();
+                    ImGui::Combo("##KickClip", &kickIdx, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
+                    ImGui::Text("Dying"); ImGui::SameLine();
+                    ImGui::Combo("##DyingClip", &dyingIdx, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
+                    
+                    static float blendTime = 0.2f;
+                    ImGui::DragFloat("Blend Time", &blendTime, 0.01f, 0.0f, 2.0f, "%.2fs");
+                    
+                    if (ImGui::Button("Apply Mapping")) {
+                        if (auto* s = sm->GetState("Idle")) { s->clipIndex = idleIdx; s->loop = true; }
+                        if (auto* s = sm->GetState("Kick")) { s->clipIndex = kickIdx; s->loop = false; }
+                        if (auto* s = sm->GetState("Dying")) { s->clipIndex = dyingIdx; s->loop = false; }
                     }
                     
-                    if (!clipNamesPtrs.empty()) {
-                        int oldSelected = selectedClipIndex;
-                        ImGui::Combo("Select Clip", &selectedClipIndex, clipNamesPtrs.data(), static_cast<int>(clipNamesPtrs.size()));
-                        if (oldSelected != selectedClipIndex && selectedClipIndex >= 0 && selectedClipIndex < static_cast<int>(animComp.clips.size())) {
-                            // Apply selection to all components sharing the same skeleton
-                            for (auto e : animView) {
-                                auto& ac = registry.get<AnimationComponent>(e);
-                                if (ac.skeleton == animComp.skeleton) {
-                                    OpenEye::Animation::AnimationSystem::PlayAnimation(registry, e, selectedClipIndex, 0.2f);
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Current clip info
+                    ImGui::Separator();
+                    ImGui::Text("Current State: %s", sm->GetCurrentState().c_str());
+                    ImGui::Text("Previous State: %s", sm->GetPreviousState().c_str());
                     if (animComp.currentClipIndex >= 0 && animComp.currentClipIndex < static_cast<int>(animComp.clips.size())) {
                         auto currentClip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(animComp.clips[animComp.currentClipIndex]);
                         if (currentClip) {
-                            float duration = currentClip->GetDuration();
-                            
-                            ImGui::Separator();
-                            ImGui::Text("Current Clip: %d", animComp.currentClipIndex);
-                            ImGui::Text("Duration: %.2f seconds", duration);
-                            
-                            // Playback controls
-                            ImGui::Separator();
-                            if (ImGui::Button(animComp.isPlaying ? "Pause" : "Play")) {
-                                animComp.isPlaying = !animComp.isPlaying;
-                                syncToAllWithSkeleton(animComp, false);
-                            }
-                            ImGui::SameLine();
-                            if (ImGui::Button("Stop")) {
-                                // Stop all sharing the same skeleton
-                                for (auto e : animView) {
-                                    auto& ac = registry.get<AnimationComponent>(e);
-                                    if (ac.skeleton == animComp.skeleton) {
-                                        OpenEye::Animation::AnimationSystem::StopAnimation(registry, e);
-                                    }
-                                }
-                                selectedClipIndex = -1;
-                            }
-                            ImGui::SameLine();
-                            {
-                                bool loopChanged = ImGui::Checkbox("Loop", &animComp.loop);
-                                if (loopChanged) {
-                                    syncToAllWithSkeleton(animComp, false);
-                                }
-                            }
-                            
-                            // Timeline scrubbing
-                            ImGui::Separator();
-                            float currentTime = animComp.currentTime;
-                            if (ImGui::SliderFloat("Time", &currentTime, 0.0f, duration, "%.2f s")) {
-                                animComp.currentTime = currentTime;
-                                animComp.boneMatricesDirty = true;
-                                // Force update bone matrices for all sharing the same skeleton
-                                syncToAllWithSkeleton(animComp, true);
-                                OpenEye::Animation::AnimationSystem::CalculateBoneMatrices(registry, animEntity);
-                            }
-                            
-                            // Time display
-                            ImGui::Text("%.2f / %.2f seconds", currentTime, duration);
-                            float progress = duration > 0.0f ? (currentTime / duration) : 0.0f;
-                            ImGui::ProgressBar(progress, ImVec2(0.0f, 0.0f));
-                            
-                            // Playback speed
-                            ImGui::Separator();
-                            if (ImGui::DragFloat("Playback Speed", &animComp.playbackSpeed, 0.1f, 0.0f, 5.0f, "%.1fx")) {
-                                syncToAllWithSkeleton(animComp, false);
-                            }
-                            
-                            // Blend info
-                            if (animComp.blendFromClipIndex >= 0) {
-                                ImGui::Separator();
-                                ImGui::Text("Blending from clip %d", animComp.blendFromClipIndex);
-                                ImGui::Text("Blend progress: %.2f / %.2f", animComp.blendTime, animComp.blendDuration);
-                            }
+                            ImGui::Text("Playing Clip: %d", animComp.currentClipIndex);
+                            ImGui::Text("Time: %.2f / %.2f", animComp.currentTime, currentClip->GetDuration());
                         }
-                    } else {
-                        ImGui::Text("No clip selected");
+                    }
+                    
+                    ImGui::Separator();
+                    if (ImGui::Button("Go Idle")) { 
+                        sm->SetState("Idle", blendTime);
+                        // Force immediate animation update
+                        auto& ac = registry.get<AnimationComponent>(animEntity);
+                        int clipIdx = sm->GetCurrentClipIndex();
+                        if (clipIdx >= 0 && clipIdx < static_cast<int>(ac.clips.size())) {
+                            OpenEye::Animation::AnimationSystem::PlayAnimation(registry, animEntity, clipIdx, blendTime);
+                            ac.loop = sm->GetCurrentLoop();
+                            ac.playbackSpeed = sm->GetCurrentPlaybackSpeed();
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Kick")) { 
+                        sm->SetState("Kick", blendTime);
+                        // Force immediate animation update
+                        auto& ac = registry.get<AnimationComponent>(animEntity);
+                        int clipIdx = sm->GetCurrentClipIndex();
+                        if (clipIdx >= 0 && clipIdx < static_cast<int>(ac.clips.size())) {
+                            OpenEye::Animation::AnimationSystem::PlayAnimation(registry, animEntity, clipIdx, blendTime);
+                            ac.loop = sm->GetCurrentLoop();
+                            ac.playbackSpeed = sm->GetCurrentPlaybackSpeed();
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Dying")) { 
+                        sm->SetState("Dying", blendTime);
+                        // Force immediate animation update
+                        auto& ac = registry.get<AnimationComponent>(animEntity);
+                        int clipIdx = sm->GetCurrentClipIndex();
+                        if (clipIdx >= 0 && clipIdx < static_cast<int>(ac.clips.size())) {
+                            OpenEye::Animation::AnimationSystem::PlayAnimation(registry, animEntity, clipIdx, blendTime);
+                            ac.loop = sm->GetCurrentLoop();
+                            ac.playbackSpeed = sm->GetCurrentPlaybackSpeed();
+                        }
                     }
                 }
             }
