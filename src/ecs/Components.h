@@ -88,9 +88,16 @@ struct Renderable {
 
 // Camera component
 struct CameraComponent {
-    Rendering::Camera camera;
+    Rendering::Camera camera; // Still holds the rendering camera for view/projection matrices
     bool isPrimary = false; // Primary camera for rendering
-    
+
+    // Projection settings (moved from Rendering::Camera for ECS control)
+    bool isPerspective = true;
+    float fov = 45.0f;
+    float aspect = 16.0f / 9.0f;
+    float nearPlane = 0.1f;
+    float farPlane = 100.0f;
+
     CameraComponent() = default;
 };
 

@@ -14,18 +14,6 @@ if(MSVC)
     add_compile_options(/MP)
     # Disable warnings for third-party code
     add_compile_options(/wd4245 /wd4100 /wd4189 /wd4244 /wd4034 /wd4127)
-    
-    # Suppress Bullet3 warnings for physics files (these include Bullet3 headers)
-    set_source_files_properties(
-        src/physics/PhysicsWorld.cpp
-        src/physics/shapes/CollisionShapeFactory.cpp
-        src/physics/bodies/RigidBodyFactory.cpp
-        src/physics/controllers/CharacterControllerFactory.cpp
-        src/physics/queries/PhysicsQuery.cpp
-        src/physics/utils/PhysicsUtils.cpp
-        PROPERTIES
-        COMPILE_FLAGS "/wd4127 /wd4456"
-    )
 else()
     add_compile_options(-Wall -Wextra -Werror -pedantic)
 endif()
@@ -43,20 +31,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 option(OPENEYE_BUILD_EDITOR "Build development editor" ON)
 option(OPENEYE_BUILD_GAME "Build final game" ON)
 
-# Include directories
-include_directories(
-    ${CMAKE_SOURCE_DIR}/thirdparty/glad/include
-    ${CMAKE_SOURCE_DIR}/thirdparty/glfw/include
-    ${CMAKE_SOURCE_DIR}/thirdparty/glm
-    ${CMAKE_SOURCE_DIR}/thirdparty/imgui
-    ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends
-    ${CMAKE_SOURCE_DIR}/thirdparty/ImGuizmo
-    ${CMAKE_SOURCE_DIR}/thirdparty/assimp/include
-    ${CMAKE_SOURCE_DIR}/thirdparty/stb
-    ${CMAKE_SOURCE_DIR}/thirdparty/nlohmann
-    ${CMAKE_SOURCE_DIR}/thirdparty/bullet3/src
-    ${CMAKE_SOURCE_DIR}/src
-)
+# Global include directories (components will add their own)
+# These are for legacy compatibility and third-party includes
 
 # --------------------------------------
 # GLAD (match GameEngine approach - simple static library)
@@ -82,6 +58,8 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(USE_DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
 set(BULLET_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BULLET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 # Disable warnings for Bullet3 (third-party code)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/bullet3)
 # Suppress warnings for Bullet3 targets (must be after add_subdirectory)
@@ -111,8 +89,14 @@ if(MSVC)
         target_compile_options(Bullet3Common PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456 /wd4458)
         set_target_properties(Bullet3Common PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
     endif()
+    # Suppress warnings for BulletRobotics (extras library) if it exists
+    if(TARGET BulletRobotics)
+        target_compile_options(BulletRobotics PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456 /wd5054)
+        set_target_properties(BulletRobotics PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
+    endif()
 endif()
 
+# ImGui library (shared across editor and game)
 set(IMGUI_SOURCES
     ${CMAKE_SOURCE_DIR}/thirdparty/imgui/imgui.cpp
     ${CMAKE_SOURCE_DIR}/thirdparty/imgui/imgui_demo.cpp
@@ -131,215 +115,79 @@ set(IMGUIZMO_SOURCES
     ${CMAKE_SOURCE_DIR}/thirdparty/ImGuizmo/GraphEditor.cpp
 )
 
-# Core library
-add_library(OpenEyeCore STATIC
-    # Core systems
-    src/core/window/Window.cpp
-    src/core/window/Window.h
-    src/core/input/Input.cpp
-    src/core/input/Input.h
-    src/core/time/Time.cpp
-    src/core/time/Time.h
-    src/core/log/Log.cpp
-    src/core/log/Log.h
-    src/core/filesystem/ShaderFileWatcher.cpp
-    src/core/filesystem/ShaderFileWatcher.h
-    
-    # ECS (Refactored - Modular Structure)
-    src/ecs/Scene.cpp
-    src/ecs/Scene.h
-    src/ecs/Components.cpp
-    src/ecs/Components.h
-    src/ecs/Systems.h
-    # ECS Systems (Modular)
-    src/ecs/systems/TransformSystem.cpp
-    src/ecs/systems/TransformSystem.h
-    src/ecs/systems/LODSystem.cpp
-    src/ecs/systems/LODSystem.h
-    src/ecs/systems/CullingSystem.cpp
-    src/ecs/systems/CullingSystem.h
-    src/ecs/systems/CameraSystem.cpp
-    src/ecs/systems/CameraSystem.h
-    src/ecs/systems/RenderSystem.cpp
-    src/ecs/systems/RenderSystem.h
-    src/ecs/systems/PhysicsSystem.cpp
-    src/ecs/systems/PhysicsSystem.h
-    src/ecs/systems/ParticleSystem.cpp
-    src/ecs/systems/ParticleSystem.h
-    
-    # Rendering resources
-    src/rendering/resources/Shader.cpp
-    src/rendering/resources/Shader.h
-    src/rendering/resources/Texture.cpp
-    src/rendering/resources/Texture.h
-    src/rendering/resources/Mesh.cpp
-    src/rendering/resources/Mesh.h
-    src/rendering/resources/Material.cpp
-    src/rendering/resources/Material.h
-    src/rendering/resources/MeshLoader.cpp
-    src/rendering/resources/MeshLoader.h
-    src/rendering/resources/UniformBuffer.cpp
-    src/rendering/resources/UniformBuffer.h
-    src/rendering/resources/Cubemap.cpp
-    src/rendering/resources/Cubemap.h
-    
-    # Rendering systems
-    src/rendering/Camera.cpp
-    src/rendering/Camera.h
-    src/rendering/Frustum.cpp
-    src/rendering/Frustum.h
-    src/rendering/LODManager.cpp
-    src/rendering/LODManager.h
-    src/rendering/InstancedRenderer.cpp
-    src/rendering/InstancedRenderer.h
-    src/rendering/GBuffer.cpp
-    src/rendering/GBuffer.h
-    src/rendering/FullscreenQuad.cpp
-    src/rendering/FullscreenQuad.h
-    src/rendering/SkyboxRenderer.cpp
-    src/rendering/SkyboxRenderer.h
-    src/rendering/IBL.cpp
-    src/rendering/IBL.h
-    src/rendering/ShadowMap.cpp
-    src/rendering/ShadowMap.h
-    src/rendering/PostProcessor.cpp
-    src/rendering/PostProcessor.h
-    src/rendering/RenderPipeline.cpp
-    src/rendering/RenderPipeline.h
-    src/rendering/passes/GBufferPass.cpp
-    src/rendering/passes/GBufferPass.h
-    src/rendering/passes/ShadowPass.cpp
-    src/rendering/passes/ShadowPass.h
-    src/rendering/passes/LightingPass.cpp
-    src/rendering/passes/LightingPass.h
-    src/rendering/passes/TransparencyPass.cpp
-    src/rendering/passes/TransparencyPass.h
-    src/rendering/framegraph/FrameGraph.cpp
-    src/rendering/framegraph/FrameGraph.h
-    
-    # Animation systems
-    src/animation/Skeleton.cpp
-    src/animation/Skeleton.h
-    src/animation/AnimationClip.cpp
-    src/animation/AnimationClip.h
-    src/animation/AnimationLoader.cpp
-    src/animation/AnimationLoader.h
-    src/animation/AnimationSystem.cpp
-    src/animation/AnimationSystem.h
-    src/animation/AnimationStateMachine.cpp
-    src/animation/AnimationStateMachine.h
-    
-    # Scene serialization
-    src/ecs/SceneSerializer.cpp
-    src/ecs/SceneSerializer.h
-    
-    # Prefab system
-    src/ecs/Prefab.cpp
-    src/ecs/Prefab.h
-    
-    # Asset management
-    src/assets/AssetGUID.cpp
-    src/assets/AssetGUID.h
-    src/assets/AssetRegistry.cpp
-    src/assets/AssetRegistry.h
-    src/assets/AssetCooker.cpp
-    src/assets/AssetCooker.h
-    
-    # Particle systems
-    src/particles/ParticleEmitter.cpp
-    src/particles/ParticleEmitter.h
-    src/particles/ParticleRenderer.cpp
-    src/particles/ParticleRenderer.h
-    
-    # Fluid systems (volumetric)
-    src/fluids/FluidCommon.h
-    src/fluids/FluidSimulation.cpp
-    src/fluids/FluidSimulation.h
-    src/fluids/FluidRenderer.cpp
-    src/fluids/FluidRenderer.h
-    src/ecs/systems/FluidSystem.cpp
-    src/ecs/systems/FluidSystem.h
-    
-    # Physics systems
-    src/physics/PhysicsWorld.cpp
-    src/physics/PhysicsWorld.h
-    src/physics/shapes/CollisionShapeFactory.cpp
-    src/physics/shapes/CollisionShapeFactory.h
-    src/physics/bodies/RigidBodyFactory.cpp
-    src/physics/bodies/RigidBodyFactory.h
-    src/physics/controllers/CharacterControllerFactory.cpp
-    src/physics/controllers/CharacterControllerFactory.h
-    src/physics/queries/PhysicsQuery.cpp
-    src/physics/queries/PhysicsQuery.h
-    src/physics/queries/PhysicsQueryTypes.h
-    src/physics/utils/PhysicsUtils.cpp
-    src/physics/utils/PhysicsUtils.h
-    
+add_library(OpenEyeImGui STATIC
     ${IMGUI_SOURCES}
     ${IMGUIZMO_SOURCES}
 )
 
-# Link third-party libraries
-if(WIN32)
-    target_link_libraries(OpenEyeCore
-        PUBLIC glad
-        PUBLIC glfw
-        PUBLIC BulletDynamics
-        PUBLIC BulletCollision
-        PUBLIC LinearMath
-        PRIVATE ${CMAKE_SOURCE_DIR}/thirdparty/assimp/lib/assimp-vc143-mt.lib
-        PRIVATE opengl32
-        PRIVATE gdi32
-        PRIVATE user32
-        PRIVATE kernel32
-    )
-else()
-    target_link_libraries(OpenEyeCore
-        PUBLIC glad
-        PUBLIC glfw
-        PUBLIC BulletDynamics
-        PUBLIC BulletCollision
-        PUBLIC LinearMath
-        PRIVATE opengl32
-    )
-endif()
+target_include_directories(OpenEyeImGui
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/thirdparty/imgui
+        ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends
+        ${CMAKE_SOURCE_DIR}/thirdparty/ImGuizmo
+)
 
-# GLFW needs additional system libraries on some platforms
-if(UNIX AND NOT APPLE)
-    target_link_libraries(glfw PRIVATE m)
-endif()
+target_link_libraries(OpenEyeImGui
+    PUBLIC
+        glad
+        glfw
+)
 
-# Copy Assimp DLL to output directory on Windows
-if(WIN32)
-    add_custom_command(TARGET OpenEyeCore POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/thirdparty/assimp/bin/assimp-vc143-mt.dll
-        $<TARGET_FILE_DIR:OpenEyeCore>
-    )
-endif()
+# --------------------------------------
+# Component Libraries (Modular Structure)
+# --------------------------------------
+# Add component subdirectories in dependency order
+add_subdirectory(src/core)
+add_subdirectory(src/assets)
+add_subdirectory(src/rendering)
+add_subdirectory(src/animation)
+add_subdirectory(src/particles)
+add_subdirectory(src/physics)
+add_subdirectory(src/fluids)
+add_subdirectory(src/ecs)
 
-# Editor executable (development environment)
+# --------------------------------------
+# Editor Application (Development Environment)
+# --------------------------------------
+# Editor only builds in Debug configuration
 if(OPENEYE_BUILD_EDITOR)
+    # Legacy editor (src/editor/main.cpp) - for backward compatibility
     add_executable(Editor
         src/editor/main.cpp
     )
     
-    target_link_libraries(Editor OpenEyeCore)
+    target_include_directories(Editor
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/thirdparty/imgui
+            ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends
+            ${CMAKE_SOURCE_DIR}/thirdparty/ImGuizmo
+            ${CMAKE_SOURCE_DIR}/thirdparty/glm
+            ${CMAKE_SOURCE_DIR}/thirdparty/assimp/include
+            ${CMAKE_SOURCE_DIR}/thirdparty/bullet3/src
+    )
+    
+    target_link_libraries(Editor
+        PRIVATE
+            OpenEyeECS
+            OpenEyeImGui
+    )
     
     # Debug configuration: enable editor features
     target_compile_definitions(Editor PRIVATE OPENEYE_EDITOR=1)
+    
+    # Editor panels library (used by OpenMeta in Debug builds)
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
+        add_subdirectory(app/editor)
+    endif()
 endif()
 
-# Game executable (final runtime)
+# --------------------------------------
+# Game Application (Final Runtime)
+# --------------------------------------
+# Game application in app/openmeta/
+# Game never depends on editor - clean separation
 if(OPENEYE_BUILD_GAME)
-    add_executable(Game
-        src/game/main.cpp
-    )
-    
-    target_link_libraries(Game OpenEyeCore)
-    
-    # Release configuration: disable editor features
-    target_compile_definitions(Game PRIVATE OPENEYE_EDITOR=0)
+    add_subdirectory(app/openmeta)
 endif()
 
 
