@@ -28,6 +28,17 @@ uniform vec3 u_PointLightColors[MAX_POINT_LIGHTS];
 uniform float u_PointLightIntensities[MAX_POINT_LIGHTS];
 uniform float u_PointLightRanges[MAX_POINT_LIGHTS];
 
+// Spot light uniforms
+#define MAX_SPOT_LIGHTS 32
+uniform int u_SpotLightCount;
+uniform vec3 u_SpotLightPositions[MAX_SPOT_LIGHTS];
+uniform vec3 u_SpotLightDirections[MAX_SPOT_LIGHTS];
+uniform vec3 u_SpotLightColors[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightIntensities[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightRanges[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightInnerAngles[MAX_SPOT_LIGHTS]; // cos(inner angle)
+uniform float u_SpotLightOuterAngles[MAX_SPOT_LIGHTS]; // cos(outer angle)
+
 // IBL uniforms
 uniform samplerCube u_IrradianceMap;
 uniform samplerCube u_PrefilterMap;
@@ -55,8 +66,16 @@ void main(){
     if (u_DebugMode==4){ FragColor=vec4(metallic,roughness,0.0,1.0); return; }
     vec3 Ld = normalize(-u_LightDir); float NdotL = max(dot(normal,Ld),0.0);
     vec3 lighting=vec3(0.0);
-    if (u_LightIntensity>0.0 && NdotL>0.0){ float vis=CalculateShadow(position,normal,Ld,u_ShadowMaps,u_ShadowMatrices,u_CascadeSplits,u_ViewMatrix); vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,Ld); lighting += brdf * (u_LightColor*u_LightIntensity) * NdotL * vis; }
+    if (u_LightIntensity>0.0 && NdotL>0.0){ 
+        float vis = 1.0;
+        if (u_ShadowCascadeCount > 0) {
+            vis = CalculateShadow(position,normal,Ld,u_ShadowMaps,u_ShadowMatrices,u_CascadeSplits,u_ViewMatrix);
+        }
+        vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,Ld); 
+        lighting += brdf * (u_LightColor*u_LightIntensity) * NdotL * vis; 
+    }
     for (int i=0;i<u_PointLightCount && i<MAX_POINT_LIGHTS;i++){ vec3 lp=u_PointLightPositions[i]; vec3 L=normalize(lp-position); float d=length(lp-position); if (d>u_PointLightRanges[i]) continue; float att=1.0/(1.0+0.09*d+0.032*d*d); float rf=1.0 - smoothstep(0.0,u_PointLightRanges[i],d); float ndl=max(dot(normal,L),0.0); if (ndl>0.0){ vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,L); lighting += brdf * (u_PointLightColors[i]*u_PointLightIntensities[i]) * ndl * att * rf; } }
+    for (int i=0;i<u_SpotLightCount && i<MAX_SPOT_LIGHTS;i++){ vec3 lp=u_SpotLightPositions[i]; vec3 L=normalize(lp-position); float d=length(lp-position); if (d>u_SpotLightRanges[i]) continue; float spotAngle=dot(L,-u_SpotLightDirections[i]); float spotAttenuation=smoothstep(u_SpotLightOuterAngles[i],u_SpotLightInnerAngles[i],spotAngle); if (spotAttenuation<=0.0) continue; float att=1.0/(1.0+0.09*d+0.032*d*d); float rf=1.0 - smoothstep(0.0,u_SpotLightRanges[i],d); float ndl=max(dot(normal,L),0.0); if (ndl>0.0){ vec3 brdf=EvaluateBurleyBRDF(albedo,metallic,roughness,normal,V,L); lighting += brdf * (u_SpotLightColors[i]*u_SpotLightIntensities[i]) * ndl * att * rf * spotAttenuation; } }
     
     // IBL (Image-Based Lighting)
     vec3 ambient = vec3(0.0);

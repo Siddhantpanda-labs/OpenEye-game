@@ -23,6 +23,7 @@ public:
     // Get scene for editor panels
     OpenEye::ECS::Scene* GetScene() { return m_scene.get(); }
     OpenEye::Core::Window* GetWindow() { return m_window.get(); }
+    OpenEye::Rendering::RenderPipeline* GetRenderPipeline() { return m_renderPipeline.get(); }
 
 private:
     void LoadScene();

@@ -140,7 +140,7 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         glClear(GL_COLOR_BUFFER_BIT);
         
         LightingPass lp; lp.Execute(scene, *m_gbuffer, camera, m_lightingShader, m_shadowMap.get(), params,
-            m_skybox && m_skybox->IsValid() ? m_skyboxRenderer.get() : nullptr,
+            m_skyboxRenderer.get(), // Always pass skyboxRenderer (it has solid color even without cubemap)
             m_ibl && m_ibl->IsValid() ? m_ibl.get() : nullptr);
     }, {}, {}, true);
     
@@ -162,6 +162,9 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
                                     m_gbuffer->GetDepthTexture(),
                                     m_width,
                                     m_height);
+        
+        // Render fluid volumes (smoke, liquid)
+        ECS::FluidSystem::Render(scene, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix());
     }, {}, {}, true);
     
     // Post-processing pass - apply effects and blit to screen

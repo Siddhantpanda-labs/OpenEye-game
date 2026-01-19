@@ -11,6 +11,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/IEditorPanel.h
     )
     
@@ -56,6 +60,8 @@ target_include_directories(OpenMetaEditorLib
         PUBLIC
             OpenEyeECS
             OpenEyeImGui
+            OpenEyeRendering
+            OpenEyeAnimation
     )
     
     target_compile_definitions(OpenMetaEditorLib PRIVATE OPENEYE_EDITOR=1)

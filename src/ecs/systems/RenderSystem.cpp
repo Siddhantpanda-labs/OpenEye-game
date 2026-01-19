@@ -609,12 +609,6 @@ void RenderSystem::RenderLightingPass(Scene& scene,
         shadowMap->BindTextures(5); // Start at texture unit 5
     }
     
-    // Bind background from skybox pass (if available)
-    if (skyboxRenderer && skyboxRenderer->GetColorTexture() != 0) {
-        glActiveTexture(GL_TEXTURE0 + 9);
-        glBindTexture(GL_TEXTURE_2D, skyboxRenderer->GetColorTexture());
-    }
-
     // Use lighting shader (MUST bind before setting uniforms)
     lightingShader->Bind();
     
@@ -626,7 +620,14 @@ void RenderSystem::RenderLightingPass(Scene& scene,
     
     // Directional light, exposure, ambient now via LightUniforms UBO
     lightingShader->SetInt("u_DebugMode", debugMode);
+    
+    // Bind background from skybox pass (if available)
     if (skyboxRenderer && skyboxRenderer->GetColorTexture() != 0) {
+        glActiveTexture(GL_TEXTURE0 + 9);
+        glBindTexture(GL_TEXTURE_2D, skyboxRenderer->GetColorTexture());
+        lightingShader->SetInt("u_Background", 9);
+    } else {
+        // No background texture - shader will use black or handle it
         lightingShader->SetInt("u_Background", 9);
     }
     
@@ -641,22 +642,42 @@ void RenderSystem::RenderLightingPass(Scene& scene,
         lightingShader->SetBool("u_UseIBL", false);
     }
     
-    // Collect point lights from scene
+    // Collect point lights and spot lights from scene
     std::vector<glm::vec3> pointLightPositions;
     std::vector<glm::vec3> pointLightColors;
     std::vector<float> pointLightIntensities;
     std::vector<float> pointLightRanges;
     
+    std::vector<glm::vec3> spotLightPositions;
+    std::vector<glm::vec3> spotLightDirections;
+    std::vector<glm::vec3> spotLightColors;
+    std::vector<float> spotLightIntensities;
+    std::vector<float> spotLightRanges;
+    std::vector<float> spotLightInnerAngles;
+    std::vector<float> spotLightOuterAngles;
+    
     auto lightView = registry.view<Transform, Light>();
     for (auto entity : lightView) {
         auto [transform, light] = lightView.get<Transform, Light>(entity);
+        glm::mat4 worldMatrix = transform.GetWorldMatrix(registry);
+        glm::vec3 worldPos = glm::vec3(worldMatrix[3]);
         
         if (light.type == Light::Type::Point) {
-            glm::vec3 worldPos = transform.GetWorldMatrix(registry) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
             pointLightPositions.push_back(worldPos);
             pointLightColors.push_back(light.color);
             pointLightIntensities.push_back(light.intensity);
             pointLightRanges.push_back(light.range);
+        } else if (light.type == Light::Type::Spot) {
+            glm::mat3 rotationMatrix = glm::mat3(worldMatrix);
+            glm::vec3 direction = glm::normalize(rotationMatrix * glm::vec3(0.0f, 0.0f, -1.0f));
+            
+            spotLightPositions.push_back(worldPos);
+            spotLightDirections.push_back(direction);
+            spotLightColors.push_back(light.color);
+            spotLightIntensities.push_back(light.intensity);
+            spotLightRanges.push_back(light.range);
+            spotLightInnerAngles.push_back(glm::cos(glm::radians(light.innerConeAngle)));
+            spotLightOuterAngles.push_back(glm::cos(glm::radians(light.outerConeAngle)));
         }
     }
     
@@ -676,7 +697,30 @@ void RenderSystem::RenderLightingPass(Scene& scene,
         lightingShader->SetFloat(rangeName, pointLightRanges[i]);
     }
     
-    // Set shadow map uniforms if shadow map is provided
+    // Set spot lights (limit to MAX_SPOT_LIGHTS)
+    size_t spotLightCount = std::min(spotLightPositions.size(), size_t(32));
+    lightingShader->SetInt("u_SpotLightCount", static_cast<int>(spotLightCount));
+    
+    for (size_t i = 0; i < spotLightCount; i++) {
+        std::string posName = "u_SpotLightPositions[" + std::to_string(i) + "]";
+        std::string dirName = "u_SpotLightDirections[" + std::to_string(i) + "]";
+        std::string colorName = "u_SpotLightColors[" + std::to_string(i) + "]";
+        std::string intensityName = "u_SpotLightIntensities[" + std::to_string(i) + "]";
+        std::string rangeName = "u_SpotLightRanges[" + std::to_string(i) + "]";
+        std::string innerName = "u_SpotLightInnerAngles[" + std::to_string(i) + "]";
+        std::string outerName = "u_SpotLightOuterAngles[" + std::to_string(i) + "]";
+        
+        lightingShader->SetVec3(posName, spotLightPositions[i]);
+        lightingShader->SetVec3(dirName, spotLightDirections[i]);
+        lightingShader->SetVec3(colorName, spotLightColors[i]);
+        lightingShader->SetFloat(intensityName, spotLightIntensities[i]);
+        lightingShader->SetFloat(rangeName, spotLightRanges[i]);
+        lightingShader->SetFloat(innerName, spotLightInnerAngles[i]);
+        lightingShader->SetFloat(outerName, spotLightOuterAngles[i]);
+    }
+    
+    // Always enable shadows (shadow map is always initialized in RenderPipeline)
+    // Cascade splits are set in FrameUniforms UBO (binding 0), not as individual uniforms
     if (shadowMap) {
         uint32_t cascadeCount = shadowMap->GetCascadeCount();
         lightingShader->SetInt("u_ShadowCascadeCount", static_cast<int>(cascadeCount));
@@ -688,15 +732,8 @@ void RenderSystem::RenderLightingPass(Scene& scene,
             uniformName = "u_ShadowMatrices[" + std::to_string(i) + "]";
             lightingShader->SetMat4(uniformName, shadowMap->GetShadowMatrix(i));
         }
-        
-        // Set cascade splits
-        const auto& splits = shadowMap->GetSplitDistances();
-        for (size_t i = 0; i < splits.size() && i < 5; i++) {
-            std::string uniformName = "u_CascadeSplits[" + std::to_string(i) + "]";
-            lightingShader->SetFloat(uniformName, splits[i]);
-        }
     } else {
-        // No shadows
+        // Fallback: no shadows (shouldn't happen, but handle gracefully)
         lightingShader->SetInt("u_ShadowCascadeCount", 0);
     }
     

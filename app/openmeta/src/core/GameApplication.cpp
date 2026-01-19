@@ -7,6 +7,8 @@
 // This is needed because PhysicsSystem::CreateGroundPlane and AttachPhysicsBody
 // take Physics::PhysicsWorld* (internal type), not the API type
 #include "physics/PhysicsWorld.h"
+#include "particles/ParticleEmitter.h"
+#include "fluids/FluidSimulation.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
@@ -249,6 +251,11 @@ void GameApplication::CreateDefaultScene() {
     auto& lightTransform = registry.get<Transform>(light);
     lightTransform.rotation = glm::quatLookAt(glm::normalize(glm::vec3(0.3f, -1.0f, 0.2f)), glm::vec3(0.0f, 1.0f, 0.0f));
     
+    // Set greyish sky color
+    if (m_renderPipeline) {
+        m_renderPipeline->SetSkyColor(glm::vec3(0.6f, 0.65f, 0.7f)); // Greyish sky
+    }
+    
     // Create ground plane
     if (m_physicsWorld) {
         void* internalPhysicsWorld = m_physicsWorld->GetInternalWorld();
@@ -297,7 +304,72 @@ void GameApplication::CreateDefaultScene() {
         }
     }
     
-    OE_INFO("Created default scene with camera, light, ground plane, and Dess model");
+    // Create particle emitter (smoke/dust effect)
+    {
+        auto particleEntity = m_scene->CreateEntity("ParticleEmitter");
+        auto& particleTransform = registry.get<Transform>(particleEntity);
+        particleTransform.position = glm::vec3(2.0f, 0.5f, 0.0f);
+        
+        OpenEye::Particles::ParticleEmitterConfig particleConfig;
+        particleConfig.position = particleTransform.position;
+        particleConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
+        particleConfig.spread = 25.0f;
+        particleConfig.minSpeed = 0.5f;
+        particleConfig.maxSpeed = 2.0f;
+        particleConfig.minLifetime = 2.0f;
+        particleConfig.maxLifetime = 4.0f;
+        particleConfig.minSize = 0.2f;
+        particleConfig.maxSize = 0.6f;
+        particleConfig.startColor = glm::vec4(0.8f, 0.8f, 0.9f, 1.0f); // Light gray/white
+        particleConfig.endColor = glm::vec4(0.3f, 0.3f, 0.3f, 0.0f);   // Fade to transparent gray
+        particleConfig.particlesPerSecond = 50.0f;
+        particleConfig.maxParticles = 500;
+        particleConfig.useGravity = true;
+        particleConfig.gravity = glm::vec3(0.0f, -2.0f, 0.0f); // Lighter gravity for floating effect
+        particleConfig.damping = 0.95f;
+        
+        auto particleEmitter = std::make_shared<OpenEye::Particles::ParticleEmitter>(particleConfig);
+        particleEmitter->Start();
+        registry.emplace<ParticleEmitterComponent>(particleEntity, particleEmitter);
+        
+        OE_INFO("Created particle emitter");
+    }
+    
+    // Create fluid volume (smoke simulation)
+    {
+        auto fluidEntity = m_scene->CreateEntity("FluidVolume");
+        auto& fluidTransform = registry.get<Transform>(fluidEntity);
+        fluidTransform.position = glm::vec3(-2.0f, 1.0f, 0.0f);
+        
+        OpenEye::Fluids::FluidGridDesc fluidDesc;
+        fluidDesc.resolution = glm::ivec3(64, 64, 64);
+        fluidDesc.volumeSize = glm::vec3(2.0f, 2.0f, 2.0f);
+        
+        auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
+        if (fluidSim->Initialize(fluidDesc, OpenEye::Fluids::FluidType::Gas)) {
+            // Configure smoke emission
+            glm::vec3 emitPos(0.5f, 0.15f, 0.5f); // Normalized position in volume [0,1]
+            float emitRadius = 0.05f;
+            float densityRate = 0.8f;
+            float tempRate = 1.5f;
+            fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
+            
+            // Set buoyancy for rising smoke
+            fluidSim->SetBuoyancy(1.5f, 0.03f, 0.0f); // sigma, kappa, ambient temp
+            
+            auto& fluidComp = registry.emplace<FluidVolumeComponent>(fluidEntity);
+            fluidComp.simulation = fluidSim;
+            fluidComp.resolution = fluidDesc.resolution;
+            fluidComp.volumeSize = fluidDesc.volumeSize;
+            fluidComp.enabled = true;
+            
+            OE_INFO("Created fluid volume (smoke simulation)");
+        } else {
+            OE_WARN("Failed to initialize fluid simulation");
+        }
+    }
+    
+    OE_INFO("Created default scene with camera, light, ground plane, Dess model, particles, and fluids");
 }
 
 void GameApplication::SetupInputCallbacks() {
@@ -312,7 +384,10 @@ void GameApplication::SetupInputCallbacks() {
         if (key == GLFW_KEY_X && action == GLFW_PRESS) {
             m_cameraLocked = !m_cameraLocked;
             m_window->SetMouseLocked(m_cameraLocked);
-            m_firstMouse = true; // Reset mouse position on lock toggle
+            if (m_cameraLocked) {
+                m_firstMouse = true; // Reset mouse position when locking
+                m_lastMousePos = Input::GetMousePosition(); // Initialize last position
+            }
             
             // Initialize yaw/pitch from current camera rotation when locking
             if (m_cameraLocked && m_scene) {
@@ -405,41 +480,45 @@ void GameApplication::UpdateCameraControls(float deltaTime) {
         
         // Process mouse movement (camera rotation) - only when X is pressed (cursor locked)
         if (m_cameraLocked) {
+            glm::vec2 currentMousePos = Input::GetMousePosition();
+            
             // Initialize yaw/pitch from current rotation when first locking
             if (m_firstMouse) {
-                m_lastMousePos = Input::GetMousePosition();
+                m_lastMousePos = currentMousePos;
                 m_firstMouse = false;
                 
                 // Initialize yaw/pitch from current rotation
                 m_cameraYaw = glm::degrees(atan2(forward.z, forward.x));
                 m_cameraPitch = glm::degrees(asin(forward.y));
-            }
-            
-            glm::vec2 mouseDelta = Input::GetMouseDelta();
-            
-            // Process rotation if there's any mouse movement (even very small)
-            // Check with epsilon to catch very small movements
-            const float epsilon = 0.0001f;
-            if (glm::abs(mouseDelta.x) > epsilon || glm::abs(mouseDelta.y) > epsilon) {
-                // Convert mouse delta to rotation
-                // Standard mouse look: right = rotate right, up = rotate up
-                float yawDelta = mouseDelta.x * m_mouseSensitivity;
-                float pitchDelta = mouseDelta.y * m_mouseSensitivity; // Positive Y = look up
+            } else {
+                // Calculate mouse delta manually (more reliable than Input::GetMouseDelta)
+                glm::vec2 mouseDelta = currentMousePos - m_lastMousePos;
                 
-                // Update yaw and pitch
-                m_cameraYaw += yawDelta;
-                m_cameraPitch -= pitchDelta; // Subtract for standard mouse look (moving mouse up looks up)
+                // Process rotation if there's any mouse movement
+                const float epsilon = 0.0001f;
+                if (glm::abs(mouseDelta.x) > epsilon || glm::abs(mouseDelta.y) > epsilon) {
+                    // Convert mouse delta to rotation
+                    // Standard mouse look: right = rotate right, up = rotate up
+                    float yawDelta = mouseDelta.x * m_mouseSensitivity;
+                    float pitchDelta = mouseDelta.y * m_mouseSensitivity;
+                    
+                    // Update yaw and pitch
+                    m_cameraYaw += yawDelta;
+                    m_cameraPitch -= pitchDelta; // Subtract for standard mouse look (moving mouse up looks up)
+                    
+                    // Clamp pitch to prevent gimbal lock
+                    m_cameraPitch = glm::clamp(m_cameraPitch, -89.0f, 89.0f);
+                    
+                    // Convert yaw and pitch to quaternion
+                    // For FPS camera: yaw around global Y axis, then pitch around local X axis
+                    glm::quat yawQuat = glm::angleAxis(glm::radians(m_cameraYaw), glm::vec3(0.0f, 1.0f, 0.0f));
+                    glm::quat pitchQuat = glm::angleAxis(glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f));
+                    transform.rotation = yawQuat * pitchQuat; // Yaw first, then pitch
+                    transform.dirty = true;
+                }
                 
-                // Clamp pitch to prevent gimbal lock
-                m_cameraPitch = glm::clamp(m_cameraPitch, -89.0f, 89.0f);
-                
-                // Convert yaw and pitch to quaternion
-                // For FPS camera: apply pitch first (local X axis), then yaw (global Y axis)
-                // Order: pitch * yaw (rotate around Y first, then around local X)
-                glm::quat yawQuat = glm::angleAxis(glm::radians(m_cameraYaw), glm::vec3(0.0f, 1.0f, 0.0f));
-                glm::quat pitchQuat = glm::angleAxis(glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f));
-                transform.rotation = yawQuat * pitchQuat; // Yaw first, then pitch (local rotation after yaw)
-                transform.dirty = true;
+                // Update last mouse position for next frame
+                m_lastMousePos = currentMousePos;
             }
         }
         
