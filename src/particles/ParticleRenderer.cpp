@@ -172,12 +172,10 @@ void ParticleRenderer::Render(const std::vector<std::shared_ptr<ParticleEmitter>
     GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     if (cullWasEnabled) glDisable(GL_CULL_FACE);
     
-    // Extract camera right, up, and forward vectors from view matrix (inverse of model matrix)
-    // View matrix columns represent camera axes in world space
-    glm::mat4 invView = glm::inverse(viewMatrix);
-    glm::vec3 cameraRight = glm::normalize(glm::vec3(invView[0][0], invView[1][0], invView[2][0]));
-    glm::vec3 cameraUp = glm::normalize(glm::vec3(invView[0][1], invView[1][1], invView[2][1]));
-    glm::vec3 cameraForward = glm::normalize(glm::vec3(invView[0][2], invView[1][2], invView[2][2]));
+    // Get camera vectors directly from camera object (more reliable than extracting from view matrix)
+    glm::vec3 cameraRight = camera.GetRight();
+    glm::vec3 cameraUp = camera.GetUp();
+    glm::vec3 cameraForward = camera.GetForward();
     // cameraPos already declared above, reuse it
     
     // Set common uniforms (will be set per-batch for volumetric shader)

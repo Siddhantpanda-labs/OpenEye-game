@@ -30,34 +30,30 @@ void main() {
     if (u_RenderMode == 1) { // CrossBillboard
         int quadIndex = a_QuadIndex;
         
-        // All quads face the camera - use cameraRight and cameraUp for all quads
-        // Rotate the quad vertices around camera forward axis to create volumetric appearance
+        // All quads MUST face the camera - use cameraRight and cameraUp directly
         vec3 cameraRight = normalize(u_CameraRight);
         vec3 cameraUp = normalize(u_CameraUp);
-        vec3 cameraForward = normalize(u_CameraForward);
         
-        // Rotate quad vertices around camera forward axis based on quadIndex
-        // This creates 3 quads that all face the camera but are rotated around forward axis
-        float angle = float(quadIndex) * 2.09439510239; // 120 degrees in radians (2*PI/3)
-        float cosAngle = cos(angle);
-        float sinAngle = sin(angle);
-        
-        // Rotate the quad position around camera forward
-        vec2 rotatedQuadPos = vec2(
-            a_Position.x * cosAngle - a_Position.y * sinAngle,
-            a_Position.x * sinAngle + a_Position.y * cosAngle
-        );
-        
-        // Apply particle rotation
+        // Apply particle rotation to quad vertices
         float cosRot = cos(a_ParticleRotation);
         float sinRot = sin(a_ParticleRotation);
         vec2 rotatedPos = vec2(
-            rotatedQuadPos.x * cosRot - rotatedQuadPos.y * sinRot,
-            rotatedQuadPos.x * sinRot + rotatedQuadPos.y * cosRot
+            a_Position.x * cosRot - a_Position.y * sinRot,
+            a_Position.x * sinRot + a_Position.y * cosRot
+        );
+        
+        // Rotate the quad vertices in 2D space around the center based on quadIndex
+        // This creates 3 quads that all face the camera but are rotated differently
+        float quadRotation = float(quadIndex) * 2.09439510239; // 120 degrees in radians
+        float cosQuadRot = cos(quadRotation);
+        float sinQuadRot = sin(quadRotation);
+        vec2 finalRotatedPos = vec2(
+            rotatedPos.x * cosQuadRot - rotatedPos.y * sinQuadRot,
+            rotatedPos.x * sinQuadRot + rotatedPos.y * cosQuadRot
         );
         
         // All quads use cameraRight and cameraUp (always face camera)
-        worldPos += cameraRight * rotatedPos.x * a_ParticleSize + cameraUp * rotatedPos.y * a_ParticleSize;
+        worldPos += cameraRight * finalRotatedPos.x * a_ParticleSize + cameraUp * finalRotatedPos.y * a_ParticleSize;
         finalPos = rotatedPos;
     } else { // Billboard (default)
         // Standard billboard calculation: align quad to face camera
