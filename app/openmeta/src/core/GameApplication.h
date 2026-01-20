@@ -54,6 +54,11 @@ private:
     bool m_firstMouse = true;
     float m_cameraYaw = -90.0f;   // Initial yaw (looking along -Z)
     float m_cameraPitch = 0.0f;   // Initial pitch (horizontal)
+    
+    // Deferred resize (to avoid resizing during rendering)
+    bool m_pendingResize = false;
+    int m_pendingWidth = 0;
+    int m_pendingHeight = 0;
 };
 
 } // namespace OpenMeta

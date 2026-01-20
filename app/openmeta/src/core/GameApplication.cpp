@@ -37,6 +37,7 @@ bool GameApplication::Initialize() {
     config.height = 1080;
     config.vsync = true;
     config.debugContext = true;
+    config.resizable = true; // Enable window resizing, maximize, and minimize
     
     if (!m_window->Initialize(config)) {
         OE_ERROR("Failed to initialize window");
@@ -67,6 +68,17 @@ bool GameApplication::Initialize() {
     int width, height;
     glfwGetFramebufferSize(m_window->GetNativeHandle(), &width, &height);
     m_renderPipeline = std::make_unique<OpenEye::Rendering::RenderPipeline>();
+    
+    // Setup resize callback AFTER render pipeline is created
+    // Defer resize to next frame to avoid destroying framebuffers during rendering
+    m_window->SetResizeCallback([this](int width, int height) {
+        if (width > 0 && height > 0) {
+            // Store pending resize (will be applied at start of next Render() call)
+            m_pendingWidth = width;
+            m_pendingHeight = height;
+            m_pendingResize = true;
+        }
+    });
     if (!m_renderPipeline->Initialize(width, height)) {
         OE_ERROR("Failed to initialize RenderPipeline");
         return false;
@@ -116,27 +128,37 @@ void GameApplication::Update(float deltaTime) {
 void GameApplication::Render() {
     if (!m_scene || !m_renderPipeline) return;
     
-    auto* camera = GetMainCamera();
-    if (!camera) return;
-    
-    // Handle window resize
-    int width, height;
-    glfwGetFramebufferSize(m_window->GetNativeHandle(), &width, &height);
-    if (width > 0 && height > 0) {
-        m_renderPipeline->Resize(width, height);
-        // Update camera aspect ratio in CameraComponent and sync to Camera
-        auto& registry = m_scene->GetRegistry();
-        auto cameraView = registry.view<OpenEye::ECS::CameraComponent, OpenEye::ECS::Transform>();
-        for (auto entity : cameraView) {
-            auto& cameraComp = cameraView.get<OpenEye::ECS::CameraComponent>(entity);
-            if (cameraComp.isPrimary) {
-                float newAspect = (float)width / (float)height;
-                cameraComp.aspect = newAspect;
-                cameraComp.camera.SetPerspective(cameraComp.fov, cameraComp.aspect, cameraComp.nearPlane, cameraComp.farPlane);
-                break;
+    // Handle pending resize BEFORE rendering (prevents destroying framebuffers during render)
+    if (m_pendingResize) {
+        // Update viewport immediately
+        glViewport(0, 0, m_pendingWidth, m_pendingHeight);
+        
+        // Update render pipeline
+        if (m_renderPipeline) {
+            m_renderPipeline->Resize(m_pendingWidth, m_pendingHeight);
+        }
+        
+        // Update camera aspect ratio
+        if (m_scene) {
+            auto& registry = m_scene->GetRegistry();
+            auto cameraView = registry.view<OpenEye::ECS::CameraComponent, OpenEye::ECS::Transform>();
+            for (auto entity : cameraView) {
+                auto& cameraComp = cameraView.get<OpenEye::ECS::CameraComponent>(entity);
+                if (cameraComp.isPrimary) {
+                    float newAspect = (float)m_pendingWidth / (float)m_pendingHeight;
+                    cameraComp.aspect = newAspect;
+                    cameraComp.camera.SetPerspective(cameraComp.fov, cameraComp.aspect, cameraComp.nearPlane, cameraComp.farPlane);
+                    break;
+                }
             }
         }
+        
+        // Clear pending resize flag
+        m_pendingResize = false;
     }
+    
+    auto* camera = GetMainCamera();
+    if (!camera) return;
     
     // Setup lighting params
     OpenEye::Rendering::LightingParams params;

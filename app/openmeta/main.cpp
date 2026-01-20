@@ -26,14 +26,17 @@ int main() {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    // Disable viewports to prevent crashes when dragging floating windows
+    // Viewports create separate platform windows which can cause OpenGL context issues
+    // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     ImGui::StyleColorsDark();
     
     ImGuiStyle& style = ImGui::GetStyle();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        style.WindowRounding = 0.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-    }
+    // Viewport-specific styling disabled since viewports are disabled
+    // if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    //     style.WindowRounding = 0.0f;
+    //     style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+    // }
     
     ImGui_ImplGlfw_InitForOpenGL(game.GetWindow()->GetNativeHandle(), true);
     ImGui_ImplOpenGL3_Init("#version 450");
@@ -70,10 +73,11 @@ int main() {
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
-        }
+        // Viewport handling disabled to prevent crashes when dragging floating windows
+        // if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        //     ImGui::UpdatePlatformWindows();
+        //     ImGui::RenderPlatformWindowsDefault();
+        // }
         
         game.GetWindow()->SwapBuffers();
     }

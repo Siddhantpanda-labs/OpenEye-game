@@ -15,6 +15,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/ParticlePanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/ParticlePanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/FluidPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/FluidPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/IEditorPanel.h
     )
     
@@ -62,6 +66,8 @@ target_include_directories(OpenMetaEditorLib
             OpenEyeImGui
             OpenEyeRendering
             OpenEyeAnimation
+            OpenEyeParticles
+            OpenEyeFluids
     )
     
     target_compile_definitions(OpenMetaEditorLib PRIVATE OPENEYE_EDITOR=1)

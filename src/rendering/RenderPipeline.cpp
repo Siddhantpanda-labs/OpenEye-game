@@ -53,13 +53,43 @@ bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
 }
 
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
-    if (width == m_width && height == m_height) return;
-    m_width = width; m_height = height;
-    if (m_gbuffer) m_gbuffer->Resize(width, height);
-    if (m_skyboxRenderer) m_skyboxRenderer->Resize(width, height);
-    if (m_postProcessor) m_postProcessor->Resize(width, height);
+    if (width == 0 || height == 0) {
+        OE_WARN_F("RenderPipeline::Resize: Ignoring invalid size %ux%u", width, height);
+        return; // Ignore invalid sizes
+    }
+    if (width == m_width && height == m_height) {
+        return; // No change needed
+    }
+    
+    OE_INFO_F("RenderPipeline::Resize: %ux%u -> %ux%u", m_width, m_height, width, height);
+    
+    // Update dimensions first
+    m_width = width; 
+    m_height = height;
+    
+    // Resize all components
+    if (m_gbuffer) {
+        m_gbuffer->Resize(width, height);
+    }
+    if (m_skyboxRenderer) {
+        m_skyboxRenderer->Resize(width, height);
+    }
+    if (m_postProcessor) {
+        m_postProcessor->Resize(width, height);
+    }
+    
+    // Recreate HDR framebuffer with new size
+    // IMPORTANT: This must only be called when NOT rendering (deferred in GameApplication)
     DestroyHDRFramebuffer();
     CreateHDRFramebuffer();
+    
+    // Verify HDR framebuffer was created successfully
+    if (m_hdrFBO == 0) {
+        OE_ERROR("RenderPipeline::Resize: Failed to create HDR framebuffer!");
+    }
+    
+    // Ensure viewport is set correctly
+    glViewport(0, 0, width, height);
 }
 
 void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
@@ -68,7 +98,18 @@ void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
 }
 
 void RenderPipeline::RenderFrame(ECS::Scene& scene, const Camera& camera, const LightingParams& params, const RenderOptions& options) {
+    // Ensure resources are initialized
     EnsureResources(m_width, m_height);
+    
+    // Safety check: Ensure HDR framebuffer is valid before rendering
+    if (m_hdrFBO == 0) {
+        OE_ERROR("RenderPipeline::RenderFrame: HDR framebuffer not initialized! Attempting to recreate...");
+        CreateHDRFramebuffer();
+        if (m_hdrFBO == 0) {
+            OE_ERROR("RenderPipeline::RenderFrame: Failed to create HDR framebuffer! Aborting render.");
+            return;
+        }
+    }
 
     // Update UBOs (Frame + Light) first – used by all passes
     struct FrameBlock {
@@ -122,17 +163,27 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
 
     // GBuffer pass
     m_frameGraph->addPass("GBuffer", [this, &scene, &camera, options](const FGPassResources&) {
+        // Ensure viewport is set correctly
+        glViewport(0, 0, m_width, m_height);
         Frustum frustum; frustum.ExtractFromMatrix(camera.GetProjectionMatrix() * camera.GetViewMatrix());
         GBufferPass gp; gp.Execute(scene, *m_gbuffer, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix(), frustum, options.enableCulling, options.enableLOD, options.enableInstancing, static_cast<size_t>(options.minInstancesForBatch));
     }, {}, {}, true);
 
     // Skybox pass (render solid sky color)
     m_frameGraph->addPass("Skybox", [this](const FGPassResources&) {
+        // Ensure viewport is set correctly
+        glViewport(0, 0, m_width, m_height);
         if (m_skyboxRenderer) m_skyboxRenderer->RenderSolidColor(m_skyColor);
     }, {}, {}, true);
 
     // Lighting pass - render to HDR texture
     m_frameGraph->addPass("Lighting", [this, &scene, &camera, params](const FGPassResources&) {
+        // Validate HDR framebuffer exists
+        if (m_hdrFBO == 0) {
+            OE_ERROR("RenderPipeline: HDR framebuffer not initialized!");
+            return;
+        }
+        
         // Bind HDR framebuffer
         glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
         glViewport(0, 0, m_width, m_height);
@@ -231,6 +282,11 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
 }
 
 void RenderPipeline::CreateHDRFramebuffer() {
+    if (m_width == 0 || m_height == 0) {
+        OE_ERROR("RenderPipeline: Cannot create HDR framebuffer with zero dimensions");
+        return;
+    }
+    
     glGenFramebuffers(1, &m_hdrFBO);
     glGenTextures(1, &m_hdrTexture);
     
@@ -245,7 +301,9 @@ void RenderPipeline::CreateHDRFramebuffer() {
     
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        OE_ERROR_F("RenderPipeline: HDR FBO incomplete: 0x%x", status);
+        OE_ERROR_F("RenderPipeline: HDR FBO incomplete: 0x%x (size: %ux%u)", status, m_width, m_height);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return;
     }
     
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

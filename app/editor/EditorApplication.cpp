@@ -5,6 +5,8 @@
 #include "panels/AssetPanel.h"
 #include "panels/LightingPanel.h"
 #include "panels/AnimationPanel.h"
+#include "panels/ParticlePanel.h"
+#include "panels/FluidPanel.h"
 #include "utils/SceneManager.h"
 #include "core/api/All.h"
 #include "imgui.h"
@@ -42,6 +44,8 @@ bool EditorApplication::Initialize() {
     auto* renderPipeline = m_gameApp->GetRenderPipeline();
     m_panels.push_back(std::make_unique<LightingPanel>(m_scene, renderPipeline));
     m_panels.push_back(std::make_unique<AnimationPanel>(m_scene));
+    m_panels.push_back(std::make_unique<ParticlePanel>(m_scene));
+    m_panels.push_back(std::make_unique<FluidPanel>(m_scene));
     
     m_isInitialized = true;
     OE_INFO("Editor panels initialized successfully");
