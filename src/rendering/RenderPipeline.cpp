@@ -188,7 +188,13 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
         glViewport(0, 0, m_width, m_height);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        
+        // Copy depth from GBuffer to HDR framebuffer for proper occlusion
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
+        glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
         
         LightingPass lp; lp.Execute(scene, *m_gbuffer, camera, m_lightingShader, m_shadowMap.get(), params,
             m_skyboxRenderer.get(), // Always pass skyboxRenderer (it has solid color even without cubemap)
@@ -289,8 +295,11 @@ void RenderPipeline::CreateHDRFramebuffer() {
     
     glGenFramebuffers(1, &m_hdrFBO);
     glGenTextures(1, &m_hdrTexture);
+    glGenTextures(1, &m_hdrDepthTexture);
     
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+    
+    // Color texture
     glBindTexture(GL_TEXTURE_2D, m_hdrTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, m_width, m_height, 0, GL_RGB, GL_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -298,6 +307,15 @@ void RenderPipeline::CreateHDRFramebuffer() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hdrTexture, 0);
+    
+    // Depth texture for proper occlusion
+    glBindTexture(GL_TEXTURE_2D, m_hdrDepthTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_hdrDepthTexture, 0);
     
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -317,6 +335,10 @@ void RenderPipeline::DestroyHDRFramebuffer() {
     if (m_hdrTexture) {
         glDeleteTextures(1, &m_hdrTexture);
         m_hdrTexture = 0;
+    }
+    if (m_hdrDepthTexture) {
+        glDeleteTextures(1, &m_hdrDepthTexture);
+        m_hdrDepthTexture = 0;
     }
 }
 

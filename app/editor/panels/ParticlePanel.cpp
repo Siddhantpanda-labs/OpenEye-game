@@ -2,6 +2,7 @@
 #include "ecs/api/All.h"
 #include "ecs/Components.h"
 #include "particles/ParticleEmitter.h"
+#include "particles/templates/ParticleTemplates.h"
 #include "imgui.h"
 #include <glm/gtc/type_ptr.hpp>
 
@@ -136,26 +137,11 @@ void ParticlePanel::ApplyFirePreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 0.5f, 0.0f);
-    OpenEye::Particles::ParticleEmitterConfig config;
+    
+    using namespace OpenEye::Particles::Templates;
+    FireConfig config;
     config.position = transform.position;
-    config.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-    config.spread = 20.0f;
-    config.minSpeed = 0.5f;
-    config.maxSpeed = 2.0f;
-    config.minLifetime = 0.5f;
-    config.maxLifetime = 1.5f;
-    config.minSize = 0.1f;
-    config.maxSize = 0.4f;
-    config.sizeOverLifetime = -0.3f;
-    config.startColor = glm::vec4(1.0f, 0.3f, 0.0f, 1.0f);
-    config.endColor = glm::vec4(0.8f, 0.1f, 0.0f, 0.0f);
-    config.particlesPerSecond = 150.0f;
-    config.maxParticles = 1000;
-    config.useGravity = false;
-    config.gravity = glm::vec3(0.0f, 2.0f, 0.0f);
-    config.damping = 0.98f;
-    auto emitter = std::make_shared<OpenEye::Particles::ParticleEmitter>(config);
-    emitter->Start();
+    auto emitter = CreateFire(config);
     registry.emplace<OpenEye::ECS::ParticleEmitterComponent>(entity, emitter);
 }
 
@@ -163,27 +149,11 @@ void ParticlePanel::ApplyWaterPreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 2.0f, 0.0f);
-    OpenEye::Particles::ParticleEmitterConfig config;
+    
+    using namespace OpenEye::Particles::Templates;
+    WaterConfig config;
     config.position = transform.position;
-    config.direction = glm::vec3(0.0f, -1.0f, 0.0f);
-    config.spread = 5.0f;
-    config.minSpeed = 2.0f;
-    config.maxSpeed = 5.0f;
-    config.minLifetime = 1.0f;
-    config.maxLifetime = 2.0f;
-    config.minSize = 0.05f;
-    config.maxSize = 0.15f;
-    config.sizeOverLifetime = 0.0f;
-    config.startColor = glm::vec4(0.2f, 0.5f, 1.0f, 0.8f);
-    config.endColor = glm::vec4(0.3f, 0.6f, 1.0f, 0.6f);
-    config.particlesPerSecond = 200.0f;
-    config.maxParticles = 2000;
-    config.useGravity = true;
-    config.gravity = glm::vec3(0.0f, -9.81f, 0.0f);
-    config.damping = 0.99f;
-    config.spawnRadius = 0.1f;
-    auto emitter = std::make_shared<OpenEye::Particles::ParticleEmitter>(config);
-    emitter->Start();
+    auto emitter = CreateWater(config);
     registry.emplace<OpenEye::ECS::ParticleEmitterComponent>(entity, emitter);
 }
 
@@ -191,28 +161,11 @@ void ParticlePanel::ApplyExplosionPreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 1.0f, 0.0f);
-    OpenEye::Particles::ParticleEmitterConfig config;
+    
+    using namespace OpenEye::Particles::Templates;
+    ExplosionConfig config;
     config.position = transform.position;
-    config.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-    config.spread = 180.0f;
-    config.minSpeed = 5.0f;
-    config.maxSpeed = 15.0f;
-    config.minLifetime = 0.3f;
-    config.maxLifetime = 1.0f;
-    config.minSize = 0.2f;
-    config.maxSize = 0.8f;
-    config.sizeOverLifetime = -0.5f;
-    config.startColor = glm::vec4(1.0f, 0.8f, 0.0f, 1.0f);
-    config.endColor = glm::vec4(0.5f, 0.1f, 0.0f, 0.0f);
-    config.particlesPerSecond = 0.0f;
-    config.maxParticles = 500;
-    config.useGravity = true;
-    config.gravity = glm::vec3(0.0f, -9.81f, 0.0f);
-    config.damping = 0.95f;
-    config.spawnRadius = 0.0f;
-    auto emitter = std::make_shared<OpenEye::Particles::ParticleEmitter>(config);
-    emitter->Emit(500);
-    emitter->Start();
+    auto emitter = CreateExplosion(config);
     registry.emplace<OpenEye::ECS::ParticleEmitterComponent>(entity, emitter);
 }
 

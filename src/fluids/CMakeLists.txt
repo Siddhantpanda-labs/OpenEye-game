@@ -7,6 +7,8 @@ set(FLUIDS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/FluidSimulation.h
     ${CMAKE_CURRENT_SOURCE_DIR}/FluidRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/FluidRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/templates/FluidTemplates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/templates/FluidTemplates.h
 )
 
 add_library(OpenEyeFluids STATIC ${FLUIDS_SOURCES})

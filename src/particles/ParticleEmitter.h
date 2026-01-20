@@ -10,6 +10,13 @@ namespace OpenEye { namespace Rendering { class Texture; } }
 namespace OpenEye {
 namespace Particles {
 
+// Particle rendering mode
+enum class ParticleRenderMode {
+    Billboard,      // Single quad facing camera (default)
+    CrossBillboard, // 3 perpendicular quads for volumetric appearance
+    Volumetric      // Shader-based raymarching (advanced)
+};
+
 // Individual particle
 struct Particle {
     glm::vec3 position;
@@ -82,6 +89,7 @@ struct ParticleEmitterConfig {
     bool flipbookBlendFrames = true;      // smooth blend between frames
 
     // Rendering controls
+    ParticleRenderMode renderMode = ParticleRenderMode::Billboard; // Rendering mode
     bool softParticles = true;            // enable depth-based soft intersection
     float softParticleFadeDistance = 0.5f;// world units fade thickness near geometry
     bool premultipliedAlpha = true;       // output premultiplied alpha for better blending

@@ -104,6 +104,7 @@ private:
     // HDR intermediate texture for lighting pass
     GLuint m_hdrFBO = 0;
     GLuint m_hdrTexture = 0;
+    GLuint m_hdrDepthTexture = 0; // Depth buffer for proper occlusion
 
     uint32_t m_width = 0;
     uint32_t m_height = 0;

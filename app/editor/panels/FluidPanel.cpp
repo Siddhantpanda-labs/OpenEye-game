@@ -3,6 +3,7 @@
 #include "ecs/Components.h"
 #include "fluids/FluidSimulation.h"
 #include "fluids/FluidCommon.h"
+#include "fluids/templates/FluidTemplates.h"
 #include "imgui.h"
 #include <glm/gtc/type_ptr.hpp>
 
@@ -189,23 +190,16 @@ void FluidPanel::ApplyFirePreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 1.0f, 0.0f);
-    OpenEye::Fluids::FluidGridDesc desc;
-    desc.resolution = glm::ivec3(64, 64, 64);
-    desc.volumeSize = glm::vec3(2.0f, 3.0f, 2.0f);
-    auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
-    if (fluidSim->Initialize(desc, OpenEye::Fluids::FluidType::Gas)) {
-        glm::vec3 emitPos(0.5f, 0.1f, 0.5f);
-        float emitRadius = 0.08f;
-        float densityRate = 1.2f;
-        float tempRate = 2.0f;
-        fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
-        fluidSim->SetBuoyancy(2.0f, 0.02f, 0.0f);
-        fluidSim->SetWind(glm::vec3(0.1f, 0.0f, 0.0f), 0.5f, true);
-        fluidSim->SetDissipation(0.99f, 0.995f);
+    
+    using namespace OpenEye::Fluids::Templates;
+    FireSmokeConfig config;
+    config.position = transform.position;
+    auto fluidSim = CreateFireSmoke(config);
+    if (fluidSim) {
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
-        fluidComp.resolution = desc.resolution;
-        fluidComp.volumeSize = desc.volumeSize;
+        fluidComp.resolution = config.resolution;
+        fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
     }
 }
@@ -214,23 +208,16 @@ void FluidPanel::ApplyWaterPreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 0.5f, 0.0f);
-    OpenEye::Fluids::FluidGridDesc desc;
-    desc.resolution = glm::ivec3(64, 64, 64);
-    desc.volumeSize = glm::vec3(3.0f, 2.0f, 3.0f);
-    auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
-    if (fluidSim->Initialize(desc, OpenEye::Fluids::FluidType::Liquid)) {
-        glm::vec3 emitPos(0.5f, 0.9f, 0.5f);
-        float emitRadius = 0.05f;
-        float densityRate = 0.8f;
-        float tempRate = 0.0f;
-        fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
-        fluidSim->SetBuoyancy(0.5f, 0.1f, 0.0f);
-        fluidSim->SetWind(glm::vec3(0.0f), 0.0f, false);
-        fluidSim->SetDissipation(0.998f, 0.99f);
+    
+    using namespace OpenEye::Fluids::Templates;
+    WaterConfig config;
+    config.position = transform.position;
+    auto fluidSim = CreateWater(config);
+    if (fluidSim) {
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
-        fluidComp.resolution = desc.resolution;
-        fluidComp.volumeSize = desc.volumeSize;
+        fluidComp.resolution = config.resolution;
+        fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
     }
 }
@@ -239,23 +226,16 @@ void FluidPanel::ApplyExplosionPreset(OpenEye::ECS::Entity entity) {
     auto& registry = m_scene->GetRegistry();
     auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
     transform.position = glm::vec3(0.0f, 1.5f, 0.0f);
-    OpenEye::Fluids::FluidGridDesc desc;
-    desc.resolution = glm::ivec3(64, 64, 64);
-    desc.volumeSize = glm::vec3(4.0f, 4.0f, 4.0f);
-    auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
-    if (fluidSim->Initialize(desc, OpenEye::Fluids::FluidType::Gas)) {
-        glm::vec3 emitPos(0.5f, 0.5f, 0.5f);
-        float emitRadius = 0.15f;
-        float densityRate = 2.0f;
-        float tempRate = 3.0f;
-        fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
-        fluidSim->SetBuoyancy(2.5f, 0.01f, 0.0f);
-        fluidSim->SetWind(glm::vec3(0.0f, 0.5f, 0.0f), 2.0f, true);
-        fluidSim->SetDissipation(0.98f, 0.99f);
+    
+    using namespace OpenEye::Fluids::Templates;
+    ExplosionConfig config;
+    config.position = transform.position;
+    auto fluidSim = CreateExplosion(config);
+    if (fluidSim) {
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
-        fluidComp.resolution = desc.resolution;
-        fluidComp.volumeSize = desc.volumeSize;
+        fluidComp.resolution = config.resolution;
+        fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
     }
 }

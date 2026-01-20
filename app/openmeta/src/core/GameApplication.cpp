@@ -401,39 +401,39 @@ void GameApplication::SetupInputCallbacks() {
     // Key callback
     m_window->SetKeyCallback([this](int key, int scancode, int action, int mods) {
         Input::OnKeyEvent(key, scancode, action, mods);
+    });
+    
+    // Mouse button callback - left click to look around
+    m_window->SetMouseButtonCallback([this](int button, int action, int mods) {
+        Input::OnMouseButtonEvent(button, action, mods);
         
-        // Toggle camera lock with X key
-        if (key == GLFW_KEY_X && action == GLFW_PRESS) {
-            m_cameraLocked = !m_cameraLocked;
+        // Left mouse button controls camera rotation
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            m_cameraLocked = (action == GLFW_PRESS);
             m_window->SetMouseLocked(m_cameraLocked);
             if (m_cameraLocked) {
-                m_firstMouse = true; // Reset mouse position when locking
+                m_firstMouse = true; // Reset mouse position when starting drag
                 m_lastMousePos = Input::GetMousePosition(); // Initialize last position
-            }
-            
-            // Initialize yaw/pitch from current camera rotation when locking
-            if (m_cameraLocked && m_scene) {
-                auto& registry = m_scene->GetRegistry();
-                auto cameraView = registry.view<CameraComponent, Transform>();
-                for (auto entity : cameraView) {
-                    auto& cameraComp = cameraView.get<CameraComponent>(entity);
-                    if (cameraComp.isPrimary) {
-                        auto& transform = cameraView.get<Transform>(entity);
-                        glm::mat4 worldMatrix = transform.GetWorldMatrix(registry);
-                        glm::mat3 rotationMatrix = glm::mat3(worldMatrix);
-                        glm::vec3 forward = glm::normalize(rotationMatrix * glm::vec3(0.0f, 0.0f, -1.0f));
-                        m_cameraYaw = glm::degrees(atan2(forward.z, forward.x));
-                        m_cameraPitch = glm::degrees(asin(forward.y));
-                        break;
+                
+                // Initialize yaw/pitch from current camera rotation when starting drag
+                if (m_scene) {
+                    auto& registry = m_scene->GetRegistry();
+                    auto cameraView = registry.view<CameraComponent, Transform>();
+                    for (auto entity : cameraView) {
+                        auto& cameraComp = cameraView.get<CameraComponent>(entity);
+                        if (cameraComp.isPrimary) {
+                            auto& transform = cameraView.get<Transform>(entity);
+                            glm::mat4 worldMatrix = transform.GetWorldMatrix(registry);
+                            glm::mat3 rotationMatrix = glm::mat3(worldMatrix);
+                            glm::vec3 forward = glm::normalize(rotationMatrix * glm::vec3(0.0f, 0.0f, -1.0f));
+                            m_cameraYaw = glm::degrees(atan2(forward.z, forward.x));
+                            m_cameraPitch = glm::degrees(asin(forward.y));
+                            break;
+                        }
                     }
                 }
             }
         }
-    });
-    
-    // Mouse button callback
-    m_window->SetMouseButtonCallback([this](int button, int action, int mods) {
-        Input::OnMouseButtonEvent(button, action, mods);
     });
     
     // Mouse move callback
@@ -520,8 +520,8 @@ void GameApplication::UpdateCameraControls(float deltaTime) {
                 const float epsilon = 0.0001f;
                 if (glm::abs(mouseDelta.x) > epsilon || glm::abs(mouseDelta.y) > epsilon) {
                     // Convert mouse delta to rotation
-                    // Standard mouse look: right = rotate right, up = rotate up
-                    float yawDelta = mouseDelta.x * m_mouseSensitivity;
+                    // Reversed mouse look: left = rotate right, right = rotate left, up = rotate up
+                    float yawDelta = -mouseDelta.x * m_mouseSensitivity; // Negative to reverse left-right
                     float pitchDelta = mouseDelta.y * m_mouseSensitivity;
                     
                     // Update yaw and pitch
