@@ -9,16 +9,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/HierarchyPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/AnimationPanel.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/ParticlePanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/ParticlePanel.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/FluidPanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/panels/FluidPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/SoftBodyPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/panels/SoftBodyPanel.h
         ${CMAKE_CURRENT_SOURCE_DIR}/panels/IEditorPanel.h
     )
     

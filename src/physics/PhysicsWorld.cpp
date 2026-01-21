@@ -7,6 +7,7 @@
 #include "../core/log/Log.h"
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
 #include <BulletDynamics/Character/btKinematicCharacterController.h>
+#include <BulletSoftBody/btSoftBodyHelpers.h>
 
 namespace OpenEye {
 namespace Physics {
@@ -37,22 +38,36 @@ void PhysicsWorld::Initialize(const glm::vec3& gravity) {
     // Setup constraint solver
     m_solver = std::make_unique<btSequentialImpulseConstraintSolver>();
     
-    // Create dynamics world
-    m_world = std::make_unique<btDiscreteDynamicsWorld>(
+    // Create soft-rigid dynamics world (supports both rigid bodies and soft bodies)
+    m_world = std::make_unique<btSoftRigidDynamicsWorld>(
         m_dispatcher.get(),
         m_broadphase.get(),
         m_solver.get(),
         m_collisionConfig.get()
     );
     
+    // Initialize soft body world info
+    m_softBodyWorldInfo = std::make_unique<btSoftBodyWorldInfo>();
+    m_softBodyWorldInfo->m_broadphase = m_broadphase.get();
+    m_softBodyWorldInfo->m_dispatcher = m_dispatcher.get();
+    m_softBodyWorldInfo->m_gravity = btVector3(gravity.x, gravity.y, gravity.z);
+    m_softBodyWorldInfo->m_sparsesdf.Initialize();
+    
     // Set gravity
     SetGravity(gravity);
     
-    OE_INFO("PhysicsWorld initialized successfully");
+    OE_INFO("PhysicsWorld initialized successfully (with soft body support)");
 }
 
 void PhysicsWorld::Shutdown() {
     if (!m_world) return;
+    
+    // Remove all soft bodies
+    for (int i = m_world->getSoftBodyArray().size() - 1; i >= 0; --i) {
+        btSoftBody* softBody = m_world->getSoftBodyArray()[i];
+        m_world->removeSoftBody(softBody);
+        delete softBody;
+    }
     
     // Remove all objects from world
     for (int i = m_world->getNumCollisionObjects() - 1; i >= 0; --i) {
@@ -75,6 +90,7 @@ void PhysicsWorld::Shutdown() {
     }
     
     // Destroy in reverse order of creation
+    m_softBodyWorldInfo.reset();
     m_world.reset();
     m_solver.reset();
     m_broadphase.reset();
@@ -194,6 +210,35 @@ void PhysicsWorld::SetGravity(const glm::vec3& gravity) {
     if (m_world) {
         m_world->setGravity(Utils::PhysicsUtils::GlmToBullet(gravity));
     }
+    if (m_softBodyWorldInfo) {
+        m_softBodyWorldInfo->m_gravity = Utils::PhysicsUtils::GlmToBullet(gravity);
+    }
+}
+
+void PhysicsWorld::AddSoftBody(btSoftBody* softBody) {
+    if (m_world && softBody) {
+        m_world->addSoftBody(softBody);
+    }
+}
+
+void PhysicsWorld::RemoveSoftBody(btSoftBody* softBody) {
+    if (m_world && softBody) {
+        m_world->removeSoftBody(softBody);
+    }
+}
+
+bool PhysicsWorld::HasSoftBody(btSoftBody* softBody) const {
+    if (!m_world || !softBody) return false;
+    for (int i = 0; i < m_world->getSoftBodyArray().size(); ++i) {
+        if (m_world->getSoftBodyArray()[i] == softBody) {
+            return true;
+        }
+    }
+    return false;
+}
+
+btSoftBodyWorldInfo& PhysicsWorld::GetSoftBodyWorldInfo() {
+    return *m_softBodyWorldInfo;
 }
 
 glm::vec3 PhysicsWorld::GetGravity() const {

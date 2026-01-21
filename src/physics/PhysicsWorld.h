@@ -4,6 +4,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <btBulletDynamicsCommon.h>
+#include <BulletSoftBody/btSoftBody.h>
+#include <BulletSoftBody/btSoftRigidDynamicsWorld.h>
 
 // Forward declaration for character controller (not in btBulletDynamicsCommon.h)
 class btKinematicCharacterController;
@@ -72,6 +74,12 @@ public:
     void DestroyCharacterController(btKinematicCharacterController* controller);
     bool HasCharacterController(btKinematicCharacterController* controller) const;
     
+    // Soft body delegates
+    void AddSoftBody(btSoftBody* softBody);
+    void RemoveSoftBody(btSoftBody* softBody);
+    bool HasSoftBody(btSoftBody* softBody) const;
+    btSoftBodyWorldInfo& GetSoftBodyWorldInfo();
+    
     // Query delegates
     RaycastResult Raycast(const glm::vec3& from, const glm::vec3& to);
     RaycastResult RaycastClosest(const glm::vec3& from, const glm::vec3& to);
@@ -84,6 +92,7 @@ public:
     
     // Debug access (for debug rendering)
     btDynamicsWorld* GetWorld() const { return m_world.get(); }
+    btSoftRigidDynamicsWorld* GetSoftWorld() const { return m_world.get(); }
     
     // Settings
     void SetGravity(const glm::vec3& gravity);
@@ -99,7 +108,8 @@ private:
     std::unique_ptr<btCollisionConfiguration> m_collisionConfig;
     std::unique_ptr<btDispatcher> m_dispatcher;
     std::unique_ptr<btConstraintSolver> m_solver;
-    std::unique_ptr<btDiscreteDynamicsWorld> m_world;
+    std::unique_ptr<btSoftRigidDynamicsWorld> m_world; // Changed to support soft bodies
+    std::unique_ptr<btSoftBodyWorldInfo> m_softBodyWorldInfo;
 };
 
 } // namespace Physics

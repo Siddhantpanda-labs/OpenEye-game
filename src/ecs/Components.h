@@ -32,6 +32,8 @@ namespace Fluids {
     class FluidSimulation;
 }
 }
+// Forward declaration for Bullet soft body (in global namespace)
+class btSoftBody;
 
 // Forward declarations for Bullet
 class btRigidBody;
@@ -223,6 +225,23 @@ struct FluidVolumeComponent {
     glm::ivec3 resolution{64, 64, 64};
     glm::vec3  volumeSize{2.0f, 2.0f, 2.0f};
     bool enabled = true;
+};
+
+// Soft body component (cloth, rope, etc.)
+struct SoftBodyComponent {
+    btSoftBody* softBody = nullptr; // Raw pointer - PhysicsWorld manages lifetime
+    std::shared_ptr<Rendering::Mesh> mesh; // Mesh for rendering (updated from soft body nodes)
+    bool enabled = true;
+    
+    // Wind force (for cloth waving)
+    glm::vec3 windDirection = glm::vec3(1.0f, 0.0f, 0.0f);
+    float windStrength = 0.0f;
+    bool windEnabled = false;
+    
+    // Fixed node indices (for cloth - top edge nodes that should stay fixed)
+    std::vector<int> fixedNodeIndices;
+    
+    SoftBodyComponent() = default;
 };
 
 } // namespace ECS

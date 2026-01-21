@@ -2,12 +2,17 @@
 
 #include <memory>
 #include <glm/glm.hpp>
-#include <btBulletDynamicsCommon.h>
-#include <BulletSoftBody/btSoftBody.h>
 
+// Forward declarations
 namespace OpenEye {
 namespace Rendering { class Mesh; }
+}
 
+// Forward declarations for Bullet
+class btSoftBody;
+class btRigidBody;
+
+namespace OpenEye {
 namespace Physics {
 
 class PhysicsWorld;
@@ -31,7 +36,7 @@ public:
     // Create soft body from mesh
     static btSoftBody* CreateFromMesh(
         PhysicsWorld* world,
-        std::shared_ptr<Rendering::Mesh> mesh,
+        std::shared_ptr<void> mesh, // Actually std::shared_ptr<Rendering::Mesh>
         const glm::vec3& position,
         float mass = 1.0f
     );
@@ -43,6 +48,15 @@ public:
         const glm::vec3& endPos,
         int segments,
         float mass = 0.1f
+    );
+    
+    // Attach cloth nodes to a rigid body (for anchoring top edge to cylinder, etc.)
+    static void AttachClothNodesToRigidBody(
+        btSoftBody* cloth,
+        btRigidBody* rigidBody,
+        const std::vector<int>& nodeIndices,
+        bool disableCollision = true,
+        float influence = 1.0f
     );
     
     // Destroy soft body

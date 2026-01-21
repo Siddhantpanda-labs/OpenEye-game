@@ -14,6 +14,7 @@
 #include "framegraph/FrameGraph.h"
 #include "../ecs/Scene.h"
 #include "../ecs/Systems.h"
+#include "../ecs/systems/SoftBodySystem.h"
 #include "Camera.h"
 #include "core/log/Log.h"
 #include <glad/glad.h>
@@ -222,6 +223,9 @@ void RenderPipeline::BuildFrameGraph(ECS::Scene& scene, const Camera& camera, co
         
         // Render fluid volumes (smoke, liquid)
         ECS::FluidSystem::Render(scene, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix());
+        
+        // Render soft body wireframe boxes (debug visualization)
+        ECS::SoftBodySystem::RenderWireframes(scene, camera, camera.GetViewMatrix(), camera.GetProjectionMatrix());
     }, {}, {}, true);
     
     // Post-processing pass - apply effects and blit to screen

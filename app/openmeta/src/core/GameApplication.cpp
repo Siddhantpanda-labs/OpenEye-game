@@ -7,12 +7,17 @@
 // This is needed because PhysicsSystem::CreateGroundPlane and AttachPhysicsBody
 // take Physics::PhysicsWorld* (internal type), not the API type
 #include "physics/PhysicsWorld.h"
+#include "physics/softbody/SoftBodyFactory.h"
+#include "physics/softbody/templates/ClothTemplates.h"
+#include "physics/bodies/RigidBodyFactory.h"
+#include "physics/shapes/CollisionShapeFactory.h"
 #include "particles/ParticleEmitter.h"
 #include "fluids/FluidSimulation.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
 #include <glm/gtc/quaternion.hpp>
+#include <BulletSoftBody/btSoftBody.h>
 
 namespace OpenMeta {
 
@@ -326,75 +331,336 @@ void GameApplication::CreateDefaultScene() {
         }
     }
     
-    // Create particle emitter (smoke/dust effect)
-    {
-        auto particleEntity = m_scene->CreateEntity("ParticleEmitter");
-        auto& particleTransform = registry.get<Transform>(particleEntity);
-        particleTransform.position = glm::vec3(2.0f, 0.5f, 0.0f);
+    // Create cloth demo with cylinder anchor
+    if (m_physicsWorld) {
+        void* internalPhysicsWorld = m_physicsWorld->GetInternalWorld();
+        OpenEye::Physics::PhysicsWorld* physicsWorld = static_cast<OpenEye::Physics::PhysicsWorld*>(internalPhysicsWorld);
         
-        OpenEye::Particles::ParticleEmitterConfig particleConfig;
-        particleConfig.position = particleTransform.position;
-        particleConfig.direction = glm::vec3(0.0f, 1.0f, 0.0f);
-        particleConfig.spread = 25.0f;
-        particleConfig.minSpeed = 0.5f;
-        particleConfig.maxSpeed = 2.0f;
-        particleConfig.minLifetime = 2.0f;
-        particleConfig.maxLifetime = 4.0f;
-        particleConfig.minSize = 0.2f;
-        particleConfig.maxSize = 0.6f;
-        particleConfig.startColor = glm::vec4(0.8f, 0.8f, 0.9f, 1.0f); // Light gray/white
-        particleConfig.endColor = glm::vec4(0.3f, 0.3f, 0.3f, 0.0f);   // Fade to transparent gray
-        particleConfig.particlesPerSecond = 50.0f;
-        particleConfig.maxParticles = 500;
-        particleConfig.useGravity = true;
-        particleConfig.gravity = glm::vec3(0.0f, -2.0f, 0.0f); // Lighter gravity for floating effect
-        particleConfig.damping = 0.95f;
+        using namespace OpenEye::SoftBodies::Templates;
+        ClothConfig clothConfig = CreateDefaultClothConfig();
+        clothConfig.position = glm::vec3(0.0f, 4.0f, -2.0f);
+        clothConfig.windDirection = glm::vec3(1.0f, 0.0f, 0.0f);
+        clothConfig.windStrength = 2.5f;
+        clothConfig.windEnabled = true;
         
-        auto particleEmitter = std::make_shared<OpenEye::Particles::ParticleEmitter>(particleConfig);
-        particleEmitter->Start();
-        registry.emplace<ParticleEmitterComponent>(particleEntity, particleEmitter);
+        // Create static cylinder to anchor cloth top edge
+        float cylinderRadius = 0.1f;
+        float cylinderHeight = clothConfig.width + 0.2f; // Slightly longer than cloth width
+        // Cloth is generated so its TOP EDGE is at clothConfig.position (y = 0 in local cloth space).
+        // Put the cylinder exactly on that top edge center.
+        glm::vec3 cylinderPos = clothConfig.position;
+        // Our cylinder mesh is built along +Y. Rotate it so its axis becomes +X (horizontal pipe).
+        glm::quat cylinderRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         
-        OE_INFO("Created particle emitter");
+        // Create cylinder collision shape
+        auto cylinderShape = OpenEye::Physics::CollisionShapeFactory::CreateCylinder(
+            glm::vec3(cylinderRadius, cylinderHeight * 0.5f, cylinderRadius)
+        );
+        
+        // Create static cylinder rigid body
+        btRigidBody* cylinderBody = OpenEye::Physics::RigidBodyFactory::Create(
+            physicsWorld,
+            cylinderPos,
+            cylinderRot,
+            cylinderShape,
+            0.0f // Static (mass = 0)
+        );
+        if (cylinderBody) {
+            // Make absolutely sure it's clamped/static
+            cylinderBody->setCollisionFlags(cylinderBody->getCollisionFlags() | btCollisionObject::CF_STATIC_OBJECT);
+            cylinderBody->setActivationState(DISABLE_SIMULATION);
+        }
+        
+        // Create cylinder entity for rendering
+        auto cylinderEntity = m_scene->CreateEntity("ClothAnchorCylinder");
+        auto& cylinderTransform = registry.get<Transform>(cylinderEntity);
+        cylinderTransform.position = cylinderPos;
+        cylinderTransform.rotation = cylinderRot;
+        
+        // Create cylinder mesh
+        auto cylinderMesh = CreateCylinderMesh(cylinderRadius, cylinderHeight, 32);
+        
+        // Create cylinder material
+        auto cylinderMaterial = std::make_shared<OpenEye::Rendering::Material>();
+        auto cylinderShader = std::make_shared<OpenEye::Rendering::Shader>();
+        cylinderShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
+                                    "assets/shaders/passes/deferred/gbuffer.frag");
+        cylinderMaterial->SetShader(cylinderShader);
+        cylinderMaterial->SetAlbedo(glm::vec3(0.3f, 0.3f, 0.3f)); // Gray cylinder
+        
+        // Add renderable
+        auto& cylinderRenderable = registry.emplace<Renderable>(cylinderEntity);
+        cylinderRenderable.mesh = cylinderMesh;
+        cylinderRenderable.material = cylinderMaterial;
+        cylinderRenderable.visible = true;
+        // IMPORTANT: Culling requires an AABB component, otherwise the entity won't render
+        registry.emplace<AABB>(cylinderEntity);
+        
+        // Add physics body component
+        auto& cylinderPhysicsBody = registry.emplace<PhysicsBody>(cylinderEntity);
+        cylinderPhysicsBody.rigidBody = cylinderBody;
+        cylinderPhysicsBody.collisionShape = cylinderShape;
+        cylinderPhysicsBody.mass = 0.0f; // Static
+        cylinderPhysicsBody.syncTransformToPhysics = true;  // Keep Bullet aligned with Transform (static anyway)
+        cylinderPhysicsBody.syncPhysicsToTransform = false; // Don't overwrite Transform from Bullet
+        
+        // Create cloth
+        btSoftBody* cloth = CreateCloth(physicsWorld, clothConfig);
+        if (cloth && cylinderBody) {
+            // Create entity for cloth
+            auto clothEntity = m_scene->CreateEntity("Cloth");
+            auto& clothTransform = registry.get<Transform>(clothEntity);
+            clothTransform.position = clothConfig.position;
+            
+            // Create mesh from cloth softbody
+            auto clothMesh = CreateMeshFromCloth(cloth, clothConfig.widthSegments, clothConfig.heightSegments);
+            
+            // Create material
+            auto clothMaterial = std::make_shared<OpenEye::Rendering::Material>();
+            auto clothShader = std::make_shared<OpenEye::Rendering::Shader>();
+            clothShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
+                                     "assets/shaders/passes/deferred/gbuffer.frag");
+            clothMaterial->SetShader(clothShader);
+            clothMaterial->SetAlbedo(glm::vec3(0.8f, 0.2f, 0.2f)); // Red cloth
+            
+            // Add renderable
+            auto& renderable = registry.emplace<Renderable>(clothEntity);
+            renderable.mesh = clothMesh;
+            renderable.material = clothMaterial;
+            renderable.visible = true;
+            // IMPORTANT: Culling requires an AABB component, otherwise the entity won't render
+            registry.emplace<AABB>(clothEntity);
+            
+            // Add soft body component
+            auto& softBodyComp = registry.emplace<SoftBodyComponent>(clothEntity);
+            softBodyComp.softBody = cloth;
+            softBodyComp.mesh = clothMesh;
+            softBodyComp.windDirection = clothConfig.windDirection;
+            softBodyComp.windStrength = clothConfig.windStrength;
+            softBodyComp.windEnabled = clothConfig.windEnabled;
+            softBodyComp.enabled = true;
+            
+        // Attach TOP edge nodes to cylinder.
+        // In SoftBodyFactory::CreateCloth(), the top edge is the first row (row 0): indices [0..widthSegments].
+            int nodesPerRow = clothConfig.widthSegments + 1;
+        int topRowStart = 0;
+            std::vector<int> topEdgeNodeIndices;
+            for (int i = 0; i <= clothConfig.widthSegments; ++i) {
+                int nodeIndex = topRowStart + i;
+                if (nodeIndex < cloth->m_nodes.size()) {
+                    topEdgeNodeIndices.push_back(nodeIndex);
+                }
+            }
+            
+            // Attach cloth nodes to cylinder using Bullet's anchor system
+            OpenEye::Physics::SoftBodyFactory::AttachClothNodesToRigidBody(
+                cloth,
+                cylinderBody,
+                topEdgeNodeIndices,
+                true, // Disable collision between cloth and cylinder
+                1.0f  // Full influence
+            );
+            
+            OE_INFO_F("Created cloth demo with %zu nodes attached to cylinder", topEdgeNodeIndices.size());
+        }
+    }
+
+    // Ensure debug primitives (cloth/cylinder) get initial AABBs right away so they render on frame 1
+    OpenEye::ECS::CullingSystem::UpdateAABBs(*m_scene);
+    
+    OE_INFO("Created default scene with camera, light, ground plane, Dess model, and cloth");
+}
+
+std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateMeshFromCloth(
+    btSoftBody* cloth, 
+    int widthSegments, 
+    int heightSegments
+) {
+    using namespace OpenEye::Rendering;
+    
+    if (!cloth) return nullptr;
+    
+    auto mesh = std::make_shared<Mesh>();
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    
+    // Get cloth world transform to convert to local space
+    btTransform clothTransform = cloth->getWorldTransform();
+    btVector3 clothWorldPos = clothTransform.getOrigin();
+    glm::vec3 clothPos = glm::vec3(clothWorldPos.x(), clothWorldPos.y(), clothWorldPos.z());
+    
+    // Create vertices from cloth nodes (convert to local space)
+    int nodeCount = cloth->m_nodes.size();
+    for (int i = 0; i < nodeCount; ++i) {
+        const btVector3& nodePos = cloth->m_nodes[i].m_x;
+        const btVector3& nodeNormal = cloth->m_nodes[i].m_n;
+        
+        Vertex vertex;
+        // Convert world space node position to local space (relative to cloth origin)
+        vertex.position = glm::vec3(nodePos.x(), nodePos.y(), nodePos.z()) - clothPos;
+        vertex.normal = glm::vec3(nodeNormal.x(), nodeNormal.y(), nodeNormal.z());
+        
+        // Calculate UV coordinates based on grid position
+        int x = i % (widthSegments + 1);
+        int y = i / (widthSegments + 1);
+        vertex.texCoord = glm::vec2(
+            static_cast<float>(x) / static_cast<float>(widthSegments),
+            static_cast<float>(y) / static_cast<float>(heightSegments)
+        );
+        
+        vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+        vertex.bitangent = glm::vec3(0.0f, 0.0f, 1.0f);
+        
+        vertices.push_back(vertex);
     }
     
-    // Create fluid volume (smoke simulation)
-    {
-        auto fluidEntity = m_scene->CreateEntity("FluidVolume");
-        auto& fluidTransform = registry.get<Transform>(fluidEntity);
-        fluidTransform.position = glm::vec3(-2.0f, 1.0f, 0.0f);
-        
-        OpenEye::Fluids::FluidGridDesc fluidDesc;
-        fluidDesc.resolution = glm::ivec3(64, 64, 64);
-        fluidDesc.volumeSize = glm::vec3(2.0f, 2.0f, 2.0f);
-        
-        auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
-        if (fluidSim->Initialize(fluidDesc, OpenEye::Fluids::FluidType::Gas)) {
-            // Configure smoke emission - increased rates for better visibility
-            glm::vec3 emitPos(0.5f, 0.15f, 0.5f); // Normalized position in volume [0,1]
-            float emitRadius = 0.08f; // Slightly larger radius
-            float densityRate = 2.0f; // Increased density rate for better visibility
-            float tempRate = 2.5f; // Increased temperature rate
-            fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
-            
-            // Set buoyancy for rising smoke
-            fluidSim->SetBuoyancy(2.0f, 0.02f, 0.0f); // Increased sigma for stronger buoyancy
-            
-            // Increased dissipation to prevent static silhouette - density fades faster
-            fluidSim->SetDissipation(0.99f, 0.99f); // Faster dissipation for continuous flow
-            
-            auto& fluidComp = registry.emplace<FluidVolumeComponent>(fluidEntity);
-            fluidComp.simulation = fluidSim;
-            fluidComp.resolution = fluidDesc.resolution;
-            fluidComp.volumeSize = fluidDesc.volumeSize;
-            fluidComp.enabled = true;
-            
-            OE_INFO("Created fluid volume (smoke simulation)");
-        } else {
-            OE_WARN("Failed to initialize fluid simulation");
+    // Create indices from cloth faces
+    // Bullet stores face nodes as pointers, need to find their indices
+    for (int i = 0; i < cloth->m_faces.size(); ++i) {
+        const btSoftBody::Face& face = cloth->m_faces[i];
+        // Find node indices by comparing pointers
+        int idx0 = -1, idx1 = -1, idx2 = -1;
+        for (int j = 0; j < nodeCount; ++j) {
+            if (&cloth->m_nodes[j] == face.m_n[0]) idx0 = j;
+            if (&cloth->m_nodes[j] == face.m_n[1]) idx1 = j;
+            if (&cloth->m_nodes[j] == face.m_n[2]) idx2 = j;
+        }
+        if (idx0 >= 0 && idx1 >= 0 && idx2 >= 0) {
+            indices.push_back(idx0);
+            indices.push_back(idx1);
+            indices.push_back(idx2);
         }
     }
     
-    OE_INFO("Created default scene with camera, light, ground plane, Dess model, particles, and fluids");
+    mesh->SetVertices(vertices);
+    mesh->SetIndices(indices);
+    
+    // Add submesh for rendering
+    OpenEye::Rendering::Submesh submesh;
+    submesh.indexOffset = 0;
+    submesh.indexCount = static_cast<uint32_t>(indices.size());
+    submesh.vertexOffset = 0;
+    submesh.vertexCount = static_cast<uint32_t>(vertices.size());
+    submesh.materialIndex = 0;
+    mesh->AddSubmesh(submesh);
+    
+    mesh->UploadToGPU();
+    
+    return mesh;
+}
+
+std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateCylinderMesh(
+    float radius,
+    float height,
+    int segments
+) {
+    using namespace OpenEye::Rendering;
+    
+    auto mesh = std::make_shared<Mesh>();
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    
+    float halfHeight = height * 0.5f;
+    
+    // Create vertices for cylinder (centered at origin, aligned along Y axis)
+    // Top circle
+    for (int i = 0; i <= segments; ++i) {
+        float angle = (float(i) / float(segments)) * 2.0f * glm::pi<float>();
+        float x = radius * glm::cos(angle);
+        float z = radius * glm::sin(angle);
+        
+        Vertex vertex;
+        vertex.position = glm::vec3(x, halfHeight, z);
+        vertex.normal = glm::normalize(glm::vec3(x / radius, 0.0f, z / radius));
+        vertex.texCoord = glm::vec2(float(i) / float(segments), 1.0f);
+        vertex.tangent = glm::vec3(-glm::sin(angle), 0.0f, glm::cos(angle));
+        vertex.bitangent = glm::vec3(0.0f, 1.0f, 0.0f);
+        vertices.push_back(vertex);
+    }
+    
+    // Bottom circle
+    for (int i = 0; i <= segments; ++i) {
+        float angle = (float(i) / float(segments)) * 2.0f * glm::pi<float>();
+        float x = radius * glm::cos(angle);
+        float z = radius * glm::sin(angle);
+        
+        Vertex vertex;
+        vertex.position = glm::vec3(x, -halfHeight, z);
+        vertex.normal = glm::normalize(glm::vec3(x / radius, 0.0f, z / radius));
+        vertex.texCoord = glm::vec2(float(i) / float(segments), 0.0f);
+        vertex.tangent = glm::vec3(-glm::sin(angle), 0.0f, glm::cos(angle));
+        vertex.bitangent = glm::vec3(0.0f, 1.0f, 0.0f);
+        vertices.push_back(vertex);
+    }
+    
+    // Create side faces (quads as triangles)
+    int topStart = 0;
+    int bottomStart = segments + 1;
+    for (int i = 0; i < segments; ++i) {
+        int top0 = topStart + i;
+        int top1 = topStart + i + 1;
+        int bottom0 = bottomStart + i;
+        int bottom1 = bottomStart + i + 1;
+        
+        // First triangle
+        indices.push_back(top0);
+        indices.push_back(bottom0);
+        indices.push_back(top1);
+        
+        // Second triangle
+        indices.push_back(top1);
+        indices.push_back(bottom0);
+        indices.push_back(bottom1);
+    }
+    
+    // Create top and bottom caps
+    // Top cap
+    int topCenter = static_cast<int>(vertices.size());
+    Vertex topCenterVertex;
+    topCenterVertex.position = glm::vec3(0.0f, halfHeight, 0.0f);
+    topCenterVertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+    topCenterVertex.texCoord = glm::vec2(0.5f, 0.5f);
+    topCenterVertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+    topCenterVertex.bitangent = glm::vec3(0.0f, 0.0f, 1.0f);
+    vertices.push_back(topCenterVertex);
+    
+    for (int i = 0; i < segments; ++i) {
+        indices.push_back(topStart + i);
+        indices.push_back(topCenter);
+        indices.push_back(topStart + i + 1);
+    }
+    
+    // Bottom cap
+    int bottomCenter = static_cast<int>(vertices.size());
+    Vertex bottomCenterVertex;
+    bottomCenterVertex.position = glm::vec3(0.0f, -halfHeight, 0.0f);
+    bottomCenterVertex.normal = glm::vec3(0.0f, -1.0f, 0.0f);
+    bottomCenterVertex.texCoord = glm::vec2(0.5f, 0.5f);
+    bottomCenterVertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+    bottomCenterVertex.bitangent = glm::vec3(0.0f, 0.0f, -1.0f);
+    vertices.push_back(bottomCenterVertex);
+    
+    for (int i = 0; i < segments; ++i) {
+        indices.push_back(bottomStart + i + 1);
+        indices.push_back(bottomCenter);
+        indices.push_back(bottomStart + i);
+    }
+    
+    mesh->SetVertices(vertices);
+    mesh->SetIndices(indices);
+    
+    // Add submesh
+    Submesh submesh;
+    submesh.indexOffset = 0;
+    submesh.indexCount = static_cast<uint32_t>(indices.size());
+    submesh.vertexOffset = 0;
+    submesh.vertexCount = static_cast<uint32_t>(vertices.size());
+    submesh.materialIndex = 0;
+    mesh->AddSubmesh(submesh);
+    
+    mesh->UploadToGPU();
+    
+    return mesh;
 }
 
 void GameApplication::SetupInputCallbacks() {

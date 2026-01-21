@@ -30,6 +30,8 @@ set(ECS_SYSTEMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/ParticleSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/FluidSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/FluidSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/SoftBodySystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/SoftBodySystem.h
 )
 
 add_library(OpenEyeECS STATIC

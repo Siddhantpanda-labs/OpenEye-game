@@ -10,6 +10,10 @@ set(PHYSICS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/bodies/RigidBodyFactory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/controllers/CharacterControllerFactory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controllers/CharacterControllerFactory.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/SoftBodyFactory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/SoftBodyFactory.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/ClothTemplates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/ClothTemplates.h
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQuery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQuery.h
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQueryTypes.h
@@ -51,8 +55,10 @@ endif()
 target_link_libraries(OpenEyePhysics
     PUBLIC
         OpenEyeCore
+        OpenEyeRendering
         BulletDynamics
         BulletCollision
+        BulletSoftBody
         LinearMath
 )
 

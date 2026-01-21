@@ -66,7 +66,11 @@ public:
     
     // Access raw data
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
+    std::vector<Vertex>& GetVertices() { return m_vertices; } // Non-const for updates
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
+    
+    // Mark mesh as dirty (needs GPU update)
+    void MarkDirty() { m_uploaded = false; }
     
     // Bounding box calculation
     void CalculateBounds(glm::vec3& outMin, glm::vec3& outMax) const;

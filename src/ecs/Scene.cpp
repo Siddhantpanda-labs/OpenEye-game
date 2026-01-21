@@ -9,6 +9,7 @@
 #include "systems/PhysicsSystem.h"
 #include "systems/ParticleSystem.h"
 #include "systems/FluidSystem.h"
+#include "systems/SoftBodySystem.h"
 #include "systems/CullingSystem.h"
 #include "physics/PhysicsWorld.h"
 #include <filesystem>
@@ -170,7 +171,14 @@ void Scene::Update(float deltaTime, void* physicsWorld) {
     // 5. Update fluids
     FluidSystem::Update(*this, deltaTime);
     
-    // 6. Update culling AABBs (after all position/transform updates)
+    // 6. Update soft bodies (if physics world is provided)
+    if (physicsWorld) {
+        Physics::PhysicsWorld* internalPhysicsWorld = static_cast<Physics::PhysicsWorld*>(physicsWorld);
+        SoftBodySystem::Update(*this, internalPhysicsWorld, deltaTime);
+        SoftBodySystem::SyncMesh(*this); // Sync soft body nodes to mesh vertices
+    }
+    
+    // 7. Update culling AABBs (after all position/transform updates)
     CullingSystem::UpdateAABBs(*this);
 }
 
