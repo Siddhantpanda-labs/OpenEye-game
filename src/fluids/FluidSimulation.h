@@ -17,7 +17,7 @@ public:
 	void Shutdown();
 
 	void Step(float deltaTime);
-	void InjectDensity(const glm::vec3& positionWS, float radiusWS, float amount);
+	void InjectDensity(const glm::vec3& positionNormalized, float radiusNormalized, float amount);
 
 	// Debug/controls
 	int  GetJacobiIterations() const { return m_jacobiIterations; }

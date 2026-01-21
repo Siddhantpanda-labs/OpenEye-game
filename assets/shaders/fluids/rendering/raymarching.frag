@@ -25,7 +25,11 @@ uniform sampler2D RayDataFront;
 
 uniform sampler3D DensityTexture; // fluid texture
 uniform sampler3D ObstacleTexture;
-uniform sampler2D BackgroundTexture; 
+uniform sampler2D BackgroundTexture;
+
+// Emission position and volume size for distance-based age fade
+uniform vec3 u_EmissionPos; // Normalized emission position [0,1]
+uniform vec3 u_VolumeSize; // World space volume size 
 
 in vec3 ogPos; // cube local space position
 in vec3 texPos; // texture space position
@@ -124,20 +128,28 @@ vec4 RaymarchingGas(vec3 start, vec3 dir)
         
         // Lower threshold to catch even small density values
         if (sampledDensity > 0.0001) {
-            // Color varies with density: high density = whiter, low density = darker gray
-            float densityFactor = clamp(sampledDensity * 1.5, 0.0, 1.0);
-            vec3 smokeColor = mix(vec3(0.3, 0.3, 0.35), vec3(0.95, 0.95, 1.0), densityFactor);
+            // Distance-based age fade: smoke further from emission point fades more
+            float distFromEmit = distance(p, u_EmissionPos);
+            float maxDist = length(u_VolumeSize) * 0.5; // Maximum distance in normalized space
+            float ageFactor = 1.0 - smoothstep(0.0, maxDist * 0.8, distFromEmit); // Fade over 80% of max distance
+            sampledDensity *= ageFactor; // Apply age-based fade
             
-            // Exponential falloff for more realistic smoke appearance
-            // Increased multiplier for better visibility
-            float alpha = 1.0 - exp(-sampledDensity * 5.0);
-            alpha *= (1.0 - finalColor.w); // Multiply by remaining transparency
-            
-            finalColor.xyz += smokeColor * alpha;
-            finalColor.w += alpha;
-            
-            if (finalColor.w > 0.95)
-                break;
+            if (sampledDensity > 0.0001) {
+                // Color varies with density: high density = whiter, low density = darker gray
+                float densityFactor = clamp(sampledDensity * 1.5, 0.0, 1.0);
+                vec3 smokeColor = mix(vec3(0.3, 0.3, 0.35), vec3(0.95, 0.95, 1.0), densityFactor);
+                
+                // Exponential falloff for more realistic smoke appearance
+                // Increased multiplier for better visibility
+                float alpha = 1.0 - exp(-sampledDensity * 5.0);
+                alpha *= (1.0 - finalColor.w); // Multiply by remaining transparency
+                
+                finalColor.xyz += smokeColor * alpha;
+                finalColor.w += alpha;
+                
+                if (finalColor.w > 0.95)
+                    break;
+            }
         }
     }
     

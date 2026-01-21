@@ -379,8 +379,8 @@ void GameApplication::CreateDefaultScene() {
             // Set buoyancy for rising smoke
             fluidSim->SetBuoyancy(2.0f, 0.02f, 0.0f); // Increased sigma for stronger buoyancy
             
-            // Reduce dissipation so smoke persists longer
-            fluidSim->SetDissipation(0.998f, 0.995f); // Slower dissipation
+            // Increased dissipation to prevent static silhouette - density fades faster
+            fluidSim->SetDissipation(0.99f, 0.99f); // Faster dissipation for continuous flow
             
             auto& fluidComp = registry.emplace<FluidVolumeComponent>(fluidEntity);
             fluidComp.simulation = fluidSim;

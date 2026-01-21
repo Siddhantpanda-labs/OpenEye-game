@@ -22,7 +22,9 @@ public:
 	           const Rendering::Camera& camera,
 	           const glm::mat4& view,
 	           const glm::mat4& proj,
-	           const glm::mat4& model);
+	           const glm::mat4& model,
+	           const glm::vec3& emissionPosNormalized,
+	           const glm::vec3& volumeSize);
 
 private:
 	// Fullscreen and cube geometry

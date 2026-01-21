@@ -52,6 +52,8 @@ std::shared_ptr<FluidSimulation> CreateExplosion(const ExplosionConfig& config) 
         return nullptr;
     }
     
+    // Explosion: initial burst injection + continuous emission
+    fluidSim->InjectDensity(config.emitPos, config.emitRadius, config.densityRate * 5.0f);
     fluidSim->SetEmission(config.emitPos, config.emitRadius, config.densityRate, config.tempRate, true);
     fluidSim->SetBuoyancy(config.sigma, config.kappa, config.ambientTemp);
     fluidSim->SetWind(config.windDir, config.windStrength, config.windEnabled);

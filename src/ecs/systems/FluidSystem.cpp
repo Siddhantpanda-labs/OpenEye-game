@@ -73,7 +73,18 @@ void FluidSystem::Render(Scene& scene, const Rendering::Camera& camera,
 		if (!vol.simulation || !vol.enabled) continue;
 
 		glm::mat4 model = transform.GetWorldMatrix(registry);
-		s_renderer->Render(*vol.simulation, camera, view, proj, model);
+		// Get emission position for distance-based age fade
+		glm::vec3 emitPos;
+		float emitRadius, densityRate, tempRate;
+		bool emitEnabled;
+		vol.simulation->GetEmission(emitPos, emitRadius, densityRate, tempRate, emitEnabled);
+		// Convert normalized emission pos to world space
+		glm::vec3 worldEmitPos = transform.position + glm::vec3(
+			emitPos.x * vol.volumeSize.x - vol.volumeSize.x * 0.5f,
+			emitPos.y * vol.volumeSize.y - vol.volumeSize.y * 0.5f,
+			emitPos.z * vol.volumeSize.z - vol.volumeSize.z * 0.5f
+		);
+		s_renderer->Render(*vol.simulation, camera, view, proj, model, emitPos, vol.volumeSize);
 	}
 }
 

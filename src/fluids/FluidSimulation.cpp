@@ -131,19 +131,19 @@ void FluidSimulation::Step(float deltaTime) {
     }
 }
 
-void FluidSimulation::InjectDensity(const glm::vec3& /*positionWS*/, float /*radiusWS*/, float /*amount*/) {
-    // Simple CPU-side injection at center for initial visualization
+void FluidSimulation::InjectDensity(const glm::vec3& positionNormalized, float radiusNormalized, float amount) {
+    // CPU-side injection at specified normalized position [0,1] for initial burst
     const glm::ivec3 res = m_desc.resolution;
     std::vector<float> data(res.x * res.y * res.z, 0.0f);
-    glm::vec3 center = glm::vec3(res) * 0.5f;
-    float radius = 0.15f * res.x;
+    glm::vec3 center = positionNormalized * glm::vec3(res); // Convert normalized to grid space
+    float radius = radiusNormalized * res.x; // Convert normalized radius to grid space
     for (int z = 0; z < res.z; ++z) {
         for (int y = 0; y < res.y; ++y) {
             for (int x = 0; x < res.x; ++x) {
                 glm::vec3 p(x, y, z);
                 float d = glm::length(p - center);
                 float w = expf(-(d * d) / (2.0f * radius * radius));
-                data[x + y * res.x + z * res.x * res.y] = w;
+                data[x + y * res.x + z * res.x * res.y] = w * amount;
             }
         }
     }

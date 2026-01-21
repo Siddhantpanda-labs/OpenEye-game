@@ -123,7 +123,9 @@ void FluidRenderer::Render(const FluidSimulation& sim,
                              const Rendering::Camera& camera, 
                              const glm::mat4& view, 
                              const glm::mat4& proj, 
-                             const glm::mat4& model) {
+                             const glm::mat4& model,
+                             const glm::vec3& emissionPosNormalized,
+                             const glm::vec3& volumeSize) {
     EnsureShaders();
     EnsureRayDataTargets();
 
@@ -199,6 +201,9 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     m_shRaymarch->SetInt("RayDataFront", 1);
     m_shRaymarch->SetInt("DensityTexture", 2);
     m_shRaymarch->SetInt("ObstacleTexture", 3);
+    // Pass emission position and volume size for distance-based age fade
+    m_shRaymarch->SetVec3("u_EmissionPos", emissionPosNormalized);
+    m_shRaymarch->SetVec3("u_VolumeSize", volumeSize);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, m_rayDataBackTex);
     glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, m_rayDataFrontTex);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_3D, sim.GetDensityTexture());
