@@ -108,7 +108,7 @@ float interpolate_tricubic_fast(sampler3D tex, vec3 coord)
 }
 
 // Raymarching for gas 
-vec4 RaymarchingGas(vec3 start, vec3 dir)
+vec4 RaymarchingGas(vec3 start, vec3 dir, out float outDepth)
 {
     vec4 finalColor = vec4(0,0,0,0);
     vec3 sampleInterval = 0.5 / grid_size;
@@ -121,36 +121,54 @@ vec4 RaymarchingGas(vec3 start, vec3 dir)
     // Start with random offset for jittering
     float offset = 0.5 * stepSize * rand(gl_FragCoord.xy);
     
+    vec3 firstHitPos = vec3(0.0); // Position of first density hit for depth calculation
+    bool foundFirstHit = false;
+    
     for(float i = offset; i <= 1.0; i += stepSize)
     {
         vec3 p = start + dir * i;
+        // Clamp sample position to bounds - density outside bounds is automatically zero
+        p = clamp(p, vec3(0.0), vec3(1.0));
         sampledDensity = texture(DensityTexture, p).x * densityScale;
         
         // Lower threshold to catch even small density values
         if (sampledDensity > 0.0001) {
-            // Distance-based age fade: smoke further from emission point fades more
-            float distFromEmit = distance(p, u_EmissionPos);
-            float maxDist = length(u_VolumeSize) * 0.5; // Maximum distance in normalized space
-            float ageFactor = 1.0 - smoothstep(0.0, maxDist * 0.8, distFromEmit); // Fade over 80% of max distance
-            sampledDensity *= ageFactor; // Apply age-based fade
-            
-            if (sampledDensity > 0.0001) {
-                // Color varies with density: high density = whiter, low density = darker gray
-                float densityFactor = clamp(sampledDensity * 1.5, 0.0, 1.0);
-                vec3 smokeColor = mix(vec3(0.3, 0.3, 0.35), vec3(0.95, 0.95, 1.0), densityFactor);
-                
-                // Exponential falloff for more realistic smoke appearance
-                // Increased multiplier for better visibility
-                float alpha = 1.0 - exp(-sampledDensity * 5.0);
-                alpha *= (1.0 - finalColor.w); // Multiply by remaining transparency
-                
-                finalColor.xyz += smokeColor * alpha;
-                finalColor.w += alpha;
-                
-                if (finalColor.w > 0.95)
-                    break;
+            // Store first hit position for depth calculation
+            if (!foundFirstHit) {
+                firstHitPos = p;
+                foundFirstHit = true;
             }
+            
+            // Color varies with density: high density = whiter, low density = darker gray
+            float densityFactor = clamp(sampledDensity * 1.5, 0.0, 1.0);
+            vec3 smokeColor = mix(vec3(0.3, 0.3, 0.35), vec3(0.95, 0.95, 1.0), densityFactor);
+            
+            // Exponential falloff for more realistic smoke appearance
+            // Increased multiplier for better visibility
+            float alpha = 1.0 - exp(-sampledDensity * 5.0);
+            alpha *= (1.0 - finalColor.w); // Multiply by remaining transparency
+            
+            finalColor.xyz += smokeColor * alpha;
+            finalColor.w += alpha;
+            
+            if (finalColor.w > 0.95)
+                break;
         }
+    }
+    
+    // Calculate depth from first hit position
+    if (foundFirstHit) {
+        // Convert normalized texture position [0,1] back to cube local space [-1,1]
+        vec3 localPos = firstHitPos * 2.0 - 1.0; // [0,1] -> [-1,1]
+        localPos.z = 1.0 - localPos.z; // Flip Z coordinate
+        // Transform to world space using model matrix
+        vec4 worldPos = model * vec4(localPos, 1.0);
+        // Transform to clip space
+        vec4 clipPos = projection * view * worldPos;
+        // Convert clip space depth to [0,1] range
+        outDepth = clipPos.z / clipPos.w * 0.5 + 0.5;
+    } else {
+        outDepth = gl_FragCoord.z; // Fallback to original depth
     }
     
     // Lower threshold to show even faint smoke
@@ -229,9 +247,10 @@ vec3 ComputeLighting(vec3 color, vec3 normal)
 }
 
 // Raymarching for the liquid
-vec4 RaymarchingLiquid(vec3 start, vec3 dir)
+vec4 RaymarchingLiquid(vec3 start, vec3 dir, out float outDepth)
 {
-    vec3 fluidColor = vec3(52.0,120.0, 198.0) / 255.0;
+    // Dark water color - deep blue-gray for realistic water appearance
+    vec3 fluidColor = vec3(15.0, 35.0, 55.0) / 255.0;
     vec4 finalColor = vec4(0,0,0,0);
     float alpha = 0.0;
     float stepSize = 0.1;
@@ -259,26 +278,44 @@ vec4 RaymarchingLiquid(vec3 start, vec3 dir)
             break;
     }
     alpha = min(alpha, 0.8);
+    
+    // Calculate depth from surface position
+    vec3 depthPos = surfaceFound ? surface : p;
+    // Convert normalized texture position [0,1] back to cube local space [-1,1]
+    vec3 localPos = depthPos * 2.0 - 1.0; // [0,1] -> [-1,1]
+    localPos.z = 1.0 - localPos.z; // Flip Z coordinate
+    // Transform to world space using model matrix
+    vec4 worldPos = model * vec4(localPos, 1.0);
+    // Transform to clip space
+    vec4 clipPos = projection * view * worldPos;
+    // Convert clip space depth to [0,1] range
+    outDepth = clipPos.z / clipPos.w * 0.5 + 0.5;
+    
     if (alpha > 0.0)
     {
-        float lightingFactor = 0.6;
         vec3 surfaceNormal;
         if (surfaceFound)
             surfaceNormal = ComputeGradient(surface);
         else
-        {
             surfaceNormal = - ComputeGradient(p);
-            lightingFactor += lightingFactor * 0.8;
-        }
+        
         surfaceNormal.z *= -1.0;
-        surfaceNormal = (view * vec4(surfaceNormal, 0.0)).xyz;
-        vec2 refractionPos = gl_FragCoord.xy - vec2(dot(surfaceNormal, cameraRight), dot(surfaceNormal, cameraUp));
-        surfaceNormal = normalize(surfaceNormal);
+        surfaceNormal = normalize((view * vec4(surfaceNormal, 0.0)).xyz);
+        
+        // Simple lighting for water - avoid complex mixing
+        float NdotL = max(dot(surfaceNormal, normalize(lightDir)), 0.0);
+        vec3 litColor = fluidColor * (0.3 + 0.7 * NdotL); // Simple diffuse lighting
+        
+        // Minimal refraction - just darken slightly
+        vec2 refractionPos = gl_FragCoord.xy - vec2(dot(surfaceNormal, cameraRight), dot(surfaceNormal, cameraUp)) * 2.0;
         vec3 refractionColor = texture(BackgroundTexture, refractionPos * InverseScreenSize).xyz;
-        fluidColor = fluidColor * lightingFactor + ComputeLighting(fluidColor, surfaceNormal) * (1 - lightingFactor);
-        alpha = max(alpha, 0.1);
-        vec3 color = fluidColor * alpha + refractionColor * (1.0 - alpha);
-        finalColor = vec4(color, 1.0);
+        
+        // Mix water color with refraction, but keep water color dominant
+        alpha = max(alpha, 0.3);
+        vec3 color = mix(refractionColor * 0.3, litColor, 0.8);
+        finalColor = vec4(color, alpha);
+    } else {
+        outDepth = gl_FragCoord.z; // Fallback to original depth if no liquid
     }
     return finalColor;
 }
@@ -313,13 +350,21 @@ void main()
         start = TextureVoxelAlign(texPos);
         dir = raydata.xyz;
     }
-    gl_FragDepth = fragDepth;
     if (length(dir) <= 0.0)
         discard;
+    
+    float raymarchedDepth;
     if (u_FluidType == 0) {
-        FragColor = RaymarchingGas(start, dir);
+        FragColor = RaymarchingGas(start, dir, raymarchedDepth);
     } else {
-        FragColor = RaymarchingLiquid(start, dir);
+        FragColor = RaymarchingLiquid(start, dir, raymarchedDepth);
+    }
+    
+    // Use raymarched depth for proper occlusion
+    if (FragColor.w > 0.001) {
+        gl_FragDepth = raymarchedDepth;
+    } else {
+        discard; // Don't write depth if no fluid
     }
 }
 

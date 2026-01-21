@@ -18,6 +18,10 @@ public:
 
 	void Step(float deltaTime);
 	void InjectDensity(const glm::vec3& positionNormalized, float radiusNormalized, float amount);
+	void InjectLevelSet(const glm::vec3& positionNormalized, float radiusNormalized, float levelSetValue);
+	void InjectHalfFilledLevelSet(float waterLevelNormalized); // Creates half-filled pool (negative below water level)
+	void InjectVelocity(const glm::vec3& positionNormalized, float radiusNormalized, const glm::vec3& velocity);
+	void InjectSineWaveVelocity(float time, float waveSpeed, float waveAmplitude, float waveFrequency, float randomNoise);
 
 	// Debug/controls
 	int  GetJacobiIterations() const { return m_jacobiIterations; }
@@ -31,6 +35,10 @@ public:
 	void SetEmission(const glm::vec3& pos01, float radius01, float densityRate, float tempRate, bool enabled) { m_emitPos = pos01; m_emitRadius = radius01; m_emitDensityRate = densityRate; m_emitTempRate = tempRate; m_emitEnabled = enabled; }
 	void GetWind(glm::vec3& direction, float& strength, bool& enabled) const { direction = m_windDirection; strength = m_windStrength; enabled = m_windEnabled; }
 	void SetWind(const glm::vec3& direction, float strength, bool enabled) { m_windDirection = glm::normalize(direction); m_windStrength = strength; m_windEnabled = enabled; }
+	void SetWaves(float speed, float amplitude, float frequency, float randomNoise, bool enabled) {
+		m_waveSpeed = speed; m_waveAmplitude = amplitude; m_waveFrequency = frequency; 
+		m_waveRandomNoise = randomNoise; m_waveEnabled = enabled; m_waveTime = 0.0f;
+	}
 	void ClearDensity();
 
 	// Accessors used by renderer
@@ -98,6 +106,14 @@ private:
 	glm::vec3 m_windDirection = glm::vec3(0.0f, 0.0f, 0.0f); // Wind direction (normalized)
 	float m_windStrength = 0.0f; // Wind strength (0 = no wind)
 	bool  m_windEnabled = false;
+	
+	// Wave params (for liquid)
+	float m_waveSpeed = 0.0f;
+	float m_waveAmplitude = 0.0f;
+	float m_waveFrequency = 0.0f;
+	float m_waveRandomNoise = 0.0f;
+	bool  m_waveEnabled = false;
+	float m_waveTime = 0.0f;
 
 	// Helpers
 	void EnsureSimShaders();
@@ -119,6 +135,7 @@ private:
 	void ProjectVelocity();
 	void ApplyBuoyancy(float deltaTime);
 	void ApplyWindForce(float deltaTime);
+	void ApplyGravity(float deltaTime);
 };
 
 } // namespace Fluids

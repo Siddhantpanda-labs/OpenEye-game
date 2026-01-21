@@ -28,14 +28,17 @@ void main()
         vec3 coord = (fragCoord - timeStep * u);
         coord = floor(coord + vec3(0.5));
         vec3 neighborhood[8];
-        neighborhood[0] = texture(SourceTexture, InverseSize * (coord + vec3(-0.5, -0.5, -0.5))).xyz;
-        neighborhood[1] = texture(SourceTexture, InverseSize * (coord + vec3(-0.5, -0.5,  0.5))).xyz;
-        neighborhood[2] = texture(SourceTexture, InverseSize * (coord + vec3(-0.5,  0.5, -0.5))).xyz;
-        neighborhood[3] = texture(SourceTexture, InverseSize * (coord + vec3(-0.5,  0.5,  0.5))).xyz;
-        neighborhood[4] = texture(SourceTexture, InverseSize * (coord + vec3( 0.5, -0.5, -0.5))).xyz;
-        neighborhood[5] = texture(SourceTexture, InverseSize * (coord + vec3( 0.5, -0.5,  0.5))).xyz;
-        neighborhood[6] = texture(SourceTexture, InverseSize * (coord + vec3( 0.5,  0.5, -0.5))).xyz;
-        neighborhood[7] = texture(SourceTexture, InverseSize * (coord + vec3( 0.5,  0.5,  0.5))).xyz;
+        vec3 offsets[8] = vec3[8](
+            vec3(-0.5, -0.5, -0.5), vec3(-0.5, -0.5,  0.5),
+            vec3(-0.5,  0.5, -0.5), vec3(-0.5,  0.5,  0.5),
+            vec3( 0.5, -0.5, -0.5), vec3( 0.5, -0.5,  0.5),
+            vec3( 0.5,  0.5, -0.5), vec3( 0.5,  0.5,  0.5)
+        );
+        for (int i = 0; i < 8; i++) {
+            vec3 sampleCoord = InverseSize * (coord + offsets[i]);
+            sampleCoord = clamp(sampleCoord, vec3(0.0), vec3(1.0)); // Clamp to bounds
+            neighborhood[i] = texture(SourceTexture, sampleCoord).xyz;
+        }
         vec3 minVal = neighborhood[0];
         vec3 maxVal = neighborhood[0];
         for (int i = 1; i < 8; i++)

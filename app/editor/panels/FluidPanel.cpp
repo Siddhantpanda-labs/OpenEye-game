@@ -187,56 +187,107 @@ void FluidPanel::RenderFluidVolume(OpenEye::ECS::Entity entity, OpenEye::ECS::Fl
 }
 
 void FluidPanel::ApplyFirePreset(OpenEye::ECS::Entity entity) {
+    if (!m_scene) return;
     auto& registry = m_scene->GetRegistry();
-    auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
-    transform.position = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (!registry.valid(entity)) return;
     
-    using namespace OpenEye::Fluids::Templates;
-    FireSmokeConfig config;
-    config.position = transform.position;
-    auto fluidSim = CreateFireSmoke(config);
-    if (fluidSim) {
+    try {
+        // Ensure entity has Transform component
+        if (!registry.all_of<OpenEye::ECS::Transform>(entity)) {
+            registry.emplace<OpenEye::ECS::Transform>(entity);
+        }
+        
+        auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
+        transform.position = glm::vec3(0.0f, 1.0f, 0.0f);
+        
+        using namespace OpenEye::Fluids::Templates;
+        FireSmokeConfig config;
+        config.position = transform.position;
+        auto fluidSim = CreateFireSmoke(config);
+        if (!fluidSim) return;
+        
+        // Remove existing fluid component if present
+        if (registry.all_of<OpenEye::ECS::FluidVolumeComponent>(entity)) {
+            registry.remove<OpenEye::ECS::FluidVolumeComponent>(entity);
+        }
+        
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
         fluidComp.resolution = config.resolution;
         fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
+    } catch (...) {
+        // Silently handle any errors
     }
 }
 
 void FluidPanel::ApplyWaterPreset(OpenEye::ECS::Entity entity) {
+    if (!m_scene) return;
     auto& registry = m_scene->GetRegistry();
-    auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
-    transform.position = glm::vec3(0.0f, 0.5f, 0.0f);
+    if (!registry.valid(entity)) return;
     
-    using namespace OpenEye::Fluids::Templates;
-    WaterConfig config;
-    config.position = transform.position;
-    auto fluidSim = CreateWater(config);
-    if (fluidSim) {
+    try {
+        // Ensure entity has Transform component
+        if (!registry.all_of<OpenEye::ECS::Transform>(entity)) {
+            registry.emplace<OpenEye::ECS::Transform>(entity);
+        }
+        
+        auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
+        transform.position = glm::vec3(0.0f, 0.5f, 0.0f);
+        
+        using namespace OpenEye::Fluids::Templates;
+        WaterConfig config;
+        config.position = transform.position;
+        auto fluidSim = CreateWater(config);
+        if (!fluidSim) return;
+        
+        // Remove existing fluid component if present
+        if (registry.all_of<OpenEye::ECS::FluidVolumeComponent>(entity)) {
+            registry.remove<OpenEye::ECS::FluidVolumeComponent>(entity);
+        }
+        
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
         fluidComp.resolution = config.resolution;
         fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
+    } catch (...) {
+        // Silently handle any errors
     }
 }
 
 void FluidPanel::ApplyExplosionPreset(OpenEye::ECS::Entity entity) {
+    if (!m_scene) return;
     auto& registry = m_scene->GetRegistry();
-    auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
-    transform.position = glm::vec3(0.0f, 1.5f, 0.0f);
+    if (!registry.valid(entity)) return;
     
-    using namespace OpenEye::Fluids::Templates;
-    ExplosionConfig config;
-    config.position = transform.position;
-    auto fluidSim = CreateExplosion(config);
-    if (fluidSim) {
+    try {
+        // Ensure entity has Transform component
+        if (!registry.all_of<OpenEye::ECS::Transform>(entity)) {
+            registry.emplace<OpenEye::ECS::Transform>(entity);
+        }
+        
+        auto& transform = registry.get<OpenEye::ECS::Transform>(entity);
+        transform.position = glm::vec3(0.0f, 1.5f, 0.0f);
+        
+        using namespace OpenEye::Fluids::Templates;
+        ExplosionConfig config;
+        config.position = transform.position;
+        auto fluidSim = CreateExplosion(config);
+        if (!fluidSim) return;
+        
+        // Remove existing fluid component if present
+        if (registry.all_of<OpenEye::ECS::FluidVolumeComponent>(entity)) {
+            registry.remove<OpenEye::ECS::FluidVolumeComponent>(entity);
+        }
+        
         auto& fluidComp = registry.emplace<OpenEye::ECS::FluidVolumeComponent>(entity);
         fluidComp.simulation = fluidSim;
         fluidComp.resolution = config.resolution;
         fluidComp.volumeSize = config.volumeSize;
         fluidComp.enabled = true;
+    } catch (...) {
+        // Silently handle any errors
     }
 }
 

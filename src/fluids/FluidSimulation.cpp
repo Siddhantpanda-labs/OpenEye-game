@@ -110,6 +110,17 @@ void FluidSimulation::Step(float deltaTime) {
     if (m_windEnabled && m_windStrength > 0.0f) {
         ApplyWindForce(deltaTime);
     }
+    
+    // Apply gravity for liquid (water stays below, flows down)
+    if (m_type == FluidType::Liquid) {
+        ApplyGravity(deltaTime);
+    }
+    
+    // Apply sine wave forces for liquid (continuous wave motion)
+    if (m_type == FluidType::Liquid && m_waveEnabled) {
+        m_waveTime += deltaTime;
+        InjectSineWaveVelocity(m_waveTime, m_waveSpeed, m_waveAmplitude, m_waveFrequency, m_waveRandomNoise);
+    }
 
     // Incompressibility: divergence -> pressure -> projection
     ComputeDivergence();
@@ -134,9 +145,16 @@ void FluidSimulation::Step(float deltaTime) {
 void FluidSimulation::InjectDensity(const glm::vec3& positionNormalized, float radiusNormalized, float amount) {
     // CPU-side injection at specified normalized position [0,1] for initial burst
     const glm::ivec3 res = m_desc.resolution;
+    
+    // Clamp position to valid bounds to prevent crashes
+    glm::vec3 clampedPos = glm::clamp(positionNormalized, glm::vec3(0.0f), glm::vec3(1.0f));
+    float clampedRadius = glm::max(0.0f, glm::min(radiusNormalized, 1.0f));
+    
     std::vector<float> data(res.x * res.y * res.z, 0.0f);
-    glm::vec3 center = positionNormalized * glm::vec3(res); // Convert normalized to grid space
-    float radius = radiusNormalized * res.x; // Convert normalized radius to grid space
+    glm::vec3 center = clampedPos * glm::vec3(res); // Convert normalized to grid space
+    float radius = clampedRadius * glm::min(res.x, glm::min(res.y, res.z)); // Use minimum dimension for radius
+    radius = glm::max(radius, 1.0f); // Ensure at least 1 voxel radius
+    
     for (int z = 0; z < res.z; ++z) {
         for (int y = 0; y < res.y; ++y) {
             for (int x = 0; x < res.x; ++x) {
@@ -150,6 +168,127 @@ void FluidSimulation::InjectDensity(const glm::vec3& positionNormalized, float r
     glBindTexture(GL_TEXTURE_3D, m_density.tex);
     glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, res.x, res.y, res.z, GL_RED, GL_FLOAT, data.data());
     glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+void FluidSimulation::InjectLevelSet(const glm::vec3& positionNormalized, float radiusNormalized, float levelSetValue) {
+    // CPU-side level-set injection for liquid (negative inside, positive outside)
+    const glm::ivec3 res = m_desc.resolution;
+    
+    // Clamp position to valid bounds to prevent crashes
+    glm::vec3 clampedPos = glm::clamp(positionNormalized, glm::vec3(0.0f), glm::vec3(1.0f));
+    float clampedRadius = glm::max(0.0f, glm::min(radiusNormalized, 1.0f));
+    
+    std::vector<float> data(res.x * res.y * res.z, 0.0f);
+    glm::vec3 center = clampedPos * glm::vec3(res); // Convert normalized to grid space
+    float radius = clampedRadius * glm::min(res.x, glm::min(res.y, res.z)); // Use minimum dimension for radius
+    radius = glm::max(radius, 1.0f); // Ensure at least 1 voxel radius
+    
+    for (int z = 0; z < res.z; ++z) {
+        for (int y = 0; y < res.y; ++y) {
+            for (int x = 0; x < res.x; ++x) {
+                glm::vec3 p(x, y, z);
+                float d = glm::length(p - center);
+                // Level-set: negative inside sphere, positive outside
+                float signedDist = d - radius;
+                // Clamp to reasonable range to avoid extreme values
+                signedDist = glm::clamp(signedDist, -radius * 2.0f, radius * 2.0f);
+                data[x + y * res.x + z * res.x * res.y] = signedDist * levelSetValue;
+            }
+        }
+    }
+    glBindTexture(GL_TEXTURE_3D, m_density.tex);
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, res.x, res.y, res.z, GL_RED, GL_FLOAT, data.data());
+    glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+void FluidSimulation::InjectHalfFilledLevelSet(float waterLevelNormalized) {
+    // Creates a half-filled pool: negative values below water level, positive above
+    // waterLevelNormalized: 0.0 = bottom, 1.0 = top (typically 0.5 for half-filled)
+    const glm::ivec3 res = m_desc.resolution;
+    
+    float clampedLevel = glm::clamp(waterLevelNormalized, 0.0f, 1.0f);
+    float waterLevelGrid = clampedLevel * res.y; // Y is typically the vertical axis
+    
+    std::vector<float> data(res.x * res.y * res.z, 0.0f);
+    
+    for (int z = 0; z < res.z; ++z) {
+        for (int y = 0; y < res.y; ++y) {
+            for (int x = 0; x < res.x; ++x) {
+                // Level-set: negative below water level, positive above
+                // Use smooth transition near water level for better rendering
+                float distFromLevel = y - waterLevelGrid;
+                float smoothDist = distFromLevel; // Can add smoothing here if needed
+                data[x + y * res.x + z * res.x * res.y] = smoothDist;
+            }
+        }
+    }
+    glBindTexture(GL_TEXTURE_3D, m_density.tex);
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, res.x, res.y, res.z, GL_RED, GL_FLOAT, data.data());
+    glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+void FluidSimulation::InjectVelocity(const glm::vec3& positionNormalized, float radiusNormalized, const glm::vec3& velocity) {
+    // CPU-side velocity injection for initial waves/motion
+    // Note: Velocity starts at zero, so we can write directly without reading first
+    const glm::ivec3 res = m_desc.resolution;
+    
+    glm::vec3 clampedPos = glm::clamp(positionNormalized, glm::vec3(0.0f), glm::vec3(1.0f));
+    float clampedRadius = glm::max(0.0f, glm::min(radiusNormalized, 1.0f));
+    
+    std::vector<float> data(res.x * res.y * res.z * 4, 0.0f); // RGBA = 4 components
+    glm::vec3 center = clampedPos * glm::vec3(res);
+    float radius = clampedRadius * glm::min(res.x, glm::min(res.y, res.z));
+    radius = glm::max(radius, 1.0f);
+    
+    for (int z = 0; z < res.z; ++z) {
+        for (int y = 0; y < res.y; ++y) {
+            for (int x = 0; x < res.x; ++x) {
+                glm::vec3 p(x, y, z);
+                float d = glm::length(p - center);
+                float w = expf(-(d * d) / (2.0f * radius * radius));
+                int idx = (x + y * res.x + z * res.x * res.y) * 4;
+                data[idx + 0] = velocity.x * w;
+                data[idx + 1] = velocity.y * w;
+                data[idx + 2] = velocity.z * w;
+                data[idx + 3] = 0.0f; // W unused
+            }
+        }
+    }
+    
+    glBindTexture(GL_TEXTURE_3D, m_velocity.tex);
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, res.x, res.y, res.z, GL_RGBA, GL_FLOAT, data.data());
+    glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+void FluidSimulation::InjectSineWaveVelocity(float time, float waveSpeed, float waveAmplitude, float waveFrequency, float randomNoise) {
+    // Inject sine wave velocity pattern using shader-based approach (safer than CPU readback)
+    // Use ApplyWindForce shader with wave-based force calculation
+    EnsureSimShaders(); // Ensure shader is loaded
+    if (!m_shApplyForce) return; // Safety check
+    
+    const glm::vec3 invSize = 1.0f / glm::vec3(m_desc.resolution);
+    
+    // Calculate wave force based on position and time
+    // Apply wave force to surface region only
+    glm::vec3 waveForce(
+        cosf(waveFrequency * 0.5f + waveSpeed * time) * waveAmplitude * 0.3f,  // X: horizontal propagation
+        sinf(waveFrequency * 0.5f + waveSpeed * time) * waveAmplitude,         // Y: vertical wave height
+        0.0f  // Z: minimal
+    );
+    
+    // Use wind force shader to apply wave forces (it supports position-based forces)
+    BindLayeredTarget(m_velocityTmp);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_shApplyForce->Bind();
+    m_shApplyForce->SetInt("VelocityTexture", 0);
+    m_shApplyForce->SetVec3("force", waveForce);
+    m_shApplyForce->SetVec3("center", glm::vec3(0.5f, 0.5f, 0.5f)); // Center of volume
+    m_shApplyForce->SetFloat("radius", 0.6f); // Cover most of volume, stronger at center
+    m_shApplyForce->SetVec3("InverseSize", invSize);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_3D, m_velocity.tex);
+    DrawFullscreenInstanced();
+    m_shApplyForce->Unbind();
+    SwapSlabs(m_velocity, m_velocityTmp);
 }
 
 void FluidSimulation::ClearDensity() {
@@ -241,6 +380,13 @@ void FluidSimulation::EnsureSimShaders() {
             "assets/shaders/fluids/generic/load_vertices.vert",
             "assets/shaders/fluids/generic/set_layer.geom",
             "assets/shaders/fluids/simulation/gas/add_temperature.frag");
+    }
+    if (!m_shApplyForce) {
+        m_shApplyForce = std::make_shared<Rendering::Shader>();
+        m_shApplyForce->LoadFromFile(
+            "assets/shaders/fluids/generic/load_vertices.vert",
+            "assets/shaders/fluids/generic/set_layer.geom",
+            "assets/shaders/fluids/simulation/apply_force.frag");
     }
 }
 
@@ -488,6 +634,9 @@ void FluidSimulation::ApplyBuoyancy(float deltaTime) {
 }
 
 void FluidSimulation::ApplyWindForce(float deltaTime) {
+    EnsureSimShaders(); // Ensure shader is loaded
+    if (!m_shApplyForce) return; // Safety check
+    
     const glm::vec3 invSize = 1.0f / glm::vec3(m_desc.resolution);
     BindLayeredTarget(m_velocityTmp);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -496,6 +645,28 @@ void FluidSimulation::ApplyWindForce(float deltaTime) {
     m_shApplyForce->SetVec3("force", m_windDirection * m_windStrength * deltaTime);
     m_shApplyForce->SetVec3("center", m_emitPos); // Apply wind from emission point
     m_shApplyForce->SetFloat("radius", m_emitRadius * 2.0f); // Wider radius for wind
+    m_shApplyForce->SetVec3("InverseSize", invSize);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_3D, m_velocity.tex);
+    DrawFullscreenInstanced();
+    m_shApplyForce->Unbind();
+    SwapSlabs(m_velocity, m_velocityTmp);
+}
+
+void FluidSimulation::ApplyGravity(float deltaTime) {
+    // Apply downward gravity force to liquid (water flows down, stays below)
+    EnsureSimShaders(); // Ensure shader is loaded
+    if (!m_shApplyForce) return; // Safety check
+    
+    const glm::vec3 invSize = 1.0f / glm::vec3(m_desc.resolution);
+    BindLayeredTarget(m_velocityTmp);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_shApplyForce->Bind();
+    m_shApplyForce->SetInt("VelocityTexture", 0);
+    // Gravity: downward force (negative Y), scaled by deltaTime
+    glm::vec3 gravityForce(0.0f, -9.8f * deltaTime, 0.0f); // Standard gravity
+    m_shApplyForce->SetVec3("force", gravityForce);
+    m_shApplyForce->SetVec3("center", glm::vec3(0.5f, 0.5f, 0.5f)); // Apply everywhere
+    m_shApplyForce->SetFloat("radius", 10.0f); // Large radius to cover entire volume
     m_shApplyForce->SetVec3("InverseSize", invSize);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_3D, m_velocity.tex);
     DrawFullscreenInstanced();

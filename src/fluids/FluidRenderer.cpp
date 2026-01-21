@@ -210,20 +210,32 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_3D, sim.GetObstacleTexture());
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
-    // Enable alpha blending and disable depth test for compositing
+    
+    // Enable proper depth testing and writing for occlusion
     GLboolean depthMask;
     glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
     GLboolean depthTestEnabled = glIsEnabled(GL_DEPTH_TEST);
-    if (depthTestEnabled) glDisable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
+    GLint depthFunc;
+    glGetIntegerv(GL_DEPTH_FUNC, &depthFunc);
+    
+    // Enable depth testing with LEQUAL for proper occlusion
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE); // Write depth for proper occlusion
+    
+    // Enable alpha blending for transparency
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
     glBindVertexArray(m_cubeVAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
+    
+    // Restore previous state
     glDisable(GL_BLEND);
     glDepthMask(depthMask);
-    if (depthTestEnabled) glEnable(GL_DEPTH_TEST);
+    glDepthFunc(depthFunc);
+    if (!depthTestEnabled) glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     m_shRaymarch->Unbind();
     

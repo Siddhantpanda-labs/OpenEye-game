@@ -26,6 +26,8 @@ void main()
     {
         vec3 u = texture(VelocityTexture, InverseSize * fragCoord).xyz;
         vec3 coord = InverseSize * (fragCoord - timeStep * u);
+        // Clamp coordinates to bounds - density outside bounds is erased (becomes zero)
+        coord = clamp(coord, vec3(0.0), vec3(1.0));
         finalColor = dissipation * texture(SourceTexture, coord);
         if (length(finalColor) < 0.0001)
             finalColor = vec4(0.0);
