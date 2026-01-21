@@ -8,7 +8,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Platform-specific settings
 if(MSVC)
-    add_compile_options(/W4 /WX /permissive- /Zc:preprocessor)
+    # NOTE: Avoid /WX globally because some thirdparty deps (notably Bullet3Collision)
+    # emit MSVC warnings like C4201, which then become hard build failures.
+    add_compile_options(/W4 /permissive- /Zc:preprocessor)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     # Enable parallel compilation
     add_compile_options(/MP)

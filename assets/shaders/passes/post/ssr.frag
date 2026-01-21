@@ -26,7 +26,8 @@ vec3 RayMarch(vec3 rayOrigin, vec3 rayDir, float rayLength) {
         currentPos += rayDir * stepSize;
         
         // Project to screen space
-        vec4 projected = u_Projection * vec4(currentPos, 1.0);
+        // From `assets/shaders/common/camera.glsl`
+        vec4 projected = u_ProjectionMatrix * vec4(currentPos, 1.0);
         projected.xy /= projected.w;
         vec2 screenCoord = projected.xy * 0.5 + 0.5;
         

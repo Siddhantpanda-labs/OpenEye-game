@@ -14,6 +14,7 @@ FluidRenderer::~FluidRenderer() { Shutdown(); }
 
 bool FluidRenderer::Initialize() {
 	CreateCube();
+	CreateWireframeBox();
     OE_INFO("FluidRenderer initialized");
 	return true;
 }
@@ -21,6 +22,8 @@ bool FluidRenderer::Initialize() {
 void FluidRenderer::Shutdown() {
 	if (m_cubeVBO) { glDeleteBuffers(1, &m_cubeVBO); m_cubeVBO = 0; }
 	if (m_cubeVAO) { glDeleteVertexArrays(1, &m_cubeVAO); m_cubeVAO = 0; }
+	if (m_wireframeVBO) { glDeleteBuffers(1, &m_wireframeVBO); m_wireframeVBO = 0; }
+	if (m_wireframeVAO) { glDeleteVertexArrays(1, &m_wireframeVAO); m_wireframeVAO = 0; }
 	if (m_rayDataFrontTex) { glDeleteTextures(1, &m_rayDataFrontTex); m_rayDataFrontTex = 0; }
 	if (m_rayDataBackTex) { glDeleteTextures(1, &m_rayDataBackTex); m_rayDataBackTex = 0; }
 	if (m_rayDataFrontFBO) { glDeleteFramebuffers(1, &m_rayDataFrontFBO); m_rayDataFrontFBO = 0; }
@@ -76,6 +79,11 @@ void FluidRenderer::EnsureShaders() {
         m_shRaymarch->LoadFromFile("assets/shaders/fluids/rendering/raydata.vert",
                                    "assets/shaders/fluids/rendering/raymarching.frag");
     }
+    if (!m_shWireframe) {
+        m_shWireframe = std::make_shared<Rendering::Shader>();
+        m_shWireframe->LoadFromFile("assets/shaders/debug/wireframe.vert",
+                                    "assets/shaders/debug/wireframe.frag");
+    }
 }
 
 void FluidRenderer::CreateCube() {
@@ -119,6 +127,10 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     EnsureShaders();
     EnsureRayDataTargets();
 
+    // Save the currently bound framebuffer (should be HDR FBO from transparency pass)
+    GLint originalFBO = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &originalFBO);
+
     // Create RayData Back
     glBindFramebuffer(GL_FRAMEBUFFER, m_rayDataBackFBO);
     glViewport(0, 0, m_viewportW, m_viewportH);
@@ -144,6 +156,10 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     glClear(GL_COLOR_BUFFER_BIT);
     glCullFace(GL_BACK); // render front faces
     m_shRayDataFront->Bind();
+    // IMPORTANT: raydata.vert uses these for gl_Position, so we must set them.
+    m_shRayDataFront->SetMat4("model", model);
+    m_shRayDataFront->SetMat4("view", view);
+    m_shRayDataFront->SetMat4("projection", proj);
     m_shRayDataFront->SetVec3("grid_size", glm::vec3(sim.GetResolution()));
     m_shRayDataFront->SetVec2("InverseSize", glm::vec2(1.0f / m_viewportW, 1.0f / m_viewportH));
     m_shRayDataFront->SetInt("RayDataTexture", 0);
@@ -155,11 +171,15 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     glBindVertexArray(0);
     m_shRayDataFront->Unbind();
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // Restore the original framebuffer (HDR FBO) for raymarching output
+    glBindFramebuffer(GL_FRAMEBUFFER, originalFBO);
+    // Restore viewport to match HDR framebuffer size
+    glViewport(0, 0, m_viewportW, m_viewportH);
     glDisable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
 
     // Raymarch pass: draw cube front faces, bind DensityTexture from sim
+    // This renders to the HDR framebuffer (restored above)
     m_shRaymarch->Bind();
     m_shRaymarch->SetMat4("model", model);
     m_shRaymarch->SetMat4("view", view);
@@ -201,6 +221,92 @@ void FluidRenderer::Render(const FluidSimulation& sim,
     if (depthTestEnabled) glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     m_shRaymarch->Unbind();
+    
+    // Render wireframe debug box
+    RenderWireframeBox(view, proj, model);
+}
+
+void FluidRenderer::CreateWireframeBox() {
+    // Create wireframe box vertices (12 edges of a cube)
+    // Cube is [-1, 1]^3 in local space
+    static const float vertices[] = {
+        // Bottom face
+        -1.0f, -1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,   1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,  -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,  -1.0f, -1.0f, -1.0f,
+        // Top face
+        -1.0f,  1.0f, -1.0f,   1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,   1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,  -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,  -1.0f,  1.0f, -1.0f,
+        // Vertical edges
+        -1.0f, -1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,   1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,   1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,  -1.0f,  1.0f,  1.0f
+    };
+    
+    glGenVertexArrays(1, &m_wireframeVAO);
+    glGenBuffers(1, &m_wireframeVBO);
+    glBindVertexArray(m_wireframeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_wireframeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glBindVertexArray(0);
+}
+
+void FluidRenderer::RenderWireframeBox(const glm::mat4& view, const glm::mat4& proj, const glm::mat4& model) {
+    if (!m_wireframeVAO) return;
+    
+    EnsureShaders();
+    if (!m_shWireframe) return;
+    
+    // Ensure we're rendering to the correct framebuffer and viewport
+    GLint currentFBO = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    
+    // Save current state
+    GLboolean depthTestEnabled = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean cullFaceEnabled = glIsEnabled(GL_CULL_FACE);
+    GLboolean blendEnabled = glIsEnabled(GL_BLEND);
+    GLfloat lineWidth;
+    glGetFloatv(GL_LINE_WIDTH, &lineWidth);
+    
+    // Set up for wireframe rendering
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glLineWidth(2.0f);
+    
+    // Ensure viewport is correct (use current viewport)
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+    
+    // Render wireframe box
+    m_shWireframe->Bind();
+    m_shWireframe->SetMat4("u_View", view);
+    m_shWireframe->SetMat4("u_Projection", proj);
+    m_shWireframe->SetMat4("u_Model", model);
+    m_shWireframe->SetVec3("u_Color", glm::vec3(0.0f, 1.0f, 0.0f)); // Green color
+    
+    glBindVertexArray(m_wireframeVAO);
+    glDrawArrays(GL_LINES, 0, 24); // 12 edges * 2 vertices = 24 vertices
+    glBindVertexArray(0);
+    
+    m_shWireframe->Unbind();
+    
+    // Restore state
+    glLineWidth(lineWidth);
+    if (blendEnabled) glEnable(GL_BLEND);
+    if (cullFaceEnabled) glEnable(GL_CULL_FACE);
+    if (!depthTestEnabled) glDisable(GL_DEPTH_TEST);
+    
+    // Restore viewport
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
 }
 
 } // namespace Fluids

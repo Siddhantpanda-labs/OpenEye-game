@@ -61,6 +61,7 @@ private:
 	Slab m_obstacles{};       // R8 (0 fluid, 1 solid)
 	Slab m_obstacleVelocity{};// RGBA16F
 	Slab m_temperature{};     // R16F (gas)
+	Slab m_temperatureTmp{};  // R16F (gas) ping-pong (avoid read/write same texture)
 	Slab m_phi1Hat{};         // RGBA16F (MacCormack tmp)
 	Slab m_phi2Hat{};         // RGBA16F (MacCormack tmp)
 

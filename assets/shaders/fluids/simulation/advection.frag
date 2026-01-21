@@ -15,7 +15,7 @@ uniform float timeStep; // Time step
 uniform vec3 InverseSize; // Inverse size of the simulation grid
 uniform float dissipation; // Dissipation factor
 
-in float layer; // Layer of the 3D texture
+flat in float layer; // Layer of the 3D texture
 
 void main()
 {

@@ -111,7 +111,7 @@ vec4 RaymarchingGas(vec3 start, vec3 dir)
     float t = dot(sampleInterval, abs(dir)) / (length(dir) * length(dir));
     t /= 2.0;
     float stepSize = t;
-    float densityScale = 0.5; // Scale density for better visibility
+    float densityScale = 2.0; // Increased scale for better visibility
     float sampledDensity = 0;
     
     // Start with random offset for jittering
@@ -122,13 +122,15 @@ vec4 RaymarchingGas(vec3 start, vec3 dir)
         vec3 p = start + dir * i;
         sampledDensity = texture(DensityTexture, p).x * densityScale;
         
-        if (sampledDensity > 0.001) {
+        // Lower threshold to catch even small density values
+        if (sampledDensity > 0.0001) {
             // Color varies with density: high density = whiter, low density = darker gray
-            float densityFactor = clamp(sampledDensity * 2.0, 0.0, 1.0);
+            float densityFactor = clamp(sampledDensity * 1.5, 0.0, 1.0);
             vec3 smokeColor = mix(vec3(0.3, 0.3, 0.35), vec3(0.95, 0.95, 1.0), densityFactor);
             
             // Exponential falloff for more realistic smoke appearance
-            float alpha = 1.0 - exp(-sampledDensity * 3.0);
+            // Increased multiplier for better visibility
+            float alpha = 1.0 - exp(-sampledDensity * 5.0);
             alpha *= (1.0 - finalColor.w); // Multiply by remaining transparency
             
             finalColor.xyz += smokeColor * alpha;
@@ -139,8 +141,8 @@ vec4 RaymarchingGas(vec3 start, vec3 dir)
         }
     }
     
-    // Only return if we have meaningful density
-    if (finalColor.w < 0.005)
+    // Lower threshold to show even faint smoke
+    if (finalColor.w < 0.001)
         return vec4(0.0);
     
     // Normalize color based on accumulated alpha

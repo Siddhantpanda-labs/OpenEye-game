@@ -28,6 +28,7 @@ bool FluidSimulation::Initialize(const FluidGridDesc& desc, FluidType type) {
     if (!Create3DSlab(m_obstacles,        GL_R8,      res.x, res.y, res.z)) return false;
     if (!Create3DSlab(m_obstacleVelocity, GL_RGBA16F, res.x, res.y, res.z)) return false;
     if (!Create3DSlab(m_temperature,      GL_R16F,    res.x, res.y, res.z)) return false;
+    if (!Create3DSlab(m_temperatureTmp,   GL_R16F,    res.x, res.y, res.z)) return false;
     if (!Create3DSlab(m_phi1Hat,          GL_RGBA16F, res.x, res.y, res.z)) return false;
     if (!Create3DSlab(m_phi2Hat,          GL_RGBA16F, res.x, res.y, res.z)) return false;
 
@@ -41,6 +42,7 @@ bool FluidSimulation::Initialize(const FluidGridDesc& desc, FluidType type) {
 	Clear3D(m_obstacles, 0.0f);
     Clear3D(m_obstacleVelocity, 0.0f);
     Clear3D(m_temperature, 0.0f);
+    Clear3D(m_temperatureTmp, 0.0f);
     Clear3D(m_phi1Hat, 0.0f);
     Clear3D(m_phi2Hat, 0.0f);
 
@@ -61,6 +63,7 @@ void FluidSimulation::Shutdown() {
 	DestroySlab(m_obstacles);
     DestroySlab(m_obstacleVelocity);
     DestroySlab(m_temperature);
+    DestroySlab(m_temperatureTmp);
     DestroySlab(m_phi1Hat);
     DestroySlab(m_phi2Hat);
     DestroyFullscreenQuad();
@@ -72,8 +75,9 @@ void FluidSimulation::Step(float deltaTime) {
 
     // Emission (gas only), controlled by parameters
     if (m_type == FluidType::Gas && m_emitEnabled) {
-        BindLayeredTarget(m_density);
-        // Don't clear - we want to accumulate density over time
+        // IMPORTANT: Avoid sampling from a texture while rendering into it (undefined in GL).
+        // Write into temp slab and swap.
+        BindLayeredTarget(m_densityTmp);
         m_shAddDye->Bind();
         m_shAddDye->SetInt("DensityTexture", 0);
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_3D, m_density.tex);
@@ -83,9 +87,10 @@ void FluidSimulation::Step(float deltaTime) {
         m_shAddDye->SetVec3("InverseSize", invSize);
         DrawFullscreenInstanced();
         m_shAddDye->Unbind();
+        SwapSlabs(m_density, m_densityTmp);
 
-        BindLayeredTarget(m_temperature);
-        // Don't clear - accumulate temperature over time
+        // Temperature injection (ping-pong)
+        BindLayeredTarget(m_temperatureTmp);
         m_shAddTemperature->Bind();
         m_shAddTemperature->SetInt("TemperatureTexture", 0);
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_3D, m_temperature.tex);
@@ -95,6 +100,7 @@ void FluidSimulation::Step(float deltaTime) {
         m_shAddTemperature->SetVec3("InverseSize", invSize);
         DrawFullscreenInstanced();
         m_shAddTemperature->Unbind();
+        SwapSlabs(m_temperature, m_temperatureTmp);
     }
 
     // Advect velocity (MacCormack)
@@ -119,7 +125,9 @@ void FluidSimulation::Step(float deltaTime) {
     AdvectScalar(m_density, m_densityTmp, deltaTime, m_densityDissipation);
     std::swap(m_density, m_densityTmp);
     if (m_type == FluidType::Gas) {
-        AdvectScalar(m_temperature, m_temperature, deltaTime, 1.0f);
+        // Ping-pong temperature to avoid read/write hazards.
+        AdvectScalar(m_temperature, m_temperatureTmp, deltaTime, 1.0f);
+        std::swap(m_temperature, m_temperatureTmp);
     }
 }
 

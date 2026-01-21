@@ -38,10 +38,10 @@ void main()
     // Compute the ray's end position in the texture space
     vec3 end = TextureVoxelAlign(texPos);
 
-    // Read the scene depth
-    float sceneDepth = texture(SceneDepthTexture, InverseSize * gl_FragCoord.xy).r;
-
     if (useSceneDepth) {
+        // Read the scene depth ONLY if enabled (avoids sampling an unbound texture)
+        float sceneDepth = texture(SceneDepthTexture, InverseSize * gl_FragCoord.xy).r;
+
         // Check if some obstacle is in front of the fluid volume back face
         if (sceneDepth < gl_FragCoord.z)
         {

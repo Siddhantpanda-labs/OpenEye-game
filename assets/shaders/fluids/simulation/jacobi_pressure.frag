@@ -11,7 +11,7 @@ uniform sampler3D Pressure;
 uniform sampler3D Obstacle;
 uniform vec3 InverseSize;
 
-in float layer;
+flat in float layer;
 
 void main()
 {

@@ -37,10 +37,16 @@ private:
     std::shared_ptr<Rendering::Shader> m_shRayDataBack;
     std::shared_ptr<Rendering::Shader> m_shRayDataFront;
     std::shared_ptr<Rendering::Shader> m_shRaymarch;
+    std::shared_ptr<Rendering::Shader> m_shWireframe; // Debug wireframe shader
+
+    // Wireframe box geometry
+    GLuint m_wireframeVAO = 0, m_wireframeVBO = 0;
 
     void EnsureRayDataTargets();
     void EnsureShaders();
 	void CreateCube();
+    void CreateWireframeBox();
+    void RenderWireframeBox(const glm::mat4& view, const glm::mat4& proj, const glm::mat4& model);
 };
 
 } // namespace Fluids

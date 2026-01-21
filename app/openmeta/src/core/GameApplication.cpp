@@ -369,15 +369,18 @@ void GameApplication::CreateDefaultScene() {
         
         auto fluidSim = std::make_shared<OpenEye::Fluids::FluidSimulation>();
         if (fluidSim->Initialize(fluidDesc, OpenEye::Fluids::FluidType::Gas)) {
-            // Configure smoke emission
+            // Configure smoke emission - increased rates for better visibility
             glm::vec3 emitPos(0.5f, 0.15f, 0.5f); // Normalized position in volume [0,1]
-            float emitRadius = 0.05f;
-            float densityRate = 0.8f;
-            float tempRate = 1.5f;
+            float emitRadius = 0.08f; // Slightly larger radius
+            float densityRate = 2.0f; // Increased density rate for better visibility
+            float tempRate = 2.5f; // Increased temperature rate
             fluidSim->SetEmission(emitPos, emitRadius, densityRate, tempRate, true);
             
             // Set buoyancy for rising smoke
-            fluidSim->SetBuoyancy(1.5f, 0.03f, 0.0f); // sigma, kappa, ambient temp
+            fluidSim->SetBuoyancy(2.0f, 0.02f, 0.0f); // Increased sigma for stronger buoyancy
+            
+            // Reduce dissipation so smoke persists longer
+            fluidSim->SetDissipation(0.998f, 0.995f); // Slower dissipation
             
             auto& fluidComp = registry.emplace<FluidVolumeComponent>(fluidEntity);
             fluidComp.simulation = fluidSim;
@@ -414,24 +417,10 @@ void GameApplication::SetupInputCallbacks() {
             if (m_cameraLocked) {
                 m_firstMouse = true; // Reset mouse position when starting drag
                 m_lastMousePos = Input::GetMousePosition(); // Initialize last position
-                
-                // Initialize yaw/pitch from current camera rotation when starting drag
-                if (m_scene) {
-                    auto& registry = m_scene->GetRegistry();
-                    auto cameraView = registry.view<CameraComponent, Transform>();
-                    for (auto entity : cameraView) {
-                        auto& cameraComp = cameraView.get<CameraComponent>(entity);
-                        if (cameraComp.isPrimary) {
-                            auto& transform = cameraView.get<Transform>(entity);
-                            glm::mat4 worldMatrix = transform.GetWorldMatrix(registry);
-                            glm::mat3 rotationMatrix = glm::mat3(worldMatrix);
-                            glm::vec3 forward = glm::normalize(rotationMatrix * glm::vec3(0.0f, 0.0f, -1.0f));
-                            m_cameraYaw = glm::degrees(atan2(forward.z, forward.x));
-                            m_cameraPitch = glm::degrees(asin(forward.y));
-                            break;
-                        }
-                    }
-                }
+                // Yaw/pitch will be initialized from current rotation in UpdateCameraControls
+            } else {
+                // When releasing mouse, keep current yaw/pitch so rotation continues smoothly
+                m_firstMouse = false;
             }
         }
     });
@@ -500,7 +489,7 @@ void GameApplication::UpdateCameraControls(float deltaTime) {
             transform.dirty = true;
         }
         
-        // Process mouse movement (camera rotation) - only when X is pressed (cursor locked)
+        // Process mouse movement (camera rotation) - only when left mouse button is pressed
         if (m_cameraLocked) {
             glm::vec2 currentMousePos = Input::GetMousePosition();
             
@@ -509,9 +498,11 @@ void GameApplication::UpdateCameraControls(float deltaTime) {
                 m_lastMousePos = currentMousePos;
                 m_firstMouse = false;
                 
-                // Initialize yaw/pitch from current rotation
-                m_cameraYaw = glm::degrees(atan2(forward.z, forward.x));
-                m_cameraPitch = glm::degrees(asin(forward.y));
+                // Initialize yaw/pitch from current rotation (extract from quaternion)
+                // Extract euler angles from quaternion rotation
+                glm::vec3 euler = glm::eulerAngles(transform.rotation);
+                m_cameraYaw = glm::degrees(euler.y); // Y rotation (around Y axis)
+                m_cameraPitch = glm::degrees(euler.x); // X rotation (around X axis)
             } else {
                 // Calculate mouse delta manually (more reliable than Input::GetMouseDelta)
                 glm::vec2 mouseDelta = currentMousePos - m_lastMousePos;

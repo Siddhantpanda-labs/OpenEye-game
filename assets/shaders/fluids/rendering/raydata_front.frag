@@ -32,13 +32,13 @@ void main()
     // Get the ray data back value
     vec4 raydata = texture(RayDataTexture, InverseSize * gl_FragCoord.xy);
 
-    // Get the depth of the scene
-    float sceneDepth = texture(SceneDepthTexture, InverseSize * gl_FragCoord.xy).r;
-
     // Compute the position of the ray start in discrete texture space
     vec3 pos = TextureVoxelAlign(texPos);
 
     if (useSceneDepth) {
+        // Get the depth of the scene ONLY if enabled (avoids sampling an unbound texture)
+        float sceneDepth = texture(SceneDepthTexture, InverseSize * gl_FragCoord.xy).r;
+
         // If the depth of the scene is less than the depth of the fragment,
         // set the position of the ray start as a negative value
         if (sceneDepth < gl_FragCoord.z)

@@ -15,7 +15,7 @@ uniform float timeStep;
 uniform vec3 InverseSize;
 uniform float dissipation;
 
-in float layer; // Layer of the 3D texture
+flat in float layer; // Layer of the 3D texture
 
 void main()
 {

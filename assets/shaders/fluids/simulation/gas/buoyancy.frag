@@ -16,7 +16,7 @@ uniform float sigma;
 uniform float kappa;
 uniform vec3 InverseSize;
 
-in float layer;
+flat in float layer;
 
 void main()
 {

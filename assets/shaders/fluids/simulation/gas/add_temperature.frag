@@ -12,7 +12,7 @@ uniform float emitterRadius;
 uniform float temperatureValue;
 uniform vec3 InverseSize;
 
-in float layer;
+flat in float layer;
 
 void main()
 {

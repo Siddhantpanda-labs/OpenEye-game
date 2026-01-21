@@ -13,7 +13,7 @@ uniform vec3 force; // Wind force direction and strength
 uniform vec3 center; // Center of the force application (use emitter pos for wind)
 uniform float radius; // Radius of the force application
 
-in float layer;
+flat in float layer;
 
 void main()
 {

@@ -12,7 +12,7 @@ uniform sampler3D ObstacleTexture;
 uniform sampler3D ObstacleVelocityTexture;
 uniform vec3 InverseSize;
 
-in float layer;
+flat in float layer;
 
 void main()
 {
