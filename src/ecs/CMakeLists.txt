@@ -32,6 +32,12 @@ set(ECS_SYSTEMS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/FluidSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/SoftBodySystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/SoftBodySystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/AnimatorSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/AnimatorSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/XPBDClothSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/XPBDClothSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/JellyBlobSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/JellyBlobSystem.h
 )
 
 add_library(OpenEyeECS STATIC

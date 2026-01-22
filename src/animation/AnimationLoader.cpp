@@ -1,12 +1,34 @@
 #include "AnimationLoader.h"
 #include "core/log/Log.h"
+#include <assimp/Importer.hpp>
 #include <assimp/scene.h>
+#include <assimp/postprocess.h>
 #include <assimp/mesh.h>
 #include <algorithm>
 #include <unordered_set>
 
 namespace OpenEye {
 namespace Animation {
+
+namespace {
+static glm::mat4 AssimpToGlm_Mat4(const aiMatrix4x4& matrix) {
+    glm::mat4 result;
+    // Assimp uses row-major, GLM uses column-major
+    result[0][0] = matrix.a1; result[1][0] = matrix.a2; result[2][0] = matrix.a3; result[3][0] = matrix.a4;
+    result[0][1] = matrix.b1; result[1][1] = matrix.b2; result[2][1] = matrix.b3; result[3][1] = matrix.b4;
+    result[0][2] = matrix.c1; result[1][2] = matrix.c2; result[2][2] = matrix.c3; result[3][2] = matrix.c4;
+    result[0][3] = matrix.d1; result[1][3] = matrix.d2; result[2][3] = matrix.d3; result[3][3] = matrix.d4;
+    return result;
+}
+
+static glm::vec3 AssimpToGlm_Vec3(const aiVector3D& vec) {
+    return glm::vec3(vec.x, vec.y, vec.z);
+}
+
+static glm::quat AssimpToGlm_Quat(const aiQuaternion& quat) {
+    return glm::quat(quat.w, quat.x, quat.y, quat.z);
+}
+} // namespace
 
 std::shared_ptr<Skeleton> AnimationLoader::ExtractSkeleton(const aiScene* scene, size_t meshIndex) {
     if (!scene || !scene->mRootNode) {
@@ -38,7 +60,7 @@ std::shared_ptr<Skeleton> AnimationLoader::ExtractSkeleton(const aiScene* scene,
     
     // Set global inverse transform from scene root (brings scene space to model space)
     // This helps fix FBX unit/axis/pivot differences and prevents stretching
-    glm::mat4 sceneRoot = AssimpToGlm(scene->mRootNode->mTransformation);
+    glm::mat4 sceneRoot = AssimpToGlm_Mat4(scene->mRootNode->mTransformation);
     skeleton->SetGlobalInverseTransform(glm::inverse(sceneRoot));
     
     return skeleton;
@@ -153,7 +175,7 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
             for (unsigned int k = 0; k < channel->mNumPositionKeys; ++k) {
                 const aiVectorKey& key = channel->mPositionKeys[k];
                 float time = static_cast<float>(key.mTime / ticksPerSecond);
-                glm::vec3 pos = AssimpToGlm(key.mValue);
+                glm::vec3 pos = AssimpToGlm_Vec3(key.mValue);
                 animChannel.positionKeys.emplace_back(time, pos);
             }
             
@@ -161,7 +183,7 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
             for (unsigned int k = 0; k < channel->mNumRotationKeys; ++k) {
                 const aiQuatKey& key = channel->mRotationKeys[k];
                 float time = static_cast<float>(key.mTime / ticksPerSecond);
-                glm::quat rot = AssimpToGlm(key.mValue);
+                glm::quat rot = AssimpToGlm_Quat(key.mValue);
                 animChannel.rotationKeys.emplace_back(time, rot);
             }
             
@@ -169,7 +191,7 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
             for (unsigned int k = 0; k < channel->mNumScalingKeys; ++k) {
                 const aiVectorKey& key = channel->mScalingKeys[k];
                 float time = static_cast<float>(key.mTime / ticksPerSecond);
-                glm::vec3 scale = AssimpToGlm(key.mValue);
+                glm::vec3 scale = AssimpToGlm_Vec3(key.mValue);
                 animChannel.scaleKeys.emplace_back(time, scale);
             }
             
@@ -183,6 +205,26 @@ std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::ExtractAnimations(
     }
     
     return clips;
+}
+
+std::vector<std::shared_ptr<AnimationClip>> AnimationLoader::LoadClipsForSkeletonFromFile(
+    const std::string& filepath,
+    const Skeleton& skeleton
+) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(
+        filepath,
+        aiProcess_Triangulate |
+        aiProcess_JoinIdenticalVertices |
+        aiProcess_LimitBoneWeights
+    );
+
+    if (!scene) {
+        OE_WARN_F("AnimationLoader: Failed to load file for clips: %s (%s)", filepath.c_str(), importer.GetErrorString());
+        return {};
+    }
+
+    return ExtractAnimations(scene, skeleton);
 }
 
 void AnimationLoader::ProcessBoneHierarchy(aiNode* node,
@@ -211,7 +253,7 @@ void AnimationLoader::ProcessBoneHierarchy(aiNode* node,
         // IMPORTANT: Update bind pose local transform from node hierarchy
         // The offsetMatrix from mesh extraction is NOT the local transform
         // Extract correct local transform from node->mTransformation
-        glm::mat4 nodeTransform = AssimpToGlm(node->mTransformation);
+        glm::mat4 nodeTransform = AssimpToGlm_Mat4(node->mTransformation);
         
         // Decompose into position, rotation, scale (manual decomposition)
         glm::mat4 m = nodeTransform;
@@ -239,7 +281,7 @@ void AnimationLoader::ProcessBoneHierarchy(aiNode* node,
         bone.parentIndex = parentBoneIndex;
         
         // Extract transform from node
-        glm::mat4 nodeTransform = AssimpToGlm(node->mTransformation);
+        glm::mat4 nodeTransform = AssimpToGlm_Mat4(node->mTransformation);
         
         // Decompose into position, rotation, scale (manual decomposition)
         glm::mat4 m = nodeTransform;
@@ -297,7 +339,7 @@ void AnimationLoader::ExtractBonesFromMesh(const aiMesh* mesh,
         // IMPORTANT: Assimp's mOffsetMatrix transforms from bone space to mesh space (bind pose)
         // This is NOT the bone's local transform - it's a world-space transform
         // We only use it to calculate the inverse bind matrix for skinning
-        glm::mat4 offsetMatrix = AssimpToGlm(bone->mOffsetMatrix);
+        glm::mat4 offsetMatrix = AssimpToGlm_Mat4(bone->mOffsetMatrix);
         
         // aiBone::mOffsetMatrix already transforms from mesh bind pose to bone space (inverse bind)
         // Use it directly for skinning
@@ -315,24 +357,6 @@ void AnimationLoader::ExtractBonesFromMesh(const aiMesh* mesh,
         skeleton.AddBone(newBone);
         nodeToBoneIndex[boneName] = boneIndex;
     }
-}
-
-glm::mat4 AnimationLoader::AssimpToGlm(const aiMatrix4x4& matrix) {
-    glm::mat4 result;
-    // Assimp uses row-major, GLM uses column-major
-    result[0][0] = matrix.a1; result[1][0] = matrix.a2; result[2][0] = matrix.a3; result[3][0] = matrix.a4;
-    result[0][1] = matrix.b1; result[1][1] = matrix.b2; result[2][1] = matrix.b3; result[3][1] = matrix.b4;
-    result[0][2] = matrix.c1; result[1][2] = matrix.c2; result[2][2] = matrix.c3; result[3][2] = matrix.c4;
-    result[0][3] = matrix.d1; result[1][3] = matrix.d2; result[2][3] = matrix.d3; result[3][3] = matrix.d4;
-    return result;
-}
-
-glm::vec3 AnimationLoader::AssimpToGlm(const aiVector3D& vec) {
-    return glm::vec3(vec.x, vec.y, vec.z);
-}
-
-glm::quat AnimationLoader::AssimpToGlm(const aiQuaternion& quat) {
-    return glm::quat(quat.w, quat.x, quat.y, quat.z);
 }
 
 } // namespace Animation

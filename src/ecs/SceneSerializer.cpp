@@ -100,6 +100,11 @@ nlohmann::json SceneSerializer::SerializeToJson(const Scene& scene) {
         if (registry.all_of<AnimationComponent>(entity)) {
             entityJson["components"]["Animation"] = SerializeAnimation(registry.get<AnimationComponent>(entity));
         }
+
+        // Serialize Animator
+        if (registry.all_of<AnimatorComponent>(entity)) {
+            entityJson["components"]["Animator"] = SerializeAnimator(registry.get<AnimatorComponent>(entity));
+        }
         
         json["entities"].push_back(entityJson);
     }
@@ -213,6 +218,14 @@ bool SceneSerializer::DeserializeFromJson(Scene& scene, const nlohmann::json& js
             }
             DeserializeAnimation(registry.get<AnimationComponent>(entity), components["Animation"]);
         }
+
+        // Deserialize Animator
+        if (components.contains("Animator")) {
+            if (!registry.all_of<AnimatorComponent>(entity)) {
+                registry.emplace<AnimatorComponent>(entity);
+            }
+            DeserializeAnimator(registry.get<AnimatorComponent>(entity), components["Animator"]);
+        }
     }
     
     return true;
@@ -321,6 +334,20 @@ nlohmann::json SceneSerializer::SerializeAnimation(const AnimationComponent& ani
     // Store clip count (actual clips loaded from files)
     json["clipCount"] = anim.clips.size();
     
+    return json;
+}
+
+nlohmann::json SceneSerializer::SerializeAnimator(const AnimatorComponent& animator) {
+    nlohmann::json json;
+    json["controllerPath"] = animator.controllerPath;
+    json["applyRootMotion"] = animator.applyRootMotion;
+    json["rootMotionAffectsPhysics"] = animator.rootMotionAffectsPhysics;
+
+    // Store basic param snapshot for convenience (does not replace controller defaults)
+    // We only support float/int/bool in snapshots here (trigger is transient).
+    // NOTE: Parameter definitions live in the controller asset.
+    // For now, store nothing unless controller is loaded at runtime.
+
     return json;
 }
 
@@ -477,6 +504,24 @@ bool SceneSerializer::DeserializeAnimation(AnimationComponent& anim, const nlohm
     // Actual skeleton and clips need to be loaded from files
     // This just restores playback state
     
+    return true;
+}
+
+bool SceneSerializer::DeserializeAnimator(AnimatorComponent& animator, const nlohmann::json& json) {
+    if (json.contains("controllerPath")) {
+        animator.controllerPath = json["controllerPath"].get<std::string>();
+    }
+    if (json.contains("applyRootMotion")) {
+        animator.applyRootMotion = json["applyRootMotion"].get<bool>();
+    }
+    if (json.contains("rootMotionAffectsPhysics")) {
+        animator.rootMotionAffectsPhysics = json["rootMotionAffectsPhysics"].get<bool>();
+    }
+
+    // Controller is loaded lazily by AnimatorSystem (runtime).
+    animator.controller.reset();
+    animator.layers.clear();
+    animator.recentEvents.clear();
     return true;
 }
 

@@ -3,6 +3,7 @@
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/LightingPanel.h"
+#include "panels/AnimatorPanel.h"
 #include "panels/SoftBodyPanel.h"
 #include "utils/SceneManager.h"
 #include "core/api/All.h"
@@ -39,6 +40,7 @@ bool EditorApplication::Initialize() {
     // Lighting panel needs RenderPipeline access
     auto* renderPipeline = m_gameApp->GetRenderPipeline();
     m_panels.push_back(std::make_unique<LightingPanel>(m_scene, renderPipeline));
+    m_panels.push_back(std::make_unique<AnimatorPanel>(m_scene));
     m_panels.push_back(std::make_unique<SoftBodyPanel>(m_scene));
     
     m_isInitialized = true;

@@ -10,6 +10,9 @@
 #include "systems/ParticleSystem.h"
 #include "systems/FluidSystem.h"
 #include "systems/SoftBodySystem.h"
+#include "systems/AnimatorSystem.h"
+#include "systems/XPBDClothSystem.h"
+#include "systems/JellyBlobSystem.h"
 #include "systems/CullingSystem.h"
 #include "physics/PhysicsWorld.h"
 #include <filesystem>
@@ -156,6 +159,9 @@ void Scene::Update(float deltaTime, void* physicsWorld) {
     TransformSystem::Update(*this);
     
     // 2. Update animations (after transforms are updated)
+    // Controller-driven animator runs first (fills AnimationComponent matrices), then legacy system can run too.
+    AnimatorSystem::Update(*this, deltaTime, physicsWorld);
+    // Legacy clip player for entities that don't have AnimatorComponent
     OpenEye::Animation::AnimationSystem::Update(*this, deltaTime);
     
     // 3. Update physics (if physics world is provided)
@@ -177,6 +183,12 @@ void Scene::Update(float deltaTime, void* physicsWorld) {
         SoftBodySystem::Update(*this, internalPhysicsWorld, deltaTime);
         SoftBodySystem::SyncMesh(*this); // Sync soft body nodes to mesh vertices
     }
+
+    // 6.5 Update XPBD cloth (CPU, independent of Bullet)
+    XPBDClothSystem::Update(*this, deltaTime);
+
+    // 6.6 Update jelly blob render deformation (rigid cluster -> single deforming mesh)
+    JellyBlobSystem::Update(*this, deltaTime);
     
     // 7. Update culling AABBs (after all position/transform updates)
     CullingSystem::UpdateAABBs(*this);

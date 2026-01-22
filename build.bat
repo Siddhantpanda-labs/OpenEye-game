@@ -12,13 +12,12 @@ REM Create build directory if needed
 if not exist build mkdir build
 cd build
 
-REM Configure CMake if needed
-if not exist CMakeCache.txt (
-    cmake .. -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF
-    if errorlevel 1 (
-        cd ..
-        exit /b 1
-    )
+REM Always (re)configure CMake so include-dir / file list changes propagate.
+REM This is fast if nothing changed, and avoids stale build issues.
+cmake .. -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF
+if errorlevel 1 (
+    cd ..
+    exit /b 1
 )
 
 REM Build main targets (skip test targets that have errors)

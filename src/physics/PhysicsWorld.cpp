@@ -5,9 +5,11 @@
 #include "queries/PhysicsQuery.h"
 #include "utils/PhysicsUtils.h"
 #include "../core/log/Log.h"
+#include <algorithm>
 #include <BulletCollision/CollisionDispatch/btGhostObject.h>
 #include <BulletDynamics/Character/btKinematicCharacterController.h>
 #include <BulletSoftBody/btSoftBodyHelpers.h>
+#include <BulletSoftBody/btSoftBodyRigidBodyCollisionConfiguration.h>
 
 namespace OpenEye {
 namespace Physics {
@@ -26,8 +28,8 @@ void PhysicsWorld::Initialize(const glm::vec3& gravity) {
         return;
     }
     
-    // Setup collision configuration
-    m_collisionConfig = std::make_unique<btDefaultCollisionConfiguration>();
+    // Collision configuration with soft-body support (cheap even if we only use rigids)
+    m_collisionConfig = std::make_unique<btSoftBodyRigidBodyCollisionConfiguration>();
     
     // Setup dispatcher
     m_dispatcher = std::make_unique<btCollisionDispatcher>(m_collisionConfig.get());
@@ -35,10 +37,10 @@ void PhysicsWorld::Initialize(const glm::vec3& gravity) {
     // Setup broadphase (Sweep and Prune - good for dynamic objects)
     m_broadphase = std::make_unique<btDbvtBroadphase>();
     
-    // Setup constraint solver
+    // Standard rigid/soft constraint solver
     m_solver = std::make_unique<btSequentialImpulseConstraintSolver>();
-    
-    // Create soft-rigid dynamics world (supports both rigid bodies and soft bodies)
+
+    // Standard soft-rigid dynamics world
     m_world = std::make_unique<btSoftRigidDynamicsWorld>(
         m_dispatcher.get(),
         m_broadphase.get(),
@@ -46,7 +48,7 @@ void PhysicsWorld::Initialize(const glm::vec3& gravity) {
         m_collisionConfig.get()
     );
     
-    // Initialize soft body world info
+    // Initialize soft body world info (separate struct we own, used for classic soft bodies if needed)
     m_softBodyWorldInfo = std::make_unique<btSoftBodyWorldInfo>();
     m_softBodyWorldInfo->m_broadphase = m_broadphase.get();
     m_softBodyWorldInfo->m_dispatcher = m_dispatcher.get();
@@ -61,6 +63,15 @@ void PhysicsWorld::Initialize(const glm::vec3& gravity) {
 
 void PhysicsWorld::Shutdown() {
     if (!m_world) return;
+
+    // Remove constraints we created (jelly springs, etc.)
+    for (auto* c : m_constraints) {
+        if (c) {
+            m_world->removeConstraint(c);
+            delete c;
+        }
+    }
+    m_constraints.clear();
     
     // Remove all soft bodies
     for (int i = m_world->getSoftBodyArray().size() - 1; i >= 0; --i) {
@@ -90,12 +101,12 @@ void PhysicsWorld::Shutdown() {
     }
     
     // Destroy in reverse order of creation
-    m_softBodyWorldInfo.reset();
     m_world.reset();
     m_solver.reset();
     m_broadphase.reset();
     m_dispatcher.reset();
     m_collisionConfig.reset();
+    m_softBodyWorldInfo.reset();
     
     OE_INFO("PhysicsWorld shut down");
 }
@@ -107,7 +118,10 @@ void PhysicsWorld::Step(float deltaTime, int maxSubSteps) {
     }
     
     OnPreStep();
-    m_world->stepSimulation(deltaTime, maxSubSteps);
+    const float clampedDtF = std::max(0.0f, std::min(deltaTime, 0.1f));  // cap at 100ms
+    const btScalar clampedDt = btScalar(clampedDtF);
+    const btScalar fixedTimeStep = btScalar(1.0f / 60.0f);              // 60 Hz default (performance)
+    m_world->stepSimulation(clampedDt, maxSubSteps, fixedTimeStep);
     OnPostStep();
 }
 
@@ -217,8 +231,14 @@ void PhysicsWorld::SetGravity(const glm::vec3& gravity) {
 
 void PhysicsWorld::AddSoftBody(btSoftBody* softBody) {
     if (m_world && softBody) {
-        m_world->addSoftBody(softBody);
+        m_world->addSoftBody(softBody, btBroadphaseProxy::DefaultFilter, btBroadphaseProxy::AllFilter);
     }
+}
+
+void PhysicsWorld::AddConstraint(btTypedConstraint* constraint, bool disableCollisionsBetweenLinkedBodies) {
+    if (!m_world || !constraint) return;
+    m_world->addConstraint(constraint, disableCollisionsBetweenLinkedBodies);
+    m_constraints.push_back(constraint);
 }
 
 void PhysicsWorld::RemoveSoftBody(btSoftBody* softBody) {

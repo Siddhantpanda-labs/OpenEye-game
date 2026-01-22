@@ -117,6 +117,11 @@ void Mesh::UploadToGPU() {
 }
 
 void Mesh::Bind() const {
+    // Ensure GPU buffers are ready at draw time (render-thread safe).
+    // Simulation systems may update CPU vertices and call MarkDirty() without uploading immediately.
+    if (!m_uploaded) {
+        const_cast<Mesh*>(this)->UploadToGPU();
+    }
     if (m_VAO != 0) {
         glBindVertexArray(m_VAO);
     }
@@ -127,6 +132,9 @@ void Mesh::Unbind() const {
 }
 
 void Mesh::Draw(int submeshIndex) const {
+    if (!m_uploaded) {
+        const_cast<Mesh*>(this)->UploadToGPU();
+    }
     if (m_VAO == 0 || !m_uploaded) {
         return;
     }

@@ -12,6 +12,16 @@ set(ANIMATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AnimationSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AnimationStateMachine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AnimationStateMachine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimatorParams.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimatorParams.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimEventTrack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimEventTrack.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/BoneMask.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/BoneMask.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/BlendTree.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/BlendTree.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimatorController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controller/AnimatorController.h
 )
 
 add_library(OpenEyeAnimation STATIC ${ANIMATION_SOURCES})
@@ -26,6 +36,7 @@ target_include_directories(OpenEyeAnimation
     PRIVATE
         # Third-party includes - internal only
         ${CMAKE_SOURCE_DIR}/thirdparty/glm
+        ${CMAKE_SOURCE_DIR}/thirdparty
         ${CMAKE_SOURCE_DIR}/thirdparty/assimp/include
 )
 

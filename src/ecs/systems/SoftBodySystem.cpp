@@ -40,6 +40,33 @@ void SoftBodySystem::Update(Scene& scene, Physics::PhysicsWorld* physicsWorld, f
         
         // Fixed nodes are now handled by Bullet's anchor system (attached to rigid body)
         // No need to manually reset positions - Bullet handles it
+
+        // One-shot impulse (e.g. "push up" control)
+        if (softBodyComp.impulseRequested) {
+            glm::vec3 dir = softBodyComp.impulseDirection;
+            float strength = softBodyComp.impulseStrength;
+            const float len = glm::length(dir);
+            if (len >= 1e-4f && strength > 0.0f) {
+                dir /= len;
+                btVector3 dv(dir.x, dir.y, dir.z);
+                dv *= btScalar(strength);
+                for (int i = 0; i < psb->m_nodes.size(); ++i) {
+                    btSoftBody::Node& node = psb->m_nodes[i];
+                    if (node.m_im == btScalar(0)) continue;
+                    node.m_v += dv;
+                }
+            }
+            softBodyComp.impulseRequested = false;
+        }
+
+        // Pulse mode (apply impulse every interval)
+        if (softBodyComp.pulseEnabled && softBodyComp.pulseInterval > 0.01f && softBodyComp.impulseStrength > 0.0f) {
+            softBodyComp.pulseTimer += deltaTime;
+            if (softBodyComp.pulseTimer >= softBodyComp.pulseInterval) {
+                softBodyComp.pulseTimer = 0.0f;
+                softBodyComp.impulseRequested = true;
+            }
+        }
         
         // Apply wind if enabled
         if (softBodyComp.windEnabled && softBodyComp.windStrength > 0.0f) {
@@ -86,7 +113,6 @@ void SoftBodySystem::SyncMesh(Scene& scene) {
         
         // Mark mesh as dirty and upload to GPU
         mesh->MarkDirty();
-        mesh->UploadToGPU();
     }
 }
 
@@ -99,21 +125,17 @@ void SoftBodySystem::ApplyWind(btSoftBody* softBody, const glm::vec3& windDir, f
     if (len < 1e-4f) return;
     dir /= len;
 
-    // Interpret windStrength as a "force scale" in world space.
-    // Apply as FORCE (not directly into velocity) to avoid runaway drift and be stable with variable dt.
-    // Small dt scaling keeps feel consistent if callers change update timestep.
+    // Deformable pipeline integrates forces via registered Lagrangian forces, not node.m_f.
+    // Applying a small velocity "push" after the physics step is stable and works for both cloth + volume.
     const float dt = (deltaTime > 0.0f ? deltaTime : 0.0f);
-    btVector3 windForce(dir.x, dir.y, dir.z);
-    windForce *= btScalar(windStrength);
-    if (dt > 0.0f) {
-        windForce *= btScalar(dt);
-    }
+    if (dt <= 0.0f) return;
+    btVector3 dv(dir.x, dir.y, dir.z);
+    dv *= btScalar(windStrength * dt);
 
-    // Apply wind force to all dynamic nodes (skip anchored/fixed nodes: invMass == 0)
     for (int i = 0; i < softBody->m_nodes.size(); ++i) {
         btSoftBody::Node& node = softBody->m_nodes[i];
         if (node.m_im == btScalar(0)) continue;
-        node.m_f += windForce;
+        node.m_v += dv;
     }
 }
 

@@ -2,6 +2,8 @@
 // Main window and game rendering
 
 #include "src/core/GameApplication.h"
+#include <exception>
+#include <cstdlib>
 
 #ifdef OPENEYE_EDITOR
 #include "editor/EditorApplication.h"
@@ -11,14 +13,37 @@
 #include "backends/imgui_impl_opengl3.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 #endif
 
 int main() {
     OpenMeta::GameApplication game;
-    
-    if (!game.Initialize()) {
-        return -1;
-    }
+
+    try {
+        if (!game.Initialize()) {
+            return -1;
+        }
+
+        // Catch unhandled exceptions/terminates and log them (helps diagnose "aborting after log").
+        std::set_terminate([]() {
+            try {
+                auto ex = std::current_exception();
+                if (ex) std::rethrow_exception(ex);
+            } catch (const std::exception& e) {
+                OE_ERROR_F("std::terminate due to exception: %s", e.what());
+            } catch (...) {
+                OE_ERROR("std::terminate due to unknown exception");
+            }
+            std::abort();
+        });
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+        // Log CRT asserts instead of showing modal dialogs (so we can see the reason in console logs).
+        _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG);
+        _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG);
+#endif
     
 #ifdef OPENEYE_EDITOR
     // Initialize ImGui for editor panels (only in debug builds)
@@ -93,4 +118,13 @@ int main() {
     
     game.Shutdown();
     return 0;
+    } catch (const std::exception& e) {
+        OE_ERROR_F("Fatal exception in main: %s", e.what());
+        game.Shutdown();
+        return -2;
+    } catch (...) {
+        OE_ERROR("Fatal unknown exception in main");
+        game.Shutdown();
+        return -3;
+    }
 }

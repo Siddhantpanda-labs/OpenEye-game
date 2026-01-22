@@ -15,6 +15,10 @@ void AnimationSystem::Update(ECS::Scene& scene, float deltaTime) {
     auto view = registry.view<ECS::AnimationComponent>();
     
     for (auto entity : view) {
+        // If entity is driven by the new AnimatorSystem/controller, don't run the legacy clip player.
+        if (registry.any_of<ECS::AnimatorComponent>(entity)) {
+            continue;
+        }
         UpdateEntity(registry, entity, deltaTime);
     }
 }

@@ -3,9 +3,13 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include <assimp/scene.h>
 #include "Skeleton.h"
 #include "AnimationClip.h"
+
+// Forward declarations (avoid forcing Assimp headers on app targets)
+struct aiScene;
+struct aiMesh;
+struct aiNode;
 
 namespace OpenEye {
 namespace Animation {
@@ -48,6 +52,14 @@ public:
         const aiScene* scene, 
         const Skeleton& skeleton);
 
+    /**
+     * @brief Load animation clips from a file and map them onto an existing skeleton (by bone names).
+     *        This is how we can combine separate FBX files (Idle/Walk/Run) into one runtime clip set.
+     */
+    static std::vector<std::shared_ptr<AnimationClip>> LoadClipsForSkeletonFromFile(
+        const std::string& filepath,
+        const Skeleton& skeleton);
+
 private:
     // Helper: Recursively process node hierarchy to build skeleton
     static void ProcessBoneHierarchy(aiNode* node, 
@@ -62,14 +74,8 @@ private:
                                      Skeleton& skeleton,
                                      std::unordered_map<std::string, int>& nodeToBoneIndex);
     
-    // Helper: Convert Assimp matrix to GLM
-    static glm::mat4 AssimpToGlm(const aiMatrix4x4& matrix);
-    
-    // Helper: Convert Assimp vector to GLM
-    static glm::vec3 AssimpToGlm(const aiVector3D& vec);
-    
-    // Helper: Convert Assimp quaternion to GLM
-    static glm::quat AssimpToGlm(const aiQuaternion& quat);
+    // NOTE: Assimp conversion helpers live in AnimationLoader.cpp on purpose,
+    // to avoid pulling Assimp typedef-heavy headers into this public header.
 };
 
 } // namespace Animation

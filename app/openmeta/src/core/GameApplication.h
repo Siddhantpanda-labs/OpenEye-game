@@ -33,6 +33,8 @@ private:
     void UpdateCameraControls(float deltaTime);
     std::shared_ptr<OpenEye::Rendering::Mesh> CreateMeshFromCloth(class btSoftBody* cloth, int widthSegments, int heightSegments);
     std::shared_ptr<OpenEye::Rendering::Mesh> CreateCylinderMesh(float radius, float height, int segments = 32);
+    std::shared_ptr<OpenEye::Rendering::Mesh> CreateSphereMesh(float radius, int segments = 24, int rings = 16);
+    std::shared_ptr<OpenEye::Rendering::Mesh> CreateMeshFromSoftBody(class btSoftBody* body, glm::vec3& outOrigin);
 
     std::unique_ptr<OpenEye::Core::Window> m_window;
     std::unique_ptr<OpenEye::ECS::Scene> m_scene;

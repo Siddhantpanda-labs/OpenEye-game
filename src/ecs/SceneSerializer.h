@@ -60,6 +60,7 @@ public:
     static nlohmann::json SerializeLight(const Light& light);
     static nlohmann::json SerializeAABB(const AABB& aabb);
     static nlohmann::json SerializeAnimation(const AnimationComponent& anim);
+    static nlohmann::json SerializeAnimator(const AnimatorComponent& animator);
     
     // Component deserialization helpers (public for Prefab to use)
     static bool DeserializeTransform(Transform& transform, const nlohmann::json& json, const entt::registry& registry);
@@ -69,6 +70,7 @@ public:
     static bool DeserializeLight(Light& light, const nlohmann::json& json);
     static bool DeserializeAABB(AABB& aabb, const nlohmann::json& json);
     static bool DeserializeAnimation(AnimationComponent& anim, const nlohmann::json& json);
+    static bool DeserializeAnimator(AnimatorComponent& animator, const nlohmann::json& json);
     
 };
 

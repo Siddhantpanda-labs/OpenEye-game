@@ -1,10 +1,10 @@
 #include "PhysicsSystem.h"
 #include "../Scene.h"
 #include "../Components.h"
-#include "../../physics/PhysicsWorld.h"
-#include "../../physics/utils/PhysicsUtils.h"
-#include "../../rendering/resources/MeshLoader.h"
-#include "../../core/log/Log.h"
+#include "physics/PhysicsWorld.h"
+#include "physics/utils/PhysicsUtils.h"
+#include "rendering/resources/MeshLoader.h"
+#include "core/log/Log.h"
 #include <btBulletDynamicsCommon.h>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -21,7 +21,8 @@ void PhysicsSystem::Update(Scene& scene, Physics::PhysicsWorld* physicsWorld, fl
     SyncTransformToPhysics(scene);
     
     // 2. Step physics simulation
-    physicsWorld->Step(deltaTime);
+    // Keep substeps modest for performance (soft/deformable pipeline is removed; this is rigid-focused).
+    physicsWorld->Step(deltaTime, 3);
     
     // 3. Sync PhysicsBody -> Transform (after step)
     SyncPhysicsToTransform(scene);
@@ -122,18 +123,7 @@ void PhysicsSystem::SyncPhysicsToTransform(Scene& scene) {
             transform.dirty = true;
         }
         
-        // Debug: Log first few physics updates for ball to verify it's moving
-        static int ballUpdateCount = 0;
-        static float lastBallY = position.y;
-        if (ballUpdateCount < 10) {
-            Core::Log::Info("PhysicsSystem: Ball position from physics: (" + 
-                std::to_string(position.x) + ", " + 
-                std::to_string(position.y) + ", " + 
-                std::to_string(position.z) + 
-                ") deltaY=" + std::to_string(position.y - lastBallY));
-            lastBallY = position.y;
-            ballUpdateCount++;
-        }
+        // (Debug logging removed)
     }
 }
 
@@ -240,8 +230,10 @@ Entity PhysicsSystem::CreateGroundPlane(
     transform.rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);  // Identity rotation
     
     // Create collision shape (box shape for ground)
-    // Make ground thin (height = 0.2 units) so objects sit on top surface
-    glm::vec3 halfExtents(size.x * 0.5f, 0.1f, size.y * 0.5f); // Height = 0.2 units total
+    // IMPORTANT: soft bodies can tunnel through very thin static colliders (no CCD).
+    // Use a thicker physics ground to make contacts robust; top surface still stays at position.y.
+    const float physicsHalfHeight = 1.0f; // 2.0 units thick
+    glm::vec3 halfExtents(size.x * 0.5f, physicsHalfHeight, size.y * 0.5f);
     auto groundShape = physicsWorld->CreateBoxShape(halfExtents);
     
     // Position ground so top surface is at position.y
@@ -249,10 +241,8 @@ Entity PhysicsSystem::CreateGroundPlane(
     glm::vec3 physicsCenter = position;
     physicsCenter.y = position.y - halfExtents.y; // Shift down by half height
     
-    // Visual: cube mesh is 1x1x1, scale to match physics size
-    // Visual height = 0.2, so scale.y = 0.2
-    transform.scale = glm::vec3(size.x, 0.2f, size.y);
-    // Visual position: top surface at position.y, so center is at position.y - 0.1
+    // Visual: keep it consistent with physics (simple + avoids mismatch)
+    transform.scale = glm::vec3(size.x, physicsHalfHeight * 2.0f, size.y);
     transform.position = physicsCenter;
     
     // Create visual representation (simple box mesh)

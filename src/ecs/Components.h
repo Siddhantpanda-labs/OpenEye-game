@@ -11,6 +11,7 @@
 #include "rendering/resources/Material.h"
 #include "rendering/Camera.h"
 #include "rendering/LODManager.h"
+#include "animation/controller/AnimatorParams.h"
 
 // Forward declarations for animation
 namespace OpenEye {
@@ -38,9 +39,12 @@ class btSoftBody;
 // Forward declarations for Bullet
 class btRigidBody;
 class btCollisionShape;
+class btTypedConstraint;
 
 namespace OpenEye {
 namespace ECS {
+
+using Entity = entt::entity;
 
 // Transform component
 struct Transform {
@@ -189,6 +193,47 @@ struct AnimationComponent {
     bool boneMatricesDirty = true;
 };
 
+// Animator runtime component (Unity/Unreal-style controller)
+// This drives AnimationComponent (skeleton/clips/finalBoneMatrices) using a controller asset + parameters.
+struct AnimatorComponent {
+    // Controller asset reference
+    std::string controllerPath;            // e.g. "assets/anim/controllers/humanoid.json"
+    std::shared_ptr<void> controller;      // Actually std::shared_ptr<Animation::Controller::AnimatorController>
+
+    // Runtime params (instance state)
+    Animation::Controller::AnimatorParams params;
+
+    // Root motion
+    bool applyRootMotion = true;
+    bool rootMotionAffectsPhysics = false; // if true and PhysicsBody is kinematic, push to Bullet
+
+    // Per-layer runtime
+    struct LayerRuntime {
+        std::string currentState;
+        std::string previousState;
+        float stateTime = 0.0f;
+
+        // Transition runtime
+        bool inTransition = false;
+        float blendTime = 0.0f;
+        float blendDuration = 0.2f;
+        float fromTime = 0.0f;
+        std::string fromState;
+    };
+
+    std::vector<LayerRuntime> layers;
+
+    // Debug/event history (for editor inspection)
+    struct FiredEvent {
+        std::string clip;
+        std::string name;
+        std::string payload;
+        float time = 0.0f;
+    };
+    std::vector<FiredEvent> recentEvents;
+    int maxRecentEvents = 32;
+};
+
 // Physics body component (for physics simulation)
 struct PhysicsBody {
     // Bullet physics objects (owned by PhysicsWorld, but we keep references)
@@ -240,8 +285,75 @@ struct SoftBodyComponent {
     
     // Fixed node indices (for cloth - top edge nodes that should stay fixed)
     std::vector<int> fixedNodeIndices;
+
+    // Volume softbody force controls (also usable for cloth)
+    // One-shot impulse request (e.g. "push up" button in editor)
+    bool impulseRequested = false;
+    glm::vec3 impulseDirection = glm::vec3(0.0f, 1.0f, 0.0f);
+    float impulseStrength = 8.0f; // interpreted as velocity impulse scale
+
+    // Optional pulse mode: apply impulse every N seconds
+    bool pulseEnabled = false;
+    float pulseInterval = 1.0f;   // seconds
+    float pulseTimer = 0.0f;      // internal
     
     SoftBodyComponent() = default;
+};
+
+// CPU XPBD cloth (lightweight, scalable replacement for deformable cloth)
+struct XPBDClothComponent {
+    bool enabled = true;
+
+    int widthSegments = 30;
+    int heightSegments = 20;
+    float width = 3.0f;
+    float height = 2.0f;
+
+    // Simulation params
+    int iterations = 8;
+    float compliance = 0.0005f; // lower = stiffer
+    float damping = 0.02f;
+    bool enableShear = true;
+
+    // Forces
+    glm::vec3 gravity = glm::vec3(0.0f, -9.81f, 0.0f);
+    bool windEnabled = true;
+    glm::vec3 windDirection = glm::vec3(1.0f, 0.0f, 0.0f);
+    float windStrength = 6.0f;
+
+    // Derived/rest lengths
+    float restLenX = 0.1f;
+    float restLenY = 0.1f;
+
+    // Local-space simulation buffers (entity Transform applies world)
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> prevPositions;
+    std::vector<float> invMass;
+};
+
+// Rigid-cluster "jelly" approximation rendered as a single deforming mesh (FFD using 3x3x3 control points).
+// Physics: many small rigid bodies + constraints. Rendering: one sphere mesh that deforms from node positions.
+struct JellyBlobComponent {
+    bool enabled = true;
+
+    // Control lattice (expected 3x3x3 for now).
+    int dim = 3;
+    std::vector<Entity> nodeEntities;                 // size dim^3
+    std::vector<btTypedConstraint*> constraints;      // optional, non-owning (PhysicsWorld owns)
+
+    // Spring/constraint tuning (applied each frame if constraints are present)
+    float springTau = 0.55f;
+    float springDamping = 0.75f;
+
+    // Debug rendering of the underlying rigid nodes
+    bool showDebugNodes = false;
+
+    // Rest cage in blob-local space (used to compute (u,v,w) in [0..1]^3).
+    glm::vec3 restMin = glm::vec3(-1.0f);
+    glm::vec3 restMax = glm::vec3(1.0f);
+
+    // Render mesh info (mesh lives on Renderable, but we cache base vertices for deformation)
+    std::vector<Rendering::Vertex> baseVertices;
 };
 
 } // namespace ECS

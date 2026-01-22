@@ -14,6 +14,8 @@ set(PHYSICS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/softbody/SoftBodyFactory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/ClothTemplates.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/ClothTemplates.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/VolumeTemplates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/softbody/templates/VolumeTemplates.h
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQuery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQuery.h
     ${CMAKE_CURRENT_SOURCE_DIR}/queries/PhysicsQueryTypes.h

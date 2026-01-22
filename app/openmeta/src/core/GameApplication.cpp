@@ -9,14 +9,19 @@
 #include "physics/PhysicsWorld.h"
 #include "physics/softbody/SoftBodyFactory.h"
 #include "physics/softbody/templates/ClothTemplates.h"
+#include "physics/softbody/templates/VolumeTemplates.h"
 #include "physics/bodies/RigidBodyFactory.h"
 #include "physics/shapes/CollisionShapeFactory.h"
 #include "particles/ParticleEmitter.h"
 #include "fluids/FluidSimulation.h"
+#include "animation/AnimationLoader.h"
+#include "animation/AnimationClip.h"
+#include "animation/Skeleton.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
 #include <glm/gtc/quaternion.hpp>
+#include <unordered_map>
 #include <BulletSoftBody/btSoftBody.h>
 
 namespace OpenMeta {
@@ -330,145 +335,422 @@ void GameApplication::CreateDefaultScene() {
             OE_INFO("Added capsule collider to Dess model");
         }
     }
+
+    // --------------------------------------------------------------------
+    // Animator demo (Orc): combine separate FBX clips into one animation set
+    // --------------------------------------------------------------------
+    {
+        const std::string idlePath = "assets/models/animation/Orc Idle.fbx";
+        const std::string walkPath = "assets/models/animation/Start Walking.fbx";
+        const std::string runPath  = "assets/models/animation/Running.fbx";
+
+        Entity orcRoot = m_scene->LoadModel(idlePath, "Orc", glm::vec3(-3.0f, 0.0f, 0.0f));
+        if (orcRoot != entt::null) {
+            // Scale down the imported FBX (it comes in very large in world units)
+            registry.get<Transform>(orcRoot).scale = glm::vec3(0.1f);
+
+            // Find the mesh entity that actually has AnimationComponent
+            Entity orcMeshEntity = entt::null;
+            auto animView = registry.view<AnimationComponent, Transform>();
+            for (auto ent : animView) {
+                const auto& t = animView.get<Transform>(ent);
+                if (t.parent == orcRoot) {
+                    orcMeshEntity = ent;
+                    break;
+                }
+            }
+
+            if (orcMeshEntity != entt::null) {
+                auto& anim = registry.get<AnimationComponent>(orcMeshEntity);
+                auto skeleton = std::static_pointer_cast<OpenEye::Animation::Skeleton>(anim.skeleton);
+
+                if (skeleton) {
+                    // Rename the base clip to match controller expectations (if present)
+                    if (!anim.clips.empty()) {
+                        auto baseClip = std::static_pointer_cast<OpenEye::Animation::AnimationClip>(anim.clips[0]);
+                        if (baseClip) baseClip->SetName("Orc Idle");
+                    }
+
+                    // Load and append extra clips from other FBX files (map by bone names)
+                    auto walkClips = OpenEye::Animation::AnimationLoader::LoadClipsForSkeletonFromFile(walkPath, *skeleton);
+                    for (auto& c : walkClips) {
+                        if (c) {
+                            c->SetName("Start Walking");
+                            anim.clips.push_back(c);
+                        }
+                    }
+                    auto runClips = OpenEye::Animation::AnimationLoader::LoadClipsForSkeletonFromFile(runPath, *skeleton);
+                    for (auto& c : runClips) {
+                        if (c) {
+                            c->SetName("Running");
+                            anim.clips.push_back(c);
+                        }
+                    }
+
+                    // Attach AnimatorComponent to drive this AnimationComponent
+                    if (!registry.all_of<AnimatorComponent>(orcMeshEntity)) {
+                        auto& animator = registry.emplace<AnimatorComponent>(orcMeshEntity);
+                        animator.controllerPath = "assets/anim/controllers/orc_controller.json";
+                        animator.applyRootMotion = false; // safer default for demo (can toggle in Animator panel)
+                    }
+
+                    OE_INFO_F("Orc animator demo: clips=%zu bones=%zu", anim.clips.size(), skeleton->GetBoneCount());
+                } else {
+                    OE_WARN("Orc animator demo: skeleton missing (FBX may not contain skin weights)");
+                }
+            } else {
+                OE_WARN("Orc animator demo: could not find child mesh with AnimationComponent");
+            }
+        } else {
+            OE_WARN("Orc animator demo: failed to load FBX");
+        }
+    }
     
-    // Create cloth demo with cylinder anchor
+    // XPBD cloth demo (CPU) + rigid-cluster jelly (springs). No Bullet deformables.
     if (m_physicsWorld) {
         void* internalPhysicsWorld = m_physicsWorld->GetInternalWorld();
         OpenEye::Physics::PhysicsWorld* physicsWorld = static_cast<OpenEye::Physics::PhysicsWorld*>(internalPhysicsWorld);
-        
-        using namespace OpenEye::SoftBodies::Templates;
-        ClothConfig clothConfig = CreateDefaultClothConfig();
-        clothConfig.position = glm::vec3(0.0f, 4.0f, -2.0f);
-        clothConfig.windDirection = glm::vec3(1.0f, 0.0f, 0.0f);
-        clothConfig.windStrength = 2.5f;
-        clothConfig.windEnabled = true;
-        
-        // Create static cylinder to anchor cloth top edge
-        float cylinderRadius = 0.1f;
-        float cylinderHeight = clothConfig.width + 0.2f; // Slightly longer than cloth width
-        // Cloth is generated so its TOP EDGE is at clothConfig.position (y = 0 in local cloth space).
-        // Put the cylinder exactly on that top edge center.
-        glm::vec3 cylinderPos = clothConfig.position;
-        // Our cylinder mesh is built along +Y. Rotate it so its axis becomes +X (horizontal pipe).
-        glm::quat cylinderRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        
-        // Create cylinder collision shape
+
+        // --------------------------------------------------------------------
+        // Cloth anchor cylinder (static)
+        // --------------------------------------------------------------------
+        const glm::vec3 clothTopPos(0.0f, 4.0f, -2.0f);
+        const float clothWidth = 3.2f;
+        const float clothHeight = 2.2f;
+        const int clothSegX = 44;
+        const int clothSegY = 30;
+
+        const float cylinderRadius = 0.10f;
+        const float cylinderHeight = clothWidth + 0.25f;
+        const glm::vec3 cylinderPos = clothTopPos;
+        const glm::quat cylinderRot = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
         auto cylinderShape = OpenEye::Physics::CollisionShapeFactory::CreateCylinder(
             glm::vec3(cylinderRadius, cylinderHeight * 0.5f, cylinderRadius)
         );
-        
-        // Create static cylinder rigid body
         btRigidBody* cylinderBody = OpenEye::Physics::RigidBodyFactory::Create(
             physicsWorld,
             cylinderPos,
             cylinderRot,
             cylinderShape,
-            0.0f // Static (mass = 0)
+            0.0f
         );
         if (cylinderBody) {
-            // Make absolutely sure it's clamped/static
             cylinderBody->setCollisionFlags(cylinderBody->getCollisionFlags() | btCollisionObject::CF_STATIC_OBJECT);
             cylinderBody->setActivationState(DISABLE_SIMULATION);
         }
-        
-        // Create cylinder entity for rendering
-        auto cylinderEntity = m_scene->CreateEntity("ClothAnchorCylinder");
+
+        Entity cylinderEntity = m_scene->CreateEntity("ClothAnchorCylinder");
         auto& cylinderTransform = registry.get<Transform>(cylinderEntity);
         cylinderTransform.position = cylinderPos;
         cylinderTransform.rotation = cylinderRot;
-        
-        // Create cylinder mesh
+
         auto cylinderMesh = CreateCylinderMesh(cylinderRadius, cylinderHeight, 32);
-        
-        // Create cylinder material
         auto cylinderMaterial = std::make_shared<OpenEye::Rendering::Material>();
         auto cylinderShader = std::make_shared<OpenEye::Rendering::Shader>();
         cylinderShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
-                                    "assets/shaders/passes/deferred/gbuffer.frag");
+                                     "assets/shaders/passes/deferred/gbuffer.frag");
         cylinderMaterial->SetShader(cylinderShader);
-        cylinderMaterial->SetAlbedo(glm::vec3(0.3f, 0.3f, 0.3f)); // Gray cylinder
-        
-        // Add renderable
+        cylinderMaterial->SetAlbedo(glm::vec3(0.25f, 0.25f, 0.25f));
+
         auto& cylinderRenderable = registry.emplace<Renderable>(cylinderEntity);
         cylinderRenderable.mesh = cylinderMesh;
         cylinderRenderable.material = cylinderMaterial;
         cylinderRenderable.visible = true;
-        // IMPORTANT: Culling requires an AABB component, otherwise the entity won't render
         registry.emplace<AABB>(cylinderEntity);
-        
-        // Add physics body component
+
         auto& cylinderPhysicsBody = registry.emplace<PhysicsBody>(cylinderEntity);
         cylinderPhysicsBody.rigidBody = cylinderBody;
         cylinderPhysicsBody.collisionShape = cylinderShape;
-        cylinderPhysicsBody.mass = 0.0f; // Static
-        cylinderPhysicsBody.syncTransformToPhysics = true;  // Keep Bullet aligned with Transform (static anyway)
-        cylinderPhysicsBody.syncPhysicsToTransform = false; // Don't overwrite Transform from Bullet
-        
-        // Create cloth
-        btSoftBody* cloth = CreateCloth(physicsWorld, clothConfig);
-        if (cloth && cylinderBody) {
-            // Create entity for cloth
-            auto clothEntity = m_scene->CreateEntity("Cloth");
-            auto& clothTransform = registry.get<Transform>(clothEntity);
-            clothTransform.position = clothConfig.position;
-            
-            // Create mesh from cloth softbody
-            auto clothMesh = CreateMeshFromCloth(cloth, clothConfig.widthSegments, clothConfig.heightSegments);
-            
-            // Create material
-            auto clothMaterial = std::make_shared<OpenEye::Rendering::Material>();
-            auto clothShader = std::make_shared<OpenEye::Rendering::Shader>();
-            clothShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
-                                     "assets/shaders/passes/deferred/gbuffer.frag");
-            clothMaterial->SetShader(clothShader);
-            clothMaterial->SetAlbedo(glm::vec3(0.8f, 0.2f, 0.2f)); // Red cloth
-            
-            // Add renderable
-            auto& renderable = registry.emplace<Renderable>(clothEntity);
-            renderable.mesh = clothMesh;
-            renderable.material = clothMaterial;
-            renderable.visible = true;
-            // IMPORTANT: Culling requires an AABB component, otherwise the entity won't render
-            registry.emplace<AABB>(clothEntity);
-            
-            // Add soft body component
-            auto& softBodyComp = registry.emplace<SoftBodyComponent>(clothEntity);
-            softBodyComp.softBody = cloth;
-            softBodyComp.mesh = clothMesh;
-            softBodyComp.windDirection = clothConfig.windDirection;
-            softBodyComp.windStrength = clothConfig.windStrength;
-            softBodyComp.windEnabled = clothConfig.windEnabled;
-            softBodyComp.enabled = true;
-            
-        // Attach TOP edge nodes to cylinder.
-        // In SoftBodyFactory::CreateCloth(), the top edge is the first row (row 0): indices [0..widthSegments].
-            int nodesPerRow = clothConfig.widthSegments + 1;
-        int topRowStart = 0;
-            std::vector<int> topEdgeNodeIndices;
-            for (int i = 0; i <= clothConfig.widthSegments; ++i) {
-                int nodeIndex = topRowStart + i;
-                if (nodeIndex < cloth->m_nodes.size()) {
-                    topEdgeNodeIndices.push_back(nodeIndex);
+        cylinderPhysicsBody.mass = 0.0f;
+        cylinderPhysicsBody.syncTransformToPhysics = true;
+        cylinderPhysicsBody.syncPhysicsToTransform = false;
+
+        // --------------------------------------------------------------------
+        // XPBD cloth entity (pinned top edge)
+        // --------------------------------------------------------------------
+        Entity clothEntity = m_scene->CreateEntity("XPBDCloth");
+        auto& clothTransform = registry.get<Transform>(clothEntity);
+        clothTransform.position = clothTopPos;
+
+        // Build a vertical grid mesh in local space: x in [-w/2..w/2], y in [0..-h]
+        auto clothMesh = std::make_shared<OpenEye::Rendering::Mesh>();
+        std::vector<OpenEye::Rendering::Vertex> verts;
+        std::vector<uint32_t> indices;
+        const int w = clothSegX + 1;
+        const int h = clothSegY + 1;
+        verts.resize(size_t(w * h));
+
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const float u = (clothSegX > 0) ? (float(x) / float(clothSegX)) : 0.0f;
+                const float v = (clothSegY > 0) ? (float(y) / float(clothSegY)) : 0.0f;
+                OpenEye::Rendering::Vertex vert{};
+                vert.position = glm::vec3((u - 0.5f) * clothWidth, -v * clothHeight, 0.0f);
+                vert.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+                vert.texCoord = glm::vec2(u, v);
+                verts[size_t(y * w + x)] = vert;
+            }
+        }
+        indices.reserve(size_t(clothSegX * clothSegY * 6));
+        for (int y = 0; y < clothSegY; ++y) {
+            for (int x = 0; x < clothSegX; ++x) {
+                const uint32_t i0 = uint32_t(y * w + x);
+                const uint32_t i1 = i0 + 1;
+                const uint32_t i2 = i0 + uint32_t(w);
+                const uint32_t i3 = i2 + 1;
+                // two tris
+                indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
+                indices.push_back(i1); indices.push_back(i2); indices.push_back(i3);
+            }
+        }
+
+        OpenEye::Rendering::Submesh sm{};
+        sm.indexOffset = 0;
+        sm.indexCount = uint32_t(indices.size());
+        sm.vertexOffset = 0;
+        sm.vertexCount = uint32_t(verts.size());
+        sm.materialIndex = 0;
+        clothMesh->SetVertices(verts);
+        clothMesh->SetIndices(indices);
+        clothMesh->AddSubmesh(sm);
+        clothMesh->UploadToGPU();
+
+        auto clothMaterial = std::make_shared<OpenEye::Rendering::Material>();
+        auto clothShader = std::make_shared<OpenEye::Rendering::Shader>();
+        clothShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
+                                  "assets/shaders/passes/deferred/gbuffer.frag");
+        clothMaterial->SetShader(clothShader);
+        clothMaterial->SetAlbedo(glm::vec3(0.75f, 0.15f, 0.15f));
+
+        auto& clothRenderable = registry.emplace<Renderable>(clothEntity);
+        clothRenderable.mesh = clothMesh;
+        clothRenderable.material = clothMaterial;
+        clothRenderable.visible = true;
+        registry.emplace<AABB>(clothEntity);
+
+        XPBDClothComponent clothSim;
+        clothSim.widthSegments = clothSegX;
+        clothSim.heightSegments = clothSegY;
+        clothSim.width = clothWidth;
+        clothSim.height = clothHeight;
+        clothSim.iterations = 10;
+        clothSim.compliance = 0.00035f;
+        clothSim.damping = 0.03f;
+        clothSim.enableShear = true;
+        clothSim.windEnabled = true;
+        clothSim.windDirection = glm::vec3(1.0f, 0.0f, 0.0f);
+        clothSim.windStrength = 7.0f;
+        clothSim.restLenX = clothWidth / float(clothSegX);
+        clothSim.restLenY = clothHeight / float(clothSegY);
+        clothSim.positions.resize(verts.size());
+        clothSim.prevPositions.resize(verts.size());
+        clothSim.invMass.resize(verts.size(), 1.0f);
+        for (size_t i = 0; i < verts.size(); ++i) {
+            clothSim.positions[i] = verts[i].position;
+            clothSim.prevPositions[i] = verts[i].position;
+        }
+        // Pin top edge (row 0)
+        for (int x = 0; x < w; ++x) {
+            clothSim.invMass[size_t(x)] = 0.0f;
+        }
+        registry.emplace<XPBDClothComponent>(clothEntity, std::move(clothSim));
+
+        OE_INFO("Created XPBD cloth demo (CPU) with static cylinder anchor");
+
+        // --------------------------------------------------------------------
+        // Jelly blob demo: rigid lattice + constraints (physics) + one deforming sphere mesh (render)
+        // --------------------------------------------------------------------
+        const glm::vec3 jellyOrigin(2.5f, 6.0f, 1.0f); // min corner of lattice in world
+        const int dim = 3;                             // 3x3x3 control points
+        const float spacing = 0.55f;
+        const float nodeRadius = 0.18f;
+        const float nodeMass = 0.35f;
+
+        const glm::vec3 cageExt = glm::vec3((dim - 1) * spacing);
+        const glm::vec3 cageCenterWorld = jellyOrigin + cageExt * 0.5f;
+
+        // Node render mesh/material (debug only)
+        auto nodeMesh = CreateSphereMesh(nodeRadius, 18, 14);
+        auto nodeMaterial = std::make_shared<OpenEye::Rendering::Material>();
+        auto nodeShader = std::make_shared<OpenEye::Rendering::Shader>();
+        nodeShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
+                                 "assets/shaders/passes/deferred/gbuffer.frag");
+        nodeMaterial->SetShader(nodeShader);
+        nodeMaterial->SetAlbedo(glm::vec3(0.12f, 0.38f, 0.9f));
+
+        // Blob render mesh/material (what the user sees)
+        const float blobRadius = cageExt.x * 0.5f * 0.95f;
+        auto blobMesh = CreateSphereMesh(blobRadius, 40, 26);
+        auto blobMaterial = std::make_shared<OpenEye::Rendering::Material>();
+        auto blobShader = std::make_shared<OpenEye::Rendering::Shader>();
+        blobShader->LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
+                                 "assets/shaders/passes/deferred/gbuffer.frag");
+        blobMaterial->SetShader(blobShader);
+        blobMaterial->SetAlbedo(glm::vec3(0.10f, 0.30f, 0.85f));
+
+        Entity blobEntity = m_scene->CreateEntity("JellyBlob");
+        auto& blobTransform = registry.get<Transform>(blobEntity);
+        blobTransform.position = cageCenterWorld;
+
+        auto& blobRenderable = registry.emplace<Renderable>(blobEntity);
+        blobRenderable.mesh = blobMesh;
+        blobRenderable.material = blobMaterial;
+        blobRenderable.visible = true;
+        registry.emplace<AABB>(blobEntity);
+
+        // Build rigid nodes
+        auto nodeShape = physicsWorld->CreateSphereShape(nodeRadius);
+        std::vector<Entity> nodes;
+        nodes.reserve(size_t(dim * dim * dim));
+        std::vector<btTypedConstraint*> constraints;
+
+        auto idxOf = [dim](int x, int y, int z) { return (z * dim * dim) + (y * dim) + x; };
+
+        for (int z = 0; z < dim; ++z) {
+            for (int y = 0; y < dim; ++y) {
+                for (int x = 0; x < dim; ++x) {
+                    Entity n = m_scene->CreateEntity("JellyNode");
+                    auto& t = registry.get<Transform>(n);
+                    t.position = jellyOrigin + glm::vec3(x * spacing, y * spacing, z * spacing);
+
+                    auto& r = registry.emplace<Renderable>(n);
+                    r.mesh = nodeMesh;
+                    r.material = nodeMaterial;
+                    r.visible = false; // hidden by default; can be enabled from editor for debugging
+                    registry.emplace<AABB>(n);
+
+                    PhysicsSystem::AttachPhysicsBody(*m_scene, n, physicsWorld, nodeShape, nodeMass, false);
+                    if (registry.all_of<PhysicsBody>(n)) {
+                        auto& pb = registry.get<PhysicsBody>(n);
+                        if (pb.rigidBody) {
+                            pb.rigidBody->setDamping(0.05f, 0.85f);
+                            pb.rigidBody->setFriction(0.8f);
+                            pb.rigidBody->setRestitution(0.05f);
+                        }
+                    }
+
+                    nodes.push_back(n);
                 }
             }
-            
-            // Attach cloth nodes to cylinder using Bullet's anchor system
-            OpenEye::Physics::SoftBodyFactory::AttachClothNodesToRigidBody(
-                cloth,
-                cylinderBody,
-                topEdgeNodeIndices,
-                true, // Disable collision between cloth and cylinder
-                1.0f  // Full influence
-            );
-            
-            OE_INFO_F("Created cloth demo with %zu nodes attached to cylinder", topEdgeNodeIndices.size());
         }
+
+        // Connect neighbors with point-to-point constraints (springy lattice)
+        const float tau = 0.55f;
+        const float damp = 0.75f;
+
+        for (int z = 0; z < dim; ++z) {
+            for (int y = 0; y < dim; ++y) {
+                for (int x = 0; x < dim; ++x) {
+                    const int aIndex = idxOf(x, y, z);
+                    auto& aPB = registry.get<PhysicsBody>(nodes[size_t(aIndex)]);
+                    if (!aPB.rigidBody) continue;
+
+                    auto link = [&](int nx, int ny, int nz, const glm::vec3& restVec) {
+                        if (nx < 0 || ny < 0 || nz < 0 || nx >= dim || ny >= dim || nz >= dim) return;
+                        const int bIndex = idxOf(nx, ny, nz);
+                        auto& bPB = registry.get<PhysicsBody>(nodes[size_t(bIndex)]);
+                        if (!bPB.rigidBody) return;
+
+                        const btVector3 pivotA(restVec.x * 0.5f, restVec.y * 0.5f, restVec.z * 0.5f);
+                        const btVector3 pivotB(-restVec.x * 0.5f, -restVec.y * 0.5f, -restVec.z * 0.5f);
+                        auto* c = new btPoint2PointConstraint(*aPB.rigidBody, *bPB.rigidBody, pivotA, pivotB);
+                        c->m_setting.m_tau = tau;
+                        c->m_setting.m_damping = damp;
+                        physicsWorld->AddConstraint(c, true);
+                        constraints.push_back(c);
+                    };
+
+                    link(x + 1, y, z, glm::vec3(spacing, 0, 0));
+                    link(x, y + 1, z, glm::vec3(0, spacing, 0));
+                    link(x, y, z + 1, glm::vec3(0, 0, spacing));
+                }
+            }
+        }
+
+        // Attach JellyBlob component for deformation + editor controls
+        JellyBlobComponent blobComp;
+        blobComp.dim = dim;
+        blobComp.nodeEntities = nodes;
+        blobComp.constraints = constraints;
+        blobComp.springTau = tau;
+        blobComp.springDamping = damp;
+        blobComp.showDebugNodes = false;
+        blobComp.restMin = -cageExt * 0.5f;
+        blobComp.restMax = cageExt * 0.5f;
+        blobComp.baseVertices = blobMesh->GetVertices(); // rest shape
+        registry.emplace<JellyBlobComponent>(blobEntity, std::move(blobComp));
+
+        OE_INFO("Created jelly blob demo (rigid lattice + single deforming render mesh)");
     }
 
     // Ensure debug primitives (cloth/cylinder) get initial AABBs right away so they render on frame 1
     OpenEye::ECS::CullingSystem::UpdateAABBs(*m_scene);
     
-    OE_INFO("Created default scene with camera, light, ground plane, Dess model, and cloth");
+    OE_INFO("Created default scene with camera, light, ground plane, Dess model, XPBD cloth, and jelly cluster");
+}
+
+std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateSphereMesh(float radius, int segments, int rings) {
+    using namespace OpenEye::Rendering;
+    auto mesh = std::make_shared<Mesh>();
+
+    segments = std::max(3, segments);
+    rings = std::max(2, rings);
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
+    // Vertices
+    vertices.reserve(size_t((rings + 1) * (segments + 1)));
+    for (int y = 0; y <= rings; ++y) {
+        const float v = float(y) / float(rings);
+        const float phi = v * glm::pi<float>(); // 0..pi
+        const float sinPhi = std::sin(phi);
+        const float cosPhi = std::cos(phi);
+
+        for (int x = 0; x <= segments; ++x) {
+            const float u = float(x) / float(segments);
+            const float theta = u * glm::two_pi<float>(); // 0..2pi
+            const float sinTheta = std::sin(theta);
+            const float cosTheta = std::cos(theta);
+
+            glm::vec3 n = glm::vec3(cosTheta * sinPhi, cosPhi, sinTheta * sinPhi);
+
+            Vertex vert{};
+            vert.position = n * radius;
+            vert.normal = glm::normalize(n);
+            vert.texCoord = glm::vec2(u, v);
+            vertices.push_back(vert);
+        }
+    }
+
+    // Indices
+    indices.reserve(size_t(rings * segments * 6));
+    const int stride = segments + 1;
+    for (int y = 0; y < rings; ++y) {
+        for (int x = 0; x < segments; ++x) {
+            const uint32_t i0 = uint32_t(y * stride + x);
+            const uint32_t i1 = i0 + 1;
+            const uint32_t i2 = i0 + uint32_t(stride);
+            const uint32_t i3 = i2 + 1;
+
+            indices.push_back(i0); indices.push_back(i2); indices.push_back(i1);
+            indices.push_back(i1); indices.push_back(i2); indices.push_back(i3);
+        }
+    }
+
+    Submesh sm{};
+    sm.indexOffset = 0;
+    sm.indexCount = uint32_t(indices.size());
+    sm.vertexOffset = 0;
+    sm.vertexCount = uint32_t(vertices.size());
+    sm.materialIndex = 0;
+
+    mesh->SetVertices(vertices);
+    mesh->SetIndices(indices);
+    mesh->AddSubmesh(sm);
+    mesh->UploadToGPU();
+    return mesh;
 }
 
 std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateMeshFromCloth(
@@ -546,6 +828,77 @@ std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateMeshFromCloth(
     
     mesh->UploadToGPU();
     
+    return mesh;
+}
+
+std::shared_ptr<OpenEye::Rendering::Mesh> GameApplication::CreateMeshFromSoftBody(btSoftBody* body, glm::vec3& outOrigin) {
+    using namespace OpenEye::Rendering;
+    if (!body) return nullptr;
+
+    auto mesh = std::make_shared<Mesh>();
+
+    const int nodeCount = body->m_nodes.size();
+    std::vector<Vertex> vertices;
+    vertices.reserve(nodeCount);
+
+    // Compute an origin from the current node positions (CreateEllipsoid returns world-space nodes,
+    // and getWorldTransform() is often identity). Using the average keeps the render transform stable.
+    glm::vec3 origin(0.0f);
+    if (nodeCount > 0) {
+        for (int i = 0; i < nodeCount; ++i) {
+            const btVector3& p = body->m_nodes[i].m_x;
+            origin += glm::vec3(p.x(), p.y(), p.z());
+        }
+        origin /= float(nodeCount);
+    }
+    outOrigin = origin;
+
+    for (int i = 0; i < nodeCount; ++i) {
+        const btVector3& p = body->m_nodes[i].m_x;
+        const btVector3& n = body->m_nodes[i].m_n;
+        Vertex v;
+        v.position = glm::vec3(p.x(), p.y(), p.z()) - origin;
+        v.normal = glm::vec3(n.x(), n.y(), n.z());
+        v.texCoord = glm::vec2(0.0f);
+        v.tangent = glm::vec3(1, 0, 0);
+        v.bitangent = glm::vec3(0, 1, 0);
+        vertices.push_back(v);
+    }
+
+    // Build indices from faces. Use a pointer->index map for speed.
+    std::vector<uint32_t> indices;
+    indices.reserve(body->m_faces.size() * 3);
+
+    std::unordered_map<const btSoftBody::Node*, uint32_t> nodeIndex;
+    nodeIndex.reserve(static_cast<size_t>(nodeCount));
+    for (int i = 0; i < nodeCount; ++i) {
+        nodeIndex[&body->m_nodes[i]] = static_cast<uint32_t>(i);
+    }
+
+    for (int i = 0; i < body->m_faces.size(); ++i) {
+        const btSoftBody::Face& f = body->m_faces[i];
+        auto it0 = nodeIndex.find(f.m_n[0]);
+        auto it1 = nodeIndex.find(f.m_n[1]);
+        auto it2 = nodeIndex.find(f.m_n[2]);
+        if (it0 != nodeIndex.end() && it1 != nodeIndex.end() && it2 != nodeIndex.end()) {
+            indices.push_back(it0->second);
+            indices.push_back(it1->second);
+            indices.push_back(it2->second);
+        }
+    }
+
+    mesh->SetVertices(vertices);
+    mesh->SetIndices(indices);
+
+    Submesh submesh;
+    submesh.indexOffset = 0;
+    submesh.indexCount = static_cast<uint32_t>(indices.size());
+    submesh.vertexOffset = 0;
+    submesh.vertexCount = static_cast<uint32_t>(vertices.size());
+    submesh.materialIndex = 0;
+    mesh->AddSubmesh(submesh);
+    mesh->UploadToGPU();
+
     return mesh;
 }
 

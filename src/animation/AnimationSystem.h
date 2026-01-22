@@ -78,15 +78,15 @@ public:
      */
     static std::shared_ptr<AnimationStateMachine> CreateStateMachine(entt::registry& registry, entt::entity entity);
 
+    // Public helpers for controller-driven systems (AnimatorSystem)
+    static void BuildBoneMatrices(const Skeleton& skeleton,
+                                  const std::vector<glm::mat4>& localTransforms,
+                                  std::vector<glm::mat4>& outFinalMatrices);
+
 private:
     // Helper: Sample animation and build local transform matrices
     static void SampleAnimation(ECS::AnimationComponent& animComponent,
                                 std::vector<glm::mat4>& outLocalTransforms);
-    
-    // Helper: Build final bone matrices from local transforms using skeleton hierarchy
-    static void BuildBoneMatrices(const Skeleton& skeleton,
-                                  const std::vector<glm::mat4>& localTransforms,
-                                  std::vector<glm::mat4>& outFinalMatrices);
     
     // Helper: Blend two animation samples
     static void BlendAnimations(const std::vector<glm::mat4>& from,

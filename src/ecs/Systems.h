@@ -8,8 +8,11 @@
 #include "systems/CullingSystem.h"
 #include "systems/RenderSystem.h"
 #include "systems/CameraSystem.h"
+#include "systems/AnimatorSystem.h"
 #include "systems/PhysicsSystem.h"
 #include "systems/ParticleSystem.h"
 #include "systems/FluidSystem.h"
 #include "systems/SoftBodySystem.h"
+#include "systems/XPBDClothSystem.h"
+#include "systems/JellyBlobSystem.h"
 

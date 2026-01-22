@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include <glm/glm.hpp>
 
 // Forward declarations
@@ -57,6 +58,16 @@ public:
         const std::vector<int>& nodeIndices,
         bool disableCollision = true,
         float influence = 1.0f
+    );
+
+    // Create volumetric soft body sphere (ellipsoid) for "jelly ball" / volume deformation demos
+    static btSoftBody* CreateVolumeSphere(
+        PhysicsWorld* world,
+        const glm::vec3& position,
+        float radius,
+        int resolution = 512,
+        float mass = 2.0f,
+        float pressure = 150.0f
     );
     
     // Destroy soft body

@@ -141,6 +141,81 @@ btSoftBody* SoftBodyFactory::CreateRope(
     return rope;
 }
 
+btSoftBody* SoftBodyFactory::CreateVolumeSphere(
+    PhysicsWorld* world,
+    const glm::vec3& position,
+    float radius,
+    int resolution,
+    float mass,
+    float pressure
+) {
+    if (!world) {
+        OE_ERROR("SoftBodyFactory::CreateVolumeSphere: world is null");
+        return nullptr;
+    }
+    if (radius <= 0.0f) {
+        OE_ERROR("SoftBodyFactory::CreateVolumeSphere: radius must be > 0");
+        return nullptr;
+    }
+
+    btSoftBodyWorldInfo& worldInfo = world->GetSoftBodyWorldInfo();
+
+    btVector3 center(position.x, position.y, position.z);
+    btVector3 radiusVec(radius, radius, radius);
+
+    // Create an ellipsoid soft body (closed surface, good for a jelly-like ball)
+    btSoftBody* body = btSoftBodyHelpers::CreateEllipsoid(worldInfo, center, radiusVec, resolution);
+    if (!body) {
+        OE_ERROR("SoftBodyFactory::CreateVolumeSphere: Failed to create ellipsoid");
+        return nullptr;
+    }
+
+    // Configure simulation parameters for a stable "volume" softbody
+    // Slightly larger margin helps soft bodies generate contacts against statics
+    body->getCollisionShape()->setMargin(0.05f);
+
+    // Mass + constraints
+    body->setTotalMass(mass, true);
+    body->generateBendingConstraints(2, body->appendMaterial());
+
+    // Pressure / volume conservation (jelly / balloon feel)
+    body->m_cfg.kPR = btScalar(pressure); // pressure coefficient
+    body->m_cfg.kVC = btScalar(20.0f);    // volume conservation
+
+    // Damping / friction
+    body->m_cfg.kDP = btScalar(0.02f);
+    body->m_cfg.kDF = btScalar(0.3f);
+    body->m_cfg.kDG = btScalar(0.0f);
+
+    // Solver iterations (more = stiffer/more stable)
+    body->m_cfg.piterations = 15;
+    body->m_cfg.viterations = 15;
+    body->m_cfg.diterations = 10;
+    body->m_cfg.citerations = 0;
+
+    // Deformable solver pipeline expects deformable collision flags (SDF_RD*).
+    body->m_cfg.collisions = btSoftBody::fCollision::SDF_RD;
+    body->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDN;
+    body->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDF;
+
+    // Contact hardness (how strongly it resists penetration)
+    body->m_cfg.kCHR = btScalar(1.0f); // rigid contacts hardness
+    body->m_cfg.kKHR = btScalar(1.0f); // kinetic contacts hardness
+    body->m_cfg.kSHR = btScalar(1.0f); // soft contacts hardness
+
+    // Pose used for shape matching / volume
+    body->setPose(true, false);
+
+    // Deformable pipeline does not require cluster-vs-rigid mode; keep it off to avoid conflicting modes.
+
+    world->AddSoftBody(body);
+
+    OE_INFO_F("Created volume sphere: r=%.2f, mass=%.2f, pressure=%.2f, res=%d",
+              radius, mass, pressure, resolution);
+
+    return body;
+}
+
 void SoftBodyFactory::Destroy(PhysicsWorld* world, btSoftBody* softBody) {
     if (!world || !softBody) return;
     
@@ -168,11 +243,18 @@ void SoftBodyFactory::AttachClothNodesToRigidBody(
         return;
     }
     
+    if (disableCollision) {
+        // Match btSoftBody::appendAnchor behavior for collision disabling
+        if (cloth->m_collisionDisabledObjects.findLinearSearch(rigidBody) == cloth->m_collisionDisabledObjects.size()) {
+            cloth->m_collisionDisabledObjects.push_back(rigidBody);
+        }
+    }
+
     for (int nodeIndex : nodeIndices) {
         if (nodeIndex >= 0 && nodeIndex < cloth->m_nodes.size()) {
-            // Use appendAnchor to attach node to rigid body
-            // This creates a constraint that keeps the node attached to the rigid body
-            cloth->appendAnchor(nodeIndex, rigidBody, disableCollision, influence);
+            // Use deformable anchor so it works correctly in the deformable pipeline.
+            // (Classic appendAnchor is not enforced the same way by deformable constraints.)
+            cloth->appendDeformableAnchor(nodeIndex, rigidBody);
         }
     }
     

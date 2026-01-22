@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <btBulletDynamicsCommon.h>
@@ -9,6 +10,7 @@
 
 // Forward declaration for character controller (not in btBulletDynamicsCommon.h)
 class btKinematicCharacterController;
+class btSoftBodySolver;
 
 // Forward declarations
 namespace OpenEye {
@@ -79,6 +81,9 @@ public:
     void RemoveSoftBody(btSoftBody* softBody);
     bool HasSoftBody(btSoftBody* softBody) const;
     btSoftBodyWorldInfo& GetSoftBodyWorldInfo();
+
+    // Constraints (for rigid-cluster "jelly" approximations, etc.)
+    void AddConstraint(btTypedConstraint* constraint, bool disableCollisionsBetweenLinkedBodies = true);
     
     // Query delegates
     RaycastResult Raycast(const glm::vec3& from, const glm::vec3& to);
@@ -108,8 +113,11 @@ private:
     std::unique_ptr<btCollisionConfiguration> m_collisionConfig;
     std::unique_ptr<btDispatcher> m_dispatcher;
     std::unique_ptr<btConstraintSolver> m_solver;
-    std::unique_ptr<btSoftRigidDynamicsWorld> m_world; // Changed to support soft bodies
+    std::unique_ptr<btSoftRigidDynamicsWorld> m_world; // Standard soft-rigid world (no deformable pipeline)
     std::unique_ptr<btSoftBodyWorldInfo> m_softBodyWorldInfo;
+
+    // Track constraints we create (for jelly spring clusters, etc.)
+    std::vector<btTypedConstraint*> m_constraints;
 };
 
 } // namespace Physics
