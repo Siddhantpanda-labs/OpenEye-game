@@ -150,6 +150,30 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib assets module
     add_subdirectory(eyelib/assets)
     add_subdirectory(api/assets)
+    # Eyelib animation module
+    add_subdirectory(eyelib/animation)
+    add_subdirectory(api/animation)
+    # Eyelib ECS module
+    add_subdirectory(eyelib/ecs)
+    add_subdirectory(api/ecs)
+    # Eyelib scene module
+    add_subdirectory(eyelib/scene)
+    add_subdirectory(api/scene)
+    # Eyelib serialize module
+    add_subdirectory(eyelib/serialize)
+    add_subdirectory(api/serialize)
+    # Eyelib particles module
+    add_subdirectory(eyelib/particles)
+    add_subdirectory(api/particles)
+    # Eyelib fluids module
+    add_subdirectory(eyelib/fluids)
+    add_subdirectory(api/fluids)
+    # Eyelib debug module
+    add_subdirectory(eyelib/debug)
+    add_subdirectory(api/debug)
+    # Eyelib physics module
+    add_subdirectory(eyelib/physics)
+    add_subdirectory(api/physics)
     # Eyelib render module
     add_subdirectory(eyelib/render)
     add_subdirectory(api/render)
