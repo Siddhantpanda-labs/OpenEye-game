@@ -136,7 +136,30 @@ target_link_libraries(OpenEyeImGui
 )
 
 # --------------------------------------
-# Component Libraries (Modular Structure)
+# Eyelib Engine Library (New Professional Structure)
+# --------------------------------------
+# Build eyelib alongside src for parallel development
+option(OPENEYE_BUILD_EYELIB "Build new eyelib engine library" ON)
+
+if(OPENEYE_BUILD_EYELIB)
+    # Eyelib core module
+    add_subdirectory(eyelib/core)
+    add_subdirectory(api/core)
+    # Eyelib math module (GLM-backed)
+    add_subdirectory(eyelib/math)
+    # Eyelib assets module
+    add_subdirectory(eyelib/assets)
+    add_subdirectory(api/assets)
+    # Eyelib render module
+    add_subdirectory(eyelib/render)
+    add_subdirectory(api/render)
+    # Eyelib platform module
+    add_subdirectory(eyelib/platform)
+    add_subdirectory(api/platform)
+endif()
+
+# --------------------------------------
+# Legacy Component Libraries (src/) - Keep for reference
 # --------------------------------------
 # Add component subdirectories in dependency order
 add_subdirectory(src/core)
