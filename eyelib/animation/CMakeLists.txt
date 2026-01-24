@@ -18,6 +18,12 @@ set(ANIMATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineConditions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineConditions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineTransitions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/AnimationEvents.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AnimationEvents.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/IK.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IK.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Procedural.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Procedural.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Animator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Animator.h
 )

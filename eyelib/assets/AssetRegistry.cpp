@@ -1,13 +1,34 @@
 #include "eyelib/assets/AssetRegistry.h"
 
 #include "eyelib/core/Log.h"
+#include "eyelib/assets/AssetManager.h"
+#include "eyelib/assets/loaders/AnimationLoader.h"
+#include "eyelib/assets/loaders/AudioLoader.h"
+#include "eyelib/assets/loaders/MeshLoader.h"
+#include "eyelib/assets/loaders/ShaderLoader.h"
+#include "eyelib/assets/loaders/TextureLoader.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <json.hpp>
 
 namespace eyelib {
 namespace assets {
+
+namespace {
+static void FillFileMetadata(const std::string& filePath, AssetMetadata& md) {
+    try {
+        std::filesystem::path p(filePath);
+        if (std::filesystem::exists(p)) {
+            md.fileSize = static_cast<uint64_t>(std::filesystem::file_size(p));
+            auto t = std::filesystem::last_write_time(p).time_since_epoch().count();
+            md.lastModified = static_cast<uint64_t>(t);
+        }
+    } catch (...) {
+    }
+}
+} // namespace
 
 static nlohmann::json ToJson(const AssetMetadata& md) {
     nlohmann::json json;
@@ -69,6 +90,7 @@ bool AssetRegistry::RegisterAsset(const AssetId& id, const std::string& filePath
     md.filePath = filePath;
     md.assetType = assetType;
     md.name = filePath;
+    FillFileMetadata(filePath, md);
 
     m_assets[id] = md;
     m_pathToId[filePath] = id;
@@ -90,6 +112,69 @@ AssetId AssetRegistry::RegisterAsset(const std::string& filePath, const std::str
     return AssetId::Invalid();
 }
 
+AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
+    const std::string typeStr = ToString(type);
+    const AssetId id = RegisterAsset(filePath, typeStr);
+    if (!id.IsValid()) return id;
+
+    auto it = m_refCounts.find(id);
+    if (it != m_refCounts.end()) {
+        it->second += 1;
+        return id;
+    }
+    m_refCounts[id] = 1;
+
+    switch (type) {
+        case AssetType::Mesh: MeshLoader::LoadMesh(filePath); break;
+        case AssetType::Texture: TextureLoader::LoadTexture(filePath, true); break;
+        case AssetType::Shader: {
+            const std::string lower = filePath;
+            if (lower.rfind(".vert") != std::string::npos) {
+                const std::string frag = filePath.substr(0, filePath.size() - 5) + ".frag";
+                ShaderLoader::LoadShader(filePath, frag);
+            } else if (lower.rfind(".frag") != std::string::npos) {
+                const std::string vert = filePath.substr(0, filePath.size() - 5) + ".vert";
+                ShaderLoader::LoadShader(vert, filePath);
+            } else {
+                ShaderLoader::LoadShader(filePath, filePath);
+            }
+            break;
+        }
+        case AssetType::Audio: AudioLoader::LoadAudio(filePath); break;
+        case AssetType::Animation: AnimationLoader::LoadAnimation(filePath); break;
+        default: break;
+    }
+
+    m_memoryUsage += GetAssetSize(id);
+    return id;
+}
+
+AssetId AssetRegistry::LoadAsset(const AssetId& id) {
+    const auto* md = GetMetadata(id);
+    if (!md) return AssetId::Invalid();
+    const auto type = AssetTypeFromString(md->assetType);
+    return LoadAsset(md->filePath, type);
+}
+
+void AssetRegistry::UnloadAsset(const AssetId& id) {
+    auto it = m_refCounts.find(id);
+    if (it == m_refCounts.end()) return;
+    if (it->second > 1) {
+        it->second -= 1;
+        return;
+    }
+    m_refCounts.erase(it);
+    const size_t size = GetAssetSize(id);
+    m_memoryUsage = (m_memoryUsage > size) ? (m_memoryUsage - size) : 0;
+    m_cache.Remove(id);
+}
+
+bool AssetRegistry::ReloadAsset(const AssetId& id) {
+    const auto* md = GetMetadata(id);
+    if (!md) return false;
+    return LoadAsset(md->filePath, AssetTypeFromString(md->assetType)).IsValid();
+}
+
 AssetMetadata* AssetRegistry::GetMetadata(const AssetId& id) {
     auto it = m_assets.find(id);
     return (it != m_assets.end()) ? &it->second : nullptr;
@@ -108,6 +193,20 @@ AssetId AssetRegistry::GetId(const std::string& filePath) const {
 std::string AssetRegistry::GetFilePath(const AssetId& id) const {
     auto it = m_assets.find(id);
     return (it != m_assets.end()) ? it->second.filePath : std::string{};
+}
+
+AssetType AssetRegistry::GetAssetType(const AssetId& id) const {
+    const auto* md = GetMetadata(id);
+    return md ? AssetTypeFromString(md->assetType) : AssetType::Unknown;
+}
+
+size_t AssetRegistry::GetAssetSize(const AssetId& id) const {
+    const auto* md = GetMetadata(id);
+    return md ? static_cast<size_t>(md->fileSize) : 0;
+}
+
+size_t AssetRegistry::GetAssetMemoryUsage() const {
+    return m_memoryUsage;
 }
 
 void AssetRegistry::AddDependency(const AssetId& asset, const AssetId& dependency) {
@@ -181,6 +280,8 @@ void AssetRegistry::UnregisterAsset(const AssetId& id) {
     }
 
     m_assets.erase(it);
+    m_refCounts.erase(id);
+    m_cache.Remove(id);
 }
 
 void AssetRegistry::UpdateVersion(const AssetId& id, uint32_t newVersion) {
@@ -273,6 +374,9 @@ std::vector<AssetId> AssetRegistry::GetAllIds() const {
 void AssetRegistry::Clear() {
     m_assets.clear();
     m_pathToId.clear();
+    m_refCounts.clear();
+    m_memoryUsage = 0;
+    m_cache.Clear();
     core::Log::Info("AssetRegistry: cleared");
 }
 

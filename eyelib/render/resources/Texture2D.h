@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/resources/TextureTypes.h"
+#include "eyelib/assets/AssetId.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -52,11 +53,17 @@ public:
     /** Raw GL texture id for internal use (e.g. framebuffer attach). */
     unsigned int Id() const { return m_id; }
 
+    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
+    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    bool HasAssetId() const { return m_assetId.IsValid(); }
+
 private:
     unsigned int m_id = 0;
     int m_width = 0;
     int m_height = 0;
     TextureFormat m_format = TextureFormat::RGBA8;
+
+    assets::AssetId m_assetId = assets::AssetId::Invalid();
 };
 
 } // namespace render

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "eyelib/assets/AssetId.h"
+#include "eyelib/assets/AssetTypes.h"
+#include "eyelib/assets/AssetCache.h"
 
 #include <cstdint>
 #include <string>
@@ -30,12 +32,27 @@ class AssetRegistry {
 public:
     bool RegisterAsset(const AssetId& id, const std::string& filePath, const std::string& assetType);
     AssetId RegisterAsset(const std::string& filePath, const std::string& assetType);
+    AssetId LoadAsset(const std::string& filePath, AssetType type);
+    AssetId LoadAsset(const AssetId& id);
+    void UnloadAsset(const AssetId& id);
+    bool ReloadAsset(const AssetId& id);
+
+    template<typename T>
+    T* GetAsset(const AssetId& id) {
+        return m_cache.Get<T>(id).get();
+    }
 
     AssetMetadata* GetMetadata(const AssetId& id);
     const AssetMetadata* GetMetadata(const AssetId& id) const;
 
     AssetId GetId(const std::string& filePath) const;
     std::string GetFilePath(const AssetId& id) const;
+    std::string GetAssetPath(const AssetId& id) const { return GetFilePath(id); }
+    AssetType GetAssetType(const AssetId& id) const;
+    size_t GetAssetSize(const AssetId& id) const;
+    size_t GetAssetMemoryUsage() const;
+    AssetCache& Cache() { return m_cache; }
+    const AssetCache& Cache() const { return m_cache; }
 
     void AddDependency(const AssetId& asset, const AssetId& dependency);
     void RemoveDependency(const AssetId& asset, const AssetId& dependency);
@@ -58,6 +75,9 @@ public:
 private:
     std::unordered_map<AssetId, AssetMetadata, AssetId::Hash> m_assets;
     std::unordered_map<std::string, AssetId> m_pathToId;
+    std::unordered_map<AssetId, uint32_t, AssetId::Hash> m_refCounts;
+    AssetCache m_cache;
+    size_t m_memoryUsage = 0;
 };
 
 } // namespace assets

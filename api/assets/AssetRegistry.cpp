@@ -1,6 +1,7 @@
 #include "api/assets/AssetRegistry.h"
 
 #include "eyelib/assets/AssetRegistry.h"
+#include "eyelib/assets/AssetTypes.h"
 
 namespace eyelib {
 namespace api {
@@ -11,6 +12,36 @@ static eyelib::assets::AssetId ToCore(const AssetId& id) {
 
 static AssetId ToApi(const eyelib::assets::AssetId& id) {
     return AssetId{ id.High(), id.Low() };
+}
+
+static eyelib::assets::AssetType ToCoreType(AssetType type) {
+    using Core = eyelib::assets::AssetType;
+    switch (type) {
+        case AssetType::Mesh: return Core::Mesh;
+        case AssetType::Texture: return Core::Texture;
+        case AssetType::Material: return Core::Material;
+        case AssetType::Shader: return Core::Shader;
+        case AssetType::Audio: return Core::Audio;
+        case AssetType::Animation: return Core::Animation;
+        case AssetType::Prefab: return Core::Prefab;
+        case AssetType::Scene: return Core::Scene;
+        default: return Core::Unknown;
+    }
+}
+
+static AssetType ToApiType(eyelib::assets::AssetType type) {
+    using Core = eyelib::assets::AssetType;
+    switch (type) {
+        case Core::Mesh: return AssetType::Mesh;
+        case Core::Texture: return AssetType::Texture;
+        case Core::Material: return AssetType::Material;
+        case Core::Shader: return AssetType::Shader;
+        case Core::Audio: return AssetType::Audio;
+        case Core::Animation: return AssetType::Animation;
+        case Core::Prefab: return AssetType::Prefab;
+        case Core::Scene: return AssetType::Scene;
+        default: return AssetType::Unknown;
+    }
 }
 
 class AssetRegistry::Impl {
@@ -33,6 +64,18 @@ AssetId AssetRegistry::RegisterAsset(const std::string& filePath, const std::str
     return ToApi(m_impl->reg.RegisterAsset(filePath, assetType));
 }
 
+AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
+    return ToApi(m_impl->reg.LoadAsset(filePath, ToCoreType(type)));
+}
+
+void AssetRegistry::UnloadAsset(const AssetId& id) {
+    m_impl->reg.UnloadAsset(ToCore(id));
+}
+
+bool AssetRegistry::ReloadAsset(const AssetId& id) {
+    return m_impl->reg.ReloadAsset(ToCore(id));
+}
+
 bool AssetRegistry::IsRegistered(const AssetId& id) const {
     return m_impl->reg.IsRegistered(ToCore(id));
 }
@@ -47,6 +90,22 @@ AssetId AssetRegistry::GetId(const std::string& filePath) const {
 
 std::string AssetRegistry::GetFilePath(const AssetId& id) const {
     return m_impl->reg.GetFilePath(ToCore(id));
+}
+
+std::string AssetRegistry::GetAssetPath(const AssetId& id) const {
+    return m_impl->reg.GetAssetPath(ToCore(id));
+}
+
+AssetType AssetRegistry::GetAssetType(const AssetId& id) const {
+    return ToApiType(m_impl->reg.GetAssetType(ToCore(id)));
+}
+
+size_t AssetRegistry::GetAssetSize(const AssetId& id) const {
+    return m_impl->reg.GetAssetSize(ToCore(id));
+}
+
+size_t AssetRegistry::GetAssetMemoryUsage() const {
+    return m_impl->reg.GetAssetMemoryUsage();
 }
 
 void AssetRegistry::AddDependency(const AssetId& asset, const AssetId& dependency) {

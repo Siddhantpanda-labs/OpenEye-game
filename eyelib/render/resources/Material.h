@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
+#include "eyelib/assets/AssetId.h"
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -65,6 +66,10 @@ public:
     void Bind() const;
     size_t GetHash() const;
 
+    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
+    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    bool HasAssetId() const { return m_assetId.IsValid(); }
+
     void ForEachTexture(std::function<void(const std::string&, const std::shared_ptr<Texture2D>&)> fn) const;
     void ForEachFloat(std::function<void(const std::string&, float)> fn) const;
     void ForEachVec3(std::function<void(const std::string&, const math::Vec3&)> fn) const;
@@ -89,6 +94,8 @@ private:
 
     mutable size_t m_cachedHash = 0;
     mutable bool m_hashDirty = true;
+
+    assets::AssetId m_assetId = assets::AssetId::Invalid();
 };
 
 } // namespace render

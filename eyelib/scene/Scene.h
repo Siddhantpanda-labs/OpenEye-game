@@ -44,6 +44,14 @@ public:
     std::vector<Entity> GetChildren(Entity parent) const;
     std::vector<Entity> GetEntities() const;
 
+    std::vector<Entity> GetRootEntities() const;
+    std::string GetEntityPath(Entity entity) const;
+    Entity FindEntity(const std::string& path) const;
+    size_t GetSiblingCount(Entity entity) const;
+    size_t GetChildCount(Entity entity) const;
+    bool MoveEntity(Entity entity, Entity newParent);
+    Entity DuplicateEntity(Entity entity);
+
     ecs::World& World() { return m_world; }
     const ecs::World& World() const { return m_world; }
 

@@ -1,17 +1,18 @@
 #pragma once
 
+#include "api/ecs/Entity.h"
 #include "eyelib/math/Transform.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace eyelib {
+namespace scene { class Scene; }
 namespace api {
-
-using Entity = uint32_t;
-static constexpr Entity NullEntity = 0;
 
 class Scene {
 public:
@@ -36,6 +37,16 @@ public:
     Entity GetParent(Entity child) const;
     std::vector<Entity> GetChildren(Entity parent) const;
     std::vector<Entity> GetEntities() const;
+    std::vector<Entity> GetRootEntities() const;
+    std::string GetEntityPath(Entity entity) const;
+    Entity FindEntity(const std::string& path) const;
+    size_t GetSiblingCount(Entity entity) const;
+    size_t GetChildCount(Entity entity) const;
+    bool MoveEntity(Entity entity, Entity newParent);
+    Entity DuplicateEntity(Entity entity);
+
+    eyelib::scene::Scene* GetInternal() const;
+    static std::shared_ptr<Scene> WrapInternal(eyelib::scene::Scene* scene);
 
 private:
     class Impl;

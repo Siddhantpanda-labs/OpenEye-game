@@ -21,6 +21,10 @@ Entity World::CreateEntity() {
     return m_impl->world.CreateEntity();
 }
 
+Entity World::CreateEntity(const std::string& name) {
+    return m_impl->world.CreateEntity(name);
+}
+
 void World::DestroyEntity(Entity e) {
     m_impl->world.DestroyEntity(e);
 }
@@ -43,6 +47,10 @@ void World::SetTransform(Entity e, const eyelib::math::Transform& t) {
 
 std::optional<eyelib::math::Transform> World::GetTransform(Entity e) const {
     return m_impl->world.GetTransform(e);
+}
+
+eyelib::ecs::World* World::GetInternal() const {
+    return &m_impl->world;
 }
 
 } // namespace api

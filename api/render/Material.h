@@ -5,6 +5,7 @@
 #include <string>
 
 namespace eyelib {
+namespace render { class Material; }
 namespace api {
 
 class Texture;
@@ -45,6 +46,9 @@ public:
     void SetNormalTexture(std::shared_ptr<Texture> t);
     void SetMetallicTexture(std::shared_ptr<Texture> t);
     void SetRoughnessTexture(std::shared_ptr<Texture> t);
+
+    static std::shared_ptr<Material> WrapInternal(const std::shared_ptr<render::Material>& material);
+    std::shared_ptr<render::Material> GetInternal() const;
 
 private:
     class Impl;

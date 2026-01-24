@@ -56,5 +56,15 @@ bool Mesh::IsValid() const {
     return m_impl->mesh->IsValid();
 }
 
+std::shared_ptr<Mesh> Mesh::WrapInternal(const std::shared_ptr<render::Mesh>& mesh) {
+    auto apiMesh = std::make_shared<Mesh>();
+    if (mesh) apiMesh->m_impl->mesh = mesh;
+    return apiMesh;
+}
+
+std::shared_ptr<render::Mesh> Mesh::GetInternal() const {
+    return m_impl->mesh;
+}
+
 } // namespace api
 } // namespace eyelib

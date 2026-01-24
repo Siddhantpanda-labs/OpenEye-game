@@ -81,5 +81,15 @@ void Material::SetRoughnessTexture(std::shared_ptr<Texture> t) {
     SetTexture("u_RoughnessTexture", t);
 }
 
+std::shared_ptr<Material> Material::WrapInternal(const std::shared_ptr<render::Material>& material) {
+    auto apiMaterial = std::make_shared<Material>();
+    if (material) apiMaterial->m_impl->material = material;
+    return apiMaterial;
+}
+
+std::shared_ptr<render::Material> Material::GetInternal() const {
+    return m_impl->material;
+}
+
 } // namespace api
 } // namespace eyelib

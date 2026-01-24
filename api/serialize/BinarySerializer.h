@@ -1,0 +1,30 @@
+#pragma once
+
+#include "api/scene/Scene.h"
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace eyelib {
+namespace api {
+namespace serialize {
+
+enum class BinaryCompression {
+    None = 0,
+    RLE = 1,
+    LZ4 = 2,
+    Zstd = 3
+};
+
+class BinarySerializer {
+public:
+    static std::vector<uint8_t> SerializeScene(const api::Scene& scene, BinaryCompression compression = BinaryCompression::None);
+    static bool DeserializeScene(api::Scene& scene, const std::vector<uint8_t>& data);
+    static bool SaveToFile(const api::Scene& scene, const std::string& path, BinaryCompression compression = BinaryCompression::None);
+    static bool LoadFromFile(api::Scene& scene, const std::string& path);
+};
+
+} // namespace serialize
+} // namespace api
+} // namespace eyelib

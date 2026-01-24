@@ -1,16 +1,14 @@
 #pragma once
 
+#include "Entity.h"
 #include "eyelib/math/Transform.h"
 
-#include <cstdint>
 #include <optional>
 #include <string>
 
 namespace eyelib {
+namespace ecs { class World; }
 namespace api {
-
-using Entity = uint32_t;
-static constexpr Entity NullEntity = 0;
 
 class World {
 public:
@@ -21,6 +19,7 @@ public:
     World& operator=(const World&) = delete;
 
     Entity CreateEntity();
+    Entity CreateEntity(const std::string& name);
     void DestroyEntity(Entity e);
     bool IsAlive(Entity e) const;
 
@@ -29,6 +28,8 @@ public:
 
     void SetTransform(Entity e, const eyelib::math::Transform& t);
     std::optional<eyelib::math::Transform> GetTransform(Entity e) const;
+
+    eyelib::ecs::World* GetInternal() const;
 
 private:
     class Impl;

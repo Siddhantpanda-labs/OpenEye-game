@@ -1,8 +1,12 @@
 # Eyelib Serialize API
 
 set(API_SERIALIZE_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/SceneJson.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/SceneJson.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/BinarySerializer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/BinarySerializer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentSerializer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentSerializer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/WorldSnapshot.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/WorldSnapshot.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
 )
 
@@ -21,6 +25,7 @@ target_include_directories(EyelibSerializeAPI
 target_link_libraries(EyelibSerializeAPI
     PUBLIC
         EyelibSceneAPI
+        EyelibECSAPI
         EyelibCore
 )
 

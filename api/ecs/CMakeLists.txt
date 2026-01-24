@@ -1,6 +1,13 @@
 # Eyelib ECS API
 
 set(API_ECS_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Entity.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Component.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Query.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/QueryResult.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/System.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/System.h
     ${CMAKE_CURRENT_SOURCE_DIR}/World.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/World.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
@@ -20,5 +27,8 @@ target_include_directories(EyelibECSAPI
 target_link_libraries(EyelibECSAPI
     PUBLIC
         EyelibECS
+        EyelibRenderAPI
+        EyelibAnimationAPI
+        EyelibPhysicsAPI
 )
 

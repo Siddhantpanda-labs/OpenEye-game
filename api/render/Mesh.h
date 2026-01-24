@@ -7,6 +7,7 @@
 #include <vector>
 
 namespace eyelib {
+namespace render { class Mesh; }
 namespace api {
 
 /**
@@ -51,6 +52,9 @@ public:
 
     /** Check if valid. */
     bool IsValid() const;
+
+    static std::shared_ptr<Mesh> WrapInternal(const std::shared_ptr<render::Mesh>& mesh);
+    std::shared_ptr<render::Mesh> GetInternal() const;
 
 private:
     class Impl;

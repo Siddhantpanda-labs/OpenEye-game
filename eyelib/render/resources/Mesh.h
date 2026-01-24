@@ -2,6 +2,7 @@
 
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
+#include "eyelib/assets/AssetId.h"
 #include <cstdint>
 #include <vector>
 
@@ -76,6 +77,10 @@ public:
     bool IsValid() const { return m_vao != 0; }
     unsigned int GetVAO() const { return m_vao; }
 
+    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
+    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    bool HasAssetId() const { return m_assetId.IsValid(); }
+
 private:
     void CreateVAO();
     void Invalidate();
@@ -92,6 +97,8 @@ private:
     unsigned int m_vbo = 0;
     unsigned int m_ebo = 0;
     bool m_uploaded = false;
+
+    assets::AssetId m_assetId = assets::AssetId::Invalid();
 };
 
 } // namespace render
