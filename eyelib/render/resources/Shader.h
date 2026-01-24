@@ -1,9 +1,8 @@
 #pragma once
 
 #include <string>
+#include "eyelib/math/Types.h"
 
-// OpenGL types are implementation-only; keep them out of headers where possible.
-// Here we keep GLuint as an unsigned int without including glad in the header.
 using GLuint = unsigned int;
 
 namespace eyelib {
@@ -25,6 +24,12 @@ public:
 
     void Bind() const;
     void Unbind() const;
+
+    void SetInt(const std::string& name, int value) const;
+    void SetFloat(const std::string& name, float value) const;
+    void SetVec3(const std::string& name, const math::Vec3& value) const;
+    void SetVec4(const std::string& name, const math::Vec4& value) const;
+    void SetMat4(const std::string& name, const math::Mat4& value) const;
 
     bool IsValid() const { return m_program != 0; }
     GLuint Program() const { return m_program; }

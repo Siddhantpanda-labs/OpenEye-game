@@ -8,6 +8,12 @@ set(CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Time.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/allocator/LinearAllocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/allocator/PoolAllocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/allocator/FreeListAllocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/job/ThreadPool.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/job/TaskGraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugin/PluginManager.cpp
 )
 
 add_library(EyelibCore STATIC ${CORE_SOURCES})

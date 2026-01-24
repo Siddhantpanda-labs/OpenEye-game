@@ -1,5 +1,4 @@
 #include "eyelib/render/resources/Shader.h"
-
 #include "eyelib/core/Log.h"
 
 #include <glad/glad.h>
@@ -92,6 +91,36 @@ void Shader::Bind() const {
 
 void Shader::Unbind() const {
     glUseProgram(0);
+}
+
+void Shader::SetInt(const std::string& name, int value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform1i(loc, value);
+}
+
+void Shader::SetFloat(const std::string& name, float value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform1f(loc, value);
+}
+
+void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform3fv(loc, 1, &value.x);
+}
+
+void Shader::SetVec4(const std::string& name, const math::Vec4& value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform4fv(loc, 1, &value.x);
+}
+
+void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, &value[0][0]);
 }
 
 } // namespace render

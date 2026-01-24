@@ -13,3 +13,6 @@
 #include "Engine.h"
 #include "Time.h"
 #include "Log.h"
+#include "Memory.h"
+#include "Job.h"
+#include "Plugin.h"

@@ -147,6 +147,7 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(api/core)
     # Eyelib math module (GLM-backed)
     add_subdirectory(eyelib/math)
+    add_subdirectory(api/math)
     # Eyelib assets module
     add_subdirectory(eyelib/assets)
     add_subdirectory(api/assets)

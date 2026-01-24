@@ -1,0 +1,1 @@
+remember and understand the instruction, remember and apply in further actions

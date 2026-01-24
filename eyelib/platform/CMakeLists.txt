@@ -6,6 +6,9 @@ set(PLATFORM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/window/Window.h
     ${CMAKE_CURRENT_SOURCE_DIR}/input/Input.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/input/Input.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/filesystem/FileSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/time/HighResTimer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/time/FramePacer.cpp
 )
 
 add_library(EyelibPlatform STATIC ${PLATFORM_SOURCES})
