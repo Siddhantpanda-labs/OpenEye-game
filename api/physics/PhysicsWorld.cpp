@@ -8,6 +8,7 @@ namespace api {
 class PhysicsWorld::Impl {
 public:
     eyelib::physics::PhysicsWorld world{};
+    std::vector<DebugLine> debugLines;
 };
 
 PhysicsWorld::PhysicsWorld() : m_impl(new Impl()) {}
@@ -55,6 +56,56 @@ void PhysicsWorld::SetGravity(const eyelib::math::Vec3& gravity) {
 
 eyelib::math::Vec3 PhysicsWorld::GetGravity() const {
     return m_impl->world.GetGravity();
+}
+
+void PhysicsWorld::SetSolverIterations(int iterations) {
+    m_impl->world.SetSolverIterations(iterations);
+}
+
+void PhysicsWorld::SetSolverSubSteps(int subSteps) {
+    m_impl->world.SetSolverSubSteps(subSteps);
+}
+
+void PhysicsWorld::SetCollisionFilter(RigidBodyHandle body, short group, short mask) {
+    m_impl->world.SetCollisionFilter(body, group, mask);
+}
+
+size_t PhysicsWorld::GetBodyCount() const {
+    return m_impl->world.GetBodyCount();
+}
+
+size_t PhysicsWorld::GetConstraintCount() const {
+    return m_impl->world.GetConstraintCount();
+}
+
+void PhysicsWorld::SetContactCallback(std::function<void(RigidBodyHandle, RigidBodyHandle, const eyelib::math::Vec3&, const eyelib::math::Vec3&)> cb) {
+    m_impl->world.SetContactCallback(std::move(cb));
+}
+
+void PhysicsWorld::CollectDebugDrawData() {
+    m_impl->world.CollectDebugDrawData();
+    const auto& lines = m_impl->world.GetDebugDrawData();
+    m_impl->debugLines.clear();
+    m_impl->debugLines.reserve(lines.size());
+    for (const auto& l : lines) {
+        DebugLine d;
+        d.from = l.from;
+        d.to = l.to;
+        d.color = l.color;
+        m_impl->debugLines.push_back(d);
+    }
+}
+
+const std::vector<DebugLine>& PhysicsWorld::GetDebugDrawData() const {
+    return m_impl->debugLines;
+}
+
+physics::PhysicsWorld* PhysicsWorld::GetInternal() {
+    return m_impl ? &m_impl->world : nullptr;
+}
+
+const physics::PhysicsWorld* PhysicsWorld::GetInternal() const {
+    return m_impl ? &m_impl->world : nullptr;
 }
 
 } // namespace api

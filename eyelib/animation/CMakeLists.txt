@@ -5,6 +5,20 @@ set(ANIMATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Skeleton.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AnimationClip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AnimationClip.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/KeyframeEditor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/KeyframeEditor.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Pose.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/BlendSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/BlendSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/BlendTree.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/BlendTree.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/AnimationStateMachine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AnimationStateMachine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineConditions.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineConditions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/StateMachineTransitions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Animator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Animator.h
 )
 

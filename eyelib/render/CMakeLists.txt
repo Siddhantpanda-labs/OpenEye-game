@@ -40,6 +40,24 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshOptimizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstancedRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BatchRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Sprite.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Sprite.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/SpriteRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/SpriteRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Font.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Font.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/TextRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/TextRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Primitives.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/2d/Primitives.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/CullingSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/CullingSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
 )
 
 add_library(EyelibRender STATIC ${RENDER_SOURCES})

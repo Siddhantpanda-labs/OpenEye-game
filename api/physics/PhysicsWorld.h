@@ -3,12 +3,21 @@
 #include "eyelib/math/Types.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <vector>
 
 namespace eyelib {
+namespace physics { class PhysicsWorld; }
 namespace api {
 
 using RigidBodyHandle = uint32_t;
+
+struct DebugLine {
+    eyelib::math::Vec3 from{0.0f};
+    eyelib::math::Vec3 to{0.0f};
+    eyelib::math::Vec3 color{1.0f, 1.0f, 1.0f};
+};
 
 struct RigidBodyTransform {
     eyelib::math::Vec3 position{0.0f, 0.0f, 0.0f};
@@ -40,9 +49,31 @@ public:
     void SetGravity(const eyelib::math::Vec3& gravity);
     eyelib::math::Vec3 GetGravity() const;
 
+    void SetSolverIterations(int iterations);
+    void SetSolverSubSteps(int subSteps);
+    void SetCollisionFilter(RigidBodyHandle body, short group, short mask);
+    size_t GetBodyCount() const;
+    size_t GetConstraintCount() const;
+
+    void SetContactCallback(std::function<void(RigidBodyHandle, RigidBodyHandle, const eyelib::math::Vec3&, const eyelib::math::Vec3&)> cb);
+
+    void CollectDebugDrawData();
+    const std::vector<DebugLine>& GetDebugDrawData() const;
+
 private:
     class Impl;
     Impl* m_impl = nullptr;
+
+    physics::PhysicsWorld* GetInternal();
+    const physics::PhysicsWorld* GetInternal() const;
+
+    friend class CollisionShape;
+    friend class RigidBody;
+    friend class Constraint;
+    friend class CharacterController;
+    friend class Query;
+    friend class SoftBody;
+    friend class Vehicle;
 };
 
 } // namespace api
