@@ -1,7 +1,7 @@
-#version 450 core
+#version 430 core
 
 in vec2 v_TexCoord;
-out vec4 FragColor;
+layout(location=0) out vec4 o_Color;
 
 uniform sampler2D g_Position;
 uniform sampler2D g_Normal;
@@ -12,21 +12,22 @@ uniform vec2 u_Resolution;
 uniform float u_StepSize = 0.1;
 uniform int u_MaxSteps = 32;
 uniform float u_Thickness = 0.01;
-
-#include "../../common/camera.glsl"
+uniform mat4 u_ViewMatrix;
+uniform mat4 u_ProjectionMatrix;
+uniform mat4 u_InverseViewMatrix;
+uniform mat4 u_InverseProjectionMatrix;
+uniform vec3 u_ViewPos;
 
 vec3 RayMarch(vec3 rayOrigin, vec3 rayDir, float rayLength) {
     float stepSize = u_StepSize;
     int maxSteps = u_MaxSteps;
     
     vec3 currentPos = rayOrigin;
-    float currentDepth = rayOrigin.z;
     
     for (int i = 0; i < maxSteps; ++i) {
         currentPos += rayDir * stepSize;
         
         // Project to screen space
-        // From `assets/shaders/common/camera.glsl`
         vec4 projected = u_ProjectionMatrix * vec4(currentPos, 1.0);
         projected.xy /= projected.w;
         vec2 screenCoord = projected.xy * 0.5 + 0.5;
@@ -36,23 +37,23 @@ vec3 RayMarch(vec3 rayOrigin, vec3 rayDir, float rayLength) {
             break;
         }
         
-        // Sample depth at this position
+        // Sample position at this screen coordinate
         vec3 samplePos = texture(g_Position, screenCoord).rgb;
         
         if (length(samplePos) < 0.001) {
             continue; // Skip sky
         }
         
-        // Check if we hit something
-        float depthDiff = currentPos.z - samplePos.z;
+        // Check if we hit something (compare view-space Z)
+        float depthDiff = abs(currentPos.z - samplePos.z);
         if (depthDiff > 0.0 && depthDiff < u_Thickness) {
             // Hit! Return the albedo at this position
             return texture(g_Albedo, screenCoord).rgb;
         }
     }
     
-    // No hit - return skybox
-    return vec3(0.0); // Will be blended with scene
+    // No hit - will sample skybox in main()
+    return vec3(-1.0); // Signal for skybox fallback
 }
 
 void main() {
@@ -62,23 +63,34 @@ void main() {
     
     // Skip SSR for sky/background
     if (length(position) < 0.001) {
-        FragColor = vec4(sceneColor, 1.0);
+        o_Color = vec4(sceneColor, 1.0);
         return;
     }
     
-    // Calculate reflection
+    // Calculate reflection direction in view space
     vec3 viewDir = normalize(u_ViewPos - position);
     vec3 reflectDir = reflect(-viewDir, normal);
     
-    // Ray march
+    // Ray march in view space
     vec3 reflectionColor = RayMarch(position, reflectDir, 10.0);
     
-    // Calculate fresnel for blending
+    // If ray march didn't hit anything, sample skybox
+    if (reflectionColor.r < -0.5) {
+        // Transform reflection direction to world space for skybox sampling
+        vec3 worldReflectDir = mat3(u_InverseViewMatrix) * reflectDir;
+        reflectionColor = texture(u_Skybox, worldReflectDir).rgb;
+    }
+    
+    // If still no valid color, use scene color
+    if (reflectionColor.r < -0.5) {
+        reflectionColor = sceneColor;
+    }
+    
+    // Calculate fresnel for blending (more reflection at glancing angles)
     float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.0);
     
-    // Blend reflection with scene
+    // Blend reflection with scene (fresnel controls blend amount)
     vec3 finalColor = mix(sceneColor, reflectionColor, fresnel * 0.5);
     
-    FragColor = vec4(finalColor, 1.0);
+    o_Color = vec4(finalColor, 1.0);
 }
-

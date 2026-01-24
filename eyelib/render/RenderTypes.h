@@ -1,0 +1,70 @@
+#pragma once
+
+#include "eyelib/math/Types.h"
+#include <memory>
+#include <vector>
+
+namespace eyelib {
+namespace render {
+
+class Mesh;
+class Material;
+
+/** Single drawable: mesh + material + world transform */
+struct Drawable {
+    std::shared_ptr<Mesh> mesh;
+    std::shared_ptr<Material> material;
+    math::Mat4 transform{1.0f};
+};
+
+/** Camera view: view/projection matrices and view position */
+struct CameraView {
+    math::Mat4 view{1.0f};
+    math::Mat4 projection{1.0f};
+    math::Vec3 viewPos{0, 0, 0};
+    float nearPlane = 0.1f;
+    float farPlane = 1000.0f;
+};
+
+/** Directional light parameters */
+struct LightParams {
+    math::Vec3 direction{0.5f, 1.0f, 0.3f};
+    math::Vec3 color{1.0f, 0.95f, 0.9f};
+    float intensity = 3.0f;
+    math::Vec3 ambient{0.08f};
+    float exposure = 1.0f;
+};
+
+/** Point light (for Forward+) */
+struct PointLight {
+    math::Vec3 position{0, 0, 0};
+    math::Vec3 color{1, 1, 1};
+    float intensity = 1.0f;
+    float radius = 10.0f;
+};
+
+/** Spot light (for Forward+) */
+struct SpotLight {
+    math::Vec3 position{0, 0, 0};
+    math::Vec3 direction{0, -1, 0};
+    math::Vec3 color{1, 1, 1};
+    float intensity = 1.0f;
+    float range = 10.0f;
+    float innerConeCos = 0.9f;  // cos(inner angle)
+    float outerConeCos = 0.7f;  // cos(outer angle)
+};
+
+/** Minimal scene representation for rendering (no ECS) */
+struct RenderScene {
+    std::vector<Drawable> opaque;
+    std::vector<Drawable> transparent;  // Sorted back-to-front by caller or pass
+    CameraView camera;
+    LightParams light;  // Directional light (always present)
+    
+    // For Forward+ rendering
+    std::vector<PointLight> pointLights;
+    std::vector<SpotLight> spotLights;
+};
+
+} // namespace render
+} // namespace eyelib

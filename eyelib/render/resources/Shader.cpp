@@ -1,7 +1,9 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/core/Log.h"
-
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <glad/glad.h>
+#include <fstream>
+#include <sstream>
 
 namespace eyelib {
 namespace render {
@@ -78,6 +80,24 @@ bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fr
     return true;
 }
 
+bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
+    std::vector<uint8_t> vertexData = platform::filesystem::ReadFile(vertexPath);
+    if (vertexData.empty()) {
+        core::Log::ErrorF("Failed to load vertex shader: %s", vertexPath.c_str());
+        return false;
+    }
+    std::string vertexSrc(reinterpret_cast<const char*>(vertexData.data()), vertexData.size());
+    
+    std::vector<uint8_t> fragmentData = platform::filesystem::ReadFile(fragmentPath);
+    if (fragmentData.empty()) {
+        core::Log::ErrorF("Failed to load fragment shader: %s", fragmentPath.c_str());
+        return false;
+    }
+    std::string fragmentSrc(reinterpret_cast<const char*>(fragmentData.data()), fragmentData.size());
+    
+    return BuildFromSource(vertexSrc, fragmentSrc);
+}
+
 void Shader::Destroy() {
     if (m_program) {
         glDeleteProgram(m_program);
@@ -93,6 +113,12 @@ void Shader::Unbind() const {
     glUseProgram(0);
 }
 
+void Shader::SetBool(const std::string& name, bool value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform1i(loc, value ? 1 : 0);
+}
+
 void Shader::SetInt(const std::string& name, int value) const {
     if (!m_program) return;
     GLint loc = glGetUniformLocation(m_program, name.c_str());
@@ -103,6 +129,12 @@ void Shader::SetFloat(const std::string& name, float value) const {
     if (!m_program) return;
     GLint loc = glGetUniformLocation(m_program, name.c_str());
     if (loc >= 0) glUniform1f(loc, value);
+}
+
+void Shader::SetVec2(const std::string& name, const math::Vec2& value) const {
+    if (!m_program) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) glUniform2fv(loc, 1, &value.x);
 }
 
 void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {

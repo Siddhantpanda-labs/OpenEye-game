@@ -3,6 +3,28 @@
 set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ClusteredLightGrid.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ClusteredLightGrid.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.cpp
@@ -15,6 +37,9 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Material.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MaterialInstance.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshOptimizer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/InstancedRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/BatchRenderer.cpp
 )
 
 add_library(EyelibRender STATIC ${RENDER_SOURCES})
