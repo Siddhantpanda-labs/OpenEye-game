@@ -32,9 +32,18 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Options
 option(OPENEYE_BUILD_EDITOR "Build development editor" ON)
 option(OPENEYE_BUILD_GAME "Build final game" ON)
+option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
+option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 
 # Global include directories (components will add their own)
 # These are for legacy compatibility and third-party includes
+
+# --------------------------------------
+# LZ4 & Zstd (FetchContent)
+# --------------------------------------
+if(OPENEYE_USE_LZ4 OR OPENEYE_USE_ZSTD)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchCompression.cmake)
+endif()
 
 # --------------------------------------
 # GLAD (match GameEngine approach - simple static library)
@@ -52,6 +61,20 @@ set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/glfw)
 
 # --------------------------------------
+# OpenAL Soft (Audio backend)
+# --------------------------------------
+set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL_CONFIG OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL_HRTF_DATA OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL_AMBDEC_PRESETS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL_UTILS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/openal-soft)
+
+# --------------------------------------
 # Bullet3 Physics Library
 # --------------------------------------
 # Configure Bullet3 build options
@@ -60,6 +83,8 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(USE_DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
 set(BULLET_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BULLET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "" FORCE)
 set(BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 # Disable warnings for Bullet3 (third-party code)
@@ -169,6 +194,9 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib fluids module
     add_subdirectory(eyelib/fluids)
     add_subdirectory(api/fluids)
+    # Eyelib audio module
+    add_subdirectory(eyelib/audio)
+    add_subdirectory(api/audio)
     # Eyelib debug module
     add_subdirectory(eyelib/debug)
     add_subdirectory(api/debug)
@@ -183,53 +211,8 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(api/platform)
 endif()
 
-# --------------------------------------
-# Legacy Component Libraries (src/) - Keep for reference
-# --------------------------------------
-# Add component subdirectories in dependency order
-add_subdirectory(src/core)
-add_subdirectory(src/assets)
-add_subdirectory(src/rendering)
-add_subdirectory(src/animation)
-add_subdirectory(src/particles)
-add_subdirectory(src/physics)
-add_subdirectory(src/fluids)
-add_subdirectory(src/ecs)
-
-# --------------------------------------
-# Editor Application (Development Environment)
-# --------------------------------------
-# Editor only builds in Debug configuration
-if(OPENEYE_BUILD_EDITOR)
-    # Legacy editor (src/editor/main.cpp) - for backward compatibility
-    add_executable(Editor
-        src/editor/main.cpp
-    )
-    
-    target_include_directories(Editor
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/thirdparty/imgui
-            ${CMAKE_SOURCE_DIR}/thirdparty/imgui/backends
-            ${CMAKE_SOURCE_DIR}/thirdparty/ImGuizmo
-            ${CMAKE_SOURCE_DIR}/thirdparty/glm
-            ${CMAKE_SOURCE_DIR}/thirdparty/assimp/include
-            ${CMAKE_SOURCE_DIR}/thirdparty/bullet3/src
-    )
-    
-    target_link_libraries(Editor
-        PRIVATE
-            OpenEyeECS
-            OpenEyeImGui
-    )
-    
-    # Debug configuration: enable editor features
-    target_compile_definitions(Editor PRIVATE OPENEYE_EDITOR=1)
-    
-    # Editor panels library (used by OpenMeta in Debug builds)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "")
-        add_subdirectory(app/editor)
-    endif()
-endif()
+set(OPENEYE_BUILD_EDITOR OFF CACHE BOOL "Build development editor" FORCE)
+set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game" FORCE)
 
 # --------------------------------------
 # Game Application (Final Runtime)

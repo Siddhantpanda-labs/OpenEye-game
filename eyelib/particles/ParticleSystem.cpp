@@ -26,6 +26,7 @@ struct EmitterState {
     EmitterConfig cfg{};
     std::vector<Particle> particles{};
     float emitAccumulator = 0.0f;
+    float time = 0.0f;
     bool playing = true;
     uint32_t activeCount = 0;
 };
@@ -77,6 +78,7 @@ EmitterHandle ParticleSystem::CreateEmitter(const EmitterConfig& config) {
     st.cfg = config;
     st.particles.resize(config.maxParticles);
     st.emitAccumulator = 0.0f;
+    st.time = 0.0f;
     st.playing = true;
     st.activeCount = 0;
     m_impl->emitters.emplace(h, std::move(st));
@@ -123,9 +125,12 @@ void ParticleSystem::Reset(EmitterHandle emitter) {
     for (auto& p : it->second.particles) {
         p.life = 0.0f;
         p.maxLife = 0.0f;
+        p.age = 0.0f;
+        p.hasPrev = false;
     }
     it->second.activeCount = 0;
     it->second.emitAccumulator = 0.0f;
+    it->second.time = 0.0f;
 }
 
 bool ParticleSystem::IsPlaying(EmitterHandle emitter) const {
@@ -151,9 +156,12 @@ void ParticleSystem::EmitBurst(EmitterHandle emitter, uint32_t count) {
 
         Particle& p = *deadIt;
         p.position = st.cfg.position;
+        p.prevPosition = p.position;
+        p.hasPrev = false;
         p.size = distSize(m_impl->rng);
         p.maxLife = distLife(m_impl->rng);
         p.life = p.maxLife;
+        p.age = 0.0f;
         p.color = st.cfg.startColor;
 
         const auto dir = RandomDirectionInCone(m_impl->rng, st.cfg.direction, st.cfg.spreadDegrees);
@@ -167,6 +175,7 @@ void ParticleSystem::Update(float dt) {
 
     for (auto& kv : m_impl->emitters) {
         auto& st = kv.second;
+        st.time += dt;
 
         // Spawn
         if (st.playing && st.cfg.particlesPerSecond > 0.0f) {
@@ -185,14 +194,49 @@ void ParticleSystem::Update(float dt) {
             p.life -= dt;
             if (p.life <= 0.0f) {
                 p.life = 0.0f;
+                if (st.cfg.subEmitter != NullEmitter && st.cfg.subEmitCount > 0) {
+                    EmitBurst(st.cfg.subEmitter, st.cfg.subEmitCount);
+                }
+                p.hasPrev = false;
                 continue;
             }
+
+            p.prevPosition = p.position;
+            p.hasPrev = true;
+            p.age += dt;
 
             if (st.cfg.useGravity) {
                 p.velocity += st.cfg.gravity * dt;
             }
+            if (glm::length(st.cfg.wind) > 0.0001f) {
+                p.velocity += st.cfg.wind * dt;
+            }
+            if (st.cfg.useTurbulence && st.cfg.turbulenceStrength > 0.0f) {
+                const float f = st.cfg.turbulenceFrequency;
+                const float t = st.time;
+                const math::Vec3 turb(
+                    std::sin((p.position.y + t) * f),
+                    std::sin((p.position.z + t * 0.73f) * f),
+                    std::sin((p.position.x + t * 1.31f) * f));
+                p.velocity += turb * (st.cfg.turbulenceStrength * dt);
+            }
             p.velocity *= std::pow(st.cfg.damping, dt * 60.0f);
             p.position += p.velocity * dt;
+
+            if (st.cfg.enableCollisions && !st.cfg.collisionPlanes.empty()) {
+                for (const auto& plane : st.cfg.collisionPlanes) {
+                    const float dist = glm::dot(plane.normal, p.position) + plane.distance;
+                    if (dist < 0.0f) {
+                        p.position -= plane.normal * dist;
+                        const float vn = glm::dot(p.velocity, plane.normal);
+                        if (vn < 0.0f) {
+                            p.velocity -= (1.0f + plane.restitution) * vn * plane.normal;
+                            math::Vec3 tangent = p.velocity - glm::dot(p.velocity, plane.normal) * plane.normal;
+                            p.velocity -= tangent * plane.friction;
+                        }
+                    }
+                }
+            }
 
             const float t = 1.0f - (p.life / std::max(0.0001f, p.maxLife));
             p.color = Lerp(st.cfg.startColor, st.cfg.endColor, t);

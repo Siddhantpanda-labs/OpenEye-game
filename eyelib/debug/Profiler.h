@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace eyelib {
@@ -12,15 +13,33 @@ struct ProfileSample {
     double milliseconds = 0.0;
 };
 
+struct ProfileStats {
+    double averageMs = 0.0;
+    double minMs = 0.0;
+    double maxMs = 0.0;
+    size_t callCount = 0;
+};
+
 class Profiler {
 public:
     static void BeginFrame();
     static void EndFrame();
 
     static void AddSample(const char* name, double milliseconds);
+    static void BeginSample(const char* name);
+    static void EndSample();
+    static void BeginGpuSample(const char* name);
+    static void EndGpuSample();
 
     static double GetLastFrameMs();
     static std::vector<ProfileSample> GetLastFrameSamples();
+
+    static double GetAverageTime(const std::string& name);
+    static double GetMinTime(const std::string& name);
+    static double GetMaxTime(const std::string& name);
+    static size_t GetCallCount(const std::string& name);
+    static void Reset();
+    static bool ExportReport(const std::string& path);
 };
 
 class ScopeTimer {

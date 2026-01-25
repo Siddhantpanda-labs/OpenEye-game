@@ -8,9 +8,26 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
-#include <thread>
-#include <string>
 #include <vector>
+#include <string>
+#include <thread>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+#include <wrl/client.h>
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfuuid.lib")
+#endif
 
 #include "stb/stb_vorbis.c"
 
@@ -115,6 +132,116 @@ bool LoadOgg(const std::string& path, AudioClip& clip) {
     free(output);
     return true;
 }
+
+bool LoadMp3(const std::string& path, AudioClip& clip) {
+#if defined(_WIN32)
+    using Microsoft::WRL::ComPtr;
+    auto toWide = [](const std::string& s) {
+        if (s.empty()) return std::wstring();
+        int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+        if (size <= 0) return std::wstring();
+        std::wstring out(size - 1, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, out.data(), size);
+        return out;
+    };
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool comInit = SUCCEEDED(hr);
+    hr = MFStartup(MF_VERSION);
+    if (FAILED(hr)) {
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    ComPtr<IMFSourceReader> reader;
+    std::wstring wpath = toWide(path);
+    hr = MFCreateSourceReaderFromURL(wpath.c_str(), nullptr, &reader);
+    if (FAILED(hr)) {
+        MFShutdown();
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    ComPtr<IMFMediaType> type;
+    hr = MFCreateMediaType(&type);
+    if (FAILED(hr)) {
+        MFShutdown();
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    type->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+    type->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    type->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 0);
+    type->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 0);
+
+    hr = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, type.Get());
+    if (FAILED(hr)) {
+        MFShutdown();
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    ComPtr<IMFMediaType> actual;
+    hr = reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &actual);
+    if (FAILED(hr)) {
+        MFShutdown();
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    UINT32 channels = 0;
+    UINT32 sampleRate = 0;
+    UINT32 bitsPerSample = 0;
+    actual->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+    actual->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+    actual->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &bitsPerSample);
+    if (channels == 0 || sampleRate == 0 || bitsPerSample != 16) {
+        MFShutdown();
+        if (comInit) CoUninitialize();
+        return false;
+    }
+
+    std::vector<float> samples;
+    while (true) {
+        DWORD flags = 0;
+        ComPtr<IMFSample> sample;
+        hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &sample);
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) break;
+        if (!sample) continue;
+
+        ComPtr<IMFMediaBuffer> buffer;
+        if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) continue;
+
+        BYTE* data = nullptr;
+        DWORD maxLen = 0;
+        DWORD curLen = 0;
+        if (FAILED(buffer->Lock(&data, &maxLen, &curLen))) continue;
+
+        const size_t count = curLen / sizeof(int16_t);
+        const int16_t* pcm = reinterpret_cast<const int16_t*>(data);
+        samples.reserve(samples.size() + count);
+        for (size_t i = 0; i < count; ++i) {
+            samples.push_back(static_cast<float>(pcm[i]) / 32768.0f);
+        }
+        buffer->Unlock();
+    }
+
+    MFShutdown();
+    if (comInit) CoUninitialize();
+
+    if (samples.empty()) return false;
+    clip.channels = static_cast<int>(channels);
+    clip.sampleRate = static_cast<int>(sampleRate);
+    clip.samples = std::move(samples);
+    return true;
+#else
+    (void)path;
+    (void)clip;
+    return false;
+#endif
+}
 } // namespace
 
 AssetId AudioLoader::LoadAudio(const std::string& path) {
@@ -129,7 +256,8 @@ AssetId AudioLoader::LoadAudio(const std::string& path) {
     } else if (lower.rfind(".ogg") != std::string::npos) {
         ok = LoadOgg(path, clip);
     } else if (lower.rfind(".mp3") != std::string::npos) {
-        core::Log::Warn("AudioLoader: MP3 not supported yet.");
+        ok = LoadMp3(path, clip);
+        if (!ok) core::Log::Warn("AudioLoader: MP3 load failed.");
     }
 
     if (ok) {

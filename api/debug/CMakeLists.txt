@@ -7,6 +7,7 @@ set(API_DEBUG_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDraw.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Profiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Profiler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Validation.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
 )
 

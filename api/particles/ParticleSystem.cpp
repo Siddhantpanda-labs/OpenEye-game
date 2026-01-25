@@ -6,6 +6,38 @@ namespace eyelib {
 namespace api {
 
 namespace {
+static eyelib::particles::CollisionPlane ToInternalPlane(const CollisionPlane& p) {
+    eyelib::particles::CollisionPlane out;
+    out.normal = p.normal;
+    out.distance = p.distance;
+    out.restitution = p.restitution;
+    out.friction = p.friction;
+    return out;
+}
+
+static CollisionPlane FromInternalPlane(const eyelib::particles::CollisionPlane& p) {
+    CollisionPlane out;
+    out.normal = p.normal;
+    out.distance = p.distance;
+    out.restitution = p.restitution;
+    out.friction = p.friction;
+    return out;
+}
+
+static std::vector<eyelib::particles::CollisionPlane> ToInternalPlanes(const std::vector<CollisionPlane>& planes) {
+    std::vector<eyelib::particles::CollisionPlane> out;
+    out.reserve(planes.size());
+    for (const auto& p : planes) out.push_back(ToInternalPlane(p));
+    return out;
+}
+
+static std::vector<CollisionPlane> FromInternalPlanes(const std::vector<eyelib::particles::CollisionPlane>& planes) {
+    std::vector<CollisionPlane> out;
+    out.reserve(planes.size());
+    for (const auto& p : planes) out.push_back(FromInternalPlane(p));
+    return out;
+}
+
 static eyelib::particles::EmitterConfig ToInternal(const EmitterConfig& c) {
     eyelib::particles::EmitterConfig out;
     out.position = c.position;
@@ -24,6 +56,16 @@ static eyelib::particles::EmitterConfig ToInternal(const EmitterConfig& c) {
     out.useGravity = c.useGravity;
     out.gravity = c.gravity;
     out.damping = c.damping;
+    out.wind = c.wind;
+    out.useTurbulence = c.useTurbulence;
+    out.turbulenceStrength = c.turbulenceStrength;
+    out.turbulenceFrequency = c.turbulenceFrequency;
+    out.enableCollisions = c.enableCollisions;
+    out.collisionPlanes = ToInternalPlanes(c.collisionPlanes);
+    out.subEmitter = c.subEmitter;
+    out.subEmitCount = c.subEmitCount;
+    out.enableTrails = c.enableTrails;
+    out.trailWidth = c.trailWidth;
     return out;
 }
 
@@ -45,17 +87,30 @@ static EmitterConfig FromInternal(const eyelib::particles::EmitterConfig& c) {
     out.useGravity = c.useGravity;
     out.gravity = c.gravity;
     out.damping = c.damping;
+    out.wind = c.wind;
+    out.useTurbulence = c.useTurbulence;
+    out.turbulenceStrength = c.turbulenceStrength;
+    out.turbulenceFrequency = c.turbulenceFrequency;
+    out.enableCollisions = c.enableCollisions;
+    out.collisionPlanes = FromInternalPlanes(c.collisionPlanes);
+    out.subEmitter = c.subEmitter;
+    out.subEmitCount = c.subEmitCount;
+    out.enableTrails = c.enableTrails;
+    out.trailWidth = c.trailWidth;
     return out;
 }
 
 static Particle FromInternal(const eyelib::particles::Particle& p) {
     Particle out;
     out.position = p.position;
+    out.prevPosition = p.prevPosition;
     out.velocity = p.velocity;
     out.color = p.color;
     out.size = p.size;
     out.life = p.life;
     out.maxLife = p.maxLife;
+    out.age = p.age;
+    out.hasPrev = p.hasPrev;
     return out;
 }
 } // namespace

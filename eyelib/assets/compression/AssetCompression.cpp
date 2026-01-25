@@ -3,6 +3,14 @@
 #include "eyelib/assets/AssetManager.h"
 #include "eyelib/core/Log.h"
 
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+#include <lz4.h>
+#endif
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+#include <zstd.h>
+#endif
+
+#include <cstring>
 #include <fstream>
 #include <iterator>
 
@@ -58,9 +66,47 @@ bool AssetCompression::CompressAsset(const AssetId& id, CompressionFormat format
         return true;
     }
 
-    if (format == CompressionFormat::LZ4 || format == CompressionFormat::Zstd) {
-        core::Log::Warn("AssetCompression: LZ4/Zstd not enabled, using RLE fallback.");
+    if (format == CompressionFormat::LZ4) {
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+        if (input.empty()) { outData.clear(); return true; }
+        const int srcSize = static_cast<int>(input.size());
+        const int bound = LZ4_compressBound(srcSize);
+        if (bound <= 0) return false;
+        std::vector<uint8_t> compressed(static_cast<size_t>(bound));
+        const int n = LZ4_compress_default(
+            reinterpret_cast<const char*>(input.data()),
+            reinterpret_cast<char*>(compressed.data()), srcSize, bound);
+        if (n <= 0) return false;
+        compressed.resize(static_cast<size_t>(n));
+        outData.clear();
+        outData.reserve(8 + compressed.size());
+        uint64_t rawSize = static_cast<uint64_t>(input.size());
+        const uint8_t* p = reinterpret_cast<const uint8_t*>(&rawSize);
+        outData.insert(outData.end(), p, p + 8);
+        outData.insert(outData.end(), compressed.begin(), compressed.end());
+        return true;
+#else
+        core::Log::Warn("AssetCompression: LZ4 not enabled, using RLE fallback.");
         return RLECompress(input, outData);
+#endif
+    }
+
+    if (format == CompressionFormat::Zstd) {
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+        if (input.empty()) { outData.clear(); return true; }
+        const size_t srcSize = input.size();
+        const size_t bound = ZSTD_compressBound(srcSize);
+        if (ZSTD_isError(bound)) return false;
+        std::vector<uint8_t> compressed(bound);
+        const size_t n = ZSTD_compress(compressed.data(), bound, input.data(), srcSize, 3);
+        if (ZSTD_isError(n)) return false;
+        compressed.resize(n);
+        outData = std::move(compressed);
+        return true;
+#else
+        core::Log::Warn("AssetCompression: Zstd not enabled, using RLE fallback.");
+        return RLECompress(input, outData);
+#endif
     }
     return false;
 }
@@ -72,9 +118,39 @@ bool AssetCompression::DecompressAsset(const AssetId& id, CompressionFormat form
         outData = data;
         return true;
     }
-    if (format == CompressionFormat::LZ4 || format == CompressionFormat::Zstd) {
-        core::Log::Warn("AssetCompression: LZ4/Zstd not enabled, using RLE fallback.");
+    if (format == CompressionFormat::LZ4) {
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+        if (data.size() < 8) return false;
+        uint64_t rawSize = 0;
+        std::memcpy(&rawSize, data.data(), 8);
+        const size_t payloadSize = data.size() - 8;
+        outData.resize(static_cast<size_t>(rawSize));
+        const int n = LZ4_decompress_safe(
+            reinterpret_cast<const char*>(data.data() + 8),
+            reinterpret_cast<char*>(outData.data()),
+            static_cast<int>(payloadSize),
+            static_cast<int>(rawSize));
+        if (n < 0) return false;
+        outData.resize(static_cast<size_t>(n));
+        return true;
+#else
+        core::Log::Warn("AssetCompression: LZ4 not enabled, using RLE fallback.");
         return RLEDecompress(data, outData);
+#endif
+    }
+    if (format == CompressionFormat::Zstd) {
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+        const unsigned long long size = ZSTD_getFrameContentSize(data.data(), data.size());
+        if (size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN) return false;
+        outData.resize(static_cast<size_t>(size));
+        const size_t n = ZSTD_decompress(outData.data(), size, data.data(), data.size());
+        if (ZSTD_isError(n)) return false;
+        outData.resize(n);
+        return true;
+#else
+        core::Log::Warn("AssetCompression: Zstd not enabled, using RLE fallback.");
+        return RLEDecompress(data, outData);
+#endif
     }
     return false;
 }

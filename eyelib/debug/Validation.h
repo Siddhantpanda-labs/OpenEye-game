@@ -3,20 +3,46 @@
 #include "eyelib/core/Log.h"
 
 #include <cstdlib>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace eyelib {
 namespace debug {
 
+enum class ValidationSeverity {
+    Info,
+    Warning,
+    Error
+};
+
+struct ValidationIssue {
+    ValidationSeverity severity = ValidationSeverity::Error;
+    std::string message;
+    std::string file;
+    int line = 0;
+};
+
+class Validation {
+public:
+    static void Report(ValidationSeverity severity, const std::string& message, const char* file = nullptr, int line = 0);
+    static std::vector<ValidationIssue> GetIssues();
+    static void Clear();
+    static void SetBreakOnError(bool enabled);
+    static bool GetBreakOnError();
+};
+
 inline void FailFast(const char* expr, const char* file, int line, const char* msg = nullptr) {
-    if (msg) {
-        core::Log::Error(std::string("ASSERT failed: ") + expr + " (" + msg + ") at " + file + ":" + std::to_string(line));
-    } else {
-        core::Log::Error(std::string("ASSERT failed: ") + expr + " at " + file + ":" + std::to_string(line));
-    }
+    const std::string message = msg ? (std::string(expr) + " (" + msg + ")") : std::string(expr);
+    Validation::Report(ValidationSeverity::Error, std::string("ASSERT failed: ") + message, file, line);
 #if defined(_MSC_VER)
-    __debugbreak();
+    if (Validation::GetBreakOnError()) {
+        __debugbreak();
+    }
 #else
-    std::abort();
+    if (Validation::GetBreakOnError()) {
+        std::abort();
+    }
 #endif
 }
 

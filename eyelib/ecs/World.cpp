@@ -29,6 +29,8 @@ World::World() : m_impl(new Impl()) {
     m_impl->registry.RegisterComponent<components::Renderable>();
     m_impl->registry.RegisterComponent<components::Camera>();
     m_impl->registry.RegisterComponent<components::Light>();
+    m_impl->registry.RegisterComponent<components::AudioListener>();
+    m_impl->registry.RegisterComponent<components::AudioSource>();
     m_impl->registry.RegisterComponent<components::RigidBody>();
     m_impl->registry.RegisterComponent<components::Animator>();
     m_impl->registry.RegisterComponent<components::AABB>();

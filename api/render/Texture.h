@@ -37,14 +37,14 @@ public:
     /** Check if valid. */
     bool IsValid() const;
 
+    /** Get internal texture (for internal use). */
+    std::shared_ptr<render::Texture2D> GetInternal() const;
+
 private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
     friend class Material;
     friend class Sprite;
-    
-    /** Get internal texture (for Material/other internal use). */
-    std::shared_ptr<render::Texture2D> GetInternal() const;
 };
 
 } // namespace api

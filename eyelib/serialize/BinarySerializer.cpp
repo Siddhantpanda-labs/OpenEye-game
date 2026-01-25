@@ -6,6 +6,13 @@
 
 #include <json.hpp>
 
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+#include <lz4.h>
+#endif
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+#include <zstd.h>
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -89,44 +96,80 @@ static bool RLEDecompress(const std::vector<uint8_t>& input, std::vector<uint8_t
 static std::vector<uint8_t> TryCompress(const std::vector<uint8_t>& input, BinaryCompression compression) {
     switch (compression) {
         case BinaryCompression::RLE: return RLECompress(input);
-        case BinaryCompression::LZ4:
-#if defined(EYELIB_WITH_LZ4)
-            // TODO: integrate LZ4.
-            return input;
+        case BinaryCompression::LZ4: {
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+            if (input.empty()) return {};
+            const int srcSize = static_cast<int>(input.size());
+            const int bound = LZ4_compressBound(srcSize);
+            if (bound <= 0) return input;
+            std::vector<uint8_t> out(static_cast<size_t>(bound));
+            const int n = LZ4_compress_default(
+                reinterpret_cast<const char*>(input.data()),
+                reinterpret_cast<char*>(out.data()),
+                srcSize, bound);
+            if (n <= 0) return input;
+            out.resize(static_cast<size_t>(n));
+            return out;
 #else
             core::Log::Warn("BinarySerializer: LZ4 not available, storing uncompressed.");
             return input;
 #endif
-        case BinaryCompression::Zstd:
-#if defined(EYELIB_WITH_ZSTD)
-            // TODO: integrate Zstd.
-            return input;
+        }
+        case BinaryCompression::Zstd: {
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+            if (input.empty()) return {};
+            const size_t srcSize = input.size();
+            const size_t bound = ZSTD_compressBound(srcSize);
+            if (ZSTD_isError(bound)) return input;
+            std::vector<uint8_t> out(bound);
+            const size_t n = ZSTD_compress(out.data(), bound, input.data(), srcSize, 3);
+            if (ZSTD_isError(n)) return input;
+            out.resize(n);
+            return out;
 #else
             core::Log::Warn("BinarySerializer: Zstd not available, storing uncompressed.");
             return input;
 #endif
+        }
         default: return input;
     }
 }
 
-static bool TryDecompress(const std::vector<uint8_t>& input, BinaryCompression compression, std::vector<uint8_t>& output) {
+static bool TryDecompress(const std::vector<uint8_t>& input, BinaryCompression compression,
+                          size_t expectedOutSize, std::vector<uint8_t>& output) {
     switch (compression) {
         case BinaryCompression::RLE:
             return RLEDecompress(input, output);
-        case BinaryCompression::LZ4:
-#if defined(EYELIB_WITH_LZ4)
-            return false;
+        case BinaryCompression::LZ4: {
+#if defined(EYELIB_WITH_LZ4) && EYELIB_WITH_LZ4
+            if (input.empty() || expectedOutSize == 0) return false;
+            output.resize(expectedOutSize);
+            const int n = LZ4_decompress_safe(
+                reinterpret_cast<const char*>(input.data()),
+                reinterpret_cast<char*>(output.data()),
+                static_cast<int>(input.size()),
+                static_cast<int>(expectedOutSize));
+            if (n < 0) return false;
+            output.resize(static_cast<size_t>(n));
+            return true;
 #else
             output = input;
             return true;
 #endif
-        case BinaryCompression::Zstd:
-#if defined(EYELIB_WITH_ZSTD)
-            return false;
+        }
+        case BinaryCompression::Zstd: {
+#if defined(EYELIB_WITH_ZSTD) && EYELIB_WITH_ZSTD
+            if (input.empty() || expectedOutSize == 0) return false;
+            output.resize(expectedOutSize);
+            const size_t n = ZSTD_decompress(output.data(), expectedOutSize, input.data(), input.size());
+            if (ZSTD_isError(n)) return false;
+            output.resize(n);
+            return true;
 #else
             output = input;
             return true;
 #endif
+        }
         default:
             output = input;
             return true;
@@ -324,11 +367,12 @@ bool BinarySerializer::DeserializeScene(scene::Scene& scene, const std::vector<u
     std::vector<uint8_t> payload(data.begin() + offset, data.begin() + offset + payloadSize);
     BinaryCompression mode = static_cast<BinaryCompression>(compression);
     std::vector<uint8_t> decoded;
-    if (!TryDecompress(payload, mode, decoded)) return false;
+    const size_t expectedSize = (rawSize != 0) ? static_cast<size_t>(rawSize) : payload.size();
+    if (!TryDecompress(payload, mode, expectedSize, decoded)) return false;
     if (decoded.empty()) return false;
     payload = std::move(decoded);
 
-    if (rawSize != 0 && payload.size() != rawSize) return false;
+    if (rawSize != 0 && payload.size() != static_cast<size_t>(rawSize)) return false;
     return ParsePayload(payload, scene);
 }
 

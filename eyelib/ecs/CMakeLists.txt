@@ -17,6 +17,8 @@ set(ECS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/components/AABB.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/components/AABB.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Animator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/components/AudioListener.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/components/AudioSource.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Camera.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Light.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Name.h
@@ -34,6 +36,8 @@ set(ECS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/LightSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/AnimationSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/AnimationSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/AudioSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/AudioSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/PhysicsSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/PhysicsSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/CullingSystem.cpp
@@ -60,5 +64,6 @@ target_link_libraries(EyelibECS
         EyelibRender
         EyelibPhysics
         EyelibAnimation
+        EyelibAudio
 )
 

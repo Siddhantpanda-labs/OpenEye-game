@@ -4,6 +4,7 @@
 #include "eyelib/assets/AssetManager.h"
 #include "eyelib/assets/loaders/AnimationLoader.h"
 #include "eyelib/assets/loaders/AudioLoader.h"
+#include "eyelib/assets/loaders/MaterialLoader.h"
 #include "eyelib/assets/loaders/MeshLoader.h"
 #include "eyelib/assets/loaders/ShaderLoader.h"
 #include "eyelib/assets/loaders/TextureLoader.h"
@@ -142,6 +143,7 @@ AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
         }
         case AssetType::Audio: AudioLoader::LoadAudio(filePath); break;
         case AssetType::Animation: AnimationLoader::LoadAnimation(filePath); break;
+        case AssetType::Material: MaterialLoader::LoadMaterial(filePath); break;
         default: break;
     }
 

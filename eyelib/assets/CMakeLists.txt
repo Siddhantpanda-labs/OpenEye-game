@@ -26,6 +26,8 @@ set(ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ShaderLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/TextureLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/TextureLoader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.h
 )
 
 add_library(EyelibAssets STATIC ${ASSETS_SOURCES})
@@ -51,7 +53,19 @@ target_link_libraries(EyelibAssets
         EyelibAnimation
 )
 
+if(OPENEYE_USE_LZ4 AND OPENEYE_LZ4_AVAILABLE)
+    target_link_libraries(EyelibAssets PRIVATE lz4)
+    target_compile_definitions(EyelibAssets PRIVATE EYELIB_WITH_LZ4=1)
+    target_include_directories(EyelibAssets PRIVATE ${lz4_SOURCE_DIR}/lib)
+endif()
+if(OPENEYE_USE_ZSTD AND OPENEYE_ZSTD_AVAILABLE)
+    target_link_libraries(EyelibAssets PRIVATE libzstd_static)
+    target_compile_definitions(EyelibAssets PRIVATE EYELIB_WITH_ZSTD=1)
+    target_include_directories(EyelibAssets PRIVATE ${zstd_SOURCE_DIR}/lib)
+endif()
+
 if(WIN32)
     target_link_libraries(EyelibAssets PRIVATE ${CMAKE_SOURCE_DIR}/thirdparty/assimp/lib/assimp-vc143-mt.lib)
+    target_link_libraries(EyelibAssets PRIVATE mfplat mfreadwrite mfuuid)
 endif()
 

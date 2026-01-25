@@ -2,6 +2,7 @@
 
 #include "eyelib/assets/loaders/AnimationLoader.h"
 #include "eyelib/assets/loaders/AudioLoader.h"
+#include "eyelib/assets/loaders/MaterialLoader.h"
 #include "eyelib/assets/loaders/MeshLoader.h"
 #include "eyelib/assets/loaders/ShaderLoader.h"
 #include "eyelib/assets/loaders/TextureLoader.h"
@@ -94,6 +95,9 @@ AssetId StreamingManager::LoadByExtension(const std::string& path) {
     if (lower.rfind(".anim") != std::string::npos || lower.rfind(".fbx") != std::string::npos ||
         lower.rfind(".gltf") != std::string::npos || lower.rfind(".dae") != std::string::npos) {
         return AnimationLoader::LoadAnimation(path);
+    }
+    if (lower.rfind(".mat") != std::string::npos) {
+        return MaterialLoader::LoadMaterial(path);
     }
 
     core::Log::WarnF("StreamingManager: unknown asset type for %s", path.c_str());

@@ -58,6 +58,8 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/IBL.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/DebugDrawRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/DebugDrawRenderer.h
 )
 
 add_library(EyelibRender STATIC ${RENDER_SOURCES})
@@ -79,6 +81,7 @@ target_link_libraries(EyelibRender
         EyelibCore
         EyelibMath
         EyelibPlatform
+        EyelibDebug
     PRIVATE
         glad
 )

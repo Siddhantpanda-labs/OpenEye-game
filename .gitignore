@@ -1,6 +1,7 @@
 # Build directories
 build/
-build1/
+build_eyelib/
+cmake/
 out/
 bin/
 lib/

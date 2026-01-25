@@ -14,6 +14,8 @@ set(API_ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/AnimationLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/AudioLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/AudioLoader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ShaderLoader.cpp

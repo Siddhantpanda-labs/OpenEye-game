@@ -7,6 +7,7 @@
 #include "eyelib/render/passes/ShadowPass.h"
 #include "eyelib/render/passes/LightingPass.h"
 #include "eyelib/render/passes/TransparencyPass.h"
+#include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Mesh.h"
@@ -324,6 +325,12 @@ void RenderPipeline::Render(const RenderScene& scene) {
         RenderForwardPlus(scene);
         break;
     }
+
+    if (m_prePostCallback) {
+        m_prePostCallback(m_hdrFBO, m_width, m_height, scene);
+    }
+
+    DebugDrawRenderer::Render(scene.camera, m_hdrFBO, m_width, m_height);
     
     // Apply post-processing if enabled
     if (m_postProcessor) {

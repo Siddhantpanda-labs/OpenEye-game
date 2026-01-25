@@ -3,6 +3,7 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -27,6 +28,7 @@ enum class PipelineMode { Forward, Deferred, ForwardPlus };
  */
 class RenderPipeline {
 public:
+    using PrePostCallback = std::function<void(unsigned int hdrFbo, unsigned int width, unsigned int height, const RenderScene& scene)>;
     RenderPipeline();
     ~RenderPipeline();
 
@@ -49,6 +51,7 @@ public:
     const std::vector<FrameGraph::PassInfo>& GetFrameGraphPasses() const;
 
     void SetFrameSize(unsigned w, unsigned h);
+    void SetPrePostProcessCallback(PrePostCallback cb) { m_prePostCallback = std::move(cb); }
     
     // Get HDR color texture (for post-processing input)
     unsigned int GetHDRColorTexture() const { return m_hdrColor; }
@@ -82,6 +85,7 @@ private:
 
     uint32_t m_width = 0, m_height = 0;
     PipelineMode m_mode = PipelineMode::Deferred;
+    PrePostCallback m_prePostCallback;
     
     // Previous frame matrices for velocity calculation
     math::Mat4 m_prevView{1.0f};

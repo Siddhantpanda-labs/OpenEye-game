@@ -13,11 +13,21 @@ static constexpr EmitterHandle NullEmitter = 0;
 
 struct Particle {
     math::Vec3 position{0.0f, 0.0f, 0.0f};
+    math::Vec3 prevPosition{0.0f, 0.0f, 0.0f};
     math::Vec3 velocity{0.0f, 0.0f, 0.0f};
     math::Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
     float size = 0.1f;
     float life = 0.0f;     // remaining
     float maxLife = 0.0f;  // initial
+    float age = 0.0f;
+    bool hasPrev = false;
+};
+
+struct CollisionPlane {
+    math::Vec3 normal{0.0f, 1.0f, 0.0f};
+    float distance = 0.0f;      // plane equation: dot(n, x) + d = 0
+    float restitution = 0.4f;   // bounce
+    float friction = 0.1f;      // tangential damping
 };
 
 struct EmitterConfig {
@@ -46,6 +56,22 @@ struct EmitterConfig {
     bool useGravity = true;
     math::Vec3 gravity{0.0f, -9.81f, 0.0f};
     float damping = 0.98f;
+    math::Vec3 wind{0.0f, 0.0f, 0.0f};
+    bool useTurbulence = false;
+    float turbulenceStrength = 0.0f;
+    float turbulenceFrequency = 1.0f;
+
+    // Collisions
+    bool enableCollisions = false;
+    std::vector<CollisionPlane> collisionPlanes{};
+
+    // Sub-emitters
+    EmitterHandle subEmitter = NullEmitter;
+    uint32_t subEmitCount = 0;
+
+    // Trails
+    bool enableTrails = false;
+    float trailWidth = 0.02f;
 };
 
 /**

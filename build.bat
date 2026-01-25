@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 REM Build main targets (skip test targets that have errors)
-cmake --build . --config %BUILD_CONFIG% --parallel --target OpenMeta Editor OpenMetaEditorLib OpenEyeCore OpenEyeECS OpenEyeRendering OpenEyePhysics OpenEyeAnimation OpenEyeAssets OpenEyeParticles OpenEyeFluids OpenEyeImGui glad glfw BulletDynamics BulletCollision LinearMath Bullet3Common Bullet3Collision Bullet3Dynamics Bullet3OpenCL_clew
+cmake --build . --config %BUILD_CONFIG% --parallel --target EyelibCore EyelibMath EyelibAssets EyelibAnimation EyelibECS EyelibScene EyelibSerialize EyelibParticles EyelibFluids EyelibDebug EyelibPhysics EyelibRender EyelibPlatform EyelibAudio EyelibRenderAPI EyelibAudioAPI EyelibAssetsAPI EyelibAnimationAPI EyelibECSAPI EyelibSceneAPI EyelibSerializeAPI EyelibParticlesAPI EyelibFluidsAPI EyelibDebugAPI EyelibPhysicsAPI EyelibPlatformAPI EyelibCoreAPI EyelibMathAPI OpenEyeImGui glad glfw BulletDynamics BulletCollision LinearMath Bullet3Common Bullet3Collision Bullet3Dynamics Bullet3OpenCL_clew
 if errorlevel 1 (
     cd ..
     exit /b 1

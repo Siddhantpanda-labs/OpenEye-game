@@ -32,3 +32,14 @@ target_link_libraries(EyelibSerialize
         EyelibScene
 )
 
+if(OPENEYE_USE_LZ4 AND OPENEYE_LZ4_AVAILABLE)
+    target_link_libraries(EyelibSerialize PRIVATE lz4)
+    target_compile_definitions(EyelibSerialize PRIVATE EYELIB_WITH_LZ4=1)
+    target_include_directories(EyelibSerialize PRIVATE ${lz4_SOURCE_DIR}/lib)
+endif()
+if(OPENEYE_USE_ZSTD AND OPENEYE_ZSTD_AVAILABLE)
+    target_link_libraries(EyelibSerialize PRIVATE libzstd_static)
+    target_compile_definitions(EyelibSerialize PRIVATE EYELIB_WITH_ZSTD=1)
+    target_include_directories(EyelibSerialize PRIVATE ${zstd_SOURCE_DIR}/lib)
+endif()
+

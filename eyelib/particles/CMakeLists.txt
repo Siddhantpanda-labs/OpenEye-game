@@ -3,6 +3,10 @@
 set(PARTICLES_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ParticleSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ParticleSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ParticleRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ParticleRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/templates/ParticleTemplates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/templates/ParticleTemplates.h
 )
 
 add_library(EyelibParticles STATIC ${PARTICLES_SOURCES})
@@ -18,5 +22,6 @@ target_link_libraries(EyelibParticles
     PUBLIC
         EyelibCore
         EyelibMath
+        EyelibRender
 )
 

@@ -3,6 +3,7 @@
 set(DEBUG_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Presets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Presets.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Validation.h
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDraw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDraw.h
@@ -17,11 +18,15 @@ target_include_directories(EyelibDebug
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/eyelib>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/thirdparty/glad/include
 )
 
 target_link_libraries(EyelibDebug
     PUBLIC
         EyelibCore
         EyelibMath
+    PRIVATE
+        glad
 )
 
