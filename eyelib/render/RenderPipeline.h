@@ -66,7 +66,7 @@ private:
     void BuildAndExecuteFrameGraph(const RenderScene& scene);
     void RenderForward(const RenderScene& scene);
     void RenderForwardPlus(const RenderScene& scene);
-    void RenderSkybox(const RenderScene& scene);
+    void RenderSkybox(const RenderScene& scene, bool useGbufferDepth);
     void EnsureSkyboxShader();
 
     std::unique_ptr<GBuffer> m_gbuffer;

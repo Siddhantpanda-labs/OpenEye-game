@@ -13,6 +13,8 @@
 #include "api/audio/All.h"
 #include "api/debug/All.h"
 
+#include "eyelib/render/resources/MeshLoader.h"
+
 #include <iostream>
 #include <string>
 #include <chrono>
@@ -144,12 +146,39 @@ bool TestRender(TestStats& stats) {
         return false;
     }
 
-    auto checkerTexture = std::make_shared<Texture>();
+    TextureCube skybox;
+    std::vector<std::string> skyFaces = {
+        "assets/Clear Ocean/vz_clear_ocean_right.png",
+        "assets/Clear Ocean/vz_clear_ocean_left.png",
+        "assets/Clear Ocean/vz_clear_ocean_up.png",
+        "assets/Clear Ocean/vz_clear_ocean_down.png",
+        "assets/Clear Ocean/vz_clear_ocean_front.png",
+        "assets/Clear Ocean/vz_clear_ocean_back.png"
+    };
+    bool skyLoaded = skybox.LoadFromFiles(skyFaces, true, true);
+    Expect(stats, skyLoaded, "Render: load Clear Ocean skybox");
+    skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
+    skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
+
+    const std::string modelPath = "assets/models/dess_holiday_hb_juan_deltarune/scene.gltf";
+    std::vector<std::shared_ptr<Mesh>> modelMeshes;
+    {
+        auto internalMeshes = ::eyelib::render::MeshLoader::LoadFromFile(modelPath);
+        modelMeshes.reserve(internalMeshes.size());
+        for (const auto& m : internalMeshes) {
+            modelMeshes.push_back(Mesh::WrapInternal(m));
+        }
+    }
+    Expect(stats, !modelMeshes.empty(), "Render: load dess_holiday mesh");
+
+    auto albedoTexture = std::make_shared<Texture>();
     Expect(stats,
-           checkerTexture->LoadFromFile("assets/textures/checke.png", true, false),
-           "Render: load checker texture");
-    checkerTexture->SetFilter(TextureFilter::Linear, TextureFilter::Linear);
-    checkerTexture->SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
+           albedoTexture->LoadFromFile(
+               "assets/models/dess_holiday_hb_juan_deltarune/textures/DessTex_baseColor.png",
+               true, true),
+           "Render: load dess_holiday albedo");
+    albedoTexture->SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
+    albedoTexture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
 
     auto texturedShader = std::make_shared<Shader>();
     Expect(stats,
@@ -157,14 +186,15 @@ bool TestRender(TestStats& stats) {
                                         "assets/shaders/passes/forward/textured.frag"),
            "Render: load textured shader");
 
-    auto cubeMat = std::make_shared<Material>();
-    cubeMat->SetShader(texturedShader);
-    cubeMat->SetAlbedo(Vec3(1.0f, 1.0f, 1.0f));
-    cubeMat->SetAlbedoTexture(checkerTexture);
-    cubeMat->SetRoughness(1.0f);
-    cubeMat->SetMetallic(0.0f);
-
-    auto cubeMesh = BuildCubeMesh(0.5f);
+    auto modelMat = std::make_shared<Material>();
+    modelMat->SetShader(texturedShader);
+    modelMat->SetAlbedo(Vec3(1.0f, 1.0f, 1.0f));
+    modelMat->SetAlbedoTexture(albedoTexture);
+    modelMat->SetRoughness(0.9f);
+    modelMat->SetMetallic(0.0f);
+    modelMat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
+    modelMat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
+    modelMat->SetVec3("u_Emission", Vec3(0.0f));
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
     Expect(stats, colorOnly.GetColorAttachmentCount() == 1, "Render: color-only target");
@@ -179,6 +209,7 @@ bool TestRender(TestStats& stats) {
     pipeline.SetMode(RenderPipeline::Mode::Forward);
 
     RenderScene scene;
+    scene.skybox = std::make_shared<TextureCube>(std::move(skybox));
     Vec3 cameraPos(2.5f, 2.0f, 2.5f);
     float cameraYaw = -135.0f;
     float cameraPitch = -20.0f;
@@ -191,13 +222,31 @@ bool TestRender(TestStats& stats) {
     scene.light.ambient = Vec3(0.1f);
     scene.light.exposure = 1.0f;
 
-    Drawable cube{};
-    cube.mesh = cubeMesh;
-    cube.material = cubeMat;
-    cube.transform = glm::mat4(1.0f);
-    scene.opaque.push_back(cube);
+    AABB bounds;
+    bool boundsInitialized = false;
+    for (const auto& mesh : modelMeshes) {
+        if (!mesh || !mesh->IsValid()) continue;
+        if (!boundsInitialized) {
+            bounds = mesh->GetAABB();
+            boundsInitialized = true;
+        } else {
+            bounds = bounds.Union(mesh->GetAABB());
+        }
+        Drawable drawable{};
+        drawable.mesh = mesh;
+        drawable.material = modelMat;
+        drawable.transform = glm::mat4(1.0f);
+        scene.opaque.push_back(drawable);
+    }
+    Expect(stats, !scene.opaque.empty(), "Render: pipeline render dess_holiday");
 
-    Expect(stats, true, "Render: pipeline render textured cube");
+    if (boundsInitialized) {
+        Vec3 center = bounds.GetCenter();
+        Vec3 size = bounds.GetSize();
+        float radius = glm::length(size) * 0.6f;
+        cameraPos = center + Vec3(0.0f, radius * 0.4f, radius * 2.2f);
+        scene.camera.viewPos = cameraPos;
+    }
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
@@ -255,7 +304,9 @@ bool TestRender(TestStats& stats) {
         scene.camera.viewPos = cameraPos;
 
         const float t = elapsed.count();
-        scene.opaque[0].transform = glm::rotate(glm::mat4(1.0f), t * 0.6f, Vec3(0.0f, 1.0f, 0.0f));
+        if (!scene.opaque.empty()) {
+            scene.opaque[0].transform = glm::rotate(glm::mat4(1.0f), t * 0.3f, Vec3(0.0f, 1.0f, 0.0f));
+        }
 
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);

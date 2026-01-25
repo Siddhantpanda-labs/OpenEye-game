@@ -101,6 +101,8 @@ void RenderPipeline::CreateHDRFramebuffer() {
     DestroyHDRFramebuffer();
 
     glGenFramebuffers(1, &m_hdrFBO);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
 
     glGenTextures(1, &m_hdrColor);
@@ -329,7 +331,8 @@ void RenderPipeline::Render(const RenderScene& scene) {
     }
 
     if (scene.skybox) {
-        RenderSkybox(scene);
+        const bool useGbufferDepth = (m_mode == PipelineMode::Deferred);
+        RenderSkybox(scene, useGbufferDepth);
     }
 
     if (m_prePostCallback) {
@@ -343,7 +346,7 @@ void RenderPipeline::Render(const RenderScene& scene) {
         PostProcessor::Settings settings;  // Default settings - can be customized via GetPostProcessor()
         math::Mat4 invView = glm::inverse(scene.camera.view);
         math::Mat4 invProj = glm::inverse(scene.camera.projection);
-        unsigned int skyboxTex = 0;  // TODO: Get from scene or RenderPipeline
+        unsigned int skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->Id() : 0;
         float time = core::Time::TotalTime();  // Get time from engine time system
         unsigned int velocityTex = m_gbuffer->GetVelocityTexture();
         unsigned int finalTexture = m_postProcessor->ApplyPostProcessing(
@@ -384,7 +387,7 @@ void RenderPipeline::EnsureSkyboxShader() {
     m_skyboxShader->LoadFromFile("assets/shaders/passes/sky/skybox.vert", "assets/shaders/passes/sky/skybox.frag");
 }
 
-void RenderPipeline::RenderSkybox(const RenderScene& scene) {
+void RenderPipeline::RenderSkybox(const RenderScene& scene, bool useGbufferDepth) {
     if (!scene.skybox || !scene.skybox->IsValid()) return;
     EnsureSkyboxShader();
     if (!m_skyboxShader || !m_skyboxShader->IsValid()) return;
@@ -392,12 +395,13 @@ void RenderPipeline::RenderSkybox(const RenderScene& scene) {
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
     glViewport(0, 0, m_width, m_height);
 
-    if (m_gbuffer) {
+    if (useGbufferDepth && m_gbuffer) {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
         glBlitFramebuffer(0, 0, static_cast<GLint>(m_gbuffer->GetWidth()), static_cast<GLint>(m_gbuffer->GetHeight()),
                           0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -417,6 +421,7 @@ void RenderPipeline::RenderSkybox(const RenderScene& scene) {
     m_skyboxShader->Unbind();
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LESS);
+    glEnable(GL_CULL_FACE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
