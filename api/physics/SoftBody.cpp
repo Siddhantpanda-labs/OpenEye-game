@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 SoftBodyHandle SoftBody::CreateCloth(PhysicsWorld& world, const eyelib::math::Vec3& position,
                                      int widthSegments, int heightSegments,
@@ -88,5 +89,6 @@ void SoftBody::ClothSetSelfCollision(PhysicsWorld& world, SoftBodyHandle cloth, 
     if (w) eyelib::physics::Cloth::SetSelfCollision(w, cloth, enabled);
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

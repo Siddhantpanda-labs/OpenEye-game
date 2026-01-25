@@ -16,3 +16,20 @@
 #include "Memory.h"
 #include "Job.h"
 #include "Plugin.h"
+
+namespace eyelib {
+namespace api {
+namespace core {
+using ::eyelib::api::Engine;
+using ::eyelib::api::Time;
+using ::eyelib::api::Log;
+using ::eyelib::api::LogLevel;
+using ::api::ThreadPool;
+using ::api::TaskGraph;
+using ::api::ParallelFor;
+using ::api::ParallelForEach;
+namespace memory = ::api::memory;
+namespace plugin = ::api::plugin;
+} // namespace core
+} // namespace api
+} // namespace eyelib

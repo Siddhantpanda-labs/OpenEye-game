@@ -12,3 +12,22 @@
 #include "KeyframeEditor.h"
 #include "Procedural.h"
 
+namespace eyelib {
+namespace api {
+namespace animation {
+using ::eyelib::api::AnimationClip;
+using ::eyelib::api::Animator;
+using ::eyelib::api::BlendSystem;
+using ::eyelib::api::BlendTree;
+using ::eyelib::api::StateMachine;
+using ::eyelib::api::Skeleton;
+using ::eyelib::api::Pose;
+using ::eyelib::api::IK;
+using ::eyelib::api::AnimationEvents;
+using ::eyelib::api::AnimationEvent;
+using ::eyelib::api::KeyframeEditor;
+using ::eyelib::api::ProceduralAnimator;
+} // namespace animation
+} // namespace api
+} // namespace eyelib
+

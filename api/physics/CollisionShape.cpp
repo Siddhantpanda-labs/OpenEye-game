@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 CollisionShapeHandle CollisionShape::CreateBox(const eyelib::math::Vec3& halfExtents) {
     return eyelib::physics::CollisionShapeFactory::CreateBox(halfExtents);
@@ -47,5 +48,6 @@ void CollisionShape::Destroy(CollisionShapeHandle handle) {
     eyelib::physics::CollisionShapeFactory::Destroy(handle);
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

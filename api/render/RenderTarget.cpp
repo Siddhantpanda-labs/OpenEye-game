@@ -6,14 +6,14 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::TextureFormat ToInternal(TextureFormat format) {
-    return static_cast<render::TextureFormat>(format);
+::eyelib::render::TextureFormat ToInternal(TextureFormat format) {
+    return static_cast<::eyelib::render::TextureFormat>(format);
 }
 } // namespace
 
 class RenderTarget::Impl {
 public:
-    std::shared_ptr<render::RenderTarget> target = std::make_shared<render::RenderTarget>();
+    std::shared_ptr<::eyelib::render::RenderTarget> target = std::make_shared<::eyelib::render::RenderTarget>();
 };
 
 RenderTarget::RenderTarget() : m_impl(std::make_unique<Impl>()) {}
@@ -27,7 +27,7 @@ RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept = default;
 bool RenderTarget::Create(uint32_t width, uint32_t height,
                           const std::vector<TextureFormat>& colorFormats,
                           TextureFormat depthFormat, int samples) {
-    std::vector<render::TextureFormat> internalFormats;
+    std::vector<::eyelib::render::TextureFormat> internalFormats;
     internalFormats.reserve(colorFormats.size());
     for (auto format : colorFormats) {
         internalFormats.push_back(ToInternal(format));
@@ -82,11 +82,11 @@ std::shared_ptr<Texture> RenderTarget::GetDepthTexture() const {
 }
 
 void RenderTarget::Blit(const RenderTarget& source, const RenderTarget& dest, bool colorOnly) {
-    render::RenderTarget::Blit(*source.m_impl->target, *dest.m_impl->target, colorOnly);
+    ::eyelib::render::RenderTarget::Blit(*source.m_impl->target, *dest.m_impl->target, colorOnly);
 }
 
 int RenderTarget::GetMaxSamples(int samples) {
-    return render::RenderTarget::GetMaxSamples(samples);
+    return ::eyelib::render::RenderTarget::GetMaxSamples(samples);
 }
 
 RenderTarget RenderTarget::CreateColorDepth(uint32_t width, uint32_t height,
@@ -114,11 +114,11 @@ RenderTarget RenderTarget::CreateDepthOnly(uint32_t width, uint32_t height,
     return target;
 }
 
-std::shared_ptr<render::RenderTarget> RenderTarget::GetInternal() const {
+std::shared_ptr<::eyelib::render::RenderTarget> RenderTarget::GetInternal() const {
     return m_impl->target;
 }
 
-std::shared_ptr<RenderTarget> RenderTarget::WrapInternal(const std::shared_ptr<render::RenderTarget>& target) {
+std::shared_ptr<RenderTarget> RenderTarget::WrapInternal(const std::shared_ptr<::eyelib::render::RenderTarget>& target) {
     auto apiTarget = std::make_shared<RenderTarget>();
     if (target) apiTarget->m_impl->target = target;
     return apiTarget;

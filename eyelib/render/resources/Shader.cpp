@@ -4,6 +4,7 @@
 #include <glad/glad.h>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 namespace eyelib {
 namespace render {
@@ -26,6 +27,66 @@ Shader& Shader::operator=(Shader&& other) noexcept {
     other.m_program = 0;
     return *this;
 }
+
+namespace {
+bool AppendShaderSource(const std::string& path,
+                        std::string& out,
+                        std::unordered_set<std::string>& includeStack,
+                        int depth) {
+    if (depth > 32) {
+        core::Log::ErrorF("Shader include depth exceeded: %s", path.c_str());
+        return false;
+    }
+
+    const std::string normalized = platform::filesystem::NormalizePath(path);
+    if (includeStack.count(normalized) != 0) {
+        core::Log::ErrorF("Shader include cycle detected: %s", normalized.c_str());
+        return false;
+    }
+
+    std::vector<uint8_t> data = platform::filesystem::ReadFile(normalized);
+    if (data.empty()) {
+        core::Log::ErrorF("Shader include not found: %s", normalized.c_str());
+        return false;
+    }
+
+    includeStack.insert(normalized);
+    std::string src(reinterpret_cast<const char*>(data.data()), data.size());
+    std::istringstream stream(src);
+    std::string line;
+    const std::string baseDir = platform::filesystem::GetDirectory(normalized);
+
+    while (std::getline(stream, line)) {
+        std::string trimmed = line;
+        trimmed.erase(0, trimmed.find_first_not_of(" \t"));
+        if (trimmed.rfind("#include", 0) == 0) {
+            const size_t firstQuote = trimmed.find_first_of("\"<");
+            const size_t lastQuote = trimmed.find_last_of("\">");
+            if (firstQuote != std::string::npos && lastQuote != std::string::npos && lastQuote > firstQuote + 1) {
+                const std::string includeFile = trimmed.substr(firstQuote + 1, lastQuote - firstQuote - 1);
+                const std::string includePath = platform::filesystem::NormalizePath(baseDir + "/" + includeFile);
+                if (!AppendShaderSource(includePath, out, includeStack, depth + 1)) {
+                    includeStack.erase(normalized);
+                    return false;
+                }
+                continue;
+            }
+        }
+
+        out.append(line);
+        out.push_back('\n');
+    }
+
+    includeStack.erase(normalized);
+    return true;
+}
+
+bool LoadShaderSource(const std::string& path, std::string& out) {
+    std::unordered_set<std::string> includeStack;
+    out.clear();
+    return AppendShaderSource(path, out, includeStack, 0);
+}
+} // namespace
 
 GLuint Shader::CompileStage(unsigned int stageType, const std::string& src) {
     const char* csrc = src.c_str();
@@ -81,20 +142,18 @@ bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fr
 }
 
 bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
-    std::vector<uint8_t> vertexData = platform::filesystem::ReadFile(vertexPath);
-    if (vertexData.empty()) {
+    std::string vertexSrc;
+    if (!LoadShaderSource(vertexPath, vertexSrc)) {
         core::Log::ErrorF("Failed to load vertex shader: %s", vertexPath.c_str());
         return false;
     }
-    std::string vertexSrc(reinterpret_cast<const char*>(vertexData.data()), vertexData.size());
-    
-    std::vector<uint8_t> fragmentData = platform::filesystem::ReadFile(fragmentPath);
-    if (fragmentData.empty()) {
+
+    std::string fragmentSrc;
+    if (!LoadShaderSource(fragmentPath, fragmentSrc)) {
         core::Log::ErrorF("Failed to load fragment shader: %s", fragmentPath.c_str());
         return false;
     }
-    std::string fragmentSrc(reinterpret_cast<const char*>(fragmentData.data()), fragmentData.size());
-    
+
     return BuildFromSource(vertexSrc, fragmentSrc);
 }
 

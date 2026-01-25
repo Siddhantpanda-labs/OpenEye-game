@@ -5,6 +5,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 /**
  * @brief Rigid body API (opaque handles).
@@ -48,5 +49,6 @@ public:
     static bool IsKinematic(PhysicsWorld& world, RigidBodyHandle body);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

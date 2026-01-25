@@ -36,8 +36,8 @@ public:
     void SetVec4Override(const std::string& name, const math::Vec4& value);
     void ClearOverrides();
 
-    std::shared_ptr<render::MaterialInstance> GetInternal() const;
-    static std::shared_ptr<MaterialInstance> WrapInternal(const std::shared_ptr<render::MaterialInstance>& instance);
+    std::shared_ptr<::eyelib::render::MaterialInstance> GetInternal() const;
+    static std::shared_ptr<MaterialInstance> WrapInternal(const std::shared_ptr<::eyelib::render::MaterialInstance>& instance);
 
 private:
     class Impl;

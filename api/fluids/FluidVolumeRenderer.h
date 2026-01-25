@@ -22,7 +22,7 @@ public:
     void SetBackgroundTexture(const Texture& texture);
 
     void RenderVolume(const FluidSimulation& sim,
-                      const Camera& camera,
+                      const render::Camera& camera,
                       const math::Mat4& model,
                       const math::Vec3& emissionPos01,
                       const math::Vec3& volumeSize);

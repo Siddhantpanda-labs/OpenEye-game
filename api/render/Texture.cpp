@@ -6,26 +6,26 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::TextureFormat ToInternal(TextureFormat format) {
-    return static_cast<render::TextureFormat>(format);
+::eyelib::render::TextureFormat ToInternal(TextureFormat format) {
+    return static_cast<::eyelib::render::TextureFormat>(format);
 }
 
-render::TextureFilter ToInternal(TextureFilter filter) {
-    return static_cast<render::TextureFilter>(filter);
+::eyelib::render::TextureFilter ToInternal(TextureFilter filter) {
+    return static_cast<::eyelib::render::TextureFilter>(filter);
 }
 
-render::TextureWrap ToInternal(TextureWrap wrap) {
-    return static_cast<render::TextureWrap>(wrap);
+::eyelib::render::TextureWrap ToInternal(TextureWrap wrap) {
+    return static_cast<::eyelib::render::TextureWrap>(wrap);
 }
 
-TextureFormat FromInternal(render::TextureFormat format) {
+TextureFormat FromInternal(::eyelib::render::TextureFormat format) {
     return static_cast<TextureFormat>(format);
 }
 } // namespace
 
 class Texture::Impl {
 public:
-    std::shared_ptr<render::Texture2D> texture = std::make_shared<render::Texture2D>();
+    std::shared_ptr<::eyelib::render::Texture2D> texture = std::make_shared<::eyelib::render::Texture2D>();
 };
 
 Texture::Texture() : m_impl(std::make_unique<Impl>()) {}
@@ -45,7 +45,7 @@ bool Texture::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bool
 }
 
 bool Texture::Create(int width, int height, int format, const void* data) {
-    render::TextureFormat fmt = static_cast<render::TextureFormat>(format);
+    ::eyelib::render::TextureFormat fmt = static_cast<::eyelib::render::TextureFormat>(format);
     return m_impl->texture->Create(width, height, fmt, data);
 }
 
@@ -89,11 +89,11 @@ bool Texture::IsValid() const {
     return m_impl->texture->IsValid();
 }
 
-std::shared_ptr<render::Texture2D> Texture::GetInternal() const {
+std::shared_ptr<::eyelib::render::Texture2D> Texture::GetInternal() const {
     return m_impl->texture;
 }
 
-std::shared_ptr<Texture> Texture::WrapInternal(const std::shared_ptr<render::Texture2D>& texture) {
+std::shared_ptr<Texture> Texture::WrapInternal(const std::shared_ptr<::eyelib::render::Texture2D>& texture) {
     auto apiTexture = std::make_shared<Texture>();
     if (texture) apiTexture->m_impl->texture = texture;
     return apiTexture;

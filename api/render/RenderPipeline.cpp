@@ -8,16 +8,16 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::Drawable ToInternal(const Drawable& d) {
-    render::Drawable out;
+::eyelib::render::Drawable ToInternal(const Drawable& d) {
+    ::eyelib::render::Drawable out;
     out.mesh = d.mesh ? d.mesh->GetInternal() : nullptr;
     out.material = d.material ? d.material->GetInternal() : nullptr;
     out.transform = d.transform;
     return out;
 }
 
-render::RenderScene ToInternal(const RenderScene& scene) {
-    render::RenderScene out;
+::eyelib::render::RenderScene ToInternal(const RenderScene& scene) {
+    ::eyelib::render::RenderScene out;
     out.opaque.reserve(scene.opaque.size());
     for (const auto& d : scene.opaque) {
         out.opaque.push_back(ToInternal(d));
@@ -38,10 +38,11 @@ render::RenderScene ToInternal(const RenderScene& scene) {
     out.light.intensity = scene.light.intensity;
     out.light.ambient = scene.light.ambient;
     out.light.exposure = scene.light.exposure;
+    out.skybox = scene.skybox ? scene.skybox->GetInternal() : nullptr;
 
     out.pointLights.reserve(scene.pointLights.size());
     for (const auto& p : scene.pointLights) {
-        render::PointLight lp;
+        ::eyelib::render::PointLight lp;
         lp.position = p.position;
         lp.color = p.color;
         lp.intensity = p.intensity;
@@ -51,7 +52,7 @@ render::RenderScene ToInternal(const RenderScene& scene) {
 
     out.spotLights.reserve(scene.spotLights.size());
     for (const auto& s : scene.spotLights) {
-        render::SpotLight ls;
+        ::eyelib::render::SpotLight ls;
         ls.position = s.position;
         ls.direction = s.direction;
         ls.color = s.color;
@@ -68,7 +69,7 @@ render::RenderScene ToInternal(const RenderScene& scene) {
 
 class RenderPipeline::Impl {
 public:
-    std::unique_ptr<render::RenderPipeline> pipeline = std::make_unique<render::RenderPipeline>();
+    std::unique_ptr<::eyelib::render::RenderPipeline> pipeline = std::make_unique<::eyelib::render::RenderPipeline>();
 };
 
 RenderPipeline::RenderPipeline() : m_impl(std::make_unique<Impl>()) {}
@@ -100,21 +101,25 @@ void RenderPipeline::Shutdown() {
 }
 
 void RenderPipeline::SetMode(Mode mode) {
-    render::PipelineMode m = (mode == Mode::Forward) ? render::PipelineMode::Forward :
-                             (mode == Mode::Deferred) ? render::PipelineMode::Deferred :
-                             render::PipelineMode::ForwardPlus;
+    ::eyelib::render::PipelineMode m = (mode == Mode::Forward) ? ::eyelib::render::PipelineMode::Forward :
+                             (mode == Mode::Deferred) ? ::eyelib::render::PipelineMode::Deferred :
+                             ::eyelib::render::PipelineMode::ForwardPlus;
     m_impl->pipeline->SetMode(m);
 }
 
 RenderPipeline::Mode RenderPipeline::GetMode() const {
-    render::PipelineMode m = m_impl->pipeline->GetMode();
-    return (m == render::PipelineMode::Forward) ? Mode::Forward :
-           (m == render::PipelineMode::Deferred) ? Mode::Deferred :
+    ::eyelib::render::PipelineMode m = m_impl->pipeline->GetMode();
+    return (m == ::eyelib::render::PipelineMode::Forward) ? Mode::Forward :
+           (m == ::eyelib::render::PipelineMode::Deferred) ? Mode::Deferred :
            Mode::ForwardPlus;
 }
 
 void RenderPipeline::Render(const RenderScene& scene) {
     m_impl->pipeline->Render(ToInternal(scene));
+}
+
+void RenderPipeline::BlitToScreen() {
+    m_impl->pipeline->BlitToScreen();
 }
 
 } // namespace api

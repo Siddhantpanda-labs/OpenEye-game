@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 CharacterControllerHandle CharacterController::Create(PhysicsWorld& world, const eyelib::math::Vec3& position, float radius, float height) {
     auto* w = world.GetInternal();
@@ -64,5 +65,6 @@ void CharacterController::SetCollisionFilter(PhysicsWorld& world, CharacterContr
     if (w) w->SetCharacterCollisionFilter(handle, group, mask);
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

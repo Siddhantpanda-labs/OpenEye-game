@@ -37,6 +37,7 @@ target_link_libraries(EyelibPhysics
     PUBLIC
         EyelibCore
         EyelibMath
+        BulletSoftBody
         BulletDynamics
         BulletCollision
         LinearMath

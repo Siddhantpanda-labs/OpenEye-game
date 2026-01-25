@@ -5,6 +5,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using ConstraintHandle = eyelib::physics::ConstraintHandle;
 
@@ -52,5 +53,6 @@ public:
                               bool enabled, float targetVelocity, float maxForce);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

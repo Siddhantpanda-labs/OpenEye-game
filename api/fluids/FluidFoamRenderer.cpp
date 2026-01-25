@@ -68,8 +68,8 @@ void FluidFoamRenderer::UpdateFromSimulation(const FluidSimulation& sim, float d
     m_impl->renderer.UpdateFromSimulation(*sim.GetInternal(), dt);
 }
 
-std::shared_ptr<Mesh> FluidFoamRenderer::BuildMesh(const Camera& camera) {
-    render::CameraView view{};
+std::shared_ptr<Mesh> FluidFoamRenderer::BuildMesh(const render::Camera& camera) {
+    ::eyelib::render::CameraView view{};
     view.view = camera.GetViewMatrix();
     view.projection = camera.GetProjectionMatrix();
     view.viewPos = camera.GetPosition();

@@ -34,8 +34,8 @@ public:
     uint32_t GetVelocityTexture() const;
     uint32_t GetDepthTexture() const;
 
-    std::shared_ptr<render::GBuffer> GetInternal() const;
-    static std::shared_ptr<GBuffer> WrapInternal(const std::shared_ptr<render::GBuffer>& buffer);
+    std::shared_ptr<::eyelib::render::GBuffer> GetInternal() const;
+    static std::shared_ptr<GBuffer> WrapInternal(const std::shared_ptr<::eyelib::render::GBuffer>& buffer);
 
 private:
     class Impl;

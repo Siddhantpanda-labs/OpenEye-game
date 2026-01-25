@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 ConstraintHandle Constraint::CreateHinge(PhysicsWorld& world,
     RigidBodyHandle bodyA, RigidBodyHandle bodyB,
@@ -79,5 +80,6 @@ void Constraint::SetHingeMotor(PhysicsWorld& world, ConstraintHandle handle,
     if (w) eyelib::physics::ConstraintFactory::SetHingeMotor(w, handle, enabled, targetVelocity, maxForce);
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

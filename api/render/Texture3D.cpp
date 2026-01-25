@@ -6,26 +6,26 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::TextureFormat ToInternal(TextureFormat format) {
-    return static_cast<render::TextureFormat>(format);
+::eyelib::render::TextureFormat ToInternal(TextureFormat format) {
+    return static_cast<::eyelib::render::TextureFormat>(format);
 }
 
-render::TextureFilter ToInternal(TextureFilter filter) {
-    return static_cast<render::TextureFilter>(filter);
+::eyelib::render::TextureFilter ToInternal(TextureFilter filter) {
+    return static_cast<::eyelib::render::TextureFilter>(filter);
 }
 
-render::TextureWrap ToInternal(TextureWrap wrap) {
-    return static_cast<render::TextureWrap>(wrap);
+::eyelib::render::TextureWrap ToInternal(TextureWrap wrap) {
+    return static_cast<::eyelib::render::TextureWrap>(wrap);
 }
 
-TextureFormat FromInternal(render::TextureFormat format) {
+TextureFormat FromInternal(::eyelib::render::TextureFormat format) {
     return static_cast<TextureFormat>(format);
 }
 } // namespace
 
 class Texture3D::Impl {
 public:
-    std::shared_ptr<render::Texture3D> texture = std::make_shared<render::Texture3D>();
+    std::shared_ptr<::eyelib::render::Texture3D> texture = std::make_shared<::eyelib::render::Texture3D>();
 };
 
 Texture3D::Texture3D() : m_impl(std::make_unique<Impl>()) {}
@@ -80,11 +80,11 @@ bool Texture3D::IsValid() const {
     return m_impl->texture->IsValid();
 }
 
-std::shared_ptr<render::Texture3D> Texture3D::GetInternal() const {
+std::shared_ptr<::eyelib::render::Texture3D> Texture3D::GetInternal() const {
     return m_impl->texture;
 }
 
-std::shared_ptr<Texture3D> Texture3D::WrapInternal(const std::shared_ptr<render::Texture3D>& texture) {
+std::shared_ptr<Texture3D> Texture3D::WrapInternal(const std::shared_ptr<::eyelib::render::Texture3D>& texture) {
     auto apiTexture = std::make_shared<Texture3D>();
     if (texture) apiTexture->m_impl->texture = texture;
     return apiTexture;

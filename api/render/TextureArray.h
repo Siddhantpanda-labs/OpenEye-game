@@ -31,8 +31,8 @@ public:
     TextureFormat GetFormat() const;
     bool IsValid() const;
 
-    std::shared_ptr<render::TextureArray> GetInternal() const;
-    static std::shared_ptr<TextureArray> WrapInternal(const std::shared_ptr<render::TextureArray>& texture);
+    std::shared_ptr<::eyelib::render::TextureArray> GetInternal() const;
+    static std::shared_ptr<TextureArray> WrapInternal(const std::shared_ptr<::eyelib::render::TextureArray>& texture);
 
 private:
     class Impl;

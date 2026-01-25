@@ -6,7 +6,7 @@ namespace api {
 
 class PostProcessor::Impl {
 public:
-    std::unique_ptr<render::PostProcessor> processor = std::make_unique<render::PostProcessor>();
+    std::unique_ptr<::eyelib::render::PostProcessor> processor = std::make_unique<::eyelib::render::PostProcessor>();
 };
 
 PostProcessor::PostProcessor() : m_impl(std::make_unique<Impl>()) {}
@@ -30,7 +30,7 @@ void PostProcessor::Shutdown() {
 }
 
 uint32_t PostProcessor::Process(uint32_t inputTexture, const Settings& settings) {
-    render::PostProcessor::Settings s;
+    ::eyelib::render::PostProcessor::Settings s;
     s.enableBloom = settings.bloom;
     s.useACES = settings.toneMapping;
     s.enableFXAA = settings.fxaa;

@@ -6,7 +6,7 @@ namespace api {
 
 class ShadowMap::Impl {
 public:
-    std::shared_ptr<render::ShadowMap> shadow = std::make_shared<render::ShadowMap>();
+    std::shared_ptr<::eyelib::render::ShadowMap> shadow = std::make_shared<::eyelib::render::ShadowMap>();
 };
 
 ShadowMap::ShadowMap() : m_impl(std::make_unique<Impl>()) {}
@@ -46,11 +46,11 @@ uint32_t ShadowMap::GetResolution() const {
     return m_impl->shadow->GetResolution();
 }
 
-std::shared_ptr<render::ShadowMap> ShadowMap::GetInternal() const {
+std::shared_ptr<::eyelib::render::ShadowMap> ShadowMap::GetInternal() const {
     return m_impl->shadow;
 }
 
-std::shared_ptr<ShadowMap> ShadowMap::WrapInternal(const std::shared_ptr<render::ShadowMap>& shadow) {
+std::shared_ptr<ShadowMap> ShadowMap::WrapInternal(const std::shared_ptr<::eyelib::render::ShadowMap>& shadow) {
     auto apiShadow = std::make_shared<ShadowMap>();
     if (shadow) apiShadow->m_impl->shadow = shadow;
     return apiShadow;

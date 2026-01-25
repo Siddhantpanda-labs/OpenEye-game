@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 VehicleHandle Vehicle::CreateVehicle(PhysicsWorld& world, RigidBodyHandle chassis,
                                      const std::vector<WheelDesc>& wheels) {
@@ -34,5 +35,6 @@ WheelTransform Vehicle::GetWheelTransform(PhysicsWorld& world, VehicleHandle han
     return w ? eyelib::physics::Vehicle::GetWheelTransform(w, handle, wheelIndex) : WheelTransform{};
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

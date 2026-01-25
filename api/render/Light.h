@@ -4,6 +4,7 @@
 
 namespace eyelib {
 namespace api {
+namespace render {
 
 /**
  * @brief Light API. Directional, point, spot lights.
@@ -33,5 +34,6 @@ struct SpotLight {
     float outerConeCos = 0.7f;  // cos(outer angle)
 };
 
+} // namespace render
 } // namespace api
 } // namespace eyelib

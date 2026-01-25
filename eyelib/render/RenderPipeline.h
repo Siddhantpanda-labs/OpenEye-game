@@ -18,6 +18,8 @@ class LightingPass;
 class ClusteredLightGrid;
 class PostProcessor;
 class Shader;
+class TextureCube;
+class FullscreenQuad;
 
 /** Forward: direct draw. Deferred: GBuffer + lighting pass. ForwardPlus: tiled forward (many lights per tile). */
 enum class PipelineMode { Forward, Deferred, ForwardPlus };
@@ -43,6 +45,7 @@ public:
     PipelineMode GetMode() const { return m_mode; }
 
     void Render(const RenderScene& scene);
+    void BlitToScreen();
 
     GBuffer* GetGBuffer();
     ShadowMap* GetShadowMap();
@@ -63,6 +66,8 @@ private:
     void BuildAndExecuteFrameGraph(const RenderScene& scene);
     void RenderForward(const RenderScene& scene);
     void RenderForwardPlus(const RenderScene& scene);
+    void RenderSkybox(const RenderScene& scene);
+    void EnsureSkyboxShader();
 
     std::unique_ptr<GBuffer> m_gbuffer;
     std::unique_ptr<ShadowMap> m_shadowMap;
@@ -73,6 +78,7 @@ private:
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
     std::shared_ptr<Shader> m_forwardPlusShader;
+    std::shared_ptr<Shader> m_skyboxShader;
 
     unsigned int m_hdrFBO = 0;
     unsigned int m_hdrColor = 0;

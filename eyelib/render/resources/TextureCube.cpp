@@ -3,7 +3,10 @@
 #include "eyelib/platform/filesystem/FileSystem.h"
 
 #include <stb_image.h>
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include <stb_image_resize2.h>
 #include <glad/glad.h>
+#include <cstdlib>
 
 namespace eyelib {
 namespace render {
@@ -68,6 +71,7 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
     stbi_set_flip_vertically_on_load(0);
     int width = 0, height = 0, channels = 0;
     unsigned char* datas[6] = {};
+    constexpr int desiredChannels = 4;
 
     for (int i = 0; i < 6; ++i) {
         std::vector<uint8_t> bytes = eyelib::platform::filesystem::ReadFile(facePaths[static_cast<size_t>(i)]);
@@ -77,17 +81,27 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
             return false;
         }
         int w, h, c;
-        datas[i] = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &c, 0);
+        datas[i] = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &c, desiredChannels);
         if (!datas[i]) {
             core::Log::ErrorF("TextureCube: stb_image failed for face %d", i);
             for (int j = 0; j < i; ++j) stbi_image_free(datas[j]);
             return false;
         }
-        if (i == 0) { width = w; height = h; channels = c; }
-        else if (w != width || h != height || c != channels) {
-            core::Log::Error("TextureCube: all faces must have same dimensions and channels");
-            for (int j = 0; j <= i; ++j) stbi_image_free(datas[j]);
-            return false;
+        if (i == 0) { width = w; height = h; channels = desiredChannels; }
+        if (w != width || h != height) {
+            core::Log::WarnF("TextureCube: resizing face %d from %dx%d to %dx%d", i, w, h, width, height);
+            unsigned char* resized = stbir_resize_uint8_linear(
+                datas[i], w, h, 0,
+                nullptr, width, height, 0,
+                STBIR_RGBA
+            );
+            if (!resized) {
+                core::Log::ErrorF("TextureCube: resize failed for face %d", i);
+                for (int j = 0; j <= i; ++j) stbi_image_free(datas[j]);
+                return false;
+            }
+            stbi_image_free(datas[i]);
+            datas[i] = resized;
         }
     }
 

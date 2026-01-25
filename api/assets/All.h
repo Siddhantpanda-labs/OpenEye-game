@@ -12,3 +12,21 @@
 #include "api/assets/loaders/ShaderLoader.h"
 #include "api/assets/loaders/TextureLoader.h"
 
+namespace eyelib {
+namespace api {
+namespace assets {
+using ::eyelib::api::AssetId;
+using ::eyelib::api::AssetType;
+using ::eyelib::api::AssetRegistry;
+using ::eyelib::api::AssetLoader;
+using ::eyelib::api::StreamingManager;
+using ::eyelib::api::AnimationLoader;
+using ::eyelib::api::AudioLoader;
+using ::eyelib::api::MaterialLoader;
+using ::eyelib::api::MeshLoader;
+using ::eyelib::api::ShaderLoader;
+using ::eyelib::api::TextureLoader;
+} // namespace assets
+} // namespace api
+} // namespace eyelib
+

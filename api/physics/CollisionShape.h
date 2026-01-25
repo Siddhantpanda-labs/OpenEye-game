@@ -7,6 +7,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using CollisionShapeHandle = eyelib::physics::CollisionShapeHandle;
 
@@ -31,5 +32,6 @@ public:
     static void Destroy(CollisionShapeHandle handle);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

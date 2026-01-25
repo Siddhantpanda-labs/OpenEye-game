@@ -75,8 +75,8 @@ public:
     /** Check if valid. */
     bool IsValid() const;
 
-    static std::shared_ptr<Mesh> WrapInternal(const std::shared_ptr<render::Mesh>& mesh);
-    std::shared_ptr<render::Mesh> GetInternal() const;
+    static std::shared_ptr<Mesh> WrapInternal(const std::shared_ptr<::eyelib::render::Mesh>& mesh);
+    std::shared_ptr<::eyelib::render::Mesh> GetInternal() const;
 
 private:
     class Impl;

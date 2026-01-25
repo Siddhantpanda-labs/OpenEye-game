@@ -17,7 +17,7 @@ public:
     ParticleRenderer();
 
     std::shared_ptr<Mesh> BuildMesh(const ParticleSystem& system, EmitterHandle emitter,
-                                    const Camera& camera);
+                                    const render::Camera& camera);
 
 private:
     std::shared_ptr<Mesh> m_mesh;

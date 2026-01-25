@@ -6,7 +6,7 @@ namespace api {
 
 class LightingPass::Impl {
 public:
-    std::unique_ptr<render::LightingPass> pass = std::make_unique<render::LightingPass>();
+    std::unique_ptr<::eyelib::render::LightingPass> pass = std::make_unique<::eyelib::render::LightingPass>();
 };
 
 LightingPass::LightingPass() : m_impl(std::make_unique<Impl>()) {}
@@ -26,11 +26,11 @@ std::shared_ptr<Shader> LightingPass::GetLightingShader() const {
 }
 
 void LightingPass::Render(GBuffer& gbuffer,
-                          const LightParams& light,
+                          const DirectionalLight& light,
                           const math::Mat4& view,
                           const math::Mat4& projection,
                           const math::Vec3& viewPos) {
-    render::LightParams internal;
+    ::eyelib::render::LightParams internal;
     internal.direction = light.direction;
     internal.color = light.color;
     internal.intensity = light.intensity;

@@ -8,7 +8,7 @@ namespace api {
 
 class Material::Impl {
 public:
-    std::shared_ptr<render::Material> material = std::make_shared<render::Material>();
+    std::shared_ptr<::eyelib::render::Material> material = std::make_shared<::eyelib::render::Material>();
 };
 
 Material::Material() : m_impl(std::make_unique<Impl>()) {}
@@ -133,13 +133,13 @@ bool Material::IsKeywordEnabled(const std::string& keyword) const {
     return m_impl->material->IsKeywordEnabled(keyword);
 }
 
-std::shared_ptr<Material> Material::WrapInternal(const std::shared_ptr<render::Material>& material) {
+std::shared_ptr<Material> Material::WrapInternal(const std::shared_ptr<::eyelib::render::Material>& material) {
     auto apiMaterial = std::make_shared<Material>();
     if (material) apiMaterial->m_impl->material = material;
     return apiMaterial;
 }
 
-std::shared_ptr<render::Material> Material::GetInternal() const {
+std::shared_ptr<::eyelib::render::Material> Material::GetInternal() const {
     return m_impl->material;
 }
 

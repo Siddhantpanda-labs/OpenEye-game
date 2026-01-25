@@ -6,18 +6,18 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::TextureFilter ToInternal(TextureFilter filter) {
-    return static_cast<render::TextureFilter>(filter);
+::eyelib::render::TextureFilter ToInternal(TextureFilter filter) {
+    return static_cast<::eyelib::render::TextureFilter>(filter);
 }
 
-render::TextureWrap ToInternal(TextureWrap wrap) {
-    return static_cast<render::TextureWrap>(wrap);
+::eyelib::render::TextureWrap ToInternal(TextureWrap wrap) {
+    return static_cast<::eyelib::render::TextureWrap>(wrap);
 }
 } // namespace
 
 class TextureCube::Impl {
 public:
-    std::shared_ptr<render::TextureCube> texture = std::make_shared<render::TextureCube>();
+    std::shared_ptr<::eyelib::render::TextureCube> texture = std::make_shared<::eyelib::render::TextureCube>();
 };
 
 TextureCube::TextureCube() : m_impl(std::make_unique<Impl>()) {}
@@ -59,11 +59,11 @@ bool TextureCube::IsValid() const {
     return m_impl->texture->IsValid();
 }
 
-std::shared_ptr<render::TextureCube> TextureCube::GetInternal() const {
+std::shared_ptr<::eyelib::render::TextureCube> TextureCube::GetInternal() const {
     return m_impl->texture;
 }
 
-std::shared_ptr<TextureCube> TextureCube::WrapInternal(const std::shared_ptr<render::TextureCube>& texture) {
+std::shared_ptr<TextureCube> TextureCube::WrapInternal(const std::shared_ptr<::eyelib::render::TextureCube>& texture) {
     auto apiTexture = std::make_shared<TextureCube>();
     if (texture) apiTexture->m_impl->texture = texture;
     return apiTexture;

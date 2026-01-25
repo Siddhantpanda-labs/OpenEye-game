@@ -29,8 +29,8 @@ public:
     const math::Mat4& GetShadowMatrix() const;
     uint32_t GetResolution() const;
 
-    std::shared_ptr<render::ShadowMap> GetInternal() const;
-    static std::shared_ptr<ShadowMap> WrapInternal(const std::shared_ptr<render::ShadowMap>& shadow);
+    std::shared_ptr<::eyelib::render::ShadowMap> GetInternal() const;
+    static std::shared_ptr<ShadowMap> WrapInternal(const std::shared_ptr<::eyelib::render::ShadowMap>& shadow);
 
 private:
     class Impl;

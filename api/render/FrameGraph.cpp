@@ -1,6 +1,7 @@
 #include "api/render/FrameGraph.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include <glad/glad.h>
+#include <memory>
 
 namespace eyelib {
 namespace api {
@@ -24,7 +25,7 @@ GLenum ToInternalFormat(TextureFormat format, bool srgb) {
 
 class FrameGraph::Impl {
 public:
-    std::unique_ptr<render::FrameGraph> fg = std::make_unique<render::FrameGraph>();
+    std::unique_ptr<::eyelib::render::FrameGraph> fg = std::make_unique<::eyelib::render::FrameGraph>();
     std::vector<PassInfo> cachedPasses;
 };
 
@@ -49,7 +50,7 @@ FrameGraph::FrameGraph(FrameGraph&& other) noexcept = default;
 FrameGraph& FrameGraph::operator=(FrameGraph&& other) noexcept = default;
 
 FGTextureHandle FrameGraph::CreateTexture(const FGTextureDesc& desc) {
-    render::FGTextureDesc internal;
+    ::eyelib::render::FGTextureDesc internal;
     internal.width = desc.width;
     internal.height = desc.height;
     internal.internalFormat = ToInternalFormat(desc.format, desc.srgb);
@@ -66,7 +67,7 @@ int FrameGraph::AddPass(const std::string& name, const ExecuteFunc& execute,
                         const std::vector<FGTextureHandle>& reads,
                         const std::vector<FGTextureHandle>& writes,
                         bool sideEffect) {
-    return m_impl->fg->AddPass(name, [execute](const render::FGPassResources& res) {
+    return m_impl->fg->AddPass(name, [execute](const ::eyelib::render::FGPassResources& res) {
         FGPassResources apiRes;
         apiRes.m_getTexture = [&](FGTextureHandle h) -> uint32_t {
             return static_cast<uint32_t>(res.getTexture(h));

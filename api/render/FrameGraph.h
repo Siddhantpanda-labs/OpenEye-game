@@ -3,6 +3,7 @@
 #include "api/render/TextureTypes.h"
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 

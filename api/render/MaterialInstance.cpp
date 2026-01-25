@@ -10,14 +10,14 @@ namespace api {
 
 class MaterialInstance::Impl {
 public:
-    std::shared_ptr<render::MaterialInstance> instance;
+    std::shared_ptr<::eyelib::render::MaterialInstance> instance;
 };
 
 MaterialInstance::MaterialInstance() : m_impl(std::make_unique<Impl>()) {}
 
 MaterialInstance::MaterialInstance(std::shared_ptr<Material> material) : m_impl(std::make_unique<Impl>()) {
     if (material) {
-        m_impl->instance = std::make_shared<render::MaterialInstance>(material->GetInternal());
+        m_impl->instance = std::make_shared<::eyelib::render::MaterialInstance>(material->GetInternal());
     }
 }
 
@@ -29,7 +29,7 @@ MaterialInstance& MaterialInstance::operator=(MaterialInstance&& other) noexcept
 
 void MaterialInstance::SetMaterial(std::shared_ptr<Material> material) {
     if (!material) return;
-    m_impl->instance = std::make_shared<render::MaterialInstance>(material->GetInternal());
+    m_impl->instance = std::make_shared<::eyelib::render::MaterialInstance>(material->GetInternal());
 }
 
 std::shared_ptr<Material> MaterialInstance::GetMaterial() const {
@@ -87,11 +87,11 @@ void MaterialInstance::ClearOverrides() {
     m_impl->instance->ClearOverrides();
 }
 
-std::shared_ptr<render::MaterialInstance> MaterialInstance::GetInternal() const {
+std::shared_ptr<::eyelib::render::MaterialInstance> MaterialInstance::GetInternal() const {
     return m_impl->instance;
 }
 
-std::shared_ptr<MaterialInstance> MaterialInstance::WrapInternal(const std::shared_ptr<render::MaterialInstance>& instance) {
+std::shared_ptr<MaterialInstance> MaterialInstance::WrapInternal(const std::shared_ptr<::eyelib::render::MaterialInstance>& instance) {
     auto apiInstance = std::make_shared<MaterialInstance>();
     if (instance) apiInstance->m_impl->instance = instance;
     return apiInstance;

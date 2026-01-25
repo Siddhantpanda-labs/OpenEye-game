@@ -9,6 +9,7 @@ namespace render {
 
 class Mesh;
 class Material;
+class TextureCube;
 
 /** Single drawable: mesh + material + world transform */
 struct Drawable {
@@ -60,6 +61,7 @@ struct RenderScene {
     std::vector<Drawable> transparent;  // Sorted back-to-front by caller or pass
     CameraView camera;
     LightParams light;  // Directional light (always present)
+    std::shared_ptr<TextureCube> skybox;
     
     // For Forward+ rendering
     std::vector<PointLight> pointLights;

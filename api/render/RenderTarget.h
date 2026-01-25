@@ -54,8 +54,8 @@ public:
                                         TextureFormat depthFormat = TextureFormat::Depth24,
                                         int samples = 0);
 
-    std::shared_ptr<render::RenderTarget> GetInternal() const;
-    static std::shared_ptr<RenderTarget> WrapInternal(const std::shared_ptr<render::RenderTarget>& target);
+    std::shared_ptr<::eyelib::render::RenderTarget> GetInternal() const;
+    static std::shared_ptr<RenderTarget> WrapInternal(const std::shared_ptr<::eyelib::render::RenderTarget>& target);
 
 private:
     class Impl;

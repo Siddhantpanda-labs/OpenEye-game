@@ -4,8 +4,8 @@ in vec2 v_TexCoord;
 out vec4 FragColor;
 
 uniform samplerCube u_Skybox;
-
-#include "../../common/camera.glsl"
+uniform mat4 u_InverseViewMatrix;
+uniform mat4 u_InverseProjectionMatrix;
 
 void main() {
     vec2 ndc = v_TexCoord * 2.0 - 1.0;

@@ -24,7 +24,7 @@ public:
     std::shared_ptr<Shader> GetLightingShader() const;
 
     void Render(GBuffer& gbuffer,
-                const LightParams& light,
+                const DirectionalLight& light,
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Vec3& viewPos);

@@ -63,8 +63,8 @@ public:
     void SetKeyword(const std::string& keyword, bool enabled);
     bool IsKeywordEnabled(const std::string& keyword) const;
 
-    static std::shared_ptr<Material> WrapInternal(const std::shared_ptr<render::Material>& material);
-    std::shared_ptr<render::Material> GetInternal() const;
+    static std::shared_ptr<Material> WrapInternal(const std::shared_ptr<::eyelib::render::Material>& material);
+    std::shared_ptr<::eyelib::render::Material> GetInternal() const;
 
 private:
     class Impl;

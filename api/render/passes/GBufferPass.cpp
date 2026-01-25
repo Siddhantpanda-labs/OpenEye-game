@@ -5,8 +5,8 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::Drawable ToInternal(const Drawable& d) {
-    render::Drawable out;
+::eyelib::render::Drawable ToInternal(const Drawable& d) {
+    ::eyelib::render::Drawable out;
     out.mesh = d.mesh ? d.mesh->GetInternal() : nullptr;
     out.material = d.material ? d.material->GetInternal() : nullptr;
     out.transform = d.transform;
@@ -16,7 +16,7 @@ render::Drawable ToInternal(const Drawable& d) {
 
 class GBufferPass::Impl {
 public:
-    std::unique_ptr<render::GBufferPass> pass = std::make_unique<render::GBufferPass>();
+    std::unique_ptr<::eyelib::render::GBufferPass> pass = std::make_unique<::eyelib::render::GBufferPass>();
 };
 
 GBufferPass::GBufferPass() : m_impl(std::make_unique<Impl>()) {}
@@ -41,7 +41,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
                          const math::Mat4& projection,
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection) {
-    std::vector<render::Drawable> internal;
+    std::vector<::eyelib::render::Drawable> internal;
     internal.reserve(drawables.size());
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));

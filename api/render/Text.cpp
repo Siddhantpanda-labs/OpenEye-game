@@ -7,7 +7,7 @@ namespace api {
 
 class Font::Impl {
 public:
-    std::unique_ptr<render::Font> font = std::make_unique<render::Font>();
+    std::unique_ptr<::eyelib::render::Font> font = std::make_unique<::eyelib::render::Font>();
 };
 
 Font::Font() : m_impl(std::make_unique<Impl>()) {}
@@ -53,7 +53,7 @@ float Font::GetPixelHeight() const {
 
 class TextRenderer::Impl {
 public:
-    std::unique_ptr<render::TextRenderer> renderer = std::make_unique<render::TextRenderer>();
+    std::unique_ptr<::eyelib::render::TextRenderer> renderer = std::make_unique<::eyelib::render::TextRenderer>();
 };
 
 TextRenderer::TextRenderer() : m_impl(std::make_unique<Impl>()) {}

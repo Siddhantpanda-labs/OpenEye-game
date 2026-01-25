@@ -31,11 +31,11 @@ void FluidVolumeRenderer::SetBackgroundTexture(const Texture& texture) {
 }
 
 void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
-                                       const Camera& camera,
+                                       const render::Camera& camera,
                                        const math::Mat4& model,
                                        const math::Vec3& emissionPos01,
                                        const math::Vec3& volumeSize) {
-    render::CameraView view{};
+    ::eyelib::render::CameraView view{};
     view.view = camera.GetViewMatrix();
     view.projection = camera.GetProjectionMatrix();
     view.viewPos = camera.GetPosition();

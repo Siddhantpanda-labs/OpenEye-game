@@ -5,6 +5,7 @@
 
 namespace eyelib {
 namespace api {
+namespace render {
 
 /**
  * @brief Camera API. View/projection matrices, position, FOV, etc.
@@ -44,5 +45,6 @@ private:
     float m_far = 1000.0f;
 };
 
+} // namespace render
 } // namespace api
 } // namespace eyelib

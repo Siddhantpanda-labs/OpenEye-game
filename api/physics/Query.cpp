@@ -2,6 +2,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 RaycastResult Query::Raycast(PhysicsWorld& world, const eyelib::math::Vec3& from, const eyelib::math::Vec3& to) {
     auto* w = world.GetInternal();
@@ -41,5 +42,6 @@ std::vector<RigidBodyHandle> Query::QuerySphere(PhysicsWorld& world, const eyeli
     return w ? eyelib::physics::PhysicsQuery::QuerySphere(w, center, radius) : std::vector<RigidBodyHandle>{};
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

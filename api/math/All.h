@@ -11,3 +11,9 @@
 #include "api/math/Interpolation.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/math/Transform.h"
+
+namespace eyelib {
+namespace api {
+namespace math = ::eyelib::math;
+} // namespace api
+} // namespace eyelib

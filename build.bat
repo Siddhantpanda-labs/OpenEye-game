@@ -14,14 +14,15 @@ cd build
 
 REM Always (re)configure CMake so include-dir / file list changes propagate.
 REM This is fast if nothing changed, and avoids stale build issues.
-cmake .. -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF
+cmake .. -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF -DOPENEYE_BUILD_TESTS=ON
 if errorlevel 1 (
     cd ..
     exit /b 1
 )
 
-REM Build main targets (skip test targets that have errors)
-cmake --build . --config %BUILD_CONFIG% --parallel --target EyelibCore EyelibMath EyelibAssets EyelibAnimation EyelibECS EyelibScene EyelibSerialize EyelibParticles EyelibFluids EyelibDebug EyelibPhysics EyelibRender EyelibPlatform EyelibAudio EyelibRenderAPI EyelibAudioAPI EyelibAssetsAPI EyelibAnimationAPI EyelibECSAPI EyelibSceneAPI EyelibSerializeAPI EyelibParticlesAPI EyelibFluidsAPI EyelibDebugAPI EyelibPhysicsAPI EyelibPlatformAPI EyelibCoreAPI EyelibMathAPI OpenEyeImGui glad glfw BulletDynamics BulletCollision LinearMath Bullet3Common Bullet3Collision Bullet3Dynamics Bullet3OpenCL_clew
+REM Build the API test app (pulls in required libs)
+REM Avoid building INTERFACE targets directly (no vcxproj).
+cmake --build . --config %BUILD_CONFIG% --parallel --target OpenEyeApiTests
 if errorlevel 1 (
     cd ..
     exit /b 1

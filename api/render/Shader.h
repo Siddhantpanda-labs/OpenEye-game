@@ -35,8 +35,8 @@ public:
 
     bool IsValid() const;
 
-    std::shared_ptr<render::Shader> GetInternal() const;
-    static std::shared_ptr<Shader> WrapInternal(const std::shared_ptr<render::Shader>& shader);
+    std::shared_ptr<::eyelib::render::Shader> GetInternal() const;
+    static std::shared_ptr<Shader> WrapInternal(const std::shared_ptr<::eyelib::render::Shader>& shader);
 
 private:
     class Impl;

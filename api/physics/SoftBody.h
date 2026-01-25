@@ -7,6 +7,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using SoftBodyHandle = eyelib::physics::SoftBodyHandle;
 
@@ -48,5 +49,6 @@ public:
     static void ClothSetSelfCollision(PhysicsWorld& world, SoftBodyHandle cloth, bool enabled);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

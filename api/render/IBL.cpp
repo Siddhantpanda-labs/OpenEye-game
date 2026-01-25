@@ -7,7 +7,7 @@ namespace api {
 
 class IBL::Impl {
 public:
-    std::unique_ptr<render::IBL> ibl = std::make_unique<render::IBL>();
+    std::unique_ptr<::eyelib::render::IBL> ibl = std::make_unique<::eyelib::render::IBL>();
 };
 
 IBL::IBL() : m_impl(std::make_unique<Impl>()) {}

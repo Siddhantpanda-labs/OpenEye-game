@@ -3,6 +3,7 @@
 
 namespace eyelib {
 namespace api {
+namespace render {
 
 Camera::Camera() = default;
 
@@ -35,5 +36,6 @@ math::Mat4 Camera::GetProjectionMatrix() const {
     return m_projection;
 }
 
+} // namespace render
 } // namespace api
 } // namespace eyelib

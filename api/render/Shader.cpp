@@ -6,7 +6,7 @@ namespace api {
 
 class Shader::Impl {
 public:
-    std::shared_ptr<render::Shader> shader = std::make_shared<render::Shader>();
+    std::shared_ptr<::eyelib::render::Shader> shader = std::make_shared<::eyelib::render::Shader>();
 };
 
 Shader::Shader() : m_impl(std::make_unique<Impl>()) {}
@@ -69,11 +69,11 @@ bool Shader::IsValid() const {
     return m_impl->shader->IsValid();
 }
 
-std::shared_ptr<render::Shader> Shader::GetInternal() const {
+std::shared_ptr<::eyelib::render::Shader> Shader::GetInternal() const {
     return m_impl->shader;
 }
 
-std::shared_ptr<Shader> Shader::WrapInternal(const std::shared_ptr<render::Shader>& shader) {
+std::shared_ptr<Shader> Shader::WrapInternal(const std::shared_ptr<::eyelib::render::Shader>& shader) {
     auto apiShader = std::make_shared<Shader>();
     if (shader) apiShader->m_impl->shader = shader;
     return apiShader;

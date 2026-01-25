@@ -5,8 +5,8 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::LODSettings ToInternal(const LODSettings& settings) {
-    render::LODSettings out;
+::eyelib::render::LODSettings ToInternal(const LODSettings& settings) {
+    ::eyelib::render::LODSettings out;
     out.distanceThresholds = settings.distanceThresholds;
     out.hysteresis = settings.hysteresis;
     out.currentLOD = settings.currentLOD;
@@ -14,7 +14,7 @@ render::LODSettings ToInternal(const LODSettings& settings) {
     return out;
 }
 
-LODSettings FromInternal(const render::LODSettings& settings) {
+LODSettings FromInternal(const ::eyelib::render::LODSettings& settings) {
     LODSettings out;
     out.distanceThresholds = settings.distanceThresholds;
     out.hysteresis = settings.hysteresis;
@@ -26,22 +26,22 @@ LODSettings FromInternal(const render::LODSettings& settings) {
 
 size_t LODManager::UpdateLOD(LODSettings& settings, float distanceFromCamera, size_t maxLOD) {
     auto internal = ToInternal(settings);
-    auto result = render::LODManager::UpdateLOD(internal, distanceFromCamera, maxLOD);
+    auto result = ::eyelib::render::LODManager::UpdateLOD(internal, distanceFromCamera, maxLOD);
     settings = FromInternal(internal);
     return result;
 }
 
 float LODManager::CalculateDistance(const math::Vec3& cameraPos, const math::Vec3& entityPos) {
-    return render::LODManager::CalculateDistance(cameraPos, entityPos);
+    return ::eyelib::render::LODManager::CalculateDistance(cameraPos, entityPos);
 }
 
 LODSettings LODManager::GetDefaultSettings() {
-    return FromInternal(render::LODManager::GetDefaultSettings());
+    return FromInternal(::eyelib::render::LODManager::GetDefaultSettings());
 }
 
 LODSettings LODManager::CreateSettings(const std::vector<float>& thresholds,
                                        const std::vector<float>& hysteresisValues) {
-    return FromInternal(render::LODManager::CreateSettings(thresholds, hysteresisValues));
+    return FromInternal(::eyelib::render::LODManager::CreateSettings(thresholds, hysteresisValues));
 }
 
 } // namespace api

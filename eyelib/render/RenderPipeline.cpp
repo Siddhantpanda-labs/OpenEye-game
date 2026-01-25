@@ -12,6 +12,8 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/resources/TextureCube.h"
+#include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/core/Time.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -326,6 +328,10 @@ void RenderPipeline::Render(const RenderScene& scene) {
         break;
     }
 
+    if (scene.skybox) {
+        RenderSkybox(scene);
+    }
+
     if (m_prePostCallback) {
         m_prePostCallback(m_hdrFBO, m_width, m_height, scene);
     }
@@ -351,6 +357,58 @@ void RenderPipeline::Render(const RenderScene& scene) {
     // Store current frame matrices for next frame's velocity calculation
     m_prevView = scene.camera.view;
     m_prevProjection = scene.camera.projection;
+}
+
+void RenderPipeline::BlitToScreen() {
+    if (m_hdrFBO == 0) return;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_hdrFBO);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
+                      0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+}
+
+void RenderPipeline::EnsureSkyboxShader() {
+    if (m_skyboxShader && m_skyboxShader->IsValid()) return;
+    m_skyboxShader = std::make_shared<Shader>();
+    m_skyboxShader->LoadFromFile("assets/shaders/passes/sky/skybox.vert", "assets/shaders/passes/sky/skybox.frag");
+}
+
+void RenderPipeline::RenderSkybox(const RenderScene& scene) {
+    if (!scene.skybox || !scene.skybox->IsValid()) return;
+    EnsureSkyboxShader();
+    if (!m_skyboxShader || !m_skyboxShader->IsValid()) return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+    glViewport(0, 0, m_width, m_height);
+
+    if (m_gbuffer) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
+        glBlitFramebuffer(0, 0, static_cast<GLint>(m_gbuffer->GetWidth()), static_cast<GLint>(m_gbuffer->GetHeight()),
+                          0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+
+    m_skyboxShader->Bind();
+    m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(scene.camera.view));
+    m_skyboxShader->SetMat4("u_InverseProjectionMatrix", glm::inverse(scene.camera.projection));
+    m_skyboxShader->SetInt("u_Skybox", 0);
+    scene.skybox->Bind(0);
+
+    static FullscreenQuad quad;
+    quad.Render();
+
+    m_skyboxShader->Unbind();
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 GBuffer* RenderPipeline::GetGBuffer() { return m_gbuffer.get(); }

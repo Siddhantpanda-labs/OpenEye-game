@@ -7,7 +7,7 @@ namespace api {
 
 class Sprite::Impl {
 public:
-    render::Sprite sprite;
+    ::eyelib::render::Sprite sprite;
 };
 
 Sprite::Sprite() : m_impl(std::make_unique<Impl>()) {}
@@ -25,7 +25,7 @@ void Sprite::SetTexture(std::shared_ptr<Texture> tex) {
 }
 
 void Sprite::SetUV(const UVRect& uv) {
-    render::UVRect r{uv.minU, uv.minV, uv.maxU, uv.maxV};
+    ::eyelib::render::UVRect r{uv.minU, uv.minV, uv.maxU, uv.maxV};
     m_impl->sprite.SetUV(r);
 }
 

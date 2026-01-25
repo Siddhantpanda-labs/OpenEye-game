@@ -4,6 +4,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 class PhysicsWorld::Impl {
 public:
@@ -100,14 +101,15 @@ const std::vector<DebugLine>& PhysicsWorld::GetDebugDrawData() const {
     return m_impl->debugLines;
 }
 
-physics::PhysicsWorld* PhysicsWorld::GetInternal() {
+::eyelib::physics::PhysicsWorld* PhysicsWorld::GetInternal() {
     return m_impl ? &m_impl->world : nullptr;
 }
 
-const physics::PhysicsWorld* PhysicsWorld::GetInternal() const {
+const ::eyelib::physics::PhysicsWorld* PhysicsWorld::GetInternal() const {
     return m_impl ? &m_impl->world : nullptr;
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib
 

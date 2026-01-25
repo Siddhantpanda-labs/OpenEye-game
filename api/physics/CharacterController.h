@@ -5,6 +5,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using CharacterControllerHandle = eyelib::physics::CharacterControllerHandle;
 
@@ -30,5 +31,6 @@ public:
     static void SetCollisionFilter(PhysicsWorld& world, CharacterControllerHandle handle, short group, short mask);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

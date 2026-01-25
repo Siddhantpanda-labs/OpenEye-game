@@ -36,6 +36,7 @@ public:
 
     /** Render scene. */
     void Render(const RenderScene& scene);
+    void BlitToScreen();
 
 private:
     class Impl;

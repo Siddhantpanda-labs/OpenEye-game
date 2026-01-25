@@ -8,6 +8,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using RaycastResult = eyelib::physics::RaycastResult;
 using SweepResult = eyelib::physics::SweepResult;
@@ -30,5 +31,6 @@ public:
     static std::vector<RigidBodyHandle> QuerySphere(PhysicsWorld& world, const eyelib::math::Vec3& center, float radius);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

@@ -34,8 +34,8 @@ public:
     int GetSize() const;
     bool IsValid() const;
 
-    std::shared_ptr<render::TextureCube> GetInternal() const;
-    static std::shared_ptr<TextureCube> WrapInternal(const std::shared_ptr<render::TextureCube>& texture);
+    std::shared_ptr<::eyelib::render::TextureCube> GetInternal() const;
+    static std::shared_ptr<TextureCube> WrapInternal(const std::shared_ptr<::eyelib::render::TextureCube>& texture);
 
 private:
     class Impl;

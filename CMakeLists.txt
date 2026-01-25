@@ -32,6 +32,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Options
 option(OPENEYE_BUILD_EDITOR "Build development editor" ON)
 option(OPENEYE_BUILD_GAME "Build final game" ON)
+option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 
@@ -221,6 +222,13 @@ set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game" FORCE)
 # Game never depends on editor - clean separation
 if(OPENEYE_BUILD_GAME)
     add_subdirectory(app/openmeta)
+endif()
+
+# --------------------------------------
+# API Test Application
+# --------------------------------------
+if(OPENEYE_BUILD_TESTS)
+    add_subdirectory(app/test)
 endif()
 
 

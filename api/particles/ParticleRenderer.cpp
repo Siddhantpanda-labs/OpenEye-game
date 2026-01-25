@@ -10,7 +10,7 @@ namespace api {
 ParticleRenderer::ParticleRenderer() : m_mesh(std::make_shared<Mesh>()) {}
 
 std::shared_ptr<Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& system, EmitterHandle emitter,
-                                                  const Camera& camera) {
+                                                  const render::Camera& camera) {
     if (!m_mesh) m_mesh = std::make_shared<Mesh>();
 
     const auto particles = system.Snapshot(emitter);

@@ -6,7 +6,7 @@ namespace api {
 
 class Mesh::Impl {
 public:
-    std::shared_ptr<render::Mesh> mesh = std::make_shared<render::Mesh>();
+    std::shared_ptr<::eyelib::render::Mesh> mesh = std::make_shared<::eyelib::render::Mesh>();
 };
 
 Mesh::Mesh() : m_impl(std::make_unique<Impl>()) {}
@@ -18,10 +18,10 @@ Mesh::Mesh(Mesh&& other) noexcept = default;
 Mesh& Mesh::operator=(Mesh&& other) noexcept = default;
 
 void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
-    std::vector<render::Vertex> v;
+    std::vector<::eyelib::render::Vertex> v;
     v.reserve(vertices.size());
     for (const auto& vert : vertices) {
-        render::Vertex rv;
+        ::eyelib::render::Vertex rv;
         rv.position = vert.position;
         rv.normal = vert.normal;
         rv.uv = vert.uv;
@@ -84,7 +84,7 @@ Mesh::Submesh Mesh::GetSubmesh(size_t index) const {
 }
 
 Mesh::IndexFormat Mesh::GetIndexFormat() const {
-    return (m_impl->mesh->GetIndexFormat() == render::IndexFormat::UInt16)
+    return (m_impl->mesh->GetIndexFormat() == ::eyelib::render::IndexFormat::UInt16)
         ? IndexFormat::UInt16
         : IndexFormat::UInt32;
 }
@@ -105,13 +105,13 @@ bool Mesh::IsValid() const {
     return m_impl->mesh->IsValid();
 }
 
-std::shared_ptr<Mesh> Mesh::WrapInternal(const std::shared_ptr<render::Mesh>& mesh) {
+std::shared_ptr<Mesh> Mesh::WrapInternal(const std::shared_ptr<::eyelib::render::Mesh>& mesh) {
     auto apiMesh = std::make_shared<Mesh>();
     if (mesh) apiMesh->m_impl->mesh = mesh;
     return apiMesh;
 }
 
-std::shared_ptr<render::Mesh> Mesh::GetInternal() const {
+std::shared_ptr<::eyelib::render::Mesh> Mesh::GetInternal() const {
     return m_impl->mesh;
 }
 

@@ -6,26 +6,26 @@ namespace eyelib {
 namespace api {
 
 namespace {
-render::TextureFormat ToInternal(TextureFormat format) {
-    return static_cast<render::TextureFormat>(format);
+::eyelib::render::TextureFormat ToInternal(TextureFormat format) {
+    return static_cast<::eyelib::render::TextureFormat>(format);
 }
 
-render::TextureFilter ToInternal(TextureFilter filter) {
-    return static_cast<render::TextureFilter>(filter);
+::eyelib::render::TextureFilter ToInternal(TextureFilter filter) {
+    return static_cast<::eyelib::render::TextureFilter>(filter);
 }
 
-render::TextureWrap ToInternal(TextureWrap wrap) {
-    return static_cast<render::TextureWrap>(wrap);
+::eyelib::render::TextureWrap ToInternal(TextureWrap wrap) {
+    return static_cast<::eyelib::render::TextureWrap>(wrap);
 }
 
-TextureFormat FromInternal(render::TextureFormat format) {
+TextureFormat FromInternal(::eyelib::render::TextureFormat format) {
     return static_cast<TextureFormat>(format);
 }
 } // namespace
 
 class TextureArray::Impl {
 public:
-    std::shared_ptr<render::TextureArray> texture = std::make_shared<render::TextureArray>();
+    std::shared_ptr<::eyelib::render::TextureArray> texture = std::make_shared<::eyelib::render::TextureArray>();
 };
 
 TextureArray::TextureArray() : m_impl(std::make_unique<Impl>()) {}
@@ -76,11 +76,11 @@ bool TextureArray::IsValid() const {
     return m_impl->texture->IsValid();
 }
 
-std::shared_ptr<render::TextureArray> TextureArray::GetInternal() const {
+std::shared_ptr<::eyelib::render::TextureArray> TextureArray::GetInternal() const {
     return m_impl->texture;
 }
 
-std::shared_ptr<TextureArray> TextureArray::WrapInternal(const std::shared_ptr<render::TextureArray>& texture) {
+std::shared_ptr<TextureArray> TextureArray::WrapInternal(const std::shared_ptr<::eyelib::render::TextureArray>& texture) {
     auto apiTexture = std::make_shared<TextureArray>();
     if (texture) apiTexture->m_impl->texture = texture;
     return apiTexture;

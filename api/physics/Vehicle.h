@@ -6,6 +6,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 using VehicleHandle = eyelib::physics::VehicleHandle;
 using WheelDesc = eyelib::physics::WheelDesc;
@@ -22,5 +23,6 @@ public:
     static WheelTransform GetWheelTransform(PhysicsWorld& world, VehicleHandle handle, int wheelIndex);
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

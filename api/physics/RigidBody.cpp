@@ -3,6 +3,7 @@
 
 namespace eyelib {
 namespace api {
+namespace physics {
 
 RigidBodyHandle RigidBody::Create(PhysicsWorld& world,
                                   const eyelib::math::Vec3& position,
@@ -105,5 +106,6 @@ bool RigidBody::IsKinematic(PhysicsWorld& world, RigidBodyHandle body) {
     return w ? w->IsKinematic(body) : false;
 }
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib

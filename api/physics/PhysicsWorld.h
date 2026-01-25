@@ -10,6 +10,7 @@
 namespace eyelib {
 namespace physics { class PhysicsWorld; }
 namespace api {
+namespace physics {
 
 using RigidBodyHandle = uint32_t;
 
@@ -64,8 +65,8 @@ private:
     class Impl;
     Impl* m_impl = nullptr;
 
-    physics::PhysicsWorld* GetInternal();
-    const physics::PhysicsWorld* GetInternal() const;
+    ::eyelib::physics::PhysicsWorld* GetInternal();
+    const ::eyelib::physics::PhysicsWorld* GetInternal() const;
 
     friend class CollisionShape;
     friend class RigidBody;
@@ -76,6 +77,7 @@ private:
     friend class Vehicle;
 };
 
+} // namespace physics
 } // namespace api
 } // namespace eyelib
 

@@ -40,7 +40,7 @@ public:
     FluidFoamSettings GetSettings() const;
 
     void UpdateFromSimulation(const FluidSimulation& sim, float dt);
-    std::shared_ptr<Mesh> BuildMesh(const Camera& camera);
+    std::shared_ptr<Mesh> BuildMesh(const render::Camera& camera);
 
 private:
     class Impl;

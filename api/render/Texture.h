@@ -56,8 +56,8 @@ public:
     bool IsValid() const;
 
     /** Get internal texture (for internal use). */
-    std::shared_ptr<render::Texture2D> GetInternal() const;
-    static std::shared_ptr<Texture> WrapInternal(const std::shared_ptr<render::Texture2D>& texture);
+    std::shared_ptr<::eyelib::render::Texture2D> GetInternal() const;
+    static std::shared_ptr<Texture> WrapInternal(const std::shared_ptr<::eyelib::render::Texture2D>& texture);
 
 private:
     class Impl;

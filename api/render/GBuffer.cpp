@@ -6,7 +6,7 @@ namespace api {
 
 class GBuffer::Impl {
 public:
-    std::shared_ptr<render::GBuffer> gbuffer = std::make_shared<render::GBuffer>();
+    std::shared_ptr<::eyelib::render::GBuffer> gbuffer = std::make_shared<::eyelib::render::GBuffer>();
 };
 
 GBuffer::GBuffer() : m_impl(std::make_unique<Impl>()) {}
@@ -73,11 +73,11 @@ uint32_t GBuffer::GetDepthTexture() const {
     return static_cast<uint32_t>(m_impl->gbuffer->GetDepthTexture());
 }
 
-std::shared_ptr<render::GBuffer> GBuffer::GetInternal() const {
+std::shared_ptr<::eyelib::render::GBuffer> GBuffer::GetInternal() const {
     return m_impl->gbuffer;
 }
 
-std::shared_ptr<GBuffer> GBuffer::WrapInternal(const std::shared_ptr<render::GBuffer>& buffer) {
+std::shared_ptr<GBuffer> GBuffer::WrapInternal(const std::shared_ptr<::eyelib::render::GBuffer>& buffer) {
     auto apiBuffer = std::make_shared<GBuffer>();
     if (buffer) apiBuffer->m_impl->gbuffer = buffer;
     return apiBuffer;
