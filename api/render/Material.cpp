@@ -1,5 +1,6 @@
 #include "api/render/Material.h"
 #include "api/render/Texture.h"
+#include "api/render/Shader.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Texture2D.h"
 
@@ -23,6 +24,11 @@ void Material::SetTexture(const std::string& name, std::shared_ptr<Texture> text
     if (!texture) return;
     auto texImpl = texture->GetInternal();
     m_impl->material->SetTexture(name, texImpl);
+}
+
+void Material::SetShader(std::shared_ptr<Shader> shader) {
+    if (!shader) return;
+    m_impl->material->SetShader(shader->GetInternal());
 }
 
 void Material::SetAlbedo(const math::Vec3& color) {

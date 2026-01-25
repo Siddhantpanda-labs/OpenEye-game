@@ -117,6 +117,7 @@ public:
     /**
      * @brief Get output texture (after full chain)
      */
+    unsigned int GetOutputFBO() const { return m_outputFBO; }
     unsigned int GetOutputTexture() const { return m_outputTexture; }
 
 private:

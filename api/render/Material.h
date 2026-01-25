@@ -9,6 +9,7 @@ namespace render { class Material; }
 namespace api {
 
 class Texture;
+class Shader;
 
 /**
  * @brief Material handle (opaque). Set shader, textures, PBR properties.
@@ -26,6 +27,7 @@ public:
 
     /** Set texture by name. */
     void SetTexture(const std::string& name, std::shared_ptr<Texture> texture);
+    void SetShader(std::shared_ptr<Shader> shader);
 
     /** Set PBR properties. */
     void SetAlbedo(const math::Vec3& color);

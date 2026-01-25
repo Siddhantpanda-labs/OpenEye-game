@@ -87,15 +87,21 @@ std::shared_ptr<eyelib::api::render::Mesh> BuildCubeMesh(float halfSize) {
     vertices.reserve(24);
     indices.reserve(36);
 
+    const float uvInset = 0.02f;
+    const float u0 = uvInset;
+    const float v0uv = uvInset;
+    const float u1 = 1.0f - uvInset;
+    const float v1uv = 1.0f - uvInset;
+
     for (const auto& face : faces) {
         const uint32_t base = static_cast<uint32_t>(vertices.size());
         Mesh::Vertex v0{}, v1{}, v2{}, v3{};
         v0.position = face.v0; v1.position = face.v1; v2.position = face.v2; v3.position = face.v3;
         v0.normal = v1.normal = v2.normal = v3.normal = face.normal;
-        v0.uv = {0.0f, 0.0f};
-        v1.uv = {1.0f, 0.0f};
-        v2.uv = {1.0f, 1.0f};
-        v3.uv = {0.0f, 1.0f};
+        v0.uv = {u0, v0uv};
+        v1.uv = {u1, v0uv};
+        v2.uv = {u1, v1uv};
+        v3.uv = {u0, v1uv};
         vertices.push_back(v0);
         vertices.push_back(v1);
         vertices.push_back(v2);
@@ -138,41 +144,26 @@ bool TestRender(TestStats& stats) {
         return false;
     }
 
-    TextureCube skybox;
-    std::vector<std::string> faces = {
-        "assets/Clear Ocean/vz_clear_ocean_right.png",
-        "assets/Clear Ocean/vz_clear_ocean_left.png",
-        "assets/Clear Ocean/vz_clear_ocean_up.png",
-        "assets/Clear Ocean/vz_clear_ocean_down.png",
-        "assets/Clear Ocean/vz_clear_ocean_front.png",
-        "assets/Clear Ocean/vz_clear_ocean_back.png"
-    };
-    bool skyboxLoaded = skybox.LoadFromFiles(faces, true, true);
-    if (!skyboxLoaded) {
-        eyelib::api::core::Log::Warn("Render: skybox faces mismatched, falling back to checker cubemap");
-        faces.assign(6, "assets/textures/checker.png");
-        skyboxLoaded = skybox.LoadFromFiles(faces, false, true);
-    }
-    Expect(stats, skyboxLoaded, "Render: load skybox cubemap");
-
-    Shader gbufferShader;
+    auto checkerTexture = std::make_shared<Texture>();
     Expect(stats,
-           gbufferShader.LoadFromFile("assets/shaders/passes/deferred/gbuffer.vert",
-                                      "assets/shaders/passes/deferred/gbuffer.frag"),
-           "Render: load gbuffer shader");
+           checkerTexture->LoadFromFile("assets/textures/checke.png", true, false),
+           "Render: load checker texture");
+    checkerTexture->SetFilter(TextureFilter::Linear, TextureFilter::Linear);
+    checkerTexture->SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    auto groundMat = std::make_shared<Material>();
-    groundMat->SetAlbedo(Vec3(0.7f, 0.7f, 0.7f));
-    groundMat->SetRoughness(1.0f);
-    groundMat->SetMetallic(0.0f);
+    auto texturedShader = std::make_shared<Shader>();
+    Expect(stats,
+           texturedShader->LoadFromFile("assets/shaders/passes/forward/textured.vert",
+                                        "assets/shaders/passes/forward/textured.frag"),
+           "Render: load textured shader");
 
     auto cubeMat = std::make_shared<Material>();
-    cubeMat->SetAlbedo(Vec3(0.9f, 0.2f, 0.2f));
-    cubeMat->SetEmission(Vec3(0.0f));
-    cubeMat->SetRoughness(0.3f);
-    cubeMat->SetMetallic(0.1f);
+    cubeMat->SetShader(texturedShader);
+    cubeMat->SetAlbedo(Vec3(1.0f, 1.0f, 1.0f));
+    cubeMat->SetAlbedoTexture(checkerTexture);
+    cubeMat->SetRoughness(1.0f);
+    cubeMat->SetMetallic(0.0f);
 
-    auto groundMesh = BuildPlaneMesh(5.0f);
     auto cubeMesh = BuildCubeMesh(0.5f);
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
@@ -185,9 +176,9 @@ bool TestRender(TestStats& stats) {
         window.Shutdown();
         return false;
     }
+    pipeline.SetMode(RenderPipeline::Mode::Forward);
 
     RenderScene scene;
-    scene.skybox = std::make_shared<TextureCube>(std::move(skybox));
     Vec3 cameraPos(2.5f, 2.0f, 2.5f);
     float cameraYaw = -135.0f;
     float cameraPitch = -20.0f;
@@ -200,20 +191,13 @@ bool TestRender(TestStats& stats) {
     scene.light.ambient = Vec3(0.1f);
     scene.light.exposure = 1.0f;
 
-    Drawable ground{};
-    ground.mesh = groundMesh;
-    ground.material = groundMat;
-    ground.transform = glm::mat4(1.0f);
-
     Drawable cube{};
     cube.mesh = cubeMesh;
     cube.material = cubeMat;
-    cube.transform = glm::translate(glm::mat4(1.0f), Vec3(0.0f, 0.5f, 0.0f));
-
-    scene.opaque.push_back(ground);
+    cube.transform = glm::mat4(1.0f);
     scene.opaque.push_back(cube);
 
-    Expect(stats, true, "Render: pipeline render asset scene");
+    Expect(stats, true, "Render: pipeline render textured cube");
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
@@ -271,9 +255,7 @@ bool TestRender(TestStats& stats) {
         scene.camera.viewPos = cameraPos;
 
         const float t = elapsed.count();
-        cube.transform = glm::rotate(glm::mat4(1.0f), t, Vec3(0.0f, 1.0f, 0.0f));
-        cube.transform = glm::translate(cube.transform, Vec3(0.0f, 0.5f, 0.0f));
-        scene.opaque[1] = cube;
+        scene.opaque[0].transform = glm::rotate(glm::mat4(1.0f), t * 0.6f, Vec3(0.0f, 1.0f, 0.0f));
 
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);

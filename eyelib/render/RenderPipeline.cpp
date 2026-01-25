@@ -360,6 +360,15 @@ void RenderPipeline::Render(const RenderScene& scene) {
 }
 
 void RenderPipeline::BlitToScreen() {
+    if (m_postProcessor && m_postProcessor->GetOutputTexture() != 0) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_postProcessor->GetOutputFBO());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
+                          0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        return;
+    }
     if (m_hdrFBO == 0) return;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_hdrFBO);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
