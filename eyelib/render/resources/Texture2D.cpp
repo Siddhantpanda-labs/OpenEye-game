@@ -24,6 +24,7 @@ static GLenum ToGL(TextureFormat f, bool isSRGB) {
         case TextureFormat::RGBA16F: return GL_RGBA16F;
         case TextureFormat::Depth24: return GL_DEPTH_COMPONENT24;
         case TextureFormat::Depth24Stencil8: return GL_DEPTH24_STENCIL8;
+        case TextureFormat::None: return GL_RGBA8;
         default: return GL_RGBA8;
     }
 }
@@ -38,6 +39,7 @@ static GLenum ToGLDataFormat(TextureFormat f) {
         case TextureFormat::RGBA16F: return GL_RGBA;
         case TextureFormat::Depth24: return GL_DEPTH_COMPONENT;
         case TextureFormat::Depth24Stencil8: return GL_DEPTH_STENCIL;
+        case TextureFormat::None: return GL_RGBA;
         default: return GL_RGBA;
     }
 }
@@ -54,6 +56,7 @@ static GLenum ToGLDataType(TextureFormat f) {
             return GL_FLOAT;
         case TextureFormat::Depth24: return GL_UNSIGNED_INT;
         case TextureFormat::Depth24Stencil8: return GL_UNSIGNED_INT_24_8;
+        case TextureFormat::None: return GL_UNSIGNED_BYTE;
         default: return GL_UNSIGNED_BYTE;
     }
 }

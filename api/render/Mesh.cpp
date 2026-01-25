@@ -27,6 +27,8 @@ void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
         rv.uv = vert.uv;
         rv.tangent = vert.tangent;
         rv.color = vert.color;
+        rv.boneIndices = vert.boneIndices;
+        rv.boneWeights = vert.boneWeights;
         v.push_back(rv);
     }
     m_impl->mesh->SetVertices(v);
@@ -34,6 +36,22 @@ void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
 
 void Mesh::SetIndices(const std::vector<uint32_t>& indices) {
     m_impl->mesh->SetIndices(indices);
+}
+
+void Mesh::SetIndices(const std::vector<uint16_t>& indices) {
+    m_impl->mesh->SetIndices(indices);
+}
+
+void Mesh::AddSubmesh(uint32_t indexOffset, uint32_t indexCount, int materialIndex) {
+    m_impl->mesh->AddSubmesh(indexOffset, indexCount, materialIndex);
+}
+
+void Mesh::SetSubmesh(size_t index, uint32_t indexOffset, uint32_t indexCount) {
+    m_impl->mesh->SetSubmesh(index, indexOffset, indexCount);
+}
+
+void Mesh::ClearSubmeshes() {
+    m_impl->mesh->ClearSubmeshes();
 }
 
 void Mesh::UploadToGPU() {
@@ -50,6 +68,37 @@ size_t Mesh::GetIndexCount() const {
 
 math::AABB Mesh::GetAABB() const {
     return m_impl->mesh->GetAABB();
+}
+
+size_t Mesh::GetSubmeshCount() const {
+    return m_impl->mesh->GetSubmeshCount();
+}
+
+Mesh::Submesh Mesh::GetSubmesh(size_t index) const {
+    const auto& s = m_impl->mesh->GetSubmesh(index);
+    Submesh out;
+    out.indexOffset = s.indexOffset;
+    out.indexCount = s.indexCount;
+    out.materialIndex = s.materialIndex;
+    return out;
+}
+
+Mesh::IndexFormat Mesh::GetIndexFormat() const {
+    return (m_impl->mesh->GetIndexFormat() == render::IndexFormat::UInt16)
+        ? IndexFormat::UInt16
+        : IndexFormat::UInt32;
+}
+
+void Mesh::GenerateNormals() {
+    m_impl->mesh->GenerateNormals();
+}
+
+void Mesh::GenerateTangents() {
+    m_impl->mesh->GenerateTangents();
+}
+
+void Mesh::Optimize() {
+    m_impl->mesh->Optimize();
 }
 
 bool Mesh::IsValid() const {

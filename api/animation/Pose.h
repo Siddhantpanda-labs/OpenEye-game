@@ -22,6 +22,7 @@ public:
     const eyelib::math::Transform& GetBoneTransform(size_t index) const;
 
     std::shared_ptr<eyelib::animation::Pose> GetInternal() const;
+    static std::shared_ptr<Pose> WrapInternal(const std::shared_ptr<eyelib::animation::Pose>& pose);
 
 private:
     std::shared_ptr<eyelib::animation::Pose> m_pose;

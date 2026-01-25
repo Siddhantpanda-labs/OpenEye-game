@@ -18,6 +18,7 @@ static GLenum ToGLInternalFormat(TextureFormat f, bool isSRGB) {
         case TextureFormat::RGBA16F: return GL_RGBA16F;
         case TextureFormat::Depth24: return GL_DEPTH_COMPONENT24;
         case TextureFormat::Depth24Stencil8: return GL_DEPTH24_STENCIL8;
+        case TextureFormat::None: return GL_RGBA8;
         default: return GL_RGBA8;
     }
 }

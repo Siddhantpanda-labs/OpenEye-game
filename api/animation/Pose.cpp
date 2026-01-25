@@ -23,5 +23,11 @@ std::shared_ptr<eyelib::animation::Pose> Pose::GetInternal() const {
     return m_pose;
 }
 
+std::shared_ptr<Pose> Pose::WrapInternal(const std::shared_ptr<eyelib::animation::Pose>& pose) {
+    auto apiPose = std::make_shared<Pose>();
+    if (pose) apiPose->m_pose = pose;
+    return apiPose;
+}
+
 } // namespace api
 } // namespace eyelib

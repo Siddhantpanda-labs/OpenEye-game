@@ -14,6 +14,7 @@ static GLenum ToGL(TextureFormat f, bool isSRGB) {
         case TextureFormat::RGBA8: return isSRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
         case TextureFormat::RGB16F: return GL_RGB16F;
         case TextureFormat::RGBA16F: return GL_RGBA16F;
+        case TextureFormat::None: return GL_RGBA8;
         default: return GL_RGBA8;
     }
 }
@@ -25,6 +26,7 @@ static GLenum ToGLDataFormat(TextureFormat f) {
         case TextureFormat::RGBA8: return GL_RGBA;
         case TextureFormat::RGB16F: return GL_RGB;
         case TextureFormat::RGBA16F: return GL_RGBA;
+        case TextureFormat::None: return GL_RGBA;
         default: return GL_RGBA;
     }
 }
@@ -38,6 +40,7 @@ static GLenum ToGLDataType(TextureFormat f) {
         case TextureFormat::RGB16F:
         case TextureFormat::RGBA16F:
             return GL_FLOAT;
+        case TextureFormat::None: return GL_UNSIGNED_BYTE;
         default: return GL_UNSIGNED_BYTE;
     }
 }

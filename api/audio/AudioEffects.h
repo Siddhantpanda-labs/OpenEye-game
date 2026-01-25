@@ -28,5 +28,58 @@ struct FilterSettings {
     float resonance = 0.7f;
 };
 
+struct DistortionSettings {
+    float drive = 1.0f;
+    float mix = 0.5f;
+};
+
+class Reverb {
+public:
+    Reverb();
+    ~Reverb();
+    void SetSettings(const ReverbSettings& settings);
+    ReverbSettings GetSettings() const;
+
+private:
+    class Impl;
+    Impl* m_impl = nullptr;
+};
+
+class Echo {
+public:
+    Echo();
+    ~Echo();
+    void SetSettings(const EchoSettings& settings);
+    EchoSettings GetSettings() const;
+
+private:
+    class Impl;
+    Impl* m_impl = nullptr;
+};
+
+class Filter {
+public:
+    Filter();
+    ~Filter();
+    void SetSettings(const FilterSettings& settings);
+    FilterSettings GetSettings() const;
+
+private:
+    class Impl;
+    Impl* m_impl = nullptr;
+};
+
+class Distortion {
+public:
+    Distortion();
+    ~Distortion();
+    void SetSettings(const DistortionSettings& settings);
+    DistortionSettings GetSettings() const;
+
+private:
+    class Impl;
+    Impl* m_impl = nullptr;
+};
+
 } // namespace api
 } // namespace eyelib

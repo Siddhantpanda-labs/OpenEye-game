@@ -6,7 +6,8 @@ namespace render {
 enum class TextureFormat {
     R8, RG8, RGB8, RGBA8,
     RGB16F, RGBA16F,
-    Depth24, Depth24Stencil8
+    Depth24, Depth24Stencil8,
+    None
 };
 
 enum class TextureFilter {

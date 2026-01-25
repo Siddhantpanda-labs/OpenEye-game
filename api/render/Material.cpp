@@ -41,6 +41,10 @@ void Material::SetEmission(const math::Vec3& color) {
     m_impl->material->SetEmission(color);
 }
 
+void Material::SetAO(float value) {
+    m_impl->material->SetAO(value);
+}
+
 void Material::SetAlpha(float value) {
     m_impl->material->SetAlpha(value);
 }
@@ -61,6 +65,10 @@ math::Vec3 Material::GetEmission() const {
     return m_impl->material->GetEmission();
 }
 
+float Material::GetAO() const {
+    return m_impl->material->GetAO();
+}
+
 float Material::GetAlpha() const {
     return m_impl->material->GetAlpha();
 }
@@ -79,6 +87,50 @@ void Material::SetMetallicTexture(std::shared_ptr<Texture> t) {
 
 void Material::SetRoughnessTexture(std::shared_ptr<Texture> t) {
     SetTexture("u_RoughnessTexture", t);
+}
+
+void Material::SetAOTexture(std::shared_ptr<Texture> t) {
+    SetTexture("u_AOTexture", t);
+}
+
+void Material::SetEmissiveTexture(std::shared_ptr<Texture> t) {
+    SetTexture("u_EmissiveTexture", t);
+}
+
+void Material::SetMetallicRoughnessTexture(std::shared_ptr<Texture> t) {
+    SetTexture("u_MetallicRoughnessTexture", t);
+}
+
+void Material::SetFloat(const std::string& name, float value) {
+    m_impl->material->SetFloat(name, value);
+}
+
+void Material::SetVec3(const std::string& name, const math::Vec3& value) {
+    m_impl->material->SetVec3(name, value);
+}
+
+void Material::SetVec4(const std::string& name, const math::Vec4& value) {
+    m_impl->material->SetVec4(name, value);
+}
+
+float Material::GetFloat(const std::string& name, float defaultValue) const {
+    return m_impl->material->GetFloat(name, defaultValue);
+}
+
+math::Vec3 Material::GetVec3(const std::string& name, const math::Vec3& defaultValue) const {
+    return m_impl->material->GetVec3(name, defaultValue);
+}
+
+math::Vec4 Material::GetVec4(const std::string& name, const math::Vec4& defaultValue) const {
+    return m_impl->material->GetVec4(name, defaultValue);
+}
+
+void Material::SetKeyword(const std::string& keyword, bool enabled) {
+    m_impl->material->SetKeyword(keyword, enabled);
+}
+
+bool Material::IsKeywordEnabled(const std::string& keyword) const {
+    return m_impl->material->IsKeywordEnabled(keyword);
 }
 
 std::shared_ptr<Material> Material::WrapInternal(const std::shared_ptr<render::Material>& material) {

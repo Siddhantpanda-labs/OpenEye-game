@@ -1,10 +1,13 @@
 #pragma once
 
+#include "api/render/RenderScene.h"
 #include <cstdint>
 #include <memory>
 
 namespace eyelib {
 namespace api {
+
+class RenderTarget;
 
 /**
  * @brief Render pipeline API (opaque). Initialize, set mode, render scene.
@@ -23,14 +26,16 @@ public:
     RenderPipeline& operator=(RenderPipeline&& other) noexcept;
 
     bool Initialize(uint32_t width, uint32_t height);
+    bool Initialize(const RenderTarget& target);
     void Resize(uint32_t width, uint32_t height);
+    void Resize(const RenderTarget& target);
     void Shutdown();
 
     void SetMode(Mode mode);
     Mode GetMode() const;
 
-    /** Render scene. Scene data passed via RenderScene struct (to be defined). */
-    void Render(/* RenderScene scene - to be added */);
+    /** Render scene. */
+    void Render(const RenderScene& scene);
 
 private:
     class Impl;

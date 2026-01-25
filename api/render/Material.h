@@ -32,6 +32,7 @@ public:
     void SetMetallic(float value);
     void SetRoughness(float value);
     void SetEmission(const math::Vec3& color);
+    void SetAO(float value);
     void SetAlpha(float value);
 
     /** Get PBR properties. */
@@ -39,6 +40,7 @@ public:
     float GetMetallic() const;
     float GetRoughness() const;
     math::Vec3 GetEmission() const;
+    float GetAO() const;
     float GetAlpha() const;
 
     /** Convenience texture setters. */
@@ -46,6 +48,20 @@ public:
     void SetNormalTexture(std::shared_ptr<Texture> t);
     void SetMetallicTexture(std::shared_ptr<Texture> t);
     void SetRoughnessTexture(std::shared_ptr<Texture> t);
+    void SetAOTexture(std::shared_ptr<Texture> t);
+    void SetEmissiveTexture(std::shared_ptr<Texture> t);
+    void SetMetallicRoughnessTexture(std::shared_ptr<Texture> t);
+
+    void SetFloat(const std::string& name, float value);
+    void SetVec3(const std::string& name, const math::Vec3& value);
+    void SetVec4(const std::string& name, const math::Vec4& value);
+
+    float GetFloat(const std::string& name, float defaultValue = 0.0f) const;
+    math::Vec3 GetVec3(const std::string& name, const math::Vec3& defaultValue = math::Vec3(0.0f)) const;
+    math::Vec4 GetVec4(const std::string& name, const math::Vec4& defaultValue = math::Vec4(0.0f)) const;
+
+    void SetKeyword(const std::string& keyword, bool enabled);
+    bool IsKeywordEnabled(const std::string& keyword) const;
 
     static std::shared_ptr<Material> WrapInternal(const std::shared_ptr<render::Material>& material);
     std::shared_ptr<render::Material> GetInternal() const;
