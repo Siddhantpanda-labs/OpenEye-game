@@ -67,6 +67,14 @@ std::shared_ptr<eyelib::animation::AnimationClip> AnimationClip::GetInternal() c
     return m_impl ? m_impl->clip : nullptr;
 }
 
+std::shared_ptr<AnimationClip> AnimationClip::WrapInternal(
+    const std::shared_ptr<eyelib::animation::AnimationClip>& clip) {
+    auto apiClip = std::make_shared<AnimationClip>();
+    apiClip->m_impl = std::make_shared<Impl>("", 0.0f);
+    apiClip->m_impl->clip = clip;
+    return apiClip;
+}
+
 } // namespace api
 } // namespace eyelib
 

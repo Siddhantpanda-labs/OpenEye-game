@@ -65,6 +65,10 @@ void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
     m_impl->shader->SetMat4(name, value);
 }
 
+void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const {
+    m_impl->shader->SetMat4Array(name, values, count);
+}
+
 bool Shader::IsValid() const {
     return m_impl->shader->IsValid();
 }

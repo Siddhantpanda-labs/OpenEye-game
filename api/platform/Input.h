@@ -27,6 +27,8 @@ public:
     static Vec2f MousePosition();
     static Vec2f MouseDelta();
     static float ScrollDelta();
+
+    static void Update();
 };
 
 } // namespace api

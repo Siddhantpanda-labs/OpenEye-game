@@ -43,6 +43,10 @@ float Input::ScrollDelta() {
     return eyelib::platform::Input::ScrollDelta();
 }
 
+void Input::Update() {
+    eyelib::platform::Input::Update();
+}
+
 } // namespace api
 } // namespace eyelib
 

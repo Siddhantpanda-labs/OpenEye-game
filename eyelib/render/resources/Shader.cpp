@@ -17,14 +17,22 @@ Shader::~Shader() {
 
 Shader::Shader(Shader&& other) noexcept {
     m_program = other.m_program;
+    m_bonesUBO = other.m_bonesUBO;
+    m_bonesUBOSize = other.m_bonesUBOSize;
     other.m_program = 0;
+    other.m_bonesUBO = 0;
+    other.m_bonesUBOSize = 0;
 }
 
 Shader& Shader::operator=(Shader&& other) noexcept {
     if (this == &other) return *this;
     Destroy();
     m_program = other.m_program;
+    m_bonesUBO = other.m_bonesUBO;
+    m_bonesUBOSize = other.m_bonesUBOSize;
     other.m_program = 0;
+    other.m_bonesUBO = 0;
+    other.m_bonesUBOSize = 0;
     return *this;
 }
 
@@ -162,6 +170,11 @@ void Shader::Destroy() {
         glDeleteProgram(m_program);
         m_program = 0;
     }
+    if (m_bonesUBO) {
+        glDeleteBuffers(1, &m_bonesUBO);
+        m_bonesUBO = 0;
+        m_bonesUBOSize = 0;
+    }
 }
 
 void Shader::Bind() const {
@@ -212,6 +225,40 @@ void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
     if (!m_program) return;
     GLint loc = glGetUniformLocation(m_program, name.c_str());
     if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, &value[0][0]);
+}
+
+void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const {
+    if (!m_program || !values || count == 0) return;
+    GLint loc = glGetUniformLocation(m_program, name.c_str());
+    if (loc >= 0) {
+        glUniformMatrix4fv(loc, static_cast<GLsizei>(count), GL_FALSE, &values[0][0][0]);
+        return;
+    }
+
+    if (name != "u_Bones" && name != "u_BoneMatrices") return;
+
+    const GLuint blockIndex = glGetUniformBlockIndex(m_program, "Bones");
+    if (blockIndex == GL_INVALID_INDEX) return;
+
+    glUniformBlockBinding(m_program, blockIndex, 3);
+
+    if (!m_bonesUBO) {
+        glGenBuffers(1, &m_bonesUBO);
+    }
+
+    const size_t maxBones = 512;
+    const size_t clampedCount = (count > maxBones) ? maxBones : count;
+    const size_t byteSize = clampedCount * sizeof(math::Mat4);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, m_bonesUBO);
+    if (m_bonesUBOSize < byteSize) {
+        glBufferData(GL_UNIFORM_BUFFER, static_cast<GLsizeiptr>(byteSize), values, GL_DYNAMIC_DRAW);
+        m_bonesUBOSize = byteSize;
+    } else {
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr>(byteSize), values);
+    }
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, m_bonesUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 } // namespace render

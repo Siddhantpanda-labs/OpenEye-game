@@ -13,8 +13,6 @@
 #include "api/audio/All.h"
 #include "api/debug/All.h"
 
-#include "eyelib/render/resources/MeshLoader.h"
-
 #include <iostream>
 #include <string>
 #include <chrono>
@@ -125,6 +123,7 @@ std::shared_ptr<eyelib::api::render::Mesh> BuildCubeMesh(float halfSize) {
 bool TestRender(TestStats& stats) {
     using namespace eyelib::api::platform;
     using namespace eyelib::api::render;
+    using namespace eyelib::api::animation;
     using namespace eyelib::api::assets;
     using namespace eyelib::math;
 
@@ -161,40 +160,37 @@ bool TestRender(TestStats& stats) {
     skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
     const std::string modelPath = "assets/models/dess_holiday_hb_juan_deltarune/scene.gltf";
+    auto modelAsset = ModelLoader::LoadModel(modelPath);
+    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load dess_holiday model");
     std::vector<std::shared_ptr<Mesh>> modelMeshes;
-    {
-        auto internalMeshes = ::eyelib::render::MeshLoader::LoadFromFile(modelPath);
-        modelMeshes.reserve(internalMeshes.size());
-        for (const auto& m : internalMeshes) {
-            modelMeshes.push_back(Mesh::WrapInternal(m));
-        }
+    std::vector<std::shared_ptr<Material>> modelMaterials;
+    if (modelAsset) {
+        modelMeshes = modelAsset->GetMeshes();
+        modelMaterials = modelAsset->GetMaterials();
     }
-    Expect(stats, !modelMeshes.empty(), "Render: load dess_holiday mesh");
 
-    auto albedoTexture = std::make_shared<Texture>();
-    Expect(stats,
-           albedoTexture->LoadFromFile(
-               "assets/models/dess_holiday_hb_juan_deltarune/textures/DessTex_baseColor.png",
-               true, true),
-           "Render: load dess_holiday albedo");
-    albedoTexture->SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
-    albedoTexture->SetWrap(TextureWrap::Repeat, TextureWrap::Repeat);
+    const std::string animModelPath = "assets/models/animation/Orc Idle.fbx";
+    auto animAsset = ModelLoader::LoadModel(animModelPath);
+    Expect(stats, animAsset && !animAsset->GetMeshes().empty(), "Render: load animation model");
+    std::vector<std::shared_ptr<Mesh>> animMeshes;
+    std::vector<std::shared_ptr<Material>> animMaterials;
+    if (animAsset) {
+        animMeshes = animAsset->GetMeshes();
+        animMaterials = animAsset->GetMaterials();
+    }
 
-    auto texturedShader = std::make_shared<Shader>();
-    Expect(stats,
-           texturedShader->LoadFromFile("assets/shaders/passes/forward/textured.vert",
-                                        "assets/shaders/passes/forward/textured.frag"),
-           "Render: load textured shader");
+    const float animScale = 0.12f;
+    const Vec3 animOffset(-2.5f, 0.0f, 0.0f);
+    const Mat4 animModelTransform = glm::translate(Mat4(1.0f), animOffset) *
+                                    glm::scale(Mat4(1.0f), Vec3(animScale));
 
-    auto modelMat = std::make_shared<Material>();
-    modelMat->SetShader(texturedShader);
-    modelMat->SetAlbedo(Vec3(1.0f, 1.0f, 1.0f));
-    modelMat->SetAlbedoTexture(albedoTexture);
-    modelMat->SetRoughness(0.9f);
-    modelMat->SetMetallic(0.0f);
-    modelMat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
-    modelMat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
-    modelMat->SetVec3("u_Emission", Vec3(0.0f));
+    auto animSkeleton = animAsset ? animAsset->GetSkeleton() : nullptr;
+    auto animClip = animAsset ? animAsset->GetClip() : nullptr;
+    if (animClip) animClip->SetLoop(true);
+    Expect(stats, animSkeleton && animClip, "Render: load animation clip");
+    auto animator = std::make_shared<Animator>();
+    if (animSkeleton) animator->SetSkeleton(animSkeleton);
+    if (animClip) animator->SetClip(animClip);
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
     Expect(stats, colorOnly.GetColorAttachmentCount() == 1, "Render: color-only target");
@@ -222,6 +218,19 @@ bool TestRender(TestStats& stats) {
     scene.light.ambient = Vec3(0.1f);
     scene.light.exposure = 1.0f;
 
+    for (const auto& mat : modelMaterials) {
+        if (!mat) continue;
+        mat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
+        mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
+        mat->SetVec3("u_Emission", Vec3(0.0f));
+    }
+    for (const auto& mat : animMaterials) {
+        if (!mat) continue;
+        mat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
+        mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
+        mat->SetVec3("u_Emission", Vec3(0.0f));
+    }
+
     AABB bounds;
     bool boundsInitialized = false;
     for (const auto& mesh : modelMeshes) {
@@ -234,11 +243,37 @@ bool TestRender(TestStats& stats) {
         }
         Drawable drawable{};
         drawable.mesh = mesh;
-        drawable.material = modelMat;
+        if (!modelMaterials.empty() && mesh->GetSubmeshCount() > 0) {
+            const int matIndex = mesh->GetSubmesh(0).materialIndex;
+            if (matIndex >= 0 && static_cast<size_t>(matIndex) < modelMaterials.size()) {
+                drawable.material = modelMaterials[static_cast<size_t>(matIndex)];
+            }
+        }
+        if (!drawable.material && !modelMaterials.empty()) {
+            drawable.material = modelMaterials.front();
+        }
         drawable.transform = glm::mat4(1.0f);
         scene.opaque.push_back(drawable);
     }
     Expect(stats, !scene.opaque.empty(), "Render: pipeline render dess_holiday");
+
+    for (const auto& mesh : animMeshes) {
+        if (!mesh || !mesh->IsValid()) continue;
+        Drawable drawable{};
+        drawable.mesh = mesh;
+        if (!animMaterials.empty() && mesh->GetSubmeshCount() > 0) {
+            const int matIndex = mesh->GetSubmesh(0).materialIndex;
+            if (matIndex >= 0 && static_cast<size_t>(matIndex) < animMaterials.size()) {
+                drawable.material = animMaterials[static_cast<size_t>(matIndex)];
+            }
+        }
+        if (!drawable.material && !animMaterials.empty()) {
+            drawable.material = animMaterials.front();
+        }
+        drawable.transform = animModelTransform;
+        scene.opaque.push_back(drawable);
+    }
+    Expect(stats, !animMeshes.empty(), "Render: pipeline render animation model");
 
     if (boundsInitialized) {
         Vec3 center = bounds.GetCenter();
@@ -262,6 +297,7 @@ bool TestRender(TestStats& stats) {
     const int MOUSE_RIGHT = 1;
 
     while (!window.ShouldClose()) {
+        window.PollEvents();
         const auto now = std::chrono::steady_clock::now();
         const std::chrono::duration<float> elapsed = now - startTime;
 
@@ -274,7 +310,9 @@ bool TestRender(TestStats& stats) {
             scene.camera.projection = glm::perspective(glm::radians(60.0f), window.AspectRatio(), 0.1f, 1000.0f);
         }
 
-        const float deltaTime = std::chrono::duration<float>(now - lastTime).count();
+        float deltaTime = std::chrono::duration<float>(now - lastTime).count();
+        if (deltaTime > 0.1f) deltaTime = 0.1f;
+        lastTime = now;
         Vec3 forward;
         forward.x = std::cos(glm::radians(cameraPitch)) * std::cos(glm::radians(cameraYaw));
         forward.y = std::sin(glm::radians(cameraPitch));
@@ -283,13 +321,14 @@ bool TestRender(TestStats& stats) {
         const Vec3 up(0.0f, 1.0f, 0.0f);
         const Vec3 right = glm::normalize(glm::cross(forward, up));
 
-        float speed = 3.5f;
-        if (Input::IsKeyPressed(KEY_W)) cameraPos += forward * (speed * deltaTime);
-        if (Input::IsKeyPressed(KEY_S)) cameraPos -= forward * (speed * deltaTime);
-        if (Input::IsKeyPressed(KEY_D)) cameraPos += right * (speed * deltaTime);
-        if (Input::IsKeyPressed(KEY_A)) cameraPos -= right * (speed * deltaTime);
-        if (Input::IsKeyPressed(KEY_E)) cameraPos += up * (speed * deltaTime);
-        if (Input::IsKeyPressed(KEY_Q)) cameraPos -= up * (speed * deltaTime);
+        const float speed = 3.5f;
+        const float move = speed * deltaTime;
+        if (Input::IsKeyPressed(KEY_W)) cameraPos += forward * move;
+        if (Input::IsKeyPressed(KEY_S)) cameraPos -= forward * move;
+        if (Input::IsKeyPressed(KEY_D)) cameraPos += right * move;
+        if (Input::IsKeyPressed(KEY_A)) cameraPos -= right * move;
+        if (Input::IsKeyPressed(KEY_E)) cameraPos += up * move;
+        if (Input::IsKeyPressed(KEY_Q)) cameraPos -= up * move;
 
         if (Input::IsMouseButtonPressed(MOUSE_RIGHT)) {
             const auto mouseDelta = Input::MouseDelta();
@@ -308,18 +347,26 @@ bool TestRender(TestStats& stats) {
             scene.opaque[0].transform = glm::rotate(glm::mat4(1.0f), t * 0.3f, Vec3(0.0f, 1.0f, 0.0f));
         }
 
+        if (animator && animSkeleton && animClip) {
+            animator->Update(deltaTime);
+            const auto& bones = animator->GetBoneMatrices();
+            for (const auto& mat : animMaterials) {
+                if (!mat) continue;
+                mat->SetMat4Array("u_Bones", bones);
+            }
+        }
+
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);
         pipeline.BlitToScreen();
         window.SwapBuffers();
-        window.PollEvents();
 
         const auto frameEnd = std::chrono::steady_clock::now();
         const auto frameMs = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - lastTime);
         if (frameMs.count() < 16) {
             std::this_thread::sleep_for(std::chrono::milliseconds(16 - frameMs.count()));
         }
-        lastTime = frameEnd;
+        Input::Update();
     }
 
     pipeline.Shutdown();

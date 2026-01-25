@@ -72,7 +72,29 @@ void Animator::Update(float dt) {
         params.insert(m_floatParams.begin(), m_floatParams.end());
         m_pose = m_blendTree->Evaluate(params, m_time, m_skeleton->BoneCount());
     } else if (m_clip) {
-        m_pose = BlendSystem::SampleClip(*m_clip, m_time, m_skeleton->BoneCount());
+        const size_t boneCount = m_skeleton->BoneCount();
+        m_pose.Resize(boneCount);
+        for (size_t i = 0; i < boneCount; ++i) {
+            const Bone& b = m_skeleton->GetBone(i);
+            math::Transform t;
+            t.position = b.bindPosition;
+            t.rotation = b.bindRotation;
+            t.scale = b.bindScale;
+
+            const auto* ch = m_clip->FindChannel(static_cast<int>(i));
+            if (ch) {
+                if (!ch->positionKeys.empty()) {
+                    t.position = m_clip->SamplePosition(m_time, static_cast<int>(i));
+                }
+                if (!ch->rotationKeys.empty()) {
+                    t.rotation = m_clip->SampleRotation(m_time, static_cast<int>(i));
+                }
+                if (!ch->scaleKeys.empty()) {
+                    t.scale = m_clip->SampleScale(m_time, static_cast<int>(i));
+                }
+            }
+            m_pose.SetBoneTransform(i, t);
+        }
     }
 
     BuildBoneMatrices();
@@ -103,7 +125,7 @@ void Animator::BuildBoneMatrices() {
         } else {
             global[i] = local[i];
         }
-        m_boneMatrices[i] = global[i] * b.inverseBindMatrix;
+        m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
     }
 }
 

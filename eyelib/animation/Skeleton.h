@@ -34,10 +34,14 @@ public:
 
     bool IsValid() const;
 
+    void SetGlobalInverseTransform(const math::Mat4& m) { m_globalInverse = m; }
+    const math::Mat4& GetGlobalInverseTransform() const { return m_globalInverse; }
+
 private:
     std::vector<Bone> m_bones;
     std::unordered_map<std::string, int> m_boneNameToIndex;
     bool m_boneMapBuilt = false;
+    math::Mat4 m_globalInverse{1.0f};
 };
 
 } // namespace animation

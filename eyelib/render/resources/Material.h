@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace eyelib {
 namespace render {
@@ -55,6 +56,7 @@ public:
     void SetFloat(const std::string& name, float value);
     void SetVec3(const std::string& name, const math::Vec3& value);
     void SetVec4(const std::string& name, const math::Vec4& value);
+    void SetMat4Array(const std::string& name, const std::vector<math::Mat4>& values);
 
     float GetFloat(const std::string& name, float defaultValue = 0.0f) const;
     math::Vec3 GetVec3(const std::string& name, const math::Vec3& defaultValue = math::Vec3(0.0f)) const;
@@ -83,6 +85,7 @@ private:
     std::unordered_map<std::string, float> m_floats;
     std::unordered_map<std::string, math::Vec3> m_vec3s;
     std::unordered_map<std::string, math::Vec4> m_vec4s;
+    std::unordered_map<std::string, std::vector<math::Mat4>> m_mat4Arrays;
     std::unordered_map<std::string, bool> m_keywords;
 
     math::Vec3 m_albedo{0.8f};

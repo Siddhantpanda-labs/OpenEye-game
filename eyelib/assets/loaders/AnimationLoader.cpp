@@ -18,12 +18,12 @@ namespace assets {
 
 namespace {
 static math::Mat4 ToMat4(const aiMatrix4x4& m) {
-    return math::Mat4(
-        m.a1, m.b1, m.c1, m.d1,
-        m.a2, m.b2, m.c2, m.d2,
-        m.a3, m.b3, m.c3, m.d3,
-        m.a4, m.b4, m.c4, m.d4
-    );
+    math::Mat4 out{1.0f};
+    out[0][0] = m.a1; out[1][0] = m.a2; out[2][0] = m.a3; out[3][0] = m.a4;
+    out[0][1] = m.b1; out[1][1] = m.b2; out[2][1] = m.b3; out[3][1] = m.b4;
+    out[0][2] = m.c1; out[1][2] = m.c2; out[2][2] = m.c3; out[3][2] = m.c4;
+    out[0][3] = m.d1; out[1][3] = m.d2; out[2][3] = m.d3; out[3][3] = m.d4;
+    return out;
 }
 
 static void Decompose(const aiMatrix4x4& m, math::Vec3& pos, math::Quat& rot, math::Vec3& scale) {
@@ -56,6 +56,8 @@ static void ProcessNode(aiNode* node, int parentIndex, const aiMatrix4x4& parent
 static std::shared_ptr<animation::Skeleton> BuildSkeleton(const aiScene* scene) {
     if (!scene || !scene->mRootNode) return nullptr;
     auto skeleton = std::make_shared<animation::Skeleton>();
+    const math::Mat4 rootTransform = ToMat4(scene->mRootNode->mTransformation);
+    skeleton->SetGlobalInverseTransform(glm::inverse(rootTransform));
     ProcessNode(scene->mRootNode, -1, aiMatrix4x4(), *skeleton);
     skeleton->BuildBoneMap();
     return skeleton;

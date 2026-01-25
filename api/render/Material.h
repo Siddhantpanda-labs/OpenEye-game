@@ -3,6 +3,7 @@
 #include "eyelib/math/Types.h"
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace eyelib {
 namespace render { class Material; }
@@ -57,6 +58,7 @@ public:
     void SetFloat(const std::string& name, float value);
     void SetVec3(const std::string& name, const math::Vec3& value);
     void SetVec4(const std::string& name, const math::Vec4& value);
+    void SetMat4Array(const std::string& name, const std::vector<math::Mat4>& values);
 
     float GetFloat(const std::string& name, float defaultValue = 0.0f) const;
     math::Vec3 GetVec3(const std::string& name, const math::Vec3& defaultValue = math::Vec3(0.0f)) const;

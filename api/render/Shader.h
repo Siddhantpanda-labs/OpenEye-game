@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -32,6 +33,7 @@ public:
     void SetVec3(const std::string& name, const math::Vec3& value) const;
     void SetVec4(const std::string& name, const math::Vec4& value) const;
     void SetMat4(const std::string& name, const math::Mat4& value) const;
+    void SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const;
 
     bool IsValid() const;
 

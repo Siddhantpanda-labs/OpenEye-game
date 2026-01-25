@@ -48,6 +48,11 @@ void Material::SetVec4(const std::string& name, const math::Vec4& value) {
     m_hashDirty = true;
 }
 
+void Material::SetMat4Array(const std::string& name, const std::vector<math::Mat4>& values) {
+    m_mat4Arrays[name] = values;
+    m_hashDirty = true;
+}
+
 float Material::GetFloat(const std::string& name, float defaultValue) const {
     auto it = m_floats.find(name);
     return it != m_floats.end() ? it->second : defaultValue;
@@ -97,6 +102,11 @@ void Material::Bind() const {
     for (const auto& p : m_floats) m_shader->SetFloat(p.first, p.second);
     for (const auto& p : m_vec3s) m_shader->SetVec3(p.first, p.second);
     for (const auto& p : m_vec4s) m_shader->SetVec4(p.first, p.second);
+    for (const auto& p : m_mat4Arrays) {
+        if (!p.second.empty()) {
+            m_shader->SetMat4Array(p.first, p.second.data(), p.second.size());
+        }
+    }
 }
 
 size_t Material::GetHash() const {

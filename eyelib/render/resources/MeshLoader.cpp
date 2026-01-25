@@ -26,6 +26,28 @@ static bool IsGLTF(const std::string& path) {
     return false;
 }
 
+static void AddBoneData(Vertex& v, int boneIndex, float weight) {
+    for (int i = 0; i < 4; ++i) {
+        if (v.boneWeights[i] == 0.0f) {
+            v.boneIndices[i] = boneIndex;
+            v.boneWeights[i] = weight;
+            return;
+        }
+    }
+    int minIndex = 0;
+    float minWeight = v.boneWeights[0];
+    for (int i = 1; i < 4; ++i) {
+        if (v.boneWeights[i] < minWeight) {
+            minWeight = v.boneWeights[i];
+            minIndex = i;
+        }
+    }
+    if (weight > minWeight) {
+        v.boneIndices[minIndex] = boneIndex;
+        v.boneWeights[minIndex] = weight;
+    }
+}
+
 static void ProcessMesh(const aiMesh* ai, const aiScene* scene, std::vector<DecodedMeshData>& out, const std::string& nodeName) {
     (void)scene;
     DecodedMeshData d;
@@ -65,6 +87,24 @@ static void ProcessMesh(const aiMesh* ai, const aiScene* scene, std::vector<Deco
         } else {
             vx.color = math::Vec4(1, 1, 1, 1);
         }
+        vx.boneIndices = math::IVec4(0);
+        vx.boneWeights = math::Vec4(0.0f);
+    }
+
+    if (ai->HasBones()) {
+        for (unsigned b = 0; b < ai->mNumBones; ++b) {
+            const aiBone* bone = ai->mBones[b];
+            const int boneIndex = static_cast<int>(b);
+            for (unsigned w = 0; w < bone->mNumWeights; ++w) {
+                const aiVertexWeight& vw = bone->mWeights[w];
+                if (vw.mVertexId >= v.size()) continue;
+                AddBoneData(v[vw.mVertexId], boneIndex, vw.mWeight);
+            }
+        }
+        for (auto& vx : v) {
+            float sum = vx.boneWeights.x + vx.boneWeights.y + vx.boneWeights.z + vx.boneWeights.w;
+            if (sum > 0.0f) vx.boneWeights /= sum;
+        }
     }
 
     for (unsigned i = 0; i < ai->mNumFaces; ++i) {
@@ -103,7 +143,7 @@ static std::vector<DecodedMeshData> ImportToDecoded(const aiScene* scene) {
 
 std::vector<std::shared_ptr<Mesh>> MeshLoader::LoadFromFile(const std::string& path) {
     Assimp::Importer imp;
-    unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace;
+    unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
     if (!IsGLTF(path)) {
         flags |= aiProcess_FlipUVs;
         flags |= aiProcess_JoinIdenticalVertices;
@@ -138,7 +178,7 @@ void MeshLoader::LoadAsync(const std::string& path, std::function<void(std::vect
             return;
         }
         Assimp::Importer imp;
-        unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace;
+        unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
         if (!IsGLTF(path)) {
             flags |= aiProcess_FlipUVs;
             flags |= aiProcess_JoinIdenticalVertices;

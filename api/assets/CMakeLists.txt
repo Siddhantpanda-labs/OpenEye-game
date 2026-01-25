@@ -8,6 +8,8 @@ set(API_ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetRegistry.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetLoader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ModelAsset.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ModelAsset.h
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingManager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/AnimationLoader.cpp
@@ -16,6 +18,8 @@ set(API_ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/AudioLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ModelLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ModelLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ShaderLoader.cpp
@@ -34,6 +38,7 @@ target_include_directories(EyelibAssetsAPI
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_SOURCE_DIR}/eyelib
+        ${CMAKE_SOURCE_DIR}/thirdparty/assimp/include
 )
 
 target_link_libraries(EyelibAssetsAPI

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include "eyelib/math/Types.h"
 
@@ -33,12 +34,15 @@ public:
     void SetVec3(const std::string& name, const math::Vec3& value) const;
     void SetVec4(const std::string& name, const math::Vec4& value) const;
     void SetMat4(const std::string& name, const math::Mat4& value) const;
+    void SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const;
 
     bool IsValid() const { return m_program != 0; }
     GLuint Program() const { return m_program; }
 
 private:
     GLuint m_program = 0;
+    mutable GLuint m_bonesUBO = 0;
+    mutable size_t m_bonesUBOSize = 0;
 
     static GLuint CompileStage(unsigned int stageType, const std::string& src);
 };

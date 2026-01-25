@@ -30,6 +30,8 @@ public:
     void SetInterpolationMode(int boneIndex, int mode); // 0=Step,1=Linear,2=Cubic
 
     std::shared_ptr<eyelib::animation::AnimationClip> GetInternal() const;
+    static std::shared_ptr<AnimationClip> WrapInternal(
+        const std::shared_ptr<eyelib::animation::AnimationClip>& clip);
 
 private:
     class Impl;

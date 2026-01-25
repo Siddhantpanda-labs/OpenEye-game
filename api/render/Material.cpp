@@ -119,6 +119,10 @@ void Material::SetVec4(const std::string& name, const math::Vec4& value) {
     m_impl->material->SetVec4(name, value);
 }
 
+void Material::SetMat4Array(const std::string& name, const std::vector<math::Mat4>& values) {
+    m_impl->material->SetMat4Array(name, values);
+}
+
 float Material::GetFloat(const std::string& name, float defaultValue) const {
     return m_impl->material->GetFloat(name, defaultValue);
 }
