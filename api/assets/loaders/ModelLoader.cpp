@@ -406,9 +406,15 @@ std::shared_ptr<ModelAsset> ModelLoader::LoadModel(const std::string& path) {
     }
 
     const std::string baseDir = platform::filesystem::GetDirectory(path);
-    std::shared_ptr<::eyelib::render::Shader> skinnedShader = std::make_shared<::eyelib::render::Shader>();
-    skinnedShader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
-                                "assets/shaders/passes/forward/skinned.frag");
+    const bool hasSkinning = (skeleton && clip && skeleton->BoneCount() > 0);
+    std::shared_ptr<::eyelib::render::Shader> shader = std::make_shared<::eyelib::render::Shader>();
+    if (hasSkinning) {
+        shader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
+                             "assets/shaders/passes/forward/skinned.frag");
+    } else {
+        shader->LoadFromFile("assets/shaders/passes/forward/textured.vert",
+                             "assets/shaders/passes/forward/textured.frag");
+    }
 
     auto defaultAlbedo = std::make_shared<::eyelib::render::Texture2D>();
     {
@@ -420,7 +426,7 @@ std::shared_ptr<ModelAsset> ModelLoader::LoadModel(const std::string& path) {
     materials.resize(scene->mNumMaterials);
     for (unsigned i = 0; i < scene->mNumMaterials; ++i) {
         auto mat = std::make_shared<::eyelib::render::Material>();
-        mat->SetShader(skinnedShader);
+        mat->SetShader(shader);
         auto albedo = LoadAlbedoTexture(scene, i, baseDir);
         mat->SetAlbedoTexture(albedo ? albedo : defaultAlbedo);
         materials[i] = mat;
