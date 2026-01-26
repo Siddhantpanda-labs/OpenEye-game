@@ -36,7 +36,6 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/TextureLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Material.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MaterialInstance.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshOptimizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstancedRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BatchRenderer.cpp

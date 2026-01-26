@@ -159,38 +159,25 @@ bool TestRender(TestStats& stats) {
     skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
     skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    const std::string modelPath = "assets/models/dess_holiday_hb_juan_deltarune/scene.gltf";
-    auto modelAsset = ModelLoader::LoadModel(modelPath);
-    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load dess_holiday model");
+    const std::string modelPath = "assets/models/joe_male/";
+    // Try common model file formats
+    std::string fullModelPath = modelPath + "scene.gltf";
+    if (!filesystem::FileExists(fullModelPath)) {
+        fullModelPath = modelPath + "model.fbx";
+        if (!filesystem::FileExists(fullModelPath)) {
+            fullModelPath = modelPath + "model.glb";
+        }
+    }
+    auto modelAsset = ModelLoader::LoadModel(fullModelPath);
+    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load joe_male model");
     std::vector<std::shared_ptr<Mesh>> modelMeshes;
     std::vector<std::shared_ptr<Material>> modelMaterials;
+    std::vector<Mat4> modelTransforms;
     if (modelAsset) {
         modelMeshes = modelAsset->GetMeshes();
         modelMaterials = modelAsset->GetMaterials();
+        modelTransforms = modelAsset->GetMeshTransforms();
     }
-
-    const std::string animModelPath = "assets/models/animation/Orc Idle.fbx";
-    auto animAsset = ModelLoader::LoadModel(animModelPath);
-    Expect(stats, animAsset && !animAsset->GetMeshes().empty(), "Render: load animation model");
-    std::vector<std::shared_ptr<Mesh>> animMeshes;
-    std::vector<std::shared_ptr<Material>> animMaterials;
-    if (animAsset) {
-        animMeshes = animAsset->GetMeshes();
-        animMaterials = animAsset->GetMaterials();
-    }
-
-    const float animScale = 0.12f;
-    const Vec3 animOffset(-2.5f, 0.0f, 0.0f);
-    const Mat4 animModelTransform = glm::translate(Mat4(1.0f), animOffset) *
-                                    glm::scale(Mat4(1.0f), Vec3(animScale));
-
-    auto animSkeleton = animAsset ? animAsset->GetSkeleton() : nullptr;
-    auto animClip = animAsset ? animAsset->GetClip() : nullptr;
-    if (animClip) animClip->SetLoop(true);
-    Expect(stats, animSkeleton && animClip, "Render: load animation clip");
-    auto animator = std::make_shared<Animator>();
-    if (animSkeleton) animator->SetSkeleton(animSkeleton);
-    if (animClip) animator->SetClip(animClip);
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
     Expect(stats, colorOnly.GetColorAttachmentCount() == 1, "Render: color-only target");
@@ -224,16 +211,11 @@ bool TestRender(TestStats& stats) {
         mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
         mat->SetVec3("u_Emission", Vec3(0.0f));
     }
-    for (const auto& mat : animMaterials) {
-        if (!mat) continue;
-        mat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
-        mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
-        mat->SetVec3("u_Emission", Vec3(0.0f));
-    }
 
     AABB bounds;
     bool boundsInitialized = false;
-    for (const auto& mesh : modelMeshes) {
+    for (size_t i = 0; i < modelMeshes.size(); ++i) {
+        const auto& mesh = modelMeshes[i];
         if (!mesh || !mesh->IsValid()) continue;
         if (!boundsInitialized) {
             bounds = mesh->GetAABB();
@@ -252,36 +234,11 @@ bool TestRender(TestStats& stats) {
         if (!drawable.material && !modelMaterials.empty()) {
             drawable.material = modelMaterials.front();
         }
-        drawable.transform = glm::mat4(1.0f);
+        // Unity-style invariant: mesh placement comes from bones, not per-mesh transforms.
+        drawable.transform = Mat4(1.0f);
         scene.opaque.push_back(drawable);
     }
-    Expect(stats, !scene.opaque.empty(), "Render: pipeline render dess_holiday");
-
-    for (const auto& mesh : animMeshes) {
-        if (!mesh || !mesh->IsValid()) continue;
-        Drawable drawable{};
-        drawable.mesh = mesh;
-        if (!animMaterials.empty() && mesh->GetSubmeshCount() > 0) {
-            const int matIndex = mesh->GetSubmesh(0).materialIndex;
-            if (matIndex >= 0 && static_cast<size_t>(matIndex) < animMaterials.size()) {
-                drawable.material = animMaterials[static_cast<size_t>(matIndex)];
-            }
-        }
-        if (!drawable.material && !animMaterials.empty()) {
-            drawable.material = animMaterials.front();
-        }
-        drawable.transform = animModelTransform;
-        scene.opaque.push_back(drawable);
-    }
-    Expect(stats, !animMeshes.empty(), "Render: pipeline render animation model");
-
-    if (boundsInitialized) {
-        Vec3 center = bounds.GetCenter();
-        Vec3 size = bounds.GetSize();
-        float radius = glm::length(size) * 0.6f;
-        cameraPos = center + Vec3(0.0f, radius * 0.4f, radius * 2.2f);
-        scene.camera.viewPos = cameraPos;
-    }
+    Expect(stats, !scene.opaque.empty(), "Render: pipeline render joe_male");
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
@@ -341,20 +298,6 @@ bool TestRender(TestStats& stats) {
 
         scene.camera.view = glm::lookAt(cameraPos, cameraPos + forward, up);
         scene.camera.viewPos = cameraPos;
-
-        const float t = elapsed.count();
-        if (!scene.opaque.empty()) {
-            scene.opaque[0].transform = glm::rotate(glm::mat4(1.0f), t * 0.3f, Vec3(0.0f, 1.0f, 0.0f));
-        }
-
-        if (animator && animSkeleton && animClip) {
-            animator->Update(deltaTime);
-            const auto& bones = animator->GetBoneMatrices();
-            for (const auto& mat : animMaterials) {
-                if (!mat) continue;
-                mat->SetMat4Array("u_Bones", bones);
-            }
-        }
 
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);

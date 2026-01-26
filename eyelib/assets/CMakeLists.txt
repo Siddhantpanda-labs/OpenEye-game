@@ -28,6 +28,8 @@ set(ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/TextureLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MaterialLoader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ModelLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ModelLoader.h
 )
 
 add_library(EyelibAssets STATIC ${ASSETS_SOURCES})

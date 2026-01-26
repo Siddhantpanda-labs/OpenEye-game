@@ -23,19 +23,21 @@ void main() {
     vec4 pos = vec4(a_Position, 1.0);
     vec3 nrm = a_Normal;
 
-    float weightSum = dot(a_BoneWeights, vec4(1.0));
-    if (weightSum > 0.0001) {
-        mat4 skin = mat4(0.0);
-        for (int i = 0; i < 4; ++i) {
-            int idx = a_BoneIndices[i];
-            float w = a_BoneWeights[i];
-            if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
-                skin += u_Bones[idx] * w;
-            }
+    // According to advise.md: Skinning always happens. Identity skinning is valid skinning.
+    // Remove branch - always compute skin matrix (Unity-style)
+    mat4 skin = mat4(0.0);
+    for (int i = 0; i < 4; ++i) {
+        int idx = a_BoneIndices[i];
+        float w = a_BoneWeights[i];
+        if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
+            skin += u_Bones[idx] * w;
         }
-        pos = skin * pos;
-        nrm = mat3(skin) * nrm;
     }
+    
+    // For static meshes: bone = identity, weights = (1,0,0,0), result = unchanged
+    // For animated meshes: bone = animated transform, result = skinned
+    pos = skin * pos;
+    nrm = mat3(skin) * nrm;
 
     vec4 worldPos = u_Model * pos;
     v_Position = worldPos.xyz;
