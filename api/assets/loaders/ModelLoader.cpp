@@ -92,6 +92,17 @@ void ProcessBoneHierarchy(aiNode* node,
         if (bone.parentIndex == -1 && parentBoneIndex >= 0) {
             bone.parentIndex = parentBoneIndex;
         }
+    } else {
+        ::eyelib::animation::Bone newBone;
+        newBone.name = nodeName;
+        newBone.parentIndex = parentBoneIndex;
+        newBone.inverseBindMatrix = math::Mat4(1.0f);
+        newBone.bindPosition = math::Vec3(0.0f);
+        newBone.bindRotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+        newBone.bindScale = math::Vec3(1.0f);
+        boneIndex = static_cast<int>(skeleton.BoneCount());
+        skeleton.AddBone(newBone);
+        nodeToBoneIndex[nodeName] = boneIndex;
     }
 
     if (boneIndex >= 0) {
