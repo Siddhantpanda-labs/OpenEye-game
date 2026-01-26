@@ -365,14 +365,76 @@ std::shared_ptr<::eyelib::render::Texture2D> LoadAlbedoTexture(
     }
 
     std::string texPath = path.C_Str();
+    if (texPath.empty()) return nullptr;
+
+    // 1) Embedded textures (FBX can embed or use "*0" style references)
+    const aiTexture* embedded = nullptr;
+    if (!texPath.empty() && texPath[0] == '*') {
+        const std::string indexStr = texPath.substr(1);
+        char* endPtr = nullptr;
+        const long index = std::strtol(indexStr.c_str(), &endPtr, 10);
+        if (endPtr != indexStr.c_str() && index >= 0 && static_cast<unsigned>(index) < scene->mNumTextures) {
+            embedded = scene->mTextures[static_cast<unsigned>(index)];
+        }
+    } else if (scene->mNumTextures > 0) {
+        embedded = scene->GetEmbeddedTexture(texPath.c_str());
+    }
+
+    if (embedded) {
+        auto tex = std::make_shared<::eyelib::render::Texture2D>();
+        if (embedded->mHeight == 0) {
+            // Compressed image data (PNG/JPG); mWidth is data size in bytes.
+            if (tex->LoadFromMemory(reinterpret_cast<const uint8_t*>(embedded->pcData),
+                                    static_cast<size_t>(embedded->mWidth),
+                                    true, true)) {
+                return tex;
+            }
+        } else {
+            // Raw BGRA8888 pixels.
+            const int width = static_cast<int>(embedded->mWidth);
+            const int height = static_cast<int>(embedded->mHeight);
+            const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
+            std::vector<uint8_t> rgba;
+            rgba.resize(count * 4);
+            const aiTexel* src = embedded->pcData;
+            for (size_t i = 0; i < count; ++i) {
+                rgba[i * 4 + 0] = src[i].r;
+                rgba[i * 4 + 1] = src[i].g;
+                rgba[i * 4 + 2] = src[i].b;
+                rgba[i * 4 + 3] = src[i].a;
+            }
+            if (tex->Create(width, height, ::eyelib::render::TextureFormat::RGBA8, rgba.data())) {
+                tex->GenerateMipmaps();
+                return tex;
+            }
+        }
+    }
+
+    // 2) External file resolution with fallback search paths
+    std::vector<std::string> candidates;
+    if (platform::filesystem::FileExists(texPath)) {
+        candidates.push_back(texPath);
+    }
+
     if (!baseDir.empty()) {
-        texPath = platform::filesystem::NormalizePath(baseDir + "/" + texPath);
+        candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + texPath));
+        const std::string filename = platform::filesystem::GetFilename(texPath);
+        candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + filename));
+        const char* subdirs[] = {"fbm", "textures", "maps", "tex", "images", "img"};
+        for (const char* subdir : subdirs) {
+            candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + subdir + "/" + filename));
+        }
     }
-    auto tex = std::make_shared<::eyelib::render::Texture2D>();
-    if (!tex->LoadFromFile(texPath, true, true)) {
-        return nullptr;
+
+    for (const auto& candidate : candidates) {
+        if (!platform::filesystem::FileExists(candidate)) continue;
+        auto tex = std::make_shared<::eyelib::render::Texture2D>();
+        if (tex->LoadFromFile(candidate, true, true)) {
+            return tex;
+        }
     }
-    return tex;
+
+    return nullptr;
 }
 
 } // namespace
