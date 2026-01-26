@@ -291,41 +291,42 @@ std::shared_ptr<::eyelib::render::Mesh> BuildMesh(const aiMesh* ai,
 
     std::vector<::eyelib::render::Vertex> vertices;
     std::vector<uint32_t> indices;
-    vertices.reserve(ai->mNumFaces * 3);
-    indices.reserve(ai->mNumFaces * 3);
+    vertices.resize(ai->mNumVertices);
 
     const bool isSkinned = ai && ai->HasBones() && skeleton;
     const math::Mat4 appliedTransform = isSkinned ? math::Mat4(1.0f) : meshTransform;
     const math::Mat3 normalMatrix = glm::transpose(glm::inverse(math::Mat3(appliedTransform)));
 
+    for (unsigned i = 0; i < ai->mNumVertices; ++i) {
+        auto& v = vertices[i];
+        math::Vec3 pos(ai->mVertices[i].x, ai->mVertices[i].y, ai->mVertices[i].z);
+        v.position = math::Vec3(appliedTransform * math::Vec4(pos, 1.0f));
+        if (ai->mNormals) {
+            math::Vec3 n(ai->mNormals[i].x, ai->mNormals[i].y, ai->mNormals[i].z);
+            v.normal = glm::normalize(normalMatrix * n);
+        }
+        if (ai->mTextureCoords[0]) {
+            v.uv = math::Vec2(ai->mTextureCoords[0][i].x, ai->mTextureCoords[0][i].y);
+        }
+        if (ai->mTangents) {
+            math::Vec3 t(ai->mTangents[i].x, ai->mTangents[i].y, ai->mTangents[i].z);
+            v.tangent = glm::normalize(normalMatrix * t);
+        }
+        v.color = math::Vec4(1, 1, 1, 1);
+        if (!boneIndicesPerVertex.empty() && i < boneIndicesPerVertex.size()) {
+            v.boneIndices = boneIndicesPerVertex[i];
+            v.boneWeights = boneWeightsPerVertex[i];
+        } else {
+            v.boneIndices = math::IVec4(0);
+            v.boneWeights = math::Vec4(0.0f);
+        }
+    }
+
+    indices.reserve(ai->mNumFaces * 3);
     for (unsigned i = 0; i < ai->mNumFaces; ++i) {
         const aiFace& f = ai->mFaces[i];
         for (unsigned j = 0; j < f.mNumIndices; ++j) {
-            const unsigned idx = f.mIndices[j];
-            ::eyelib::render::Vertex v{};
-            math::Vec3 pos(ai->mVertices[idx].x, ai->mVertices[idx].y, ai->mVertices[idx].z);
-            v.position = math::Vec3(appliedTransform * math::Vec4(pos, 1.0f));
-            if (ai->mNormals) {
-                math::Vec3 n(ai->mNormals[idx].x, ai->mNormals[idx].y, ai->mNormals[idx].z);
-                v.normal = glm::normalize(normalMatrix * n);
-            }
-            if (ai->mTextureCoords[0]) {
-                v.uv = math::Vec2(ai->mTextureCoords[0][idx].x, ai->mTextureCoords[0][idx].y);
-            }
-            if (ai->mTangents) {
-                math::Vec3 t(ai->mTangents[idx].x, ai->mTangents[idx].y, ai->mTangents[idx].z);
-                v.tangent = glm::normalize(normalMatrix * t);
-            }
-            v.color = math::Vec4(1, 1, 1, 1);
-            if (!boneIndicesPerVertex.empty() && idx < boneIndicesPerVertex.size()) {
-                v.boneIndices = boneIndicesPerVertex[idx];
-                v.boneWeights = boneWeightsPerVertex[idx];
-            } else {
-                v.boneIndices = math::IVec4(0);
-                v.boneWeights = math::Vec4(0.0f);
-            }
-            vertices.push_back(v);
-            indices.push_back(static_cast<uint32_t>(vertices.size() - 1));
+            indices.push_back(f.mIndices[j]);
         }
     }
 
@@ -370,6 +371,7 @@ std::shared_ptr<ModelAsset> ModelLoader::LoadModel(const std::string& path) {
     unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
     if (!IsGLTF(path)) {
         flags |= aiProcess_FlipUVs;
+        flags |= aiProcess_JoinIdenticalVertices;
     }
 
     const aiScene* scene = importer.ReadFile(path, flags);

@@ -118,13 +118,28 @@ void Animator::BuildBoneMatrices() {
     }
 
     std::vector<math::Mat4> global(count, math::Mat4(1.0f));
-    for (size_t i = 0; i < count; ++i) {
-        const Bone& b = m_skeleton->GetBone(i);
+    std::vector<uint8_t> computed(count, 0);
+
+    std::function<void(size_t)> computeGlobal = [&](size_t idx) {
+        if (computed[idx]) return;
+        const Bone& b = m_skeleton->GetBone(idx);
         if (b.parentIndex >= 0) {
-            global[i] = global[static_cast<size_t>(b.parentIndex)] * local[i];
+            const size_t parent = static_cast<size_t>(b.parentIndex);
+            if (parent < count) {
+                computeGlobal(parent);
+                global[idx] = global[parent] * local[idx];
+            } else {
+                global[idx] = local[idx];
+            }
         } else {
-            global[i] = local[i];
+            global[idx] = local[idx];
         }
+        computed[idx] = 1;
+    };
+
+    for (size_t i = 0; i < count; ++i) {
+        computeGlobal(i);
+        const Bone& b = m_skeleton->GetBone(i);
         m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
     }
 }
