@@ -26,6 +26,7 @@ set(ECS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/components/RigidBody.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Transform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/components/Transform.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/components/ScriptComponent.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/ComponentHandles.h
     ${CMAKE_CURRENT_SOURCE_DIR}/components/All.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/TransformSystem.cpp
@@ -65,5 +66,6 @@ target_link_libraries(EyelibECS
         EyelibPhysics
         EyelibAnimation
         EyelibAudio
+        EyelibScripting
 )
 

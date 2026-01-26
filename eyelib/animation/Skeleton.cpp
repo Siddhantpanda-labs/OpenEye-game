@@ -10,6 +10,32 @@ void Skeleton::AddBone(const Bone& bone) {
     m_boneMapBuilt = false;
 }
 
+void Skeleton::ModifyBone(size_t index, const Bone& bone) {
+    if (index >= m_bones.size()) return;
+    m_bones[index] = bone;
+    m_boneMapBuilt = false; // Rebuild map in case name changed
+}
+
+void Skeleton::RemoveBone(size_t index) {
+    if (index >= m_bones.size()) return;
+    
+    // Remove the bone
+    m_bones.erase(m_bones.begin() + static_cast<ptrdiff_t>(index));
+    
+    // Update parent indices for remaining bones
+    for (auto& bone : m_bones) {
+        if (bone.parentIndex == static_cast<int>(index)) {
+            // Orphan the bone (make it root)
+            bone.parentIndex = -1;
+        } else if (bone.parentIndex > static_cast<int>(index)) {
+            // Adjust parent index down by 1
+            bone.parentIndex--;
+        }
+    }
+    
+    m_boneMapBuilt = false;
+}
+
 void Skeleton::Clear() {
     m_bones.clear();
     m_boneNameToIndex.clear();

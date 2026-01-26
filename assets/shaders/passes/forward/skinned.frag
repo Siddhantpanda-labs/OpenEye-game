@@ -5,24 +5,133 @@ in vec3 v_Normal;
 in vec2 v_TexCoord;
 
 uniform sampler2D u_AlbedoTexture;
+uniform sampler2D u_NormalTexture;
+uniform sampler2D u_MetallicRoughnessTexture;
+uniform sampler2D u_AOTexture;
+uniform sampler2D u_EmissiveTexture;
+
+uniform float u_HasNormalTexture;
+uniform float u_HasMetallicRoughnessTexture;
+uniform float u_HasAOTexture;
+uniform float u_HasEmissiveTexture;
+
 uniform vec3 u_Albedo;
 uniform float u_Metallic;
 uniform float u_Roughness;
 uniform vec3 u_Emission;
+uniform float u_AO;
+
 uniform vec3 u_LightDir;
 uniform vec3 u_LightColor;
 uniform vec3 u_ViewPos;
+uniform float u_LightIntensity;
 
 out vec4 FragColor;
 
+const float PI = 3.14159265359;
+
+// Normal Distribution Function (GGX/Trowbridge-Reitz)
+float DistributionGGX(vec3 N, vec3 H, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH * NdotH;
+    float num = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+    return num / denom;
+}
+
+// Geometry Function (Schlick-GGX)
+float GeometrySchlickGGX(float NdotV, float roughness) {
+    float r = (roughness + 1.0);
+    float k = (r * r) / 8.0;
+    float num = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+    return num / denom;
+}
+
+// Geometry Function (Smith)
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+    return ggx1 * ggx2;
+}
+
+// Fresnel-Schlick approximation
+vec3 FresnelSchlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 void main() {
     vec3 N = normalize(v_Normal);
+    
+    // Normal mapping (simplified - assumes normal map is in world space or object space)
+    // TODO: Add proper TBN matrix support in vertex shader for tangent-space normal maps
+    if (u_HasNormalTexture > 0.5) {
+        vec3 normalSample = texture(u_NormalTexture, v_TexCoord).rgb;
+        normalSample = normalSample * 2.0 - 1.0; // Convert from [0,1] to [-1,1]
+        // Simple blend with vertex normal (proper implementation needs TBN)
+        N = normalize(mix(N, normalSample, 0.5));
+    }
+    
+    vec3 V = normalize(u_ViewPos - v_Position);
     vec3 L = normalize(-u_LightDir);
-    vec3 texColor = texture(u_AlbedoTexture, v_TexCoord).rgb;
-    vec3 albedo = texColor * u_Albedo;
+    vec3 H = normalize(V + L);
+    
+    // Sample textures
+    vec3 albedoColor = texture(u_AlbedoTexture, v_TexCoord).rgb * u_Albedo;
+    
+    float metallic = u_Metallic;
+    float roughness = u_Roughness;
+    if (u_HasMetallicRoughnessTexture > 0.5) {
+        vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg; // glTF: B=metallic, G=roughness
+        metallic = mix(metallic, mr.x, 1.0);
+        roughness = mix(roughness, mr.y, 1.0);
+    }
+    
+    float ao = u_AO;
+    if (u_HasAOTexture > 0.5) {
+        ao = texture(u_AOTexture, v_TexCoord).r;
+    }
+    
+    vec3 emission = u_Emission;
+    if (u_HasEmissiveTexture > 0.5) {
+        emission = texture(u_EmissiveTexture, v_TexCoord).rgb;
+    }
+    
+    // Calculate F0 for dielectrics, blend with albedo for metals
+    vec3 F0 = vec3(0.04);
+    F0 = mix(F0, albedoColor, metallic);
+    
+    // Cook-Torrance BRDF
+    float NDF = DistributionGGX(N, H, roughness);
+    float G = GeometrySmith(N, V, L, roughness);
+    vec3 F = FresnelSchlick(max(dot(H, V), 0.0), F0);
+    
+    vec3 kS = F;
+    vec3 kD = vec3(1.0) - kS;
+    kD *= 1.0 - metallic;
+    
+    vec3 numerator = NDF * G * F;
+    float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+    vec3 specular = numerator / denominator;
+    
     float NdotL = max(dot(N, L), 0.0);
-    vec3 diffuse = albedo * u_LightColor * NdotL;
-    vec3 ambient = albedo * 0.1;
-    vec3 color = ambient + diffuse + u_Emission;
+    vec3 Lo = (kD * albedoColor / PI + specular) * u_LightColor * u_LightIntensity * NdotL;
+    
+    // Ambient lighting
+    vec3 ambient = vec3(0.03) * albedoColor * ao;
+    
+    vec3 color = ambient + Lo + emission;
+    
+    // HDR tonemapping (simple Reinhard)
+    color = color / (color + vec3(1.0));
+    
+    // Gamma correction
+    color = pow(color, vec3(1.0/2.2));
+    
     FragColor = vec4(color, 1.0);
 }

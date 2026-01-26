@@ -26,6 +26,9 @@ public:
     Skeleton& operator=(const Skeleton&) = delete;
 
     void AddBone(const Bone& bone);
+    void ModifyBone(size_t index, const Bone& bone);
+    void RemoveBone(size_t index);
+    Bone GetBone(size_t index) const;
     void BuildBoneMap();
     size_t BoneCount() const;
     int FindBoneIndex(const std::string& name) const;

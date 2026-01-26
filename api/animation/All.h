@@ -11,6 +11,7 @@
 #include "AnimationEvents.h"
 #include "KeyframeEditor.h"
 #include "Procedural.h"
+#include "RiggingUtils.h"
 
 namespace eyelib {
 namespace api {
@@ -27,6 +28,7 @@ using ::eyelib::api::AnimationEvents;
 using ::eyelib::api::AnimationEvent;
 using ::eyelib::api::KeyframeEditor;
 using ::eyelib::api::ProceduralAnimator;
+using ::eyelib::api::RiggingUtils;
 } // namespace animation
 } // namespace api
 } // namespace eyelib

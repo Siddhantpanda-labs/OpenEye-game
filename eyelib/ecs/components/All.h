@@ -10,4 +10,5 @@
 #include "Name.h"
 #include "Renderable.h"
 #include "RigidBody.h"
+#include "ScriptComponent.h"
 #include "Transform.h"

@@ -23,6 +23,8 @@ set(API_ANIMATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/KeyframeEditor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Procedural.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Procedural.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RiggingUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RiggingUtils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
 )
 
@@ -40,5 +42,6 @@ target_include_directories(EyelibAnimationAPI
 target_link_libraries(EyelibAnimationAPI
     PUBLIC
         EyelibAnimation
+        EyelibRender
 )
 

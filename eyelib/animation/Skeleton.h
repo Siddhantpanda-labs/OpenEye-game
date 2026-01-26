@@ -23,6 +23,8 @@ struct Bone {
 class Skeleton {
 public:
     void AddBone(const Bone& bone);
+    void ModifyBone(size_t index, const Bone& bone);
+    void RemoveBone(size_t index);
     void Clear();
 
     size_t BoneCount() const { return m_bones.size(); }

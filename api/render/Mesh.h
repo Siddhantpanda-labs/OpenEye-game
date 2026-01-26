@@ -46,6 +46,12 @@ public:
     /** Set vertex data. */
     void SetVertices(const std::vector<Vertex>& vertices);
 
+    /** Get vertex data for progressive editing. */
+    std::vector<Vertex> GetVertices() const;
+
+    /** Update a subset of vertices (more efficient than full SetVertices). */
+    void UpdateVertices(const std::vector<Vertex>& vertices, size_t startIndex = 0);
+
     /** Set index data. */
     void SetIndices(const std::vector<uint32_t>& indices);
     void SetIndices(const std::vector<uint16_t>& indices);

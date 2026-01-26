@@ -62,6 +62,58 @@ set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/glfw)
 
 # --------------------------------------
+# Lua (Scripting engine)
+# --------------------------------------
+# Build Lua from local thirdparty source
+set(LUA_SOURCES
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lapi.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lcode.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lctype.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ldebug.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ldo.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ldump.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lfunc.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lgc.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/llex.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lmem.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lobject.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lopcodes.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lparser.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lstate.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lstring.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ltable.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ltm.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lundump.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lvm.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lzio.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lauxlib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lbaselib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lcorolib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ldblib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/liolib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lmathlib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/loadlib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/loslib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lstrlib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/ltablib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/lutf8lib.c
+    ${CMAKE_SOURCE_DIR}/thirdparty/lua/linit.c
+)
+
+add_library(Lua STATIC ${LUA_SOURCES})
+
+target_include_directories(Lua
+    PUBLIC
+        ${CMAKE_SOURCE_DIR}/thirdparty/lua
+)
+
+# Disable warnings for Lua (third-party code)
+if(MSVC)
+    target_compile_options(Lua PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996)
+    set_target_properties(Lua PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
+endif()
+
+# --------------------------------------
 # OpenAL Soft (Audio backend)
 # --------------------------------------
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
@@ -211,6 +263,9 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib platform module
     add_subdirectory(eyelib/platform)
     add_subdirectory(api/platform)
+    # Eyelib scripting module
+    add_subdirectory(eyelib/scripting)
+    add_subdirectory(api/scripting)
 endif()
 
 set(OPENEYE_BUILD_EDITOR OFF CACHE BOOL "Build development editor" FORCE)

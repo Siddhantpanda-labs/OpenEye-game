@@ -3,6 +3,7 @@
 #include "ComponentRegistry.h"
 #include "ComponentStorage.h"
 #include "components/All.h"
+#include "components/ScriptComponent.h"
 
 #include "entt/entt.hpp"
 
@@ -34,6 +35,7 @@ World::World() : m_impl(new Impl()) {
     m_impl->registry.RegisterComponent<components::RigidBody>();
     m_impl->registry.RegisterComponent<components::Animator>();
     m_impl->registry.RegisterComponent<components::AABB>();
+    m_impl->registry.RegisterComponent<components::ScriptComponent>();
 }
 
 World::~World() {

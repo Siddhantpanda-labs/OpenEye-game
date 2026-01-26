@@ -159,9 +159,9 @@ bool TestRender(TestStats& stats) {
     skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
     skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    const std::string modelPath = "assets/models/ancient_king/scene.gltf";
+    const std::string modelPath = "assets/models/zombie/source/Male_Zombie.fbx";
     auto modelAsset = ModelLoader::LoadModel(modelPath);
-    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load joe_gltf model");
+    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load zombie PBR model");
     std::vector<std::shared_ptr<Mesh>> modelMeshes;
     std::vector<std::shared_ptr<Material>> modelMaterials;
     std::vector<Mat4> modelTransforms;
@@ -171,25 +171,22 @@ bool TestRender(TestStats& stats) {
         modelTransforms = modelAsset->GetMeshTransforms();
     }
 
-    // Load running.fbx animation to apply to joe_male model
-    const std::string runningAnimPath = "assets/models/animation/running.fbx";
-    auto runningAsset = ModelLoader::LoadModel(runningAnimPath);
-    Expect(stats, runningAsset != nullptr, "Render: load running.fbx animation");
+    // Use zombie model's own skeleton and animation
+    auto zombieSkeleton = modelAsset ? modelAsset->GetSkeleton() : nullptr;
+    auto zombieClip = modelAsset ? modelAsset->GetClip() : nullptr;
+    if (zombieClip) zombieClip->SetLoop(true);
     
-    auto runningSkeleton = runningAsset ? runningAsset->GetSkeleton() : nullptr;
-    auto runningClip = runningAsset ? runningAsset->GetClip() : nullptr;
-    if (runningClip) runningClip->SetLoop(true);
-    Expect(stats, runningSkeleton && runningClip, "Render: load running animation clip");
-    
-    // Use running animation for joe_male model
     auto animator = std::make_shared<Animator>();
-    if (runningSkeleton) animator->SetSkeleton(runningSkeleton);
-    if (runningClip) animator->SetClip(runningClip);
+    if (zombieSkeleton) animator->SetSkeleton(zombieSkeleton);
+    if (zombieClip) animator->SetClip(zombieClip);
     
-    if (runningSkeleton && runningClip) {
-        eyelib::api::core::Log::InfoF("Loaded running.fbx animation: %zu bones", 
-                                     runningSkeleton->BoneCount());
-        eyelib::api::core::Log::Info("Applying running animation to joe_male model (press 'T' to toggle)");
+    if (zombieSkeleton && zombieClip) {
+        eyelib::api::core::Log::InfoF("Loaded zombie model: %zu bones, %zu meshes, %zu materials", 
+                                     zombieSkeleton->BoneCount(), modelMeshes.size(), modelMaterials.size());
+        eyelib::api::core::Log::Info("Zombie PBR animated model loaded (press 'T' to toggle animation)");
+    } else if (zombieSkeleton) {
+        eyelib::api::core::Log::InfoF("Loaded zombie model: %zu bones (no animation clip)", 
+                                     zombieSkeleton->BoneCount());
     }
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
@@ -222,6 +219,8 @@ bool TestRender(TestStats& stats) {
         if (!mat) continue;
         mat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
         mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
+        mat->SetFloat("u_LightIntensity", scene.light.intensity);
+        mat->SetVec3("u_ViewPos", cameraPos);
         mat->SetVec3("u_Emission", Vec3(0.0f));
     }
 
@@ -251,7 +250,7 @@ bool TestRender(TestStats& stats) {
         drawable.transform = Mat4(1.0f);
         scene.opaque.push_back(drawable);
     }
-    Expect(stats, !scene.opaque.empty(), "Render: pipeline render joe_male");
+    Expect(stats, !scene.opaque.empty(), "Render: pipeline render zombie PBR model");
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
@@ -323,13 +322,19 @@ bool TestRender(TestStats& stats) {
 
         scene.camera.view = glm::lookAt(cameraPos, cameraPos + forward, up);
         scene.camera.viewPos = cameraPos;
+        
+        // Update view position for PBR materials
+        for (const auto& mat : modelMaterials) {
+            if (!mat) continue;
+            mat->SetVec3("u_ViewPos", cameraPos);
+        }
 
         // Update animation only if toggle is enabled
-        // Apply running animation to joe_male model
-        if (animationPlaying && animator && runningSkeleton && runningClip) {
+        // Apply zombie's own animation
+        if (animationPlaying && animator && zombieSkeleton && zombieClip) {
             animator->Update(deltaTime);
             const auto& bones = animator->GetBoneMatrices();
-            // Apply to joe_male model materials
+            // Apply to zombie model materials
             for (const auto& mat : modelMaterials) {
                 if (!mat) continue;
                 mat->SetMat4Array("u_Bones", bones);

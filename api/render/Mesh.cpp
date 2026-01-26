@@ -35,6 +35,49 @@ void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
     m_impl->mesh->SetVertices(v);
 }
 
+std::vector<Mesh::Vertex> Mesh::GetVertices() const {
+    const auto& internalVerts = m_impl->mesh->GetVertices();
+    std::vector<Vertex> vertices;
+    vertices.reserve(internalVerts.size());
+    for (const auto& iv : internalVerts) {
+        Vertex v;
+        v.position = iv.position;
+        v.normal = iv.normal;
+        v.uv = iv.uv;
+        v.uv1 = iv.uv1;
+        v.tangent = iv.tangent;
+        v.color = iv.color;
+        v.boneIndices = iv.boneIndices;
+        v.boneWeights = iv.boneWeights;
+        vertices.push_back(v);
+    }
+    return vertices;
+}
+
+void Mesh::UpdateVertices(const std::vector<Vertex>& vertices, size_t startIndex) {
+    auto& internalVerts = m_impl->mesh->GetVertices();
+    if (startIndex + vertices.size() > internalVerts.size()) {
+        // Extend if needed
+        internalVerts.resize(startIndex + vertices.size());
+    }
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        const auto& vert = vertices[i];
+        auto& rv = internalVerts[startIndex + i];
+        rv.position = vert.position;
+        rv.normal = vert.normal;
+        rv.uv = vert.uv;
+        rv.uv1 = vert.uv1;
+        rv.tangent = vert.tangent;
+        rv.color = vert.color;
+        rv.boneIndices = vert.boneIndices;
+        rv.boneWeights = vert.boneWeights;
+    }
+    // Mark as dirty so GPU update is needed
+    m_impl->mesh->InvalidateAABB();
+    // Re-upload to GPU (full upload for now, can be optimized later with glBufferSubData)
+    m_impl->mesh->UploadToGPU();
+}
+
 void Mesh::SetIndices(const std::vector<uint32_t>& indices) {
     m_impl->mesh->SetIndices(indices);
 }

@@ -26,6 +26,8 @@ set(ANIMATION_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Procedural.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Animator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Animator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RiggingUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RiggingUtils.h
 )
 
 add_library(EyelibAnimation STATIC ${ANIMATION_SOURCES})
@@ -43,5 +45,6 @@ target_link_libraries(EyelibAnimation
     PUBLIC
         EyelibCore
         EyelibMath
+        EyelibRender
 )
 

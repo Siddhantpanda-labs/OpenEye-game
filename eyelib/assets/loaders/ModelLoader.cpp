@@ -423,18 +423,15 @@ std::shared_ptr<render::Mesh> BuildMesh(const aiMesh* ai,
     return mesh;
 }
 
-std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+// Generic texture loader for any texture type
+std::shared_ptr<render::Texture2D> LoadTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir,
+    aiTextureType type, bool sRGB = true) {
     if (!scene || materialIndex >= scene->mNumMaterials) return nullptr;
     const aiMaterial* mat = scene->mMaterials[materialIndex];
     aiString path;
-    if (mat->GetTextureCount(aiTextureType_BASE_COLOR) > 0 &&
-        mat->GetTexture(aiTextureType_BASE_COLOR, 0, &path) == aiReturn_SUCCESS) {
-        // ok
-    } else if (mat->GetTextureCount(aiTextureType_DIFFUSE) > 0 &&
-               mat->GetTexture(aiTextureType_DIFFUSE, 0, &path) == aiReturn_SUCCESS) {
-        // ok
-    } else {
+    if (mat->GetTextureCount(type) == 0 ||
+        mat->GetTexture(type, 0, &path) != aiReturn_SUCCESS) {
         return nullptr;
     }
 
@@ -460,7 +457,7 @@ std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
             // Compressed image data (PNG/JPG); mWidth is data size in bytes.
             if (tex->LoadFromMemory(reinterpret_cast<const uint8_t*>(embedded->pcData),
                                     static_cast<size_t>(embedded->mWidth),
-                                    true, true)) {
+                                    sRGB, true)) {
                 return tex;
             }
         } else {
@@ -503,12 +500,71 @@ std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
     for (const auto& candidate : candidates) {
         if (!platform::filesystem::FileExists(candidate)) continue;
         auto tex = std::make_shared<render::Texture2D>();
-        if (tex->LoadFromFile(candidate, true, true)) {
+        if (tex->LoadFromFile(candidate, sRGB, true)) {
             return tex;
         }
     }
 
     return nullptr;
+}
+
+// Convenience wrappers for specific texture types
+std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+    // Try BASE_COLOR first (glTF), then DIFFUSE (FBX)
+    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_BASE_COLOR, true);
+    if (tex) return tex;
+    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_DIFFUSE, true);
+}
+
+std::shared_ptr<render::Texture2D> LoadNormalTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+    // Try NORMALS first, then HEIGHT (sometimes used as normal)
+    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_NORMALS, false);
+    if (tex) return tex;
+    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_HEIGHT, false);
+}
+
+std::shared_ptr<render::Texture2D> LoadMetallicRoughnessTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+    // glTF uses UNKNOWN for metallic-roughness (combined texture)
+    // Try METALNESS and ROUGHNESS separately first
+    auto metallicTex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_METALNESS, false);
+    auto roughnessTex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_DIFFUSE_ROUGHNESS, false);
+    
+    // For glTF, metallic-roughness is often in UNKNOWN slot
+    // We'll check by texture name pattern
+    if (!scene || materialIndex >= scene->mNumMaterials) return nullptr;
+    const aiMaterial* mat = scene->mMaterials[materialIndex];
+    
+    // Check all texture types for metallic-roughness by name
+    for (int texType = 1; texType < AI_TEXTURE_TYPE_MAX; ++texType) {
+        if (mat->GetTextureCount(static_cast<aiTextureType>(texType)) > 0) {
+            aiString texPath;
+            if (mat->GetTexture(static_cast<aiTextureType>(texType), 0, &texPath) == aiReturn_SUCCESS) {
+                std::string pathStr = texPath.C_Str();
+                std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
+                if (pathStr.find("metallicroughness") != std::string::npos ||
+                    (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") != std::string::npos)) {
+                    return LoadTexture(scene, materialIndex, baseDir, static_cast<aiTextureType>(texType), false);
+                }
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
+std::shared_ptr<render::Texture2D> LoadAOTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_AMBIENT_OCCLUSION, false);
+    if (tex) return tex;
+    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_LIGHTMAP, false);
+}
+
+std::shared_ptr<render::Texture2D> LoadEmissiveTexture(
+    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
+    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_EMISSIVE, true);
 }
 
 struct MaterialUVInfo {
@@ -585,10 +641,31 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     skinnedShader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
                                 "assets/shaders/passes/forward/skinned.frag");
 
+    // Default textures for materials without textures
     auto defaultAlbedo = std::make_shared<render::Texture2D>();
     {
         const uint8_t white[4] = {255, 255, 255, 255};
         defaultAlbedo->Create(1, 1, render::TextureFormat::RGBA8, white);
+    }
+    auto defaultNormal = std::make_shared<render::Texture2D>();
+    {
+        const uint8_t normal[4] = {128, 128, 255, 255}; // Normal pointing up (0.5, 0.5, 1.0) -> (128, 128, 255)
+        defaultNormal->Create(1, 1, render::TextureFormat::RGBA8, normal);
+    }
+    auto defaultMetallicRoughness = std::make_shared<render::Texture2D>();
+    {
+        const uint8_t mr[4] = {0, 128, 0, 255}; // Metallic=0, Roughness=0.5
+        defaultMetallicRoughness->Create(1, 1, render::TextureFormat::RGBA8, mr);
+    }
+    auto defaultAO = std::make_shared<render::Texture2D>();
+    {
+        const uint8_t ao[4] = {255, 255, 255, 255}; // AO=1.0
+        defaultAO->Create(1, 1, render::TextureFormat::RGBA8, ao);
+    }
+    auto defaultEmissive = std::make_shared<render::Texture2D>();
+    {
+        const uint8_t emissive[4] = {0, 0, 0, 255}; // No emission
+        defaultEmissive->Create(1, 1, render::TextureFormat::RGBA8, emissive);
     }
 
     const size_t materialCount = scene->mNumMaterials;
@@ -604,16 +681,90 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     const std::vector<math::Mat4> bindPoseMatrices = BuildBindPoseMatrices(*result.skeleton);
     
     const bool isGltf = IsGLTF(path);
+    
+    // Load PBR textures
+    std::vector<std::shared_ptr<render::Texture2D>> normals, metallicRoughness, ao, emissive;
+    normals.resize(materialCount);
+    metallicRoughness.resize(materialCount);
+    ao.resize(materialCount);
+    emissive.resize(materialCount);
+    
+    for (unsigned i = 0; i < materialCount; ++i) {
+        normals[i] = LoadNormalTexture(scene, i, baseDir);
+        metallicRoughness[i] = LoadMetallicRoughnessTexture(scene, i, baseDir);
+        ao[i] = LoadAOTexture(scene, i, baseDir);
+        emissive[i] = LoadEmissiveTexture(scene, i, baseDir);
+    }
+    
     result.materials.resize(materialCount);
     for (unsigned i = 0; i < materialCount; ++i) {
+        const aiMaterial* aiMat = scene->mMaterials[i];
         auto mat = std::make_shared<render::Material>();
         mat->SetShader(skinnedShader);
+        
+        // Albedo texture (always set, has default)
         mat->SetAlbedoTexture(albedos[i]);
+        
+        // PBR textures (set defaults if missing, set flags)
+        if (normals[i]) {
+            mat->SetNormalTexture(normals[i]);
+            mat->SetFloat("u_HasNormalTexture", 1.0f);
+        } else {
+            mat->SetNormalTexture(defaultNormal);
+            mat->SetFloat("u_HasNormalTexture", 0.0f);
+        }
+        if (metallicRoughness[i]) {
+            mat->SetMetallicRoughnessTexture(metallicRoughness[i]);
+            mat->SetFloat("u_HasMetallicRoughnessTexture", 1.0f);
+        } else {
+            mat->SetMetallicRoughnessTexture(defaultMetallicRoughness);
+            mat->SetFloat("u_HasMetallicRoughnessTexture", 0.0f);
+        }
+        if (ao[i]) {
+            mat->SetAOTexture(ao[i]);
+            mat->SetFloat("u_HasAOTexture", 1.0f);
+        } else {
+            mat->SetAOTexture(defaultAO);
+            mat->SetFloat("u_HasAOTexture", 0.0f);
+        }
+        if (emissive[i]) {
+            mat->SetEmissiveTexture(emissive[i]);
+            mat->SetFloat("u_HasEmissiveTexture", 1.0f);
+        } else {
+            mat->SetEmissiveTexture(defaultEmissive);
+            mat->SetFloat("u_HasEmissiveTexture", 0.0f);
+        }
+        
+        // Load PBR material properties
+        aiColor3D color;
+        if (aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, color) == aiReturn_SUCCESS) {
+            mat->SetAlbedo(math::Vec3(color.r, color.g, color.b));
+        }
+        
+        float metallic = 0.0f;
+        if (aiMat->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == aiReturn_SUCCESS) {
+            mat->SetMetallic(metallic);
+        }
+        
+        float roughness = 0.5f;
+        if (aiMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == aiReturn_SUCCESS) {
+            mat->SetRoughness(roughness);
+        }
+        
+        if (aiMat->Get(AI_MATKEY_COLOR_EMISSIVE, color) == aiReturn_SUCCESS) {
+            mat->SetEmission(math::Vec3(color.r, color.g, color.b));
+        }
+        
+        float ao = 1.0f;
+        // AO is typically in a texture, but some formats may have it as a material property
+        // For now, default to 1.0 (no occlusion)
+        mat->SetAO(ao);
+        
         // glTF UV transform support (KHR_texture_transform) for base color.
-        MaterialUVInfo uvInfo = GetMaterialUVInfo(scene->mMaterials[i], aiTextureType_BASE_COLOR);
-        if (scene->mMaterials[i]->GetTextureCount(aiTextureType_BASE_COLOR) == 0) {
+        MaterialUVInfo uvInfo = GetMaterialUVInfo(aiMat, aiTextureType_BASE_COLOR);
+        if (aiMat->GetTextureCount(aiTextureType_BASE_COLOR) == 0) {
             // Fall back to diffuse slot if base color isn't used.
-            uvInfo = GetMaterialUVInfo(scene->mMaterials[i], aiTextureType_DIFFUSE);
+            uvInfo = GetMaterialUVInfo(aiMat, aiTextureType_DIFFUSE);
         }
         if (uvInfo.uvIndex > 1) {
             core::Log::WarnF("ModelLoader: material %u uses texCoord %d (only UV0/UV1 supported)",
@@ -623,6 +774,13 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
         mat->SetFloat("u_UVRotation", uvInfo.rotation);
         mat->SetFloat("u_TexCoordIndex", uvInfo.uvIndex == 1 ? 1.0f : 0.0f);
         mat->SetFloat("u_FlipV", isGltf ? 1.0f : 0.0f);
+        
+        // Set PBR uniforms
+        mat->SetFloat("u_Metallic", mat->GetMetallic());
+        mat->SetFloat("u_Roughness", mat->GetRoughness());
+        mat->SetVec3("u_Emission", mat->GetEmission());
+        mat->SetFloat("u_AO", mat->GetAO());
+        
         // According to advise.md: bindPoseMatrices always exists (at least root bone)
         mat->SetMat4Array("u_Bones", bindPoseMatrices);
         result.materials[i] = mat;
