@@ -20,6 +20,7 @@ public:
         math::Vec3 position{0, 0, 0};
         math::Vec3 normal{0, 1, 0};
         math::Vec2 uv{0, 0};
+        math::Vec2 uv1{0, 0};
         math::Vec3 tangent{0, 0, 0};
         math::Vec4 color{1, 1, 1, 1};
         math::IVec4 boneIndices{0, 0, 0, 0};

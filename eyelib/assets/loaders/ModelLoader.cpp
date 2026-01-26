@@ -10,6 +10,7 @@
 #include "eyelib/render/resources/Texture2D.h"
 
 #include <assimp/Importer.hpp>
+#include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
@@ -42,18 +43,9 @@ math::Mat4 ToMat4(const aiMatrix4x4& m) {
 }
 
 void DecomposeTRS(const math::Mat4& m, math::Vec3& outT, math::Quat& outR, math::Vec3& outS) {
-    outT = math::Vec3(m[3]);
-    outS = math::Vec3(
-        glm::length(math::Vec3(m[0])),
-        glm::length(math::Vec3(m[1])),
-        glm::length(math::Vec3(m[2]))
-    );
-    math::Mat3 rotMat(
-        math::Vec3(m[0]) / (outS.x != 0.0f ? outS.x : 1.0f),
-        math::Vec3(m[1]) / (outS.y != 0.0f ? outS.y : 1.0f),
-        math::Vec3(m[2]) / (outS.z != 0.0f ? outS.z : 1.0f)
-    );
-    outR = glm::quat_cast(rotMat);
+    // Use the engine's standard decomposition to preserve handedness/sign.
+    math::Decompose(m, outT, outR, outS);
+    outR = glm::normalize(outR);
 }
 
 void ExtractBonesFromMeshes(const aiScene* scene,
@@ -193,7 +185,7 @@ UnifiedSkeletonResult BuildUnifiedSkeleton(const aiScene* scene,
         ProcessBoneHierarchy(scene->mRootNode, *skeleton, nodeToBoneIndex, -1);
     } else {
         // Static path: create placement bones from scene graph
-        // For static placement bones, keep global inverse identity so bones apply full mesh globals.
+        // Use identity global inverse so we can feed raw mesh globals directly into the palette.
         skeleton->SetGlobalInverseTransform(math::Mat4(1.0f));
         // Root bone
         animation::Bone root;
@@ -210,8 +202,11 @@ UnifiedSkeletonResult BuildUnifiedSkeleton(const aiScene* scene,
             animation::Bone b;
             b.name = "Mesh_" + std::to_string(i);
             b.parentIndex = 0; // Parent to root
-            b.inverseBindMatrix = math::Mat4(1.0f);
-            DecomposeTRS(meshGlobals[i], b.bindPosition, b.bindRotation, b.bindScale);
+            // Feed raw node matrix directly into the palette (no TRS decomposition).
+            b.inverseBindMatrix = meshGlobals[i];
+            b.bindPosition = math::Vec3(0.0f);
+            b.bindRotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+            b.bindScale = math::Vec3(1.0f);
             const int boneIndex = static_cast<int>(skeleton->BoneCount());
             skeleton->AddBone(b);
             result.meshToBoneIndex[i] = boneIndex;
@@ -395,6 +390,9 @@ std::shared_ptr<render::Mesh> BuildMesh(const aiMesh* ai,
         if (ai->mTextureCoords[0]) {
             v.uv = math::Vec2(ai->mTextureCoords[0][i].x, ai->mTextureCoords[0][i].y);
         }
+        if (ai->mTextureCoords[1]) {
+            v.uv1 = math::Vec2(ai->mTextureCoords[1][i].x, ai->mTextureCoords[1][i].y);
+        }
         if (ai->mTangents) {
             math::Vec3 t(ai->mTangents[i].x, ai->mTangents[i].y, ai->mTangents[i].z);
             v.tangent = glm::normalize(t);
@@ -513,6 +511,35 @@ std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
     return nullptr;
 }
 
+struct MaterialUVInfo {
+    math::Vec4 transform{0.0f, 0.0f, 1.0f, 1.0f}; // offset.xy, scale.zw
+    float rotation = 0.0f; // radians
+    int uvIndex = 0;
+};
+
+MaterialUVInfo GetMaterialUVInfo(const aiMaterial* mat, aiTextureType type) {
+    MaterialUVInfo info;
+    if (!mat) return info;
+
+    int uvIndex = 0;
+    if (mat->Get(AI_MATKEY_UVWSRC(type, 0), uvIndex) == aiReturn_SUCCESS) {
+        info.uvIndex = uvIndex;
+    }
+
+    aiUVTransform uvTransform;
+    if (mat->Get(AI_MATKEY_UVTRANSFORM(type, 0), uvTransform) == aiReturn_SUCCESS) {
+        info.transform = math::Vec4(
+            uvTransform.mTranslation.x,
+            uvTransform.mTranslation.y,
+            uvTransform.mScaling.x,
+            uvTransform.mScaling.y
+        );
+        info.rotation = uvTransform.mRotation;
+    }
+
+    return info;
+}
+
 } // namespace
 
 LoadedModel ModelLoader::LoadModel(const std::string& path) {
@@ -576,11 +603,26 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     // Build bind pose matrices (shared for all materials)
     const std::vector<math::Mat4> bindPoseMatrices = BuildBindPoseMatrices(*result.skeleton);
     
+    const bool isGltf = IsGLTF(path);
     result.materials.resize(materialCount);
     for (unsigned i = 0; i < materialCount; ++i) {
         auto mat = std::make_shared<render::Material>();
         mat->SetShader(skinnedShader);
         mat->SetAlbedoTexture(albedos[i]);
+        // glTF UV transform support (KHR_texture_transform) for base color.
+        MaterialUVInfo uvInfo = GetMaterialUVInfo(scene->mMaterials[i], aiTextureType_BASE_COLOR);
+        if (scene->mMaterials[i]->GetTextureCount(aiTextureType_BASE_COLOR) == 0) {
+            // Fall back to diffuse slot if base color isn't used.
+            uvInfo = GetMaterialUVInfo(scene->mMaterials[i], aiTextureType_DIFFUSE);
+        }
+        if (uvInfo.uvIndex > 1) {
+            core::Log::WarnF("ModelLoader: material %u uses texCoord %d (only UV0/UV1 supported)",
+                             i, uvInfo.uvIndex);
+        }
+        mat->SetVec4("u_UVTransform", uvInfo.transform);
+        mat->SetFloat("u_UVRotation", uvInfo.rotation);
+        mat->SetFloat("u_TexCoordIndex", uvInfo.uvIndex == 1 ? 1.0f : 0.0f);
+        mat->SetFloat("u_FlipV", isGltf ? 1.0f : 0.0f);
         // According to advise.md: bindPoseMatrices always exists (at least root bone)
         mat->SetMat4Array("u_Bones", bindPoseMatrices);
         result.materials[i] = mat;

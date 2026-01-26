@@ -159,17 +159,9 @@ bool TestRender(TestStats& stats) {
     skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
     skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    const std::string modelPath = "assets/models/joe_male/";
-    // Try common model file formats
-    std::string fullModelPath = modelPath + "scene.gltf";
-    if (!filesystem::FileExists(fullModelPath)) {
-        fullModelPath = modelPath + "model.fbx";
-        if (!filesystem::FileExists(fullModelPath)) {
-            fullModelPath = modelPath + "model.glb";
-        }
-    }
-    auto modelAsset = ModelLoader::LoadModel(fullModelPath);
-    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load joe_male model");
+    const std::string modelPath = "assets/models/ancient_king/scene.gltf";
+    auto modelAsset = ModelLoader::LoadModel(modelPath);
+    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load joe_gltf model");
     std::vector<std::shared_ptr<Mesh>> modelMeshes;
     std::vector<std::shared_ptr<Material>> modelMaterials;
     std::vector<Mat4> modelTransforms;
@@ -177,6 +169,27 @@ bool TestRender(TestStats& stats) {
         modelMeshes = modelAsset->GetMeshes();
         modelMaterials = modelAsset->GetMaterials();
         modelTransforms = modelAsset->GetMeshTransforms();
+    }
+
+    // Load running.fbx animation to apply to joe_male model
+    const std::string runningAnimPath = "assets/models/animation/running.fbx";
+    auto runningAsset = ModelLoader::LoadModel(runningAnimPath);
+    Expect(stats, runningAsset != nullptr, "Render: load running.fbx animation");
+    
+    auto runningSkeleton = runningAsset ? runningAsset->GetSkeleton() : nullptr;
+    auto runningClip = runningAsset ? runningAsset->GetClip() : nullptr;
+    if (runningClip) runningClip->SetLoop(true);
+    Expect(stats, runningSkeleton && runningClip, "Render: load running animation clip");
+    
+    // Use running animation for joe_male model
+    auto animator = std::make_shared<Animator>();
+    if (runningSkeleton) animator->SetSkeleton(runningSkeleton);
+    if (runningClip) animator->SetClip(runningClip);
+    
+    if (runningSkeleton && runningClip) {
+        eyelib::api::core::Log::InfoF("Loaded running.fbx animation: %zu bones", 
+                                     runningSkeleton->BoneCount());
+        eyelib::api::core::Log::Info("Applying running animation to joe_male model (press 'T' to toggle)");
     }
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
@@ -251,7 +264,11 @@ bool TestRender(TestStats& stats) {
     const int KEY_D = 68;
     const int KEY_Q = 81;
     const int KEY_E = 69;
+    const int KEY_T = 84;
     const int MOUSE_RIGHT = 1;
+
+    bool animationPlaying = false;
+    bool prevTKeyState = false;
 
     while (!window.ShouldClose()) {
         window.PollEvents();
@@ -296,8 +313,29 @@ bool TestRender(TestStats& stats) {
             if (cameraPitch < -89.0f) cameraPitch = -89.0f;
         }
 
+        // Toggle animation playback with 'T' key
+        bool currentTKeyState = Input::IsKeyPressed(KEY_T);
+        if (currentTKeyState && !prevTKeyState) {
+            animationPlaying = !animationPlaying;
+            eyelib::api::core::Log::InfoF("Animation playback: %s", animationPlaying ? "ON" : "OFF");
+        }
+        prevTKeyState = currentTKeyState;
+
         scene.camera.view = glm::lookAt(cameraPos, cameraPos + forward, up);
         scene.camera.viewPos = cameraPos;
+
+        // Update animation only if toggle is enabled
+        // Apply running animation to joe_male model
+        if (animationPlaying && animator && runningSkeleton && runningClip) {
+            animator->Update(deltaTime);
+            const auto& bones = animator->GetBoneMatrices();
+            // Apply to joe_male model materials
+            for (const auto& mat : modelMaterials) {
+                if (!mat) continue;
+                mat->SetMat4Array("u_Bones", bones);
+            }
+        }
+        // If animation is disabled, materials keep their bind pose matrices (set at load time)
 
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);

@@ -206,6 +206,9 @@ void Mesh::CreateVAO() {
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
     off += sizeof(math::Vec2);
+    glEnableVertexAttribArray(7);
+    glVertexAttribPointer(7, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
+    off += sizeof(math::Vec2);
     glEnableVertexAttribArray(3);
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
     off += sizeof(math::Vec3);

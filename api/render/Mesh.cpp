@@ -25,6 +25,7 @@ void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
         rv.position = vert.position;
         rv.normal = vert.normal;
         rv.uv = vert.uv;
+        rv.uv1 = vert.uv1;
         rv.tangent = vert.tangent;
         rv.color = vert.color;
         rv.boneIndices = vert.boneIndices;
