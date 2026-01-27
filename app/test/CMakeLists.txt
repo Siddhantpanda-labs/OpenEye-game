@@ -2,6 +2,9 @@
 
 set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdPersonCamera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/CharacterController.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/CharacterTest.cpp
 )
 
 add_executable(OpenEyeApiTests ${TEST_SOURCES})

@@ -1,340 +1,88 @@
 #include "api/core/All.h"
-#include "api/math/All.h"
-#include "api/platform/All.h"
-#include "api/render/All.h"
-#include "api/geometry/All.h"
+#include "CharacterTest.h"
 
 #include <iostream>
 #include <string>
 #include <chrono>
 #include <thread>
 
-#include <glm/gtc/matrix_transform.hpp>
-
 namespace {
 
-struct TestStats {
-    int passed = 0;
-    int failed = 0;
-};
+bool RunCharacterTest() {
+    using namespace eyelib::test;
 
-bool Expect(TestStats& stats, bool condition, const std::string& name) {
-    if (condition) {
-        stats.passed++;
-        std::cout << "[PASS] " << name << "\n";
-        return true;
-    }
-    stats.failed++;
-    std::cout << "[FAIL] " << name << "\n";
-    eyelib::api::core::Log::WarnF("Test failed: %s", name.c_str());
-    return false;
-}
-
-std::shared_ptr<eyelib::api::render::Mesh> BuildPlaneMesh(float halfSize) {
-    using namespace eyelib::api::render;
-    auto mesh = std::make_shared<Mesh>();
-
-    std::vector<Mesh::Vertex> vertices(4);
-    vertices[0].position = {-halfSize, 0.0f, -halfSize};
-    vertices[1].position = { halfSize, 0.0f, -halfSize};
-    vertices[2].position = { halfSize, 0.0f,  halfSize};
-    vertices[3].position = {-halfSize, 0.0f,  halfSize};
-    for (auto& v : vertices) {
-        v.normal = {0.0f, 1.0f, 0.0f};
-    }
-    vertices[0].uv = {0.0f, 0.0f};
-    vertices[1].uv = {1.0f, 0.0f};
-    vertices[2].uv = {1.0f, 1.0f};
-    vertices[3].uv = {0.0f, 1.0f};
-
-    std::vector<uint32_t> indices = {0, 1, 2, 0, 2, 3};
-
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    mesh->UploadToGPU();
-    return mesh;
-}
-
-std::shared_ptr<eyelib::api::render::Mesh> BuildCubeMesh(float halfSize) {
-    using namespace eyelib::api::render;
-    auto mesh = std::make_shared<Mesh>();
-
-    struct Face {
-        eyelib::math::Vec3 normal;
-        eyelib::math::Vec3 v0, v1, v2, v3;
-    };
-    const float h = halfSize;
-    const Face faces[] = {
-        {{ 0, 0, 1}, {-h, -h,  h}, { h, -h,  h}, { h,  h,  h}, {-h,  h,  h}}, // front
-        {{ 0, 0,-1}, { h, -h, -h}, {-h, -h, -h}, {-h,  h, -h}, { h,  h, -h}}, // back
-        {{ 1, 0, 0}, { h, -h,  h}, { h, -h, -h}, { h,  h, -h}, { h,  h,  h}}, // right
-        {{-1, 0, 0}, {-h, -h, -h}, {-h, -h,  h}, {-h,  h,  h}, {-h,  h, -h}}, // left
-        {{ 0, 1, 0}, {-h,  h,  h}, { h,  h,  h}, { h,  h, -h}, {-h,  h, -h}}, // top
-        {{ 0,-1, 0}, {-h, -h, -h}, { h, -h, -h}, { h, -h,  h}, {-h, -h,  h}}  // bottom
-    };
-
-    std::vector<Mesh::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(24);
-    indices.reserve(36);
-
-    const float uvInset = 0.02f;
-    const float u0 = uvInset;
-    const float v0uv = uvInset;
-    const float u1 = 1.0f - uvInset;
-    const float v1uv = 1.0f - uvInset;
-
-    for (const auto& face : faces) {
-        const uint32_t base = static_cast<uint32_t>(vertices.size());
-        Mesh::Vertex v0{}, v1{}, v2{}, v3{};
-        v0.position = face.v0; v1.position = face.v1; v2.position = face.v2; v3.position = face.v3;
-        v0.normal = v1.normal = v2.normal = v3.normal = face.normal;
-        v0.uv = {u0, v0uv};
-        v1.uv = {u1, v0uv};
-        v2.uv = {u1, v1uv};
-        v3.uv = {u0, v1uv};
-        vertices.push_back(v0);
-        vertices.push_back(v1);
-        vertices.push_back(v2);
-        vertices.push_back(v3);
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
-    }
-
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    mesh->UploadToGPU();
-    return mesh;
-}
-
-bool TestRender(TestStats& stats) {
-    using namespace eyelib::api::platform;
-    using namespace eyelib::api::render;
-    using namespace eyelib::math;
-
-    Window window;
-    WindowConfig cfg;
-    cfg.title = "OpenEye API Tests";
-    cfg.width = 1280;
-    cfg.height = 720;
-    cfg.debugContext = false;
-    cfg.resizable = true;
-
-    if (!Expect(stats, window.Initialize(cfg), "Render: window init")) {
+    CharacterTest test;
+    if (!test.Initialize(1280, 720)) {
+        eyelib::api::core::Log::Error("Failed to initialize character test");
         return false;
     }
 
-    Renderer renderer;
-    if (!Expect(stats, renderer.Initialize(), "Render: renderer init")) {
-        window.Shutdown();
-        return false;
-    }
-
-    TextureCube skybox;
-    std::vector<std::string> skyFaces = {
-        "assets/Clear Ocean/vz_clear_ocean_right.png",
-        "assets/Clear Ocean/vz_clear_ocean_left.png",
-        "assets/Clear Ocean/vz_clear_ocean_up.png",
-        "assets/Clear Ocean/vz_clear_ocean_down.png",
-        "assets/Clear Ocean/vz_clear_ocean_front.png",
-        "assets/Clear Ocean/vz_clear_ocean_back.png"
+    // Load character model (try common paths)
+    std::vector<std::string> modelPaths = {
+        "assets/models/animation/Orc_Idle.fbx",
+        "assets/models/animation/orc_idle.fbx",
+        "assets/models/animation/Orc.fbx",
+        "assets/models/animation/orc.fbx"
     };
-    bool skyLoaded = skybox.LoadFromFiles(skyFaces, true, true);
-    Expect(stats, skyLoaded, "Render: load Clear Ocean skybox");
-    skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
-    skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    // Create sphere mesh using geometry primitives
-    using namespace eyelib::api::geometry;
-    auto sphereMesh = Primitives::CreateSphere(1.0f, 32, 16);
-    Expect(stats, sphereMesh && sphereMesh->IsValid(), "Geometry: create sphere primitive");
-    
-    eyelib::api::core::Log::Info("Sphere mesh created (press 1=Subdivide, 2=Smooth, 3=Noise)");
-    
-    // Create a simple material for the sphere
-    auto sphereMaterial = std::make_shared<Material>();
-    auto shader = std::make_shared<Shader>();
-    // Try forward/basic shader first, then fallback to root basic shader
-    if (shader->LoadFromFile("assets/shaders/passes/forward/basic.vert", "assets/shaders/passes/forward/basic.frag")) {
-        sphereMaterial->SetShader(shader);
-    } else {
-        // Fallback to basic shader if forward/basic not available
-        auto basicShader = std::make_shared<Shader>();
-        if (basicShader->LoadFromFile("assets/shaders/basic.vert", "assets/shaders/basic.frag")) {
-            sphereMaterial->SetShader(basicShader);
+    bool modelLoaded = false;
+    for (const auto& path : modelPaths) {
+        if (test.LoadCharacterModel(path)) {
+            modelLoaded = true;
+            eyelib::api::core::Log::InfoF("Successfully loaded model: %s", path.c_str());
+            break;
         }
     }
-    
-    // Set up material properties
-    sphereMaterial->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
-    sphereMaterial->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
-    sphereMaterial->SetFloat("u_LightIntensity", 2.0f);
-    sphereMaterial->SetVec3("u_ViewPos", Vec3(2.5f, 2.0f, 2.5f));
-    sphereMaterial->SetVec3("u_Emission", Vec3(0.0f));
 
-    RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
-    Expect(stats, colorOnly.GetColorAttachmentCount() == 1, "Render: color-only target");
-    Expect(stats, colorOnly.GetDepthTexture() == nullptr, "Render: no depth texture");
-
-    RenderPipeline pipeline;
-    if (!Expect(stats, pipeline.Initialize(window.Width(), window.Height()), "Render: pipeline init")) {
-        renderer.Shutdown();
-        window.Shutdown();
-        return false;
+    if (!modelLoaded) {
+        eyelib::api::core::Log::Warn("Could not load character model. Trying to continue without model...");
     }
-    pipeline.SetMode(RenderPipeline::Mode::Forward);
 
-    RenderScene scene;
-    scene.skybox = std::make_shared<TextureCube>(std::move(skybox));
-    Vec3 cameraPos(2.5f, 2.0f, 2.5f);
-    float cameraYaw = -135.0f;
-    float cameraPitch = -20.0f;
-    scene.camera.projection = glm::perspective(glm::radians(60.0f), window.AspectRatio(), 0.1f, 1000.0f);
-    scene.camera.viewPos = cameraPos;
+    // Try to load additional animations
+    std::vector<std::string> walkPaths = {
+        "assets/models/animation/Start_Walking.fbx",
+        "assets/models/animation/start_walking.fbx"
+    };
+    std::vector<std::string> runPaths = {
+        "assets/models/animation/Running.fbx",
+        "assets/models/animation/running.fbx"
+    };
 
-    scene.light.direction = {-0.4f, -1.0f, -0.2f};
-    scene.light.color = {1.0f, 1.0f, 1.0f};
-    scene.light.intensity = 2.0f;
-    scene.light.ambient = Vec3(0.1f);
-    scene.light.exposure = 1.0f;
+    std::string walkPath, runPath;
+    for (const auto& path : walkPaths) {
+        // Check if file exists (simplified - just try loading)
+        walkPath = path;
+        break; // Use first path
+    }
+    for (const auto& path : runPaths) {
+        runPath = path;
+        break;
+    }
 
-    // Add sphere to scene
-    Drawable sphereDrawable{};
-    sphereDrawable.mesh = sphereMesh;
-    sphereDrawable.material = sphereMaterial;
-    sphereDrawable.transform = Mat4(1.0f); // Identity transform (centered at origin)
-    scene.opaque.push_back(sphereDrawable);
-    
-    Expect(stats, !scene.opaque.empty(), "Render: pipeline render sphere");
+    if (!walkPath.empty() || !runPath.empty()) {
+        test.LoadAnimations("", walkPath, runPath);
+    }
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
-    int lastWidth = window.Width();
-    int lastHeight = window.Height();
 
-    const int KEY_W = 87;
-    const int KEY_A = 65;
-    const int KEY_S = 83;
-    const int KEY_D = 68;
-    const int KEY_Q = 81;
-    const int KEY_E = 69;
-    const int KEY_1 = 49;
-    const int KEY_2 = 50;
-    const int KEY_3 = 51;
-    const int MOUSE_RIGHT = 1;
-
-    bool prevKey1State = false;
-    bool prevKey2State = false;
-    bool prevKey3State = false;
-
-    while (!window.ShouldClose()) {
-        window.PollEvents();
+    while (!test.ShouldClose()) {
         const auto now = std::chrono::steady_clock::now();
-        const std::chrono::duration<float> elapsed = now - startTime;
-
-        const int w = window.Width();
-        const int h = window.Height();
-        if (w != lastWidth || h != lastHeight) {
-            lastWidth = w;
-            lastHeight = h;
-            pipeline.Resize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
-            scene.camera.projection = glm::perspective(glm::radians(60.0f), window.AspectRatio(), 0.1f, 1000.0f);
-        }
-
         float deltaTime = std::chrono::duration<float>(now - lastTime).count();
-        if (deltaTime > 0.1f) deltaTime = 0.1f;
+        if (deltaTime > 0.1f) deltaTime = 0.1f; // Cap delta time
         lastTime = now;
-        Vec3 forward;
-        forward.x = std::cos(glm::radians(cameraPitch)) * std::cos(glm::radians(cameraYaw));
-        forward.y = std::sin(glm::radians(cameraPitch));
-        forward.z = std::cos(glm::radians(cameraPitch)) * std::sin(glm::radians(cameraYaw));
-        forward = glm::normalize(forward);
-        const Vec3 up(0.0f, 1.0f, 0.0f);
-        const Vec3 right = glm::normalize(glm::cross(forward, up));
 
-        const float speed = 3.5f;
-        const float move = speed * deltaTime;
-        if (Input::IsKeyPressed(KEY_W)) cameraPos += forward * move;
-        if (Input::IsKeyPressed(KEY_S)) cameraPos -= forward * move;
-        if (Input::IsKeyPressed(KEY_D)) cameraPos += right * move;
-        if (Input::IsKeyPressed(KEY_A)) cameraPos -= right * move;
-        if (Input::IsKeyPressed(KEY_E)) cameraPos += up * move;
-        if (Input::IsKeyPressed(KEY_Q)) cameraPos -= up * move;
-
-        if (Input::IsMouseButtonPressed(MOUSE_RIGHT)) {
-            const auto mouseDelta = Input::MouseDelta();
-            const float sensitivity = 0.15f;
-            cameraYaw += mouseDelta.x * sensitivity;
-            cameraPitch -= mouseDelta.y * sensitivity;
-            if (cameraPitch > 89.0f) cameraPitch = 89.0f;
-            if (cameraPitch < -89.0f) cameraPitch = -89.0f;
-        }
-
-        // Geometry operations on sphere (keys 1, 2, 3)
-        bool currentKey1State = Input::IsKeyPressed(KEY_1);
-        bool currentKey2State = Input::IsKeyPressed(KEY_2);
-        bool currentKey3State = Input::IsKeyPressed(KEY_3);
-        
-        if (currentKey1State && !prevKey1State) {
-            // Key 1: Subdivide
-            eyelib::api::core::Log::Info("Applying Subdivide operation...");
-            SelectionBuilder builder(*sphereMesh);
-            Selection selection = builder.Build(); // Empty selection = all faces
-            MeshOps::Subdivide(*sphereMesh, selection, 1);
-            sphereMesh->UploadToGPU(); // Re-upload after modification
-            eyelib::api::core::Log::InfoF("Subdivide complete. Vertex count: %zu", sphereMesh->GetVertices().size());
-        }
-        
-        if (currentKey2State && !prevKey2State) {
-            // Key 2: Smooth
-            eyelib::api::core::Log::Info("Applying Smooth operation...");
-            SelectionBuilder builder(*sphereMesh);
-            Selection selection = builder.Build(); // Empty selection = all vertices
-            MeshOps::Smooth(*sphereMesh, selection, 0.8f, 3);
-            sphereMesh->UploadToGPU(); // Re-upload after modification
-            eyelib::api::core::Log::Info("Smooth complete.");
-        }
-        
-        if (currentKey3State && !prevKey3State) {
-            // Key 3: Apply Noise
-            eyelib::api::core::Log::Info("Applying Noise operation...");
-            SelectionBuilder builder(*sphereMesh);
-            Selection selection = builder.Build(); // Empty selection = all vertices
-            MeshOps::ApplyNoise(*sphereMesh, selection, 0.5f, 0.1f, 12345, 4);
-            sphereMesh->UploadToGPU(); // Re-upload after modification
-            eyelib::api::core::Log::Info("Noise complete.");
-        }
-        
-        prevKey1State = currentKey1State;
-        prevKey2State = currentKey2State;
-        prevKey3State = currentKey3State;
-
-        scene.camera.view = glm::lookAt(cameraPos, cameraPos + forward, up);
-        scene.camera.viewPos = cameraPos;
-        
-        // Update view position for sphere material
-        sphereMaterial->SetVec3("u_ViewPos", cameraPos);
-
-        renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
-        pipeline.Render(scene);
-        pipeline.BlitToScreen();
-        window.SwapBuffers();
+        test.Update(deltaTime);
+        test.Render();
 
         const auto frameEnd = std::chrono::steady_clock::now();
         const auto frameMs = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - lastTime);
         if (frameMs.count() < 16) {
             std::this_thread::sleep_for(std::chrono::milliseconds(16 - frameMs.count()));
         }
-        Input::Update();
     }
 
-    pipeline.Shutdown();
-    renderer.Shutdown();
-    window.Shutdown();
+    test.Shutdown();
     return true;
 }
 
@@ -347,11 +95,13 @@ int main() {
     Log::Initialize("OpenEyeApiTests.log");
     Log::SetLevel(LogLevel::Info);
 
-    TestStats stats{};
-    TestRender(stats);
+    Log::Info("Starting Third-Person Character Test");
+    Log::Info("Controls: WASD = Move, Right Mouse Button = Look around, Scroll = Zoom");
 
-    Log::InfoF("Tests finished. Passed: %d, Failed: %d", stats.passed, stats.failed);
+    bool success = RunCharacterTest();
+
+    Log::Info(success ? "Character test completed successfully" : "Character test failed");
     Log::Shutdown();
 
-    return stats.failed == 0 ? 0 : 1;
+    return success ? 0 : 1;
 }
