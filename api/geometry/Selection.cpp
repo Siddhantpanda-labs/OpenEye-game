@@ -1,6 +1,7 @@
 #include "api/geometry/Selection.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "api/render/Mesh.h"
+#include "api/render/Texture.h"
 
 namespace eyelib {
 namespace api {
@@ -31,6 +32,13 @@ Selection::Selection(Selection&&) noexcept = default;
 Selection& Selection::operator=(Selection&&) noexcept = default;
 
 Selection::Selection(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
+
+Selection Selection::Empty(Type type) {
+    auto emptySel = ::eyelib::geometry::Selection::Empty(
+        static_cast<::eyelib::geometry::Selection::Type>(type));
+    auto impl = std::make_unique<Impl>(emptySel);
+    return Selection(std::move(impl));
+}
 
 Selection::Type Selection::GetType() const {
     auto type = m_impl->selection.GetType();
@@ -111,8 +119,37 @@ SelectionBuilder& SelectionBuilder::ByNormal(const ::eyelib::math::Vec3& directi
     return *this;
 }
 
+SelectionBuilder& SelectionBuilder::ByCurvature(float minCurvature, float maxCurvature) {
+    m_impl->builder.ByCurvature(minCurvature, maxCurvature);
+    return *this;
+}
+
 SelectionBuilder& SelectionBuilder::ByDistance(const ::eyelib::math::Vec3& point, float radius) {
     m_impl->builder.ByDistance(point, radius);
+    return *this;
+}
+
+SelectionBuilder& SelectionBuilder::ByObjectID(const api::Texture& objectIDBuffer, uint8_t objectID,
+                                               const ::eyelib::math::Mat4& viewMatrix, const ::eyelib::math::Mat4& projectionMatrix,
+                                               int viewportWidth, int viewportHeight) {
+    auto internalTexture = objectIDBuffer.GetInternal();
+    m_impl->builder.ByObjectID(*internalTexture, objectID, viewMatrix, projectionMatrix, viewportWidth, viewportHeight);
+    return *this;
+}
+
+SelectionBuilder& SelectionBuilder::ByDepth(const api::Texture& depthBuffer, float minDepth, float maxDepth,
+                                           const ::eyelib::math::Mat4& viewMatrix, const ::eyelib::math::Mat4& projectionMatrix,
+                                           int viewportWidth, int viewportHeight) {
+    auto internalTexture = depthBuffer.GetInternal();
+    m_impl->builder.ByDepth(*internalTexture, minDepth, maxDepth, viewMatrix, projectionMatrix, viewportWidth, viewportHeight);
+    return *this;
+}
+
+SelectionBuilder& SelectionBuilder::ByColorBuffer(const api::Texture& colorBuffer, const ::eyelib::math::Vec3& targetColor,
+                                                 float colorThreshold, const ::eyelib::math::Mat4& viewMatrix,
+                                                 const ::eyelib::math::Mat4& projectionMatrix, int viewportWidth, int viewportHeight) {
+    auto internalTexture = colorBuffer.GetInternal();
+    m_impl->builder.ByColorBuffer(*internalTexture, targetColor, colorThreshold, viewMatrix, projectionMatrix, viewportWidth, viewportHeight);
     return *this;
 }
 

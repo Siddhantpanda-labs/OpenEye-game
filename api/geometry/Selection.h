@@ -7,10 +7,11 @@
 #include <memory>
 
 namespace eyelib {
-namespace render { class Mesh; }
+namespace render { class Mesh; class Texture2D; }
 namespace geometry { class Selection; } // Forward declaration
 namespace api {
 class Mesh; // Forward declaration for API Mesh
+class Texture; // Forward declaration for API Texture
 namespace geometry {
 
 /**
@@ -34,6 +35,11 @@ public:
     Selection& operator=(const Selection&);
     Selection(Selection&&) noexcept;
     Selection& operator=(Selection&&) noexcept;
+    
+    /**
+     * @brief Create an empty selection of the specified type.
+     */
+    static Selection Empty(Type type);
     
     Type GetType() const;
     bool IsEmpty() const;
@@ -72,7 +78,53 @@ public:
     SelectionBuilder& ByFaceIDs(const std::vector<uint32_t>& faceIDs);
     SelectionBuilder& ByBounds(const ::eyelib::math::AABB& bounds);
     SelectionBuilder& ByNormal(const ::eyelib::math::Vec3& direction, float threshold = 0.9f);
+    SelectionBuilder& ByCurvature(float minCurvature, float maxCurvature);
     SelectionBuilder& ByDistance(const ::eyelib::math::Vec3& point, float radius);
+    
+    /**
+     * @brief Select vertices by object ID from render buffer (vision-based).
+     * 
+     * @param objectIDBuffer Object ID buffer texture
+     * @param objectID Object ID to select (0-255)
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByObjectID(const api::Texture& objectIDBuffer, uint8_t objectID,
+                                 const ::eyelib::math::Mat4& viewMatrix, const ::eyelib::math::Mat4& projectionMatrix,
+                                 int viewportWidth, int viewportHeight);
+    
+    /**
+     * @brief Select vertices by depth buffer (vision-based).
+     * 
+     * @param depthBuffer Depth buffer texture
+     * @param minDepth Minimum depth value (0.0 = near, 1.0 = far)
+     * @param maxDepth Maximum depth value
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByDepth(const api::Texture& depthBuffer, float minDepth, float maxDepth,
+                             const ::eyelib::math::Mat4& viewMatrix, const ::eyelib::math::Mat4& projectionMatrix,
+                             int viewportWidth, int viewportHeight);
+    
+    /**
+     * @brief Select vertices by color buffer (vision-based).
+     * 
+     * @param colorBuffer Color buffer texture
+     * @param targetColor Target color to match
+     * @param colorThreshold Color matching threshold (0.0 = exact match, 1.0 = any color)
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByColorBuffer(const api::Texture& colorBuffer, const ::eyelib::math::Vec3& targetColor,
+                                   float colorThreshold, const ::eyelib::math::Mat4& viewMatrix,
+                                   const ::eyelib::math::Mat4& projectionMatrix, int viewportWidth, int viewportHeight);
+    
     SelectionBuilder& Union(const Selection& other);
     SelectionBuilder& Intersect(const Selection& other);
     

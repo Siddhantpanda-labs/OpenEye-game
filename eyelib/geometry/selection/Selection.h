@@ -2,6 +2,7 @@
 
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
+#include "eyelib/render/resources/Texture2D.h"
 #include <cstdint>
 #include <vector>
 #include <unordered_set>
@@ -160,9 +161,67 @@ public:
     SelectionBuilder& ByNormal(const math::Vec3& direction, float threshold = 0.9f);
     
     /**
+     * @brief Select vertices by curvature.
+     * @param minCurvature Minimum curvature value (mean curvature magnitude)
+     * @param maxCurvature Maximum curvature value
+     */
+    SelectionBuilder& ByCurvature(float minCurvature, float maxCurvature);
+    
+    /**
      * @brief Select vertices within distance from point.
      */
     SelectionBuilder& ByDistance(const math::Vec3& point, float radius);
+    
+    /**
+     * @brief Select vertices by object ID from render buffer.
+     * 
+     * Uses object ID buffer to select vertices belonging to specific objects.
+     * Requires object ID buffer from render pipeline.
+     * 
+     * @param objectIDBuffer Object ID buffer (RGBA8 texture, R channel contains object ID)
+     * @param objectID Object ID to select (0-255)
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByObjectID(const render::Texture2D& objectIDBuffer, uint8_t objectID,
+                                 const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                 int viewportWidth, int viewportHeight);
+    
+    /**
+     * @brief Select vertices by depth buffer.
+     * 
+     * Selects vertices visible in depth buffer within depth range.
+     * 
+     * @param depthBuffer Depth buffer texture
+     * @param minDepth Minimum depth value (0.0 = near, 1.0 = far)
+     * @param maxDepth Maximum depth value
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByDepth(const render::Texture2D& depthBuffer, float minDepth, float maxDepth,
+                              const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                              int viewportWidth, int viewportHeight);
+    
+    /**
+     * @brief Select vertices by color buffer.
+     * 
+     * Selects vertices matching color in color buffer (useful for vision-based selection).
+     * 
+     * @param colorBuffer Color buffer texture
+     * @param targetColor Target color to match
+     * @param colorThreshold Color matching threshold (0.0 = exact match, 1.0 = any color)
+     * @param viewMatrix Camera view matrix
+     * @param projectionMatrix Camera projection matrix
+     * @param viewportWidth Viewport width
+     * @param viewportHeight Viewport height
+     */
+    SelectionBuilder& ByColorBuffer(const render::Texture2D& colorBuffer, const math::Vec3& targetColor,
+                                    float colorThreshold, const math::Mat4& viewMatrix,
+                                    const math::Mat4& projectionMatrix, int viewportWidth, int viewportHeight);
     
     /**
      * @brief Combine with another selection (union).

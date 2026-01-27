@@ -3,6 +3,8 @@
 set(GEOMETRY_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/core/MeshTopology.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/MeshTopology.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/MeshSnapshot.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/MeshSnapshot.h
 )
 
 set(GEOMETRY_SELECTION_SOURCES
@@ -29,11 +31,27 @@ set(GEOMETRY_OPERATIONS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshDisplace.h
     ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshNoise.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshNoise.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshExtrude.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshExtrude.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshBevel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshBevel.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshBoolean.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshBoolean.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshDecimate.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshDecimate.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshDeform.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshDeform.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshTexturePaint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshTexturePaint.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshColorPaint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/operations/MeshColorPaint.h
 )
 
 set(GEOMETRY_FIELDS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fields/NoiseField.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fields/NoiseField.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/fields/Field.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fields/Field.h
 )
 
 set(GEOMETRY_SOURCES

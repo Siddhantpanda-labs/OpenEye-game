@@ -12,15 +12,15 @@ namespace geometry {
 class MeshTopology;
 
 /**
- * @brief MeshSmooth: Laplacian smoothing operations.
+ * @brief MeshSmooth: Uniform Laplacian + Taubin (HC) smoothing operations.
  * 
- * Smooths mesh geometry by averaging vertex positions with neighbors.
- * Deterministic and region-aware.
+ * Industry-proven smoothing: Uniform Laplacian with Taubin shape restoration.
+ * Simple, stable, and effective.
  */
 class MeshSmooth {
 public:
     /**
-     * @brief Smooth mesh vertices using Laplacian smoothing.
+     * @brief Smooth mesh vertices using Taubin (HC) smoothing.
      * 
      * @param mesh Mesh to smooth (modified in-place)
      * @param selection Region to smooth (if empty, smooths all vertices)
@@ -33,29 +33,24 @@ public:
                       const Mask* mask = nullptr);
     
     /**
-     * @brief Smooth mesh with uniform weights (simple average).
+     * @brief Smooth mesh with uniform Laplacian (simple one-ring average).
      */
     static void SmoothUniform(render::Mesh& mesh, const Selection& selection,
                               float strength = 0.5f, int iterations = 1,
                               const Mask* mask = nullptr);
-    
-    /**
-     * @brief Smooth mesh with cotangent weights (better for irregular meshes).
-     */
-    static void SmoothCotangent(render::Mesh& mesh, const Selection& selection,
-                                float strength = 0.5f, int iterations = 1,
-                                const Mask* mask = nullptr);
 
 private:
+    // Taubin (HC) smoothing: two-pass correction on uniform Laplacian
+    static void SmoothTaubin(render::Mesh& mesh, const Selection& selection,
+                            float lambda, float mu, int iterations,
+                            const Mask* mask, const MeshTopology& topology);
+    
+    // Compute uniform Laplacian for a vertex (one-ring average)
+    static math::Vec3 ComputeUniformLaplacian(const render::Mesh& mesh, uint32_t vertexID,
+                                               const MeshTopology& topology, size_t vertexCount);
+    
     // Helper to get vertex neighbors from topology
     static std::vector<uint32_t> GetVertexNeighbors(const MeshTopology& topology, uint32_t vertexID, size_t vertexCount);
-    
-    // Helper to get vertex neighbors from mesh (rebuilds topology - use sparingly)
-    static std::vector<uint32_t> GetVertexNeighbors(const render::Mesh& mesh, uint32_t vertexID);
-    
-    // Helper to compute Laplacian for a vertex
-    static math::Vec3 ComputeLaplacian(const render::Mesh& mesh, uint32_t vertexID, 
-                                       const std::vector<uint32_t>& neighbors);
 };
 
 } // namespace geometry
