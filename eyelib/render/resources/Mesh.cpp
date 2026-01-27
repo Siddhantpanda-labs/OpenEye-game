@@ -225,11 +225,35 @@ void Mesh::CreateVAO() {
 }
 
 void Mesh::UploadToGPU() {
-    if (m_uploaded) return;
     if (m_vertices.empty()) return;
     if (m_indexFormat == IndexFormat::UInt32 && m_indices32.empty()) return;
     if (m_indexFormat == IndexFormat::UInt16 && m_indices16.empty()) return;
 
+    // If already uploaded, update existing buffers instead of recreating
+    if (m_uploaded && m_vao && m_vbo && m_ebo) {
+        glBindVertexArray(m_vao);
+        
+        // Update vertex buffer
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        GLsizeiptr vertexSize = static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex));
+        glBufferData(GL_ARRAY_BUFFER, vertexSize, m_vertices.data(), GL_STATIC_DRAW);
+        
+        // Update index buffer
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+        if (m_indexFormat == IndexFormat::UInt32) {
+            GLsizeiptr indexSize = static_cast<GLsizeiptr>(m_indices32.size() * sizeof(uint32_t));
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexSize, m_indices32.data(), GL_STATIC_DRAW);
+        } else {
+            GLsizeiptr indexSize = static_cast<GLsizeiptr>(m_indices16.size() * sizeof(uint16_t));
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexSize, m_indices16.data(), GL_STATIC_DRAW);
+        }
+        
+        glBindVertexArray(0);
+        if (m_aabbDirty) ComputeAABB();
+        return;
+    }
+
+    // First-time upload: create buffers
     if (m_vao) {
         glDeleteVertexArrays(1, &m_vao);
         glDeleteBuffers(1, &m_vbo);

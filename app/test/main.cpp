@@ -294,7 +294,7 @@ bool TestRender(TestStats& stats) {
             eyelib::api::core::Log::Info("Applying Smooth operation...");
             SelectionBuilder builder(*sphereMesh);
             Selection selection = builder.Build(); // Empty selection = all vertices
-            MeshOps::Smooth(*sphereMesh, selection, 0.5f, 3);
+            MeshOps::Smooth(*sphereMesh, selection, 0.8f, 3);
             sphereMesh->UploadToGPU(); // Re-upload after modification
             eyelib::api::core::Log::Info("Smooth complete.");
         }
