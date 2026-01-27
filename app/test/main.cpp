@@ -2,16 +2,7 @@
 #include "api/math/All.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
-#include "api/physics/All.h"
-#include "api/animation/All.h"
-#include "api/ecs/All.h"
-#include "api/scene/All.h"
-#include "api/assets/All.h"
-#include "api/serialize/All.h"
-#include "api/particles/All.h"
-#include "api/fluids/All.h"
-#include "api/audio/All.h"
-#include "api/debug/All.h"
+#include "api/geometry/All.h"
 
 #include <iostream>
 #include <string>
@@ -123,8 +114,6 @@ std::shared_ptr<eyelib::api::render::Mesh> BuildCubeMesh(float halfSize) {
 bool TestRender(TestStats& stats) {
     using namespace eyelib::api::platform;
     using namespace eyelib::api::render;
-    using namespace eyelib::api::animation;
-    using namespace eyelib::api::assets;
     using namespace eyelib::math;
 
     Window window;
@@ -159,35 +148,33 @@ bool TestRender(TestStats& stats) {
     skybox.SetFilter(TextureFilter::LinearMipmapLinear, TextureFilter::Linear);
     skybox.SetWrap(TextureWrap::ClampToEdge, TextureWrap::ClampToEdge, TextureWrap::ClampToEdge);
 
-    const std::string modelPath = "assets/models/zombie/source/Male_Zombie.fbx";
-    auto modelAsset = ModelLoader::LoadModel(modelPath);
-    Expect(stats, modelAsset && !modelAsset->GetMeshes().empty(), "Render: load zombie PBR model");
-    std::vector<std::shared_ptr<Mesh>> modelMeshes;
-    std::vector<std::shared_ptr<Material>> modelMaterials;
-    std::vector<Mat4> modelTransforms;
-    if (modelAsset) {
-        modelMeshes = modelAsset->GetMeshes();
-        modelMaterials = modelAsset->GetMaterials();
-        modelTransforms = modelAsset->GetMeshTransforms();
-    }
-
-    // Use zombie model's own skeleton and animation
-    auto zombieSkeleton = modelAsset ? modelAsset->GetSkeleton() : nullptr;
-    auto zombieClip = modelAsset ? modelAsset->GetClip() : nullptr;
-    if (zombieClip) zombieClip->SetLoop(true);
+    // Create sphere mesh using geometry primitives
+    using namespace eyelib::api::geometry;
+    auto sphereMesh = Primitives::CreateSphere(1.0f, 32, 16);
+    Expect(stats, sphereMesh && sphereMesh->IsValid(), "Geometry: create sphere primitive");
     
-    auto animator = std::make_shared<Animator>();
-    if (zombieSkeleton) animator->SetSkeleton(zombieSkeleton);
-    if (zombieClip) animator->SetClip(zombieClip);
+    eyelib::api::core::Log::Info("Sphere mesh created (press 1=Subdivide, 2=Smooth, 3=Noise)");
     
-    if (zombieSkeleton && zombieClip) {
-        eyelib::api::core::Log::InfoF("Loaded zombie model: %zu bones, %zu meshes, %zu materials", 
-                                     zombieSkeleton->BoneCount(), modelMeshes.size(), modelMaterials.size());
-        eyelib::api::core::Log::Info("Zombie PBR animated model loaded (press 'T' to toggle animation)");
-    } else if (zombieSkeleton) {
-        eyelib::api::core::Log::InfoF("Loaded zombie model: %zu bones (no animation clip)", 
-                                     zombieSkeleton->BoneCount());
+    // Create a simple material for the sphere
+    auto sphereMaterial = std::make_shared<Material>();
+    auto shader = std::make_shared<Shader>();
+    // Try forward/basic shader first, then fallback to root basic shader
+    if (shader->LoadFromFile("assets/shaders/passes/forward/basic.vert", "assets/shaders/passes/forward/basic.frag")) {
+        sphereMaterial->SetShader(shader);
+    } else {
+        // Fallback to basic shader if forward/basic not available
+        auto basicShader = std::make_shared<Shader>();
+        if (basicShader->LoadFromFile("assets/shaders/basic.vert", "assets/shaders/basic.frag")) {
+            sphereMaterial->SetShader(basicShader);
+        }
     }
+    
+    // Set up material properties
+    sphereMaterial->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
+    sphereMaterial->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
+    sphereMaterial->SetFloat("u_LightIntensity", 2.0f);
+    sphereMaterial->SetVec3("u_ViewPos", Vec3(2.5f, 2.0f, 2.5f));
+    sphereMaterial->SetVec3("u_Emission", Vec3(0.0f));
 
     RenderTarget colorOnly = RenderTarget::CreateColorOnly(128, 128);
     Expect(stats, colorOnly.GetColorAttachmentCount() == 1, "Render: color-only target");
@@ -215,42 +202,14 @@ bool TestRender(TestStats& stats) {
     scene.light.ambient = Vec3(0.1f);
     scene.light.exposure = 1.0f;
 
-    for (const auto& mat : modelMaterials) {
-        if (!mat) continue;
-        mat->SetVec3("u_LightDir", Vec3(-0.4f, -1.0f, -0.2f));
-        mat->SetVec3("u_LightColor", Vec3(1.0f, 1.0f, 1.0f));
-        mat->SetFloat("u_LightIntensity", scene.light.intensity);
-        mat->SetVec3("u_ViewPos", cameraPos);
-        mat->SetVec3("u_Emission", Vec3(0.0f));
-    }
-
-    AABB bounds;
-    bool boundsInitialized = false;
-    for (size_t i = 0; i < modelMeshes.size(); ++i) {
-        const auto& mesh = modelMeshes[i];
-        if (!mesh || !mesh->IsValid()) continue;
-        if (!boundsInitialized) {
-            bounds = mesh->GetAABB();
-            boundsInitialized = true;
-        } else {
-            bounds = bounds.Union(mesh->GetAABB());
-        }
-        Drawable drawable{};
-        drawable.mesh = mesh;
-        if (!modelMaterials.empty() && mesh->GetSubmeshCount() > 0) {
-            const int matIndex = mesh->GetSubmesh(0).materialIndex;
-            if (matIndex >= 0 && static_cast<size_t>(matIndex) < modelMaterials.size()) {
-                drawable.material = modelMaterials[static_cast<size_t>(matIndex)];
-            }
-        }
-        if (!drawable.material && !modelMaterials.empty()) {
-            drawable.material = modelMaterials.front();
-        }
-        // Unity-style invariant: mesh placement comes from bones, not per-mesh transforms.
-        drawable.transform = Mat4(1.0f);
-        scene.opaque.push_back(drawable);
-    }
-    Expect(stats, !scene.opaque.empty(), "Render: pipeline render zombie PBR model");
+    // Add sphere to scene
+    Drawable sphereDrawable{};
+    sphereDrawable.mesh = sphereMesh;
+    sphereDrawable.material = sphereMaterial;
+    sphereDrawable.transform = Mat4(1.0f); // Identity transform (centered at origin)
+    scene.opaque.push_back(sphereDrawable);
+    
+    Expect(stats, !scene.opaque.empty(), "Render: pipeline render sphere");
 
     const auto startTime = std::chrono::steady_clock::now();
     auto lastTime = startTime;
@@ -263,11 +222,14 @@ bool TestRender(TestStats& stats) {
     const int KEY_D = 68;
     const int KEY_Q = 81;
     const int KEY_E = 69;
-    const int KEY_T = 84;
+    const int KEY_1 = 49;
+    const int KEY_2 = 50;
+    const int KEY_3 = 51;
     const int MOUSE_RIGHT = 1;
 
-    bool animationPlaying = false;
-    bool prevTKeyState = false;
+    bool prevKey1State = false;
+    bool prevKey2State = false;
+    bool prevKey3State = false;
 
     while (!window.ShouldClose()) {
         window.PollEvents();
@@ -312,35 +274,50 @@ bool TestRender(TestStats& stats) {
             if (cameraPitch < -89.0f) cameraPitch = -89.0f;
         }
 
-        // Toggle animation playback with 'T' key
-        bool currentTKeyState = Input::IsKeyPressed(KEY_T);
-        if (currentTKeyState && !prevTKeyState) {
-            animationPlaying = !animationPlaying;
-            eyelib::api::core::Log::InfoF("Animation playback: %s", animationPlaying ? "ON" : "OFF");
+        // Geometry operations on sphere (keys 1, 2, 3)
+        bool currentKey1State = Input::IsKeyPressed(KEY_1);
+        bool currentKey2State = Input::IsKeyPressed(KEY_2);
+        bool currentKey3State = Input::IsKeyPressed(KEY_3);
+        
+        if (currentKey1State && !prevKey1State) {
+            // Key 1: Subdivide
+            eyelib::api::core::Log::Info("Applying Subdivide operation...");
+            SelectionBuilder builder(*sphereMesh);
+            Selection selection = builder.Build(); // Empty selection = all faces
+            MeshOps::Subdivide(*sphereMesh, selection, 1);
+            sphereMesh->UploadToGPU(); // Re-upload after modification
+            eyelib::api::core::Log::InfoF("Subdivide complete. Vertex count: %zu", sphereMesh->GetVertices().size());
         }
-        prevTKeyState = currentTKeyState;
+        
+        if (currentKey2State && !prevKey2State) {
+            // Key 2: Smooth
+            eyelib::api::core::Log::Info("Applying Smooth operation...");
+            SelectionBuilder builder(*sphereMesh);
+            Selection selection = builder.Build(); // Empty selection = all vertices
+            MeshOps::Smooth(*sphereMesh, selection, 0.5f, 3);
+            sphereMesh->UploadToGPU(); // Re-upload after modification
+            eyelib::api::core::Log::Info("Smooth complete.");
+        }
+        
+        if (currentKey3State && !prevKey3State) {
+            // Key 3: Apply Noise
+            eyelib::api::core::Log::Info("Applying Noise operation...");
+            SelectionBuilder builder(*sphereMesh);
+            Selection selection = builder.Build(); // Empty selection = all vertices
+            MeshOps::ApplyNoise(*sphereMesh, selection, 0.5f, 0.1f, 12345, 4);
+            sphereMesh->UploadToGPU(); // Re-upload after modification
+            eyelib::api::core::Log::Info("Noise complete.");
+        }
+        
+        prevKey1State = currentKey1State;
+        prevKey2State = currentKey2State;
+        prevKey3State = currentKey3State;
 
         scene.camera.view = glm::lookAt(cameraPos, cameraPos + forward, up);
         scene.camera.viewPos = cameraPos;
         
-        // Update view position for PBR materials
-        for (const auto& mat : modelMaterials) {
-            if (!mat) continue;
-            mat->SetVec3("u_ViewPos", cameraPos);
-        }
-
-        // Update animation only if toggle is enabled
-        // Apply zombie's own animation
-        if (animationPlaying && animator && zombieSkeleton && zombieClip) {
-            animator->Update(deltaTime);
-            const auto& bones = animator->GetBoneMatrices();
-            // Apply to zombie model materials
-            for (const auto& mat : modelMaterials) {
-                if (!mat) continue;
-                mat->SetMat4Array("u_Bones", bones);
-            }
-        }
-        // If animation is disabled, materials keep their bind pose matrices (set at load time)
+        // Update view position for sphere material
+        sphereMaterial->SetVec3("u_ViewPos", cameraPos);
 
         renderer.Clear(0.1f, 0.1f, 0.1f, 1.0f);
         pipeline.Render(scene);

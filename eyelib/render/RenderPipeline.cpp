@@ -200,6 +200,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
     glClearColor(0.1f, 0.1f, 0.15f, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE); // Disable culling to render both front and back faces
     for (const auto& d : scene.opaque) {
         if (!d.mesh || !d.material) continue;
         d.material->Bind();
@@ -216,6 +217,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
         }
     }
     TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    glEnable(GL_CULL_FACE); // Re-enable culling for other passes
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

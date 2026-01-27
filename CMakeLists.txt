@@ -260,6 +260,9 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib render module
     add_subdirectory(eyelib/render)
     add_subdirectory(api/render)
+    # Eyelib geometry module (mesh operations, selection, masking)
+    add_subdirectory(eyelib/geometry)
+    add_subdirectory(api/geometry)
     # Eyelib platform module
     add_subdirectory(eyelib/platform)
     add_subdirectory(api/platform)

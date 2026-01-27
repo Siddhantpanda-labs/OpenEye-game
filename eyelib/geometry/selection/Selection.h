@@ -1,0 +1,190 @@
+#pragma once
+
+#include "eyelib/math/Types.h"
+#include "eyelib/math/AABB.h"
+#include <cstdint>
+#include <vector>
+#include <unordered_set>
+#include <memory>
+
+namespace eyelib {
+namespace render { class Mesh; }
+namespace geometry {
+
+// Forward declaration
+class MeshTopology;
+
+/**
+ * @brief Selection: represents a set of selected vertices, edges, or faces.
+ * 
+ * Selection is immutable once created. Use SelectionBuilder to create selections.
+ * This design ensures selections are always valid and can be safely passed around.
+ */
+class Selection {
+public:
+    enum class Type {
+        Vertices,  // Vertex selection
+        Edges,     // Edge selection
+        Faces      // Face selection
+    };
+    
+    Selection();
+    ~Selection() = default;
+    
+    Selection(const Selection&) = default;
+    Selection& operator=(const Selection&) = default;
+    Selection(Selection&&) noexcept = default;
+    Selection& operator=(Selection&&) noexcept = default;
+    
+    /**
+     * @brief Create empty selection.
+     */
+    static Selection Empty(Type type);
+    
+    /**
+     * @brief Create selection from vertex IDs.
+     */
+    static Selection FromVertexIDs(const std::vector<uint32_t>& vertexIDs);
+    
+    /**
+     * @brief Create selection from edge IDs.
+     */
+    static Selection FromEdgeIDs(const std::vector<uint32_t>& edgeIDs);
+    
+    /**
+     * @brief Create selection from face IDs.
+     */
+    static Selection FromFaceIDs(const std::vector<uint32_t>& faceIDs);
+    
+    /**
+     * @brief Get selection type.
+     */
+    Type GetType() const { return m_type; }
+    
+    /**
+     * @brief Check if selection is empty.
+     */
+    bool IsEmpty() const { return m_ids.empty(); }
+    
+    /**
+     * @brief Get selection count.
+     */
+    size_t GetCount() const { return m_ids.size(); }
+    
+    /**
+     * @brief Check if ID is selected.
+     */
+    bool Contains(uint32_t id) const;
+    
+    /**
+     * @brief Get all selected IDs.
+     */
+    const std::vector<uint32_t>& GetIDs() const { return m_ids; }
+    
+    /**
+     * @brief Get selected IDs as set (for fast lookup).
+     */
+    const std::unordered_set<uint32_t>& GetIDSet() const { return m_idSet; }
+    
+    /**
+     * @brief Combine two selections (union).
+     */
+    Selection Union(const Selection& other) const;
+    
+    /**
+     * @brief Intersect two selections.
+     */
+    Selection Intersect(const Selection& other) const;
+    
+    /**
+     * @brief Subtract other selection from this.
+     */
+    Selection Subtract(const Selection& other) const;
+    
+    /**
+     * @brief Invert selection (select all except these).
+     */
+    Selection Invert(size_t totalCount) const;
+
+private:
+    Type m_type = Type::Vertices;
+    std::vector<uint32_t> m_ids;              // Sorted list of IDs
+    std::unordered_set<uint32_t> m_idSet;     // Fast lookup set
+    
+    Selection(Type type, const std::vector<uint32_t>& ids);
+    void BuildSet();
+};
+
+/**
+ * @brief SelectionBuilder: fluent API for building selections.
+ * 
+ * Example:
+ *   auto sel = SelectionBuilder(mesh)
+ *       .ByVertexIDs({0, 1, 2})
+ *       .ByBounds(aabb)
+ *       .Build();
+ */
+class SelectionBuilder {
+public:
+    explicit SelectionBuilder(const render::Mesh& mesh);
+    ~SelectionBuilder() = default;
+    
+    SelectionBuilder(const SelectionBuilder&) = delete;
+    SelectionBuilder& operator=(const SelectionBuilder&) = delete;
+    
+    /**
+     * @brief Select by vertex IDs.
+     */
+    SelectionBuilder& ByVertexIDs(const std::vector<uint32_t>& vertexIDs);
+    
+    /**
+     * @brief Select by edge IDs.
+     */
+    SelectionBuilder& ByEdgeIDs(const std::vector<uint32_t>& edgeIDs);
+    
+    /**
+     * @brief Select by face IDs.
+     */
+    SelectionBuilder& ByFaceIDs(const std::vector<uint32_t>& faceIDs);
+    
+    /**
+     * @brief Select vertices within bounding box.
+     */
+    SelectionBuilder& ByBounds(const math::AABB& bounds);
+    
+    /**
+     * @brief Select vertices by normal direction.
+     * @param direction Normal direction to match
+     * @param threshold Dot product threshold (cosine of angle)
+     */
+    SelectionBuilder& ByNormal(const math::Vec3& direction, float threshold = 0.9f);
+    
+    /**
+     * @brief Select vertices within distance from point.
+     */
+    SelectionBuilder& ByDistance(const math::Vec3& point, float radius);
+    
+    /**
+     * @brief Combine with another selection (union).
+     */
+    SelectionBuilder& Union(const Selection& other);
+    
+    /**
+     * @brief Intersect with another selection.
+     */
+    SelectionBuilder& Intersect(const Selection& other);
+    
+    /**
+     * @brief Build final selection.
+     */
+    Selection Build() const;
+
+private:
+    const render::Mesh& m_mesh;
+    Selection m_current;
+    
+    void EnsureType(Selection::Type type);
+};
+
+} // namespace geometry
+} // namespace eyelib

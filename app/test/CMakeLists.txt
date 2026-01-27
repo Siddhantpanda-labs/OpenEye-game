@@ -28,4 +28,5 @@ target_link_libraries(OpenEyeApiTests
         EyelibFluidsAPI
         EyelibAudioAPI
         EyelibDebugAPI
+        EyelibGeometryAPI
 )
