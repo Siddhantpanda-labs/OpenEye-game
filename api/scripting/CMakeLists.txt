@@ -1,22 +1,23 @@
 # Eyelib Scripting API
+# Public API with PIMPL pattern for ABI stability
 
-# Phase 1: Minimal API (just header for now)
-# Full API implementation will come in Phase 2
-
-set(API_SCRIPTING_SOURCES
+set(SCRIPTING_API_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Script.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Script.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ScriptVM.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ScriptVM.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
 )
 
-add_library(EyelibScriptingAPI INTERFACE)
+add_library(EyelibScriptingAPI STATIC ${SCRIPTING_API_SOURCES})
 
 target_include_directories(EyelibScriptingAPI
-    INTERFACE
+    PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/api>
         $<INSTALL_INTERFACE:include>
 )
 
 target_link_libraries(EyelibScriptingAPI
-    INTERFACE
+    PUBLIC
         EyelibScripting
 )

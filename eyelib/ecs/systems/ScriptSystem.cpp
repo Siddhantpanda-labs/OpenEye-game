@@ -4,6 +4,7 @@
 #include "eyelib/ecs/components/ScriptComponent.h"
 #include "eyelib/scripting/ScriptManager.h"
 #include "eyelib/scripting/bindings/BindingHelpers.h"
+#include "eyelib/scripting/bindings/BindingRegistry.h"
 #include "eyelib/scripting/bindings/TimeBindings.h"
 #include "eyelib/scripting/bindings/EntityBindings.h"
 #include "eyelib/scripting/bindings/TransformBindings.h"
@@ -88,6 +89,13 @@ void ScriptSystem::InitializeScript(Entity entity, components::ScriptComponent& 
     // Get script table from global
     lua_getglobal(L, scriptName.c_str());
     if (lua_istable(L, -1)) {
+        // Inject properties from ScriptComponent into the script table
+        // This allows C++ code to assign values/entities to script fields
+        for (const auto& [key, value] : script.properties) {
+            scripting::bindings::PushScriptValue(L, value, m_world);
+            lua_setfield(L, -2, key.c_str());
+        }
+        
         lua_getfield(L, -1, "OnStart");
         if (lua_isfunction(L, -1)) {
             // Push self (the table)

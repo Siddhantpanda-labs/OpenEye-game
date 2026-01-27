@@ -146,17 +146,11 @@ const ScriptManager::ScriptInfo* ScriptManager::GetScriptInfo(ScriptHandle handl
 
 std::time_t ScriptManager::GetFileModificationTime(const std::string& path) const {
     // Use platform filesystem to get modification time
-    // For now, simplified implementation
-    std::ifstream file(path);
-    if (!file.good()) {
+    int64_t fileTime = platform::filesystem::GetFileTime(path);
+    if (fileTime <= 0) {
         return 0;
     }
-    
-    // Platform-specific implementation would go here
-    // For Windows: use GetFileTime
-    // For Linux: use stat
-    // For now, return current time as placeholder
-    return std::time(nullptr);
+    return static_cast<std::time_t>(fileTime);
 }
 
 bool ScriptManager::LoadScriptContent(ScriptInfo& info) {

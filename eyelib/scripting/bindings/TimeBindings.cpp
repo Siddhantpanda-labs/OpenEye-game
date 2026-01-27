@@ -1,4 +1,5 @@
 #include "TimeBindings.h"
+#include "BindingHelpers.h"
 #include "eyelib/core/Time.h"
 
 extern "C" {
@@ -21,17 +22,12 @@ static int lua_Time_Time(lua_State* L) {
 }
 
 void RegisterTimeBindings(lua_State* L) {
-    // Create Time table
-    lua_newtable(L);
-
-    lua_pushcfunction(L, lua_Time_DeltaTime);
-    lua_setfield(L, -2, "DeltaTime");
-
-    lua_pushcfunction(L, lua_Time_Time);
-    lua_setfield(L, -2, "Time");
-
-    // Set as global
-    lua_setglobal(L, "Time");
+    // Time bindings don't need World, so no registry access needed
+    // Create Time table using macros
+    LUA_BIND_TABLE_BEGIN(L, "Time");
+    LUA_BIND_METHOD(L, "DeltaTime", lua_Time_DeltaTime);
+    LUA_BIND_METHOD(L, "Time", lua_Time_Time);
+    LUA_BIND_TABLE_END(L, "Time");
 }
 
 } // namespace bindings

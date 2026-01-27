@@ -1,15 +1,21 @@
 #pragma once
 
-// Scripting API - Phase 1 (minimal)
-// Full API will be added in later phases
+/**
+ * @brief Scripting API - Public interface for Lua scripting system.
+ * 
+ * This API provides a clean, stable interface to the scripting system
+ * using PIMPL pattern to hide implementation details and maintain ABI stability.
+ */
 
-// For now, scripts are managed through ECS ScriptComponent
-// API wrappers will be added in Phase 2
+#include "api/scripting/Script.h"
+#include "api/scripting/ScriptVM.h"
 
 namespace eyelib {
 namespace api {
 namespace scripting {
-    // Placeholder for future API
+    // Re-export for convenience
+    using ScriptHandle = ::eyelib::scripting::ScriptHandle;
+    constexpr ScriptHandle InvalidScriptHandle = ::eyelib::scripting::InvalidScriptHandle;
 } // namespace scripting
 } // namespace api
 } // namespace eyelib

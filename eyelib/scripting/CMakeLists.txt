@@ -6,7 +6,10 @@ set(SCRIPTING_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ScriptManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ScriptManager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ScriptValue.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bindings/BindingHelpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings/BindingHelpers.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bindings/BindingRegistry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/bindings/BindingRegistry.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings/TimeBindings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings/TimeBindings.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bindings/EntityBindings.cpp
