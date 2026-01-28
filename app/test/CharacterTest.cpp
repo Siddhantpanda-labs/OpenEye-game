@@ -60,6 +60,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     m_camera.SetSensitivity(0.15f);
 
     // Setup character
+    // DEBUG: Lock character position to origin for in-place animation testing
     m_character.SetPosition(math::Vec3(0.0f, 0.0f, 0.0f));
     m_character.SetWalkSpeed(3.0f);
     m_character.SetRunSpeed(6.0f);
@@ -161,22 +162,38 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
         
-        // Enable root motion extraction
-        // Try to identify root motion bone (common names: "root", "Armature", "Hips")
-        m_animator->SetRootMotionBone("root"); // Will try common names if not found
-        m_animator->SetRootMotionEnabled(true);
+        // DEBUG: Enable root motion extraction but disable application for in-place testing
+        // Root motion extraction neutralizes the root bone (makes it identity visually)
+        // But we don't apply the extracted motion to character transform (stays in place)
+        // Empty string will auto-detect root bone (bone with parentIndex == -1)
+        m_animator->SetRootMotionBone(""); // Auto-detect root bone
+        m_animator->SetRootMotionEnabled(true); // Extract root motion to neutralize root bone
         
-        // Set motion authority: ControllerDriven for player-controlled, AnimationDriven for cutscenes/AI
-        // Set to AnimationDriven to use only root motion from animation (no input movement)
+        // DEBUG: Set motion authority to AnimationDriven to disable input-based movement
+        // This ensures only root motion (if applied) controls movement, not WASD input
         m_animator->SetMotionAuthority(api::Animator::MotionAuthority::AnimationDriven);
         
-        // Use default clip from model if available
+        // DEBUG: Force run animation for in-place debugging
+        // Use run clip if available, otherwise use default clip from model
         auto defaultClip = m_characterModel->GetClip();
         if (defaultClip) {
             m_idleClip = defaultClip;
-            m_animator->SetClip(defaultClip);
-            api::core::Log::Info("Using default animation clip from model");
+            // If run clip not loaded yet, use default clip as fallback
+            if (!m_runClip) {
+                m_runClip = defaultClip;
+            }
+            // DEBUG: Set run clip directly for in-place testing
+            if (m_runClip) {
+                m_animator->SetClip(m_runClip);
+                api::core::Log::Info("DEBUG: Run animation set to play in place (root motion disabled)");
+            } else {
+                m_animator->SetClip(defaultClip);
+                api::core::Log::Info("DEBUG: Default animation set to play in place (root motion disabled)");
+            }
         }
+        
+        // DEBUG: Force character to run state
+        m_character.SetRunning(true);
     }
 
     api::core::Log::InfoF("Character model loaded: %zu meshes, skeleton: %s",
@@ -223,6 +240,11 @@ void CharacterTest::LoadAnimations(const std::string& idlePath,
         auto runModel = api::ModelLoader::LoadModel(runPath);
         if (runModel && runModel->GetClip()) {
             m_runClip = runModel->GetClip();
+            // DEBUG: If animator exists, set run clip immediately for in-place testing
+            if (m_animator) {
+                m_animator->SetClip(m_runClip);
+                api::core::Log::InfoF("DEBUG: Run animation set to play in place: %s", runPath.c_str());
+            }
             api::core::Log::InfoF("Loaded run animation: %s", runPath.c_str());
         } else {
             api::core::Log::WarnF("Failed to load run animation: %s", runPath.c_str());
@@ -309,17 +331,29 @@ void CharacterTest::UpdateCamera(float deltaTime) {
 }
 
 void CharacterTest::UpdateCharacter(float deltaTime) {
+    // DEBUG: Lock character position to origin to prevent any movement
+    m_character.SetPosition(math::Vec3(0.0f, 0.0f, 0.0f));
+    
     // Update character animations
     if (m_animator) {
-        m_character.UpdateAnimations(m_animator, m_idleClip, m_walkClip, m_runClip);
+        // DEBUG: Skip normal animation state updates - run clip is set in initialization
+        // m_character.UpdateAnimations(m_animator, m_idleClip, m_walkClip, m_runClip);
+        
         m_animator->Update(deltaTime);
         
+        // DEBUG: Disable root motion application - animation plays in place
+        // This helps debug snapping issues by isolating animation playback from root motion
+        // The animation should loop smoothly without any position snapping
+        // Root motion is still extracted in library, but not applied to character transform
+        // TODO: Re-enable after debugging
+        /*
         // Apply root motion delta to character (respects motion authority)
         auto rootMotionDelta = m_animator->GetRootMotionDelta();
         if (rootMotionDelta.hasMotion) {
             auto motionAuthority = m_animator->GetMotionAuthority();
             m_character.ApplyRootMotion(rootMotionDelta, motionAuthority);
         }
+        */
     }
 }
 

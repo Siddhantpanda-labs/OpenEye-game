@@ -1,6 +1,7 @@
 #include "Animator.h"
 
 #include "eyelib/math/TransformUtils.h"
+#include "eyelib/core/Log.h"
 #include <algorithm>
 #include <cmath>
 
@@ -67,6 +68,54 @@ void Animator::SetTrigger(const std::string& name) {
 void Animator::Update(float dt) {
     m_time += dt;
     if (!m_skeleton) return;
+    
+    // DEBUG: Log root motion state on first update
+    static bool firstUpdate = true;
+    if (firstUpdate && m_rootMotionEnabled) {
+        core::Log::InfoF("DEBUG: Animator::Update - Root motion enabled: %s, Root motion bone index: %d", 
+            m_rootMotionEnabled ? "true" : "false", m_rootMotionBoneIndex);
+        const size_t boneCount = m_skeleton->BoneCount();
+        core::Log::InfoF("DEBUG: Skeleton has %zu bones", boneCount);
+        
+        // Find all root bones (parentIndex == -1)
+        std::vector<size_t> rootBones;
+        for (size_t i = 0; i < boneCount; ++i) {
+            const Bone& b = m_skeleton->GetBone(i);
+            if (b.parentIndex == -1) {
+                rootBones.push_back(i);
+                core::Log::InfoF("DEBUG: Root bone: index %zu, name: %s", i, b.name.c_str());
+            }
+        }
+        if (rootBones.size() > 1) {
+            core::Log::WarnF("DEBUG: WARNING - Multiple root bones found! This might cause issues.");
+        }
+        
+        // Check root bone's children for animation channels with translation
+        if (m_rootMotionBoneIndex >= 0 && static_cast<size_t>(m_rootMotionBoneIndex) < boneCount) {
+            const Bone& rootBone = m_skeleton->GetBone(static_cast<size_t>(m_rootMotionBoneIndex));
+            core::Log::InfoF("DEBUG: Root bone %d children:", m_rootMotionBoneIndex);
+            int childCount = 0;
+            for (size_t i = 0; i < boneCount; ++i) {
+                const Bone& b = m_skeleton->GetBone(i);
+                if (b.parentIndex == m_rootMotionBoneIndex) {
+                    childCount++;
+                    if (m_clip) {
+                        const auto* ch = m_clip->FindChannel(static_cast<int>(i));
+                        if (ch && !ch->positionKeys.empty()) {
+                            core::Log::WarnF("DEBUG: Child bone %zu (name: %s) has position animation - this might cause movement!", 
+                                i, b.name.c_str());
+                        }
+                    }
+                    if (childCount <= 5) { // Log first 5 children
+                        core::Log::InfoF("DEBUG:   Child %zu: name=%s, parentIndex=%d", i, b.name.c_str(), b.parentIndex);
+                    }
+                }
+            }
+            core::Log::InfoF("DEBUG: Root bone has %d children total", childCount);
+        }
+        
+        firstUpdate = false;
+    }
 
     if (m_stateMachine) {
         for (const auto& [k, v] : m_boolParams) m_stateMachine->SetCondition(k, v);
@@ -87,19 +136,69 @@ void Animator::Update(float dt) {
     } else if (m_clip) {
         const size_t boneCount = m_skeleton->BoneCount();
         m_pose.Resize(boneCount);
+        
+        // DEBUG: Log pose evaluation start
+        static int poseEvalLogCount = 0;
+        if (poseEvalLogCount < 3) {
+            core::Log::InfoF("DEBUG: Pose evaluation - root motion enabled: %s, root motion bone index: %d, bone count: %zu", 
+                m_rootMotionEnabled ? "true" : "false", m_rootMotionBoneIndex, boneCount);
+            poseEvalLogCount++;
+        }
+        
         for (size_t i = 0; i < boneCount; ++i) {
-            // IMPORTANT: When root motion is enabled, the root bone must NEVER receive
-            // animated or bind-pose transforms. World motion owns the root.
-            if (m_rootMotionEnabled && static_cast<int>(i) == m_rootMotionBoneIndex) {
+            const Bone& b = m_skeleton->GetBone(i);
+            
+            // IMPORTANT: When root motion is enabled, handle root motion bone specially
+            // The root motion bone (usually Hips) needs its translation extracted but kept at bind pose for skeleton integrity
+            // The actual root bone (parentIndex == -1, usually RootNode) should be completely neutralized
+            bool isActualRootBone = false;
+            bool isRootMotionBone = false;
+            
+            if (m_rootMotionEnabled) {
+                // CRITICAL: Always neutralize the actual root bone (parentIndex == -1) completely
+                // This is usually a dummy root node (e.g., "RootNode") that has no spatial meaning
+                if (b.parentIndex == -1) {
+                    isActualRootBone = true;
+                }
+                // Root motion bone: Keep bind pose translation, but allow rotation/scale from animation
+                // This maintains skeleton hierarchy while extracting translation for root motion
+                else if (static_cast<int>(i) == m_rootMotionBoneIndex && m_rootMotionBoneIndex >= 0) {
+                    isRootMotionBone = true;
+                }
+            }
+            
+            if (isActualRootBone) {
+                // Actual root bone: Completely neutralize (identity transform)
                 math::Transform identityPose;
                 identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
                 identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
                 identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
                 m_pose.SetBoneTransform(i, identityPose);
                 continue;
+            } else if (isRootMotionBone) {
+                // Root motion bone: Keep bind pose translation, but use animation for rotation/scale
+                // This maintains skeleton integrity while allowing root motion extraction
+                math::Transform rootMotionPose;
+                rootMotionPose.position = b.bindPosition; // Keep bind pose translation
+                rootMotionPose.rotation = b.bindRotation;  // Start with bind rotation
+                rootMotionPose.scale = b.bindScale;        // Start with bind scale
+                
+                // Apply animation rotation and scale (but NOT translation - that's extracted as root motion)
+                const auto* ch = m_clip->FindChannel(static_cast<int>(i));
+                if (ch) {
+                    if (!ch->rotationKeys.empty()) {
+                        rootMotionPose.rotation = m_clip->SampleRotation(m_time, static_cast<int>(i));
+                    }
+                    if (!ch->scaleKeys.empty()) {
+                        rootMotionPose.scale = m_clip->SampleScale(m_time, static_cast<int>(i));
+                    }
+                    // Translation is NOT applied here - it's extracted as root motion delta
+                }
+                
+                m_pose.SetBoneTransform(i, rootMotionPose);
+                continue;
             }
             
-            const Bone& b = m_skeleton->GetBone(i);
             math::Transform t;
             t.position = b.bindPosition;
             t.rotation = b.bindRotation;
@@ -122,18 +221,76 @@ void Animator::Update(float dt) {
     }
 
     // Extract root motion if enabled (before building bone matrices)
-    if (m_rootMotionEnabled && m_rootMotionBoneIndex >= 0) {
-        ExtractRootMotion();
+    if (m_rootMotionEnabled) {
+        if (m_rootMotionBoneIndex >= 0) {
+            ExtractRootMotion();
+            
+            // IMPORTANT: When root motion is enabled, the root bone must NEVER receive
+            // animated or bind-pose transforms. World motion owns the root.
+            // For clips, this is already done during pose evaluation, but we do it here for state machine/blend tree.
+            if (static_cast<size_t>(m_rootMotionBoneIndex) < m_pose.GetBoneCount()) {
+                math::Transform identityPose;
+                identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
+                identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+                identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
+                m_pose.SetBoneTransform(static_cast<size_t>(m_rootMotionBoneIndex), identityPose);
+            }
+        } else {
+            // Root motion enabled but bone index not set - neutralize actual root bone anyway
+            // This is a safety measure to prevent movement when root motion is enabled
+            if (m_skeleton) {
+                const size_t boneCount = m_skeleton->BoneCount();
+                for (size_t i = 0; i < boneCount; ++i) {
+                    const Bone& b = m_skeleton->GetBone(i);
+                    if (b.parentIndex == -1) {
+                        // Found root bone - neutralize it
+                        math::Transform identityPose;
+                        identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
+                        identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+                        identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
+                        m_pose.SetBoneTransform(i, identityPose);
+                        break;
+                    }
+                }
+            }
+            m_rootMotionDelta.hasMotion = false;
+        }
         
-        // IMPORTANT: When root motion is enabled, the root bone must NEVER receive
-        // animated or bind-pose transforms. World motion owns the root.
-        // For clips, this is already done during pose evaluation, but we do it here for state machine/blend tree.
-        if (static_cast<size_t>(m_rootMotionBoneIndex) < m_pose.GetBoneCount()) {
-            math::Transform identityPose;
-            identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
-            identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
-            identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
-            m_pose.SetBoneTransform(static_cast<size_t>(m_rootMotionBoneIndex), identityPose);
+        // CRITICAL: Always neutralize actual root bone (parentIndex == -1) regardless of rootMotionBoneIndex
+        // This ensures the actual root bone (dummy root node) never causes movement when root motion is enabled
+        // NOTE: The root motion bone (usually Hips) is NOT neutralized here - it keeps its bind pose translation
+        if (m_skeleton) {
+            const size_t boneCount = m_skeleton->BoneCount();
+            bool rootFound = false;
+            for (size_t i = 0; i < boneCount; ++i) {
+                const Bone& b = m_skeleton->GetBone(i);
+                // Only neutralize the actual root bone (parentIndex == -1), NOT the root motion bone
+                if (b.parentIndex == -1 && static_cast<int>(i) != m_rootMotionBoneIndex) {
+                    // DEBUG: Log root bone neutralization in safety pass
+                    static int safetyPassLogCount = 0;
+                    if (safetyPassLogCount < 3) {
+                        core::Log::InfoF("DEBUG: Safety pass - neutralizing actual root bone %zu (name: %s) in pose", 
+                            i, b.name.c_str());
+                        safetyPassLogCount++;
+                    }
+                    
+                    math::Transform identityPose;
+                    identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
+                    identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+                    identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
+                    m_pose.SetBoneTransform(i, identityPose);
+                    rootFound = true;
+                    break;
+                }
+            }
+            if (!rootFound) {
+                // This is OK if root motion bone IS the actual root bone
+                static int safetyPassWarnCount = 0;
+                if (safetyPassWarnCount < 1) {
+                    core::Log::Info("DEBUG: Safety pass - Actual root bone is same as root motion bone (OK)");
+                    safetyPassWarnCount++;
+                }
+            }
         }
     } else {
         m_rootMotionDelta.hasMotion = false;
@@ -152,10 +309,46 @@ void Animator::SetRootMotionBone(int boneIndex) {
     m_hasPreviousRootTransformBeforeCancel = false;
     m_rootMotionDelta.hasMotion = false;
     m_previousRootSampleTime = 0.0f;
+    
+    // DEBUG: Log root motion bone index
+    if (boneIndex >= 0 && m_skeleton) {
+        const size_t boneCount = m_skeleton->BoneCount();
+        if (static_cast<size_t>(boneIndex) < boneCount) {
+            const Bone& bone = m_skeleton->GetBone(static_cast<size_t>(boneIndex));
+            core::Log::InfoF("DEBUG: Root motion bone set to index %d (name: %s, parentIndex: %d)", 
+                boneIndex, bone.name.c_str(), bone.parentIndex);
+        } else {
+            core::Log::WarnF("DEBUG: Root motion bone index %d is out of range (bone count: %zu)", 
+                boneIndex, boneCount);
+        }
+    } else if (boneIndex < 0) {
+        core::Log::Warn("DEBUG: Root motion bone index is -1 (not found)");
+    }
 }
 
 void Animator::SetRootMotionEnabled(bool enabled) {
     m_rootMotionEnabled = enabled;
+    
+    // DEBUG: Log root motion enabled state
+    core::Log::InfoF("DEBUG: Root motion %s", enabled ? "ENABLED" : "DISABLED");
+    
+    if (enabled && m_skeleton) {
+        // Find and log actual root bone
+        const size_t boneCount = m_skeleton->BoneCount();
+        for (size_t i = 0; i < boneCount; ++i) {
+            const Bone& b = m_skeleton->GetBone(i);
+            if (b.parentIndex == -1) {
+                core::Log::InfoF("DEBUG: Actual root bone found: index %zu (name: %s)", i, b.name.c_str());
+                break;
+            }
+        }
+        if (m_rootMotionBoneIndex >= 0) {
+            core::Log::InfoF("DEBUG: Root motion bone index: %d", m_rootMotionBoneIndex);
+        } else {
+            core::Log::Warn("DEBUG: Root motion bone index is -1 (will use actual root bone)");
+        }
+    }
+    
     if (!enabled) {
         m_hasPreviousRootTransformBeforeCancel = false;
         m_rootMotionDelta.hasMotion = false;
@@ -318,11 +511,24 @@ void Animator::BuildBoneMatrices() {
         if (computed[idx]) return;
         const Bone& b = m_skeleton->GetBone(idx);
         
-        // CRITICAL: Root motion bone must have identity global transform
-        if (m_rootMotionEnabled && static_cast<int>(idx) == m_rootMotionBoneIndex) {
-            global[idx] = math::Mat4(1.0f); // Force identity
-            computed[idx] = 1;
-            return;
+        // CRITICAL: Root motion bone handling
+        if (m_rootMotionEnabled) {
+            // CRITICAL: Always neutralize the actual root bone (parentIndex == -1) completely
+            // This is usually a dummy root node that has no spatial meaning
+            if (b.parentIndex == -1) {
+                global[idx] = math::Mat4(1.0f); // Force identity
+                computed[idx] = 1;
+                return;
+            }
+            // Root motion bone: Use its local transform (which has bind pose translation)
+            // This maintains skeleton hierarchy - the bone keeps its bind pose position relative to root
+            // Translation delta is extracted separately for root motion
+            if (static_cast<int>(idx) == m_rootMotionBoneIndex && m_rootMotionBoneIndex >= 0) {
+                // Root motion bone uses its local transform (bind pose translation + animated rotation/scale)
+                // Don't force identity - let it compute normally from local transform
+                // The parent (actual root) is identity, so this becomes: identity * local = local
+                // This maintains skeleton integrity
+            }
         }
         
         if (b.parentIndex >= 0) {
@@ -330,6 +536,17 @@ void Animator::BuildBoneMatrices() {
             if (parent < count) {
                 computeGlobal(parent);
                 global[idx] = global[parent] * local[idx];
+                
+                // DEBUG: Check if root bone's child has translation animation
+                static int childCheckLogCount = 0;
+                if (childCheckLogCount < 5 && parent == static_cast<size_t>(m_rootMotionBoneIndex) && m_rootMotionBoneIndex >= 0) {
+                    const auto& childPose = m_pose.GetBoneTransform(idx);
+                    if (glm::length(childPose.position) > 0.001f) {
+                        core::Log::WarnF("DEBUG: Root bone's child %zu (name: %s) has translation: (%.3f, %.3f, %.3f) - this might cause movement!",
+                            idx, b.name.c_str(), childPose.position.x, childPose.position.y, childPose.position.z);
+                    }
+                    childCheckLogCount++;
+                }
             } else {
                 global[idx] = local[idx];
             }
@@ -339,6 +556,18 @@ void Animator::BuildBoneMatrices() {
         computed[idx] = 1;
     };
 
+    // DEBUG: Log global inverse transform
+    static int globalInverseLogCount = 0;
+    if (globalInverseLogCount < 3 && m_rootMotionEnabled) {
+        const auto& globalInverse = m_skeleton->GetGlobalInverseTransform();
+        core::Log::InfoF("DEBUG: Global inverse transform:");
+        for (int row = 0; row < 4; ++row) {
+            core::Log::InfoF("DEBUG:   [%.3f, %.3f, %.3f, %.3f]", 
+                globalInverse[row][0], globalInverse[row][1], globalInverse[row][2], globalInverse[row][3]);
+        }
+        globalInverseLogCount++;
+    }
+    
     for (size_t i = 0; i < count; ++i) {
         computeGlobal(i);
         const Bone& b = m_skeleton->GetBone(i);
@@ -347,12 +576,24 @@ void Animator::BuildBoneMatrices() {
         // RULE: Root motion lives ONLY in world/entity space.
         // RULE: Root bone is always visual identity when root motion is enabled.
         // RULE: Skeleton root is virtual and has no spatial meaning.
-        if (m_rootMotionEnabled && static_cast<int>(i) == m_rootMotionBoneIndex) {
-            // Root motion bone: identity global transform (no spatial contribution from skeleton)
-            // Standard skinning formula: globalInverse * global * inverseBindMatrix
-            m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform()
-                * math::Mat4(1.0f)
-                * b.inverseBindMatrix;
+        if (m_rootMotionEnabled) {
+            // CRITICAL: Always neutralize the actual root bone (parentIndex == -1) completely
+            // This is usually a dummy root node that has no spatial meaning
+            if (b.parentIndex == -1) {
+                // Actual root bone: completely neutral - pure identity matrix
+                m_boneMatrices[i] = math::Mat4(1.0f);
+            }
+            // Root motion bone: Use standard skinning formula with its bind pose translation
+            // This maintains skeleton hierarchy - the bone keeps its proper transform for skinning
+            // Translation delta is extracted separately for root motion
+            else if (static_cast<int>(i) == m_rootMotionBoneIndex && m_rootMotionBoneIndex >= 0) {
+                // Root motion bone uses standard formula - maintains skeleton integrity
+                // The bone has bind pose translation + animated rotation/scale
+                // This ensures proper skinning while root motion is extracted from translation delta
+                m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
+            } else {
+                m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
+            }
         } else {
             m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
         }
