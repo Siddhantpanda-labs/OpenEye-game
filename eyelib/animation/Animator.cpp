@@ -167,25 +167,33 @@ void Animator::ExtractRootMotion() {
     if (!m_skeleton || m_rootMotionBoneIndex < 0) return;
     if (static_cast<size_t>(m_rootMotionBoneIndex) >= m_skeleton->BoneCount()) return;
     
+    const Bone& rootBone = m_skeleton->GetBone(static_cast<size_t>(m_rootMotionBoneIndex));
     math::Transform animatedRootTransform;
     auto sampleRootAtTime = [&](float time) -> math::Mat4 {
         math::Transform t;
-        if (m_clip) {
-            const Bone& rootBone = m_skeleton->GetBone(static_cast<size_t>(m_rootMotionBoneIndex));
-            t.position = rootBone.bindPosition;
-            t.rotation = rootBone.bindRotation;
-            t.scale = rootBone.bindScale;
+         if (m_clip) {
+            // Sample animation values directly (Assimp stores absolute local transforms)
             const auto* ch = m_clip->FindChannel(m_rootMotionBoneIndex);
             if (ch) {
                 if (!ch->positionKeys.empty()) {
                     t.position = m_clip->SamplePosition(time, m_rootMotionBoneIndex);
+                } else {
+                    t.position = rootBone.bindPosition;
                 }
                 if (!ch->rotationKeys.empty()) {
                     t.rotation = m_clip->SampleRotation(time, m_rootMotionBoneIndex);
+                } else {
+                    t.rotation = rootBone.bindRotation;
                 }
                 if (!ch->scaleKeys.empty()) {
                     t.scale = m_clip->SampleScale(time, m_rootMotionBoneIndex);
+                } else {
+                    t.scale = rootBone.bindScale;
                 }
+            } else {
+                t.position = rootBone.bindPosition;
+                t.rotation = rootBone.bindRotation;
+                t.scale = rootBone.bindScale;
             }
         } else {
             t = m_pose.GetBoneTransform(static_cast<size_t>(m_rootMotionBoneIndex));
@@ -220,7 +228,9 @@ void Animator::ExtractRootMotion() {
         math::Mat4 deltaMat{1.0f};
         if (m_hasPreviousRootTransformBeforeCancel && loop && currT < prevT) {
             // Handle wrap: prev->end + start->curr
-            const math::Mat4 endMat = sampleRootAtTime(duration);
+            // NOTE: duration normalizes to 0.0f when looping, so sample just before the end.
+            const float endTime = (duration > 0.0f) ? std::nextafter(duration, 0.0f) : duration;
+            const math::Mat4 endMat = sampleRootAtTime(endTime);
             const math::Mat4 startMat = sampleRootAtTime(0.0f);
             const math::Mat4 prevToEnd = endMat * glm::inverse(prevMat);
             const math::Mat4 startToCurr = currMat * glm::inverse(startMat);
@@ -338,11 +348,11 @@ void Animator::BuildBoneMatrices() {
         // RULE: Root bone is always visual identity when root motion is enabled.
         // RULE: Skeleton root is virtual and has no spatial meaning.
         if (m_rootMotionEnabled && static_cast<int>(i) == m_rootMotionBoneIndex) {
-            // Root motion bone: completely neutral - no spatial transformation at all
-            // Root motion is extracted and applied to world transform, skeleton must not contribute
-            // Use identity matrix to ensure root bone doesn't add any offset to skinning
-            // NOTE: This assumes root bone vertices are weighted to child bones, not root itself
-            m_boneMatrices[i] = math::Mat4(1.0f);
+            // Root motion bone: identity global transform (no spatial contribution from skeleton)
+            // Standard skinning formula: globalInverse * global * inverseBindMatrix
+            m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform()
+                * math::Mat4(1.0f)
+                * b.inverseBindMatrix;
         } else {
             m_boneMatrices[i] = m_skeleton->GetGlobalInverseTransform() * global[i] * b.inverseBindMatrix;
         }
