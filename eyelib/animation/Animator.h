@@ -15,6 +15,15 @@ namespace eyelib {
 namespace animation {
 
 /**
+ * @brief Root motion delta structure.
+ */
+struct RootMotionDelta {
+    math::Vec3 translation{0.0f};
+    math::Quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    bool hasMotion = false;
+};
+
+/**
  * @brief Animator controller: state machine or blend tree driven.
  */
 class Animator {
@@ -34,9 +43,17 @@ public:
     bool GetBoolParameter(const std::string& name) const;
     void SetTrigger(const std::string& name);
 
+    // Root motion support
+    void SetRootMotionBone(int boneIndex);
+    void SetRootMotionEnabled(bool enabled);
+    bool IsRootMotionEnabled() const { return m_rootMotionEnabled; }
+    int GetRootMotionBoneIndex() const { return m_rootMotionBoneIndex; }
+    RootMotionDelta GetRootMotionDelta() const { return m_rootMotionDelta; }
+
 private:
     void RebuildPose();
     void BuildBoneMatrices();
+    void ExtractRootMotion();
 
     std::shared_ptr<Skeleton> m_skeleton{};
     std::shared_ptr<AnimationClip> m_clip{};
@@ -50,6 +67,14 @@ private:
     float m_time = 0.0f;
     Pose m_pose;
     std::vector<math::Mat4> m_boneMatrices;
+
+    // Root motion tracking
+    int m_rootMotionBoneIndex = -1;
+    bool m_rootMotionEnabled = false;
+    RootMotionDelta m_rootMotionDelta;
+    math::Mat4 m_previousRootTransformBeforeCancel{1.0f};
+    bool m_hasPreviousRootTransformBeforeCancel = false;
+    float m_previousRootSampleTime = 0.0f;
 };
 
 } // namespace animation

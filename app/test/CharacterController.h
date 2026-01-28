@@ -53,11 +53,15 @@ public:
     /**
      * @brief Update character movement based on input.
      * 
+     * Only applies movement if motion authority is ControllerDriven or Hybrid.
+     * 
      * @param moveInput Movement input (-1 to 1 for forward/back, -1 to 1 for left/right)
      * @param cameraForward Camera forward direction (for relative movement)
      * @param deltaTime Frame delta time
+     * @param motionAuthority Current motion authority mode
      */
-    void UpdateMovement(const math::Vec2& moveInput, const math::Vec3& cameraForward, float deltaTime);
+    void UpdateMovement(const math::Vec2& moveInput, const math::Vec3& cameraForward, float deltaTime, 
+                       api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::ControllerDriven);
 
     /**
      * @brief Update character animations based on current state.
@@ -72,6 +76,17 @@ public:
         std::shared_ptr<api::AnimationClip> idleClip,
         std::shared_ptr<api::AnimationClip> walkClip = nullptr,
         std::shared_ptr<api::AnimationClip> runClip = nullptr);
+
+    /**
+     * @brief Apply root motion delta to character transform.
+     * 
+     * Only applies root motion if motion authority is AnimationDriven or Hybrid.
+     * 
+     * @param rootMotionDelta Root motion delta from animator
+     * @param motionAuthority Current motion authority mode
+     */
+    void ApplyRootMotion(const api::Animator::RootMotionDelta& rootMotionDelta,
+                        api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
 
     /**
      * @brief Set movement speed.
@@ -136,7 +151,9 @@ private:
         Run
     };
     AnimationState m_animationState = AnimationState::Idle;
-    std::shared_ptr<api::AnimationClip> m_currentClip = nullptr;  // Track current clip to avoid resetting
+    
+    // Track current animation clip to avoid resetting time unnecessarily
+    std::shared_ptr<api::AnimationClip> m_currentClip;
 };
 
 } // namespace test

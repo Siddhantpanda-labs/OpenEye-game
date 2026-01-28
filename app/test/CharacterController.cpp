@@ -35,14 +35,26 @@ math::Vec3 CharacterController::GetForward() const {
 math::Mat4 CharacterController::GetTransform() const {
     math::Mat4 transform(1.0f);
     transform = glm::translate(transform, m_position);
-    // Add 180 degrees to rotation to fix model facing direction
-    transform = glm::rotate(transform, glm::radians(m_rotation + 180.0f), math::Vec3(0.0f, 1.0f, 0.0f));
+    transform = glm::rotate(transform, glm::radians(m_rotation), math::Vec3(0.0f, 1.0f, 0.0f));
     // Scale model down by 50x (0.02 scale)
     transform = glm::scale(transform, math::Vec3(0.02f, 0.02f, 0.02f));
     return transform;
 }
 
-void CharacterController::UpdateMovement(const math::Vec2& moveInput, const math::Vec3& cameraForward, float deltaTime) {
+void CharacterController::UpdateMovement(const math::Vec2& moveInput, const math::Vec3& cameraForward, float deltaTime,
+                                        api::Animator::MotionAuthority motionAuthority) {
+    // Skip input-based movement if motion is animation-driven
+    if (motionAuthority == api::Animator::MotionAuthority::AnimationDriven) {
+        // Still update animation state based on input for visual feedback
+        if (glm::length(moveInput) > 0.001f) {
+            m_animationState = m_isRunning ? AnimationState::Run : AnimationState::Walk;
+            m_currentSpeed = m_isRunning ? m_runSpeed : m_walkSpeed;
+        } else {
+            m_currentSpeed = 0.0f;
+            m_animationState = AnimationState::Idle;
+        }
+        return;
+    }
     // Project camera forward onto horizontal plane
     math::Vec3 cameraForwardFlat = cameraForward;
     cameraForwardFlat.y = 0.0f;
@@ -69,10 +81,7 @@ void CharacterController::UpdateMovement(const math::Vec2& moveInput, const math
         m_position += movement;
         
         // Rotate character toward movement direction
-        // atan2(x, z) gives angle where x=cos, z=sin (matching GetForward)
         float targetYaw = std::atan2(moveDirection.x, moveDirection.z) * 180.0f / 3.14159265f;
-        // Ensure yaw is in 0-360 range
-        if (targetYaw < 0.0f) targetYaw += 360.0f;
         
         // Smooth rotation toward target
         float rotationDiff = targetYaw - m_rotation;
@@ -139,6 +148,38 @@ void CharacterController::SetRunSpeed(float speed) {
 
 void CharacterController::SetRotationSpeed(float speed) {
     m_rotationSpeed = std::max(0.0f, speed);
+}
+
+void CharacterController::ApplyRootMotion(const api::Animator::RootMotionDelta& rootMotionDelta,
+                                         api::Animator::MotionAuthority motionAuthority) {
+    if (!rootMotionDelta.hasMotion) return;
+    
+    // Skip root motion if motion is controller-driven
+    if (motionAuthority == api::Animator::MotionAuthority::ControllerDriven) {
+        return;
+    }
+    
+    // Apply root motion translation to character position
+    // Root motion is in local space (character's forward/right/up), so transform by character rotation
+    float yawRad = glm::radians(m_rotation);
+    math::Mat4 rotationMat(1.0f);
+    rotationMat = glm::rotate(rotationMat, yawRad, math::Vec3(0.0f, 1.0f, 0.0f));
+    
+    // Transform root motion translation from local to world space
+    math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
+    
+    if (motionAuthority == api::Animator::MotionAuthority::AnimationDriven) {
+        // Pure animation-driven: root motion fully controls movement
+        m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
+    } else if (motionAuthority == api::Animator::MotionAuthority::Hybrid) {
+        // Hybrid mode: blend root motion with input (for now, equal blend)
+        // In a full implementation, you'd have a blend factor parameter
+        // For now, we'll apply root motion but input movement is also applied in UpdateMovement
+        m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z) * 0.5f;
+    }
+    
+    // Apply root motion rotation (optional - usually we control rotation via input)
+    // For now, we'll skip rotation application as character rotation is controlled by movement direction
 }
 
 } // namespace test

@@ -161,6 +161,15 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
         
+        // Enable root motion extraction
+        // Try to identify root motion bone (common names: "root", "Armature", "Hips")
+        m_animator->SetRootMotionBone("root"); // Will try common names if not found
+        m_animator->SetRootMotionEnabled(true);
+        
+        // Set motion authority: ControllerDriven for player-controlled, AnimationDriven for cutscenes/AI
+        // Set to AnimationDriven to use only root motion from animation (no input movement)
+        m_animator->SetMotionAuthority(api::Animator::MotionAuthority::AnimationDriven);
+        
         // Use default clip from model if available
         auto defaultClip = m_characterModel->GetClip();
         if (defaultClip) {
@@ -269,8 +278,14 @@ void CharacterTest::ProcessInput(float deltaTime) {
     m_character.SetRunning(isRunning);
 
     // Update character movement relative to camera
+    // Get motion authority from animator
+    api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::ControllerDriven;
+    if (m_animator) {
+        motionAuthority = m_animator->GetMotionAuthority();
+    }
+    
     math::Vec3 cameraForward = m_camera.GetForward();
-    m_character.UpdateMovement(characterMoveInput, cameraForward, deltaTime);
+    m_character.UpdateMovement(characterMoveInput, cameraForward, deltaTime, motionAuthority);
 
     // Update camera with mouse input (right click to look around)
     m_mouseRightPressed = Input::IsMouseButtonPressed(1); // Right mouse button
@@ -298,6 +313,13 @@ void CharacterTest::UpdateCharacter(float deltaTime) {
     if (m_animator) {
         m_character.UpdateAnimations(m_animator, m_idleClip, m_walkClip, m_runClip);
         m_animator->Update(deltaTime);
+        
+        // Apply root motion delta to character (respects motion authority)
+        auto rootMotionDelta = m_animator->GetRootMotionDelta();
+        if (rootMotionDelta.hasMotion) {
+            auto motionAuthority = m_animator->GetMotionAuthority();
+            m_character.ApplyRootMotion(rootMotionDelta, motionAuthority);
+        }
     }
 }
 
