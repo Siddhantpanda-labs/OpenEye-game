@@ -2,7 +2,6 @@
 
 #include "eyelib/animation/Animator.h"
 #include "eyelib/animation/Skeleton.h"
-#include "api/core/Log.h"
 #include <algorithm>
 #include <cctype>
 
@@ -107,7 +106,6 @@ void Animator::SetRootMotionBone(const std::string& boneName) {
                     boneIndex = m_impl->skeleton->FindBoneIndex(name);
                     if (boneIndex >= 0) {
                         m_impl->rootMotionBoneName = name;
-                        Log::InfoF("DEBUG: Found root motion bone by name: %s (index %d)", name.c_str(), boneIndex);
                         break;
                     }
                 }
@@ -127,7 +125,6 @@ void Animator::SetRootMotionBone(const std::string& boneName) {
                 const auto& bone = m_impl->skeleton->GetBone(i);
                 if (bone.parentIndex == -1) {
                     actualRootIndex = static_cast<int>(i);
-                    Log::InfoF("DEBUG: Found actual root bone: index %d, name: %s", actualRootIndex, bone.name.c_str());
                     break;
                 }
             }
@@ -145,8 +142,6 @@ void Animator::SetRootMotionBone(const std::string& boneName) {
                             i == 0) { // Often bone 0 is the hips
                             boneIndex = static_cast<int>(i);
                             m_impl->rootMotionBoneName = bone.name;
-                            Log::InfoF("DEBUG: Found root motion bone (child of root): index %d, name: %s", 
-                                boneIndex, bone.name.c_str());
                             break;
                         }
                     }
@@ -158,12 +153,6 @@ void Animator::SetRootMotionBone(const std::string& boneName) {
                 boneIndex = actualRootIndex;
                 const auto& bone = m_impl->skeleton->GetBone(static_cast<size_t>(boneIndex));
                 m_impl->rootMotionBoneName = bone.name;
-                Log::WarnF("DEBUG: Using actual root bone as root motion bone: index %d, name: %s", 
-                    boneIndex, bone.name.c_str());
-            }
-            
-            if (boneIndex < 0) {
-                Log::Warn("DEBUG: No root motion bone found!");
             }
         }
         
@@ -172,17 +161,6 @@ void Animator::SetRootMotionBone(const std::string& boneName) {
             boneIndex = 0;
             const auto& bone = m_impl->skeleton->GetBone(0);
             m_impl->rootMotionBoneName = bone.name.empty() ? "Bone0" : bone.name;
-            Log::WarnF("DEBUG: Root bone not found by name, using bone 0 as fallback (name: %s, parentIndex: %d)", 
-                bone.name.c_str(), bone.parentIndex);
-        }
-        
-        // DEBUG: Log final root bone detection result
-        if (boneIndex >= 0) {
-            const auto& finalBone = m_impl->skeleton->GetBone(static_cast<size_t>(boneIndex));
-            Log::InfoF("DEBUG: Final root motion bone: index %d, name: %s, parentIndex: %d", 
-                boneIndex, finalBone.name.c_str(), finalBone.parentIndex);
-        } else {
-            Log::Error("DEBUG: FAILED to find root motion bone! Index is -1");
         }
         
         // Delegate to library

@@ -60,7 +60,6 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     m_camera.SetSensitivity(0.15f);
 
     // Setup character
-    // DEBUG: Lock character position to origin for in-place animation testing
     m_character.SetPosition(math::Vec3(0.0f, 0.0f, 0.0f));
     m_character.SetWalkSpeed(3.0f);
     m_character.SetRunSpeed(6.0f);
@@ -162,38 +161,19 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
         
-        // DEBUG: Enable root motion extraction but disable application for in-place testing
-        // Root motion extraction neutralizes the root bone (makes it identity visually)
-        // But we don't apply the extracted motion to character transform (stays in place)
-        // Empty string will auto-detect root bone (bone with parentIndex == -1)
-        m_animator->SetRootMotionBone(""); // Auto-detect root bone
+        // Setup root motion: Auto-detect root motion bone (usually Hips)
+        m_animator->SetRootMotionBone(""); // Auto-detect root motion bone
         m_animator->SetRootMotionEnabled(true); // Extract root motion to neutralize root bone
+        m_animator->SetMotionAuthority(api::Animator::MotionAuthority::AnimationDriven); // Enable root motion application
         
-        // DEBUG: Set motion authority to AnimationDriven to disable input-based movement
-        // This ensures only root motion (if applied) controls movement, not WASD input
-        m_animator->SetMotionAuthority(api::Animator::MotionAuthority::AnimationDriven);
-        
-        // DEBUG: Force run animation for in-place debugging
-        // Use run clip if available, otherwise use default clip from model
-        auto defaultClip = m_characterModel->GetClip();
-        if (defaultClip) {
-            m_idleClip = defaultClip;
-            // If run clip not loaded yet, use default clip as fallback
-            if (!m_runClip) {
-                m_runClip = defaultClip;
-            }
-            // DEBUG: Set run clip directly for in-place testing
-            if (m_runClip) {
-                m_animator->SetClip(m_runClip);
-                api::core::Log::Info("DEBUG: Run animation set to play in place (root motion disabled)");
-            } else {
-                m_animator->SetClip(defaultClip);
-                api::core::Log::Info("DEBUG: Default animation set to play in place (root motion disabled)");
-            }
+        // Set walk animation to play
+        if (m_walkClip) {
+            m_animator->SetClip(m_walkClip);
+        } else if (m_idleClip) {
+            m_animator->SetClip(m_idleClip);
+        } else if (m_characterModel->GetClip()) {
+            m_animator->SetClip(m_characterModel->GetClip());
         }
-        
-        // DEBUG: Force character to run state
-        m_character.SetRunning(true);
     }
 
     api::core::Log::InfoF("Character model loaded: %zu meshes, skeleton: %s",
@@ -210,46 +190,42 @@ void CharacterTest::LoadAnimations(const std::string& idlePath,
         return;
     }
 
-    // Load idle animation
-    if (!idlePath.empty()) {
-        auto idleModel = api::ModelLoader::LoadModel(idlePath);
-        if (idleModel && idleModel->GetClip()) {
-            m_idleClip = idleModel->GetClip();
-            if (m_animator) {
-                m_animator->SetClip(m_idleClip);
+        // Load idle animation
+        if (!idlePath.empty()) {
+            auto idleModel = api::ModelLoader::LoadModel(idlePath);
+            if (idleModel && idleModel->GetClip()) {
+                m_idleClip = idleModel->GetClip();
+                api::core::Log::InfoF("Loaded idle animation: %s", idlePath.c_str());
+            } else {
+                api::core::Log::WarnF("Failed to load idle animation: %s", idlePath.c_str());
             }
-            api::core::Log::InfoF("Loaded idle animation: %s", idlePath.c_str());
-        } else {
-            api::core::Log::WarnF("Failed to load idle animation: %s", idlePath.c_str());
         }
-    }
 
     // Load walk animation
     if (!walkPath.empty()) {
         auto walkModel = api::ModelLoader::LoadModel(walkPath);
         if (walkModel && walkModel->GetClip()) {
             m_walkClip = walkModel->GetClip();
+            // Set walk animation immediately if animator exists
+            if (m_animator) {
+                m_animator->SetClip(m_walkClip);
+            }
             api::core::Log::InfoF("Loaded walk animation: %s", walkPath.c_str());
         } else {
             api::core::Log::WarnF("Failed to load walk animation: %s", walkPath.c_str());
         }
     }
 
-    // Load run animation
-    if (!runPath.empty()) {
-        auto runModel = api::ModelLoader::LoadModel(runPath);
-        if (runModel && runModel->GetClip()) {
-            m_runClip = runModel->GetClip();
-            // DEBUG: If animator exists, set run clip immediately for in-place testing
-            if (m_animator) {
-                m_animator->SetClip(m_runClip);
-                api::core::Log::InfoF("DEBUG: Run animation set to play in place: %s", runPath.c_str());
+        // Load run animation
+        if (!runPath.empty()) {
+            auto runModel = api::ModelLoader::LoadModel(runPath);
+            if (runModel && runModel->GetClip()) {
+                m_runClip = runModel->GetClip();
+                api::core::Log::InfoF("Loaded run animation: %s", runPath.c_str());
+            } else {
+                api::core::Log::WarnF("Failed to load run animation: %s", runPath.c_str());
             }
-            api::core::Log::InfoF("Loaded run animation: %s", runPath.c_str());
-        } else {
-            api::core::Log::WarnF("Failed to load run animation: %s", runPath.c_str());
         }
-    }
 }
 
 void CharacterTest::ProcessInput(float deltaTime) {
@@ -282,32 +258,27 @@ void CharacterTest::ProcessInput(float deltaTime) {
     // Update camera movement
     m_camera.UpdateMovement(cameraMoveInput, deltaTime);
 
+    // Disabled: No input movement - just play animation in place
     // Character movement (WASD relative to camera)
-    math::Vec2 characterMoveInput(0.0f, 0.0f);
-    if (Input::IsKeyPressed(KEY_W)) characterMoveInput.y += 1.0f;
-    if (Input::IsKeyPressed(KEY_S)) characterMoveInput.y -= 1.0f;
-    if (Input::IsKeyPressed(KEY_D)) characterMoveInput.x += 1.0f;
-    if (Input::IsKeyPressed(KEY_A)) characterMoveInput.x -= 1.0f;
+    // math::Vec2 characterMoveInput(0.0f, 0.0f);
+    // if (Input::IsKeyPressed(KEY_W)) characterMoveInput.y += 1.0f;
+    // if (Input::IsKeyPressed(KEY_S)) characterMoveInput.y -= 1.0f;
+    // if (Input::IsKeyPressed(KEY_D)) characterMoveInput.x += 1.0f;
+    // if (Input::IsKeyPressed(KEY_A)) characterMoveInput.x -= 1.0f;
 
     // Normalize character movement input if diagonal
-    float characterMoveLength = glm::length(characterMoveInput);
-    if (characterMoveLength > 1.0f) {
-        characterMoveInput = characterMoveInput / characterMoveLength;
-    }
+    // float characterMoveLength = glm::length(characterMoveInput);
+    // if (characterMoveLength > 1.0f) {
+    //     characterMoveInput = characterMoveInput / characterMoveLength;
+    // }
 
     // Set running state (space bar)
-    bool isRunning = Input::IsKeyPressed(KEY_SPACE);
-    m_character.SetRunning(isRunning);
+    // bool isRunning = Input::IsKeyPressed(KEY_SPACE);
+    // m_character.SetRunning(isRunning);
 
-    // Update character movement relative to camera
-    // Get motion authority from animator
-    api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::ControllerDriven;
-    if (m_animator) {
-        motionAuthority = m_animator->GetMotionAuthority();
-    }
-    
-    math::Vec3 cameraForward = m_camera.GetForward();
-    m_character.UpdateMovement(characterMoveInput, cameraForward, deltaTime, motionAuthority);
+    // Simple input: W = forward, S = backward (root motion only)
+    m_moveForward = Input::IsKeyPressed(KEY_W);
+    m_moveBackward = Input::IsKeyPressed(KEY_S);
 
     // Update camera with mouse input (right click to look around)
     m_mouseRightPressed = Input::IsMouseButtonPressed(1); // Right mouse button
@@ -331,29 +302,27 @@ void CharacterTest::UpdateCamera(float deltaTime) {
 }
 
 void CharacterTest::UpdateCharacter(float deltaTime) {
-    // DEBUG: Lock character position to origin to prevent any movement
-    m_character.SetPosition(math::Vec3(0.0f, 0.0f, 0.0f));
-    
-    // Update character animations
     if (m_animator) {
-        // DEBUG: Skip normal animation state updates - run clip is set in initialization
-        // m_character.UpdateAnimations(m_animator, m_idleClip, m_walkClip, m_runClip);
-        
+        // Update animation
         m_animator->Update(deltaTime);
         
-        // DEBUG: Disable root motion application - animation plays in place
-        // This helps debug snapping issues by isolating animation playback from root motion
-        // The animation should loop smoothly without any position snapping
-        // Root motion is still extracted in library, but not applied to character transform
-        // TODO: Re-enable after debugging
-        /*
-        // Apply root motion delta to character (respects motion authority)
-        auto rootMotionDelta = m_animator->GetRootMotionDelta();
-        if (rootMotionDelta.hasMotion) {
-            auto motionAuthority = m_animator->GetMotionAuthority();
-            m_character.ApplyRootMotion(rootMotionDelta, motionAuthority);
+        // Apply root motion when W or S is pressed
+        if (m_moveForward || m_moveBackward) {
+            // Get root motion delta from animator
+            auto rootMotionDelta = m_animator->GetRootMotionDelta();
+            
+            if (rootMotionDelta.hasMotion) {
+                // For backward movement, reverse the root motion direction
+                api::Animator::RootMotionDelta motionToApply = rootMotionDelta;
+                if (m_moveBackward && !m_moveForward) {
+                    // Reverse direction for backward movement
+                    motionToApply.translation = -rootMotionDelta.translation;
+                }
+                
+                // Apply root motion to character position
+                m_character.ApplyRootMotion(motionToApply, m_animator->GetMotionAuthority());
+            }
         }
-        */
     }
 }
 

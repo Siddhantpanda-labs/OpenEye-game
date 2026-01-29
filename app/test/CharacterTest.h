@@ -111,6 +111,8 @@ private:
     // Input state
     bool m_mouseRightPressed = false;
     bool m_mouseRightPressedLast = false;
+    bool m_moveForward = false;
+    bool m_moveBackward = false;
     
     // Window dimensions
     int m_windowWidth = 1280;

@@ -43,49 +43,29 @@ math::Mat4 CharacterController::GetTransform() const {
 
 void CharacterController::UpdateMovement(const math::Vec2& moveInput, const math::Vec3& cameraForward, float deltaTime,
                                         api::Animator::MotionAuthority motionAuthority) {
-    // Skip input-based movement if motion is animation-driven
-    if (motionAuthority == api::Animator::MotionAuthority::AnimationDriven) {
-        // Still update animation state based on input for visual feedback
-        if (glm::length(moveInput) > 0.001f) {
-            m_animationState = m_isRunning ? AnimationState::Run : AnimationState::Walk;
-            m_currentSpeed = m_isRunning ? m_runSpeed : m_walkSpeed;
-        } else {
-            m_currentSpeed = 0.0f;
-            m_animationState = AnimationState::Idle;
-        }
-        return;
-    }
-    // Project camera forward onto horizontal plane
-    math::Vec3 cameraForwardFlat = cameraForward;
-    cameraForwardFlat.y = 0.0f;
-    cameraForwardFlat = glm::normalize(cameraForwardFlat);
-    
-    // Calculate right direction
-    math::Vec3 up(0.0f, 1.0f, 0.0f);
-    math::Vec3 right = glm::normalize(glm::cross(cameraForwardFlat, up));
-    
-    // Calculate movement direction relative to camera
-    math::Vec3 moveDirection = (cameraForwardFlat * moveInput.y) + (right * moveInput.x);
-    moveDirection.y = 0.0f; // Keep movement on horizontal plane
-    
-    float moveLength = glm::length(moveDirection);
-    if (moveLength > 0.001f) {
+    // Update animation state based on input
+    // Movement is controlled by root motion, not direct input
+    if (glm::length(moveInput) > 0.001f) {
+        m_animationState = m_isRunning ? AnimationState::Run : AnimationState::Walk;
+        m_currentSpeed = m_isRunning ? m_runSpeed : m_walkSpeed;
+        
+        // Calculate movement direction for character rotation (root motion controls actual movement)
+        math::Vec3 cameraForwardFlat = cameraForward;
+        cameraForwardFlat.y = 0.0f;
+        cameraForwardFlat = glm::normalize(cameraForwardFlat);
+        
+        math::Vec3 up(0.0f, 1.0f, 0.0f);
+        math::Vec3 right = glm::normalize(glm::cross(cameraForwardFlat, up));
+        
+        math::Vec3 moveDirection = (cameraForwardFlat * moveInput.y) + (right * moveInput.x);
+        moveDirection.y = 0.0f;
         moveDirection = glm::normalize(moveDirection);
-        
-        // Running state is set externally via SetRunning()
-        float speed = m_isRunning ? m_runSpeed : m_walkSpeed;
-        m_currentSpeed = speed;
-        
-        // Move character
-        math::Vec3 movement = moveDirection * speed * deltaTime;
-        m_position += movement;
         
         // Rotate character toward movement direction
         float targetYaw = std::atan2(moveDirection.x, moveDirection.z) * 180.0f / 3.14159265f;
         
         // Smooth rotation toward target
         float rotationDiff = targetYaw - m_rotation;
-        // Normalize rotation difference to -180 to 180 range
         while (rotationDiff > 180.0f) rotationDiff -= 360.0f;
         while (rotationDiff < -180.0f) rotationDiff += 360.0f;
         
@@ -99,13 +79,12 @@ void CharacterController::UpdateMovement(const math::Vec2& moveInput, const math
         // Normalize rotation
         while (m_rotation < 0.0f) m_rotation += 360.0f;
         while (m_rotation >= 360.0f) m_rotation -= 360.0f;
-        
-        // Update animation state
-        m_animationState = m_isRunning ? AnimationState::Run : AnimationState::Walk;
     } else {
         m_currentSpeed = 0.0f;
         m_animationState = AnimationState::Idle;
     }
+    
+    // No direct input-based movement - root motion controls all movement
 }
 
 void CharacterController::UpdateAnimations(
@@ -168,18 +147,8 @@ void CharacterController::ApplyRootMotion(const api::Animator::RootMotionDelta& 
     // Transform root motion translation from local to world space
     math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
     
-    if (motionAuthority == api::Animator::MotionAuthority::AnimationDriven) {
-        // Pure animation-driven: root motion fully controls movement
-        m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
-    } else if (motionAuthority == api::Animator::MotionAuthority::Hybrid) {
-        // Hybrid mode: blend root motion with input (for now, equal blend)
-        // In a full implementation, you'd have a blend factor parameter
-        // For now, we'll apply root motion but input movement is also applied in UpdateMovement
-        m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z) * 0.5f;
-    }
-    
-    // Apply root motion rotation (optional - usually we control rotation via input)
-    // For now, we'll skip rotation application as character rotation is controlled by movement direction
+    // Apply root motion (AnimationDriven or Hybrid - both use root motion)
+    m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
 }
 
 } // namespace test
