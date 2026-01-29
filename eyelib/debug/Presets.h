@@ -15,6 +15,8 @@ struct Presets {
     std::atomic<bool> wireframe{false};
     std::atomic<bool> physicsDebugDraw{false};
     std::atomic<bool> frameTimeGraph{true};
+    /** When true, DebugDrawRenderer draws lines/text (DebugDraw::AddLine etc.). Default true. */
+    std::atomic<bool> debugDrawEnabled{true};
 };
 
 Presets& GetPresets();

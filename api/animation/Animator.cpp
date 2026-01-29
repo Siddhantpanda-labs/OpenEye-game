@@ -73,6 +73,10 @@ const std::vector<eyelib::math::Mat4>& Animator::GetBoneMatrices() const {
     return m_impl->boneMatrices;
 }
 
+const std::vector<eyelib::math::Mat4>& Animator::GetBoneGlobalMatrices() const {
+    return m_impl->animator->GetBoneGlobalMatrices();
+}
+
 void Animator::SetParameter(const std::string& name, float value) {
     m_impl->animator->SetParameter(name, value);
 }

@@ -36,6 +36,8 @@ public:
     void Update(float dt);
     const Pose& GetPose() const { return m_pose; }
     const std::vector<math::Mat4>& GetBoneMatrices() const { return m_boneMatrices; }
+    /** Global bone transforms in model space (for debug drawing). */
+    const std::vector<math::Mat4>& GetBoneGlobalMatrices() const { return m_globalBoneMatrices; }
 
     void SetParameter(const std::string& name, float value);
     void SetParameter(const std::string& name, bool value);
@@ -67,6 +69,7 @@ private:
     float m_time = 0.0f;
     Pose m_pose;
     std::vector<math::Mat4> m_boneMatrices;
+    std::vector<math::Mat4> m_globalBoneMatrices;
 
     // Root motion tracking
     int m_rootMotionBoneIndex = -1;

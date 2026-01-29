@@ -2,6 +2,8 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
+#include "api/debug/DebugDraw.h"
+#include "api/debug/Presets.h"
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/animation/All.h"
 #include "eyelib/math/Types.h"
@@ -54,6 +56,9 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
         return false;
     }
     m_pipeline->SetMode(api::RenderPipeline::Mode::Forward);
+
+    // Enable debug draw so skeleton/debug lines are visible (DebugDraw::AddLine, etc.)
+    api::debug::Presets::SetDebugDrawEnabled(true);
 
     // Setup free-flying camera
     m_camera.SetMoveSpeed(5.0f);
@@ -161,12 +166,11 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
         
-        // Setup root motion: Auto-detect root motion bone (usually Hips)
-        m_animator->SetRootMotionBone(""); // Auto-detect root motion bone
-        m_animator->SetRootMotionEnabled(true); // Extract root motion to neutralize root bone
-        m_animator->SetMotionAuthority(api::Animator::MotionAuthority::AnimationDriven); // Enable root motion application
+        // Root motion extraction only (in-place: no root motion applied to transform)
+        m_animator->SetRootMotionBone("");
+        m_animator->SetRootMotionEnabled(true);
         
-        // Set walk animation to play
+        // Set walk animation to play in place
         if (m_walkClip) {
             m_animator->SetClip(m_walkClip);
         } else if (m_idleClip) {
@@ -276,10 +280,6 @@ void CharacterTest::ProcessInput(float deltaTime) {
     // bool isRunning = Input::IsKeyPressed(KEY_SPACE);
     // m_character.SetRunning(isRunning);
 
-    // Simple input: W = forward, S = backward (root motion only)
-    m_moveForward = Input::IsKeyPressed(KEY_W);
-    m_moveBackward = Input::IsKeyPressed(KEY_S);
-
     // Update camera with mouse input (right click to look around)
     m_mouseRightPressed = Input::IsMouseButtonPressed(1); // Right mouse button
     
@@ -303,26 +303,8 @@ void CharacterTest::UpdateCamera(float deltaTime) {
 
 void CharacterTest::UpdateCharacter(float deltaTime) {
     if (m_animator) {
-        // Update animation
         m_animator->Update(deltaTime);
-        
-        // Apply root motion when W or S is pressed
-        if (m_moveForward || m_moveBackward) {
-            // Get root motion delta from animator
-            auto rootMotionDelta = m_animator->GetRootMotionDelta();
-            
-            if (rootMotionDelta.hasMotion) {
-                // For backward movement, reverse the root motion direction
-                api::Animator::RootMotionDelta motionToApply = rootMotionDelta;
-                if (m_moveBackward && !m_moveForward) {
-                    // Reverse direction for backward movement
-                    motionToApply.translation = -rootMotionDelta.translation;
-                }
-                
-                // Apply root motion to character position
-                m_character.ApplyRootMotion(motionToApply, m_animator->GetMotionAuthority());
-            }
-        }
+        // Walk animation in place; no root motion applied
     }
 }
 
@@ -330,6 +312,8 @@ void CharacterTest::Update(float deltaTime) {
     if (!m_window) return;
 
     m_window->PollEvents();
+
+    api::debug::DebugDraw::BeginFrame(deltaTime);
 
     // Handle window resize
     const int w = m_window->Width();
@@ -370,6 +354,31 @@ void CharacterTest::Update(float deltaTime) {
         }
         
         m_scene.opaque.push_back(drawable);
+    }
+
+    // Skeleton debug: draw bone lines (world space)
+    if (m_skeleton && m_animator) {
+        const auto& globalMatrices = m_animator->GetBoneGlobalMatrices();
+        const size_t count = globalMatrices.size();
+        if (count == m_skeleton->BoneCount()) {
+            const math::Mat4 charTransform = m_character.GetTransform();
+            const math::Vec4 green(0.2f, 1.0f, 0.3f, 1.0f);
+            for (size_t i = 0; i < count; ++i) {
+                const auto& bone = m_skeleton->GetBone(i);
+                if (bone.parentIndex < 0) continue;
+                const size_t p = static_cast<size_t>(bone.parentIndex);
+                if (p >= count) continue;
+                // Model-space positions: GLM mat4 is column-major, translation is column 3 → [3][0],[3][1],[3][2]
+                const math::Vec3 modelA(globalMatrices[p][3][0], globalMatrices[p][3][1], globalMatrices[p][3][2]);
+                const math::Vec3 modelB(globalMatrices[i][3][0], globalMatrices[i][3][1], globalMatrices[i][3][2]);
+                const math::Vec4 worldA = charTransform * math::Vec4(modelA.x, modelA.y, modelA.z, 1.0f);
+                const math::Vec4 worldB = charTransform * math::Vec4(modelB.x, modelB.y, modelB.z, 1.0f);
+                api::debug::DebugDraw::AddLine(
+                    math::Vec3(worldA.x, worldA.y, worldA.z),
+                    math::Vec3(worldB.x, worldB.y, worldB.z),
+                    green, 0.0f);
+            }
+        }
     }
 }
 

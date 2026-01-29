@@ -14,6 +14,10 @@ struct Presets {
 
     static void SetFrameTimeGraph(bool enabled);
     static bool GetFrameTimeGraph();
+
+    /** Enable/disable debug draw (lines, text from DebugDraw). When enabled, skeleton/debug lines are visible. */
+    static void SetDebugDrawEnabled(bool enabled);
+    static bool GetDebugDrawEnabled();
 };
 
 } // namespace debug

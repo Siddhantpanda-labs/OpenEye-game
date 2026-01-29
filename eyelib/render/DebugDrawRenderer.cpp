@@ -1,6 +1,7 @@
 #include "eyelib/render/DebugDrawRenderer.h"
 
 #include "eyelib/debug/DebugDraw.h"
+#include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/render/2d/Font.h"
 #include "eyelib/render/2d/TextRenderer.h"
@@ -31,6 +32,7 @@ static bool s_fontAttempted = false;
 static float s_textSize = 16.0f;
 static std::string s_fontPath;
 static bool s_initialized = false;
+static bool s_shaderLoadLogged = false;
 
 static void EnsureResources() {
     if (s_initialized) return;
@@ -47,7 +49,12 @@ static void EnsureResources() {
     glBindVertexArray(0);
 
     s_shader = std::make_shared<Shader>();
-    s_shader->LoadFromFile("assets/shaders/debug/lines.vert", "assets/shaders/debug/lines.frag");
+    if (!s_shader->LoadFromFile("assets/shaders/debug/lines.vert", "assets/shaders/debug/lines.frag")) {
+        if (!s_shaderLoadLogged) {
+            core::Log::Warn("DebugDraw: failed to load debug line shader (assets/shaders/debug/lines.*). Run from project root or set working directory. Skeleton/debug lines will not be visible.");
+            s_shaderLoadLogged = true;
+        }
+    }
 }
 
 static void TryLoadFont() {
@@ -88,7 +95,7 @@ void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo,
     if (width == 0 || height == 0) return;
 
     EnsureResources();
-    if (!s_shader) return;
+    if (!s_shader || !s_shader->IsValid()) return;
 
     if (!lines.empty()) {
         std::vector<LineVertex> vertices;
@@ -101,7 +108,7 @@ void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo,
         glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
         glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
 
-        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -119,6 +126,7 @@ void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo,
 
         s_shader->Unbind();
 
+        glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
     }

@@ -390,6 +390,7 @@ void Animator::BuildBoneMatrices() {
     const size_t count = m_skeleton->BoneCount();
     if (m_pose.GetBoneCount() < count) m_pose.Resize(count);
     if (m_boneMatrices.size() != count) m_boneMatrices.assign(count, math::Mat4(1.0f));
+    if (m_globalBoneMatrices.size() != count) m_globalBoneMatrices.assign(count, math::Mat4(1.0f));
 
     std::vector<math::Mat4> local(count, math::Mat4(1.0f));
     for (size_t i = 0; i < count; ++i) {
@@ -443,7 +444,8 @@ void Animator::BuildBoneMatrices() {
     for (size_t i = 0; i < count; ++i) {
         computeGlobal(i);
         const Bone& b = m_skeleton->GetBone(i);
-        
+        m_globalBoneMatrices[i] = global[i];
+
         // CRITICAL: Root motion bone final matrix must be identity-based
         // RULE: Root motion lives ONLY in world/entity space.
         // RULE: Root bone is always visual identity when root motion is enabled.

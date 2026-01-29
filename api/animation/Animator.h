@@ -29,6 +29,8 @@ public:
 
     void Update(float deltaTime);
     const std::vector<eyelib::math::Mat4>& GetBoneMatrices() const;
+    /** Global bone transforms in model space (for debug drawing). */
+    const std::vector<eyelib::math::Mat4>& GetBoneGlobalMatrices() const;
 
     void SetParameter(const std::string& name, float value);
     void SetParameter(const std::string& name, bool value);

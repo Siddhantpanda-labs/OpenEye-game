@@ -273,10 +273,10 @@ void DebugDraw::BeginFrame(float dt) {
     if (dt <= 0.0f) return;
     std::scoped_lock lock(g_mutex);
     for (auto& l : g_lines) {
-        if (l.duration > 0.0f) l.duration -= dt;
+        l.duration -= dt;
     }
     for (auto& t : g_texts) {
-        if (t.duration > 0.0f) t.duration -= dt;
+        t.duration -= dt;
     }
     g_lines.erase(std::remove_if(g_lines.begin(), g_lines.end(), [](const DebugLine& l) { return l.duration < 0.0f; }), g_lines.end());
     g_texts.erase(std::remove_if(g_texts.begin(), g_texts.end(), [](const DebugText& t) { return t.duration < 0.0f; }), g_texts.end());
