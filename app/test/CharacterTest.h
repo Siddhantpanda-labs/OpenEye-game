@@ -115,7 +115,9 @@ private:
     // Input state
     bool m_mouseRightPressed = false;
     bool m_mouseRightPressedLast = false;
-    
+    /** 1 = W (forward), -1 = S (backward), 0 = neither. Used for root motion direction. */
+    int m_forwardInput = 0;
+
     // Window dimensions
     int m_windowWidth = 1280;
     int m_windowHeight = 720;

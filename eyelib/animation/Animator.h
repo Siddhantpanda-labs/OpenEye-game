@@ -78,6 +78,9 @@ private:
     math::Mat4 m_previousRootTransformBeforeCancel{1.0f};
     bool m_hasPreviousRootTransformBeforeCancel = false;
     float m_previousRootSampleTime = 0.0f;
+    // State-machine root motion: sample current state's clip, not blended pose (avoids wrong delta during transitions)
+    int m_previousRootMotionState = -1;
+    float m_previousRootMotionStateTime = 0.0f;
 };
 
 } // namespace animation

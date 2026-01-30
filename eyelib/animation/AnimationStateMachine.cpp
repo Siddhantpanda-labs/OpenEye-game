@@ -159,5 +159,15 @@ void AnimationStateMachine::ConsumeTriggersForTransition(const Transition& t) {
     }
 }
 
+std::shared_ptr<AnimationClip> AnimationStateMachine::GetStateClip(StateHandle state) const {
+    if (state < 0 || state >= static_cast<StateHandle>(m_states.size())) return nullptr;
+    return m_states[state].clip;
+}
+
+float AnimationStateMachine::GetStatePlaybackSpeed(StateHandle state) const {
+    if (state < 0 || state >= static_cast<StateHandle>(m_states.size())) return 1.0f;
+    return m_states[state].playbackSpeed;
+}
+
 } // namespace animation
 } // namespace eyelib

@@ -75,7 +75,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     SetupScene();
 
     api::core::Log::Info("Character test initialized successfully");
-    api::core::Log::Info("Controls: Mouse = Look around; W = walk, W+Space = run, release W = idle");
+    api::core::Log::Info("Controls: Mouse = Look; W = walk forward, S = walk back, W+Space = run; release W = idle");
 
     return true;
 }
@@ -167,7 +167,7 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
         
-        // Root motion extraction only (in-place: no root motion applied to transform)
+        // Root motion: extracted from walk/run clips and applied when W/S pressed
         m_animator->SetRootMotionBone("");
         m_animator->SetRootMotionEnabled(true);
         
@@ -264,18 +264,35 @@ void CharacterTest::ProcessInput(float deltaTime) {
     using namespace api::platform;
 
     const int KEY_W = 87;
+    const int KEY_S = 83;
     const int KEY_SPACE = 32;
 
-    // Idle / Walk / Run: W = walk, W+Space = run, release W = idle
+    bool w = Input::IsKeyPressed(KEY_W);
+    bool s = Input::IsKeyPressed(KEY_S);
+    bool space = Input::IsKeyPressed(KEY_SPACE);
+
+    // Idle / Walk / Run: W or S = walk (forward/back), W+Space or S+Space = run, release both = idle
     if (m_animator && m_stateMachine) {
-        bool w = Input::IsKeyPressed(KEY_W);
-        bool space = Input::IsKeyPressed(KEY_SPACE);
-        if (w && space)
+        if ((w || s) && space)
             m_animator->SetTrigger("toRun");
-        else if (w)
+        else if (w || s)
             m_animator->SetTrigger("toWalk");
         else
             m_animator->SetTrigger("toIdle");
+    }
+
+    // Forward/backward for root motion: W = forward, S = backward
+    m_forwardInput = w ? 1 : (s ? -1 : 0);
+
+    // Face character toward camera forward (W) or backward (S) when moving
+    if (m_forwardInput != 0) {
+        math::Vec3 camFwd = m_camera.GetForward();
+        camFwd.y = 0.0f;
+        camFwd = glm::normalize(camFwd);
+        if (m_forwardInput == -1)
+            camFwd = -camFwd;
+        float yawDeg = std::atan2(camFwd.x, camFwd.z) * 180.0f / 3.14159265f;
+        m_character.SetRotation(yawDeg);
     }
 
     // Camera movement disabled - only look around is active
@@ -333,10 +350,23 @@ void CharacterTest::UpdateCamera(float deltaTime) {
 }
 
 void CharacterTest::UpdateCharacter(float deltaTime) {
-    if (m_animator) {
-        m_animator->Update(deltaTime);
-        // Walk animation in place; no root motion applied
-    }
+    if (!m_animator) return;
+
+    m_animator->Update(deltaTime);
+
+    // Apply root motion when in Walk or Run and W (forward) or S (backward) is pressed
+    if (!m_stateMachine || m_forwardInput == 0) return;
+
+    const int idleState = 0, walkState = 1, runState = 2;
+    int currentState = m_stateMachine->GetInternal()->GetCurrentState();
+    if (currentState != walkState && currentState != runState) return;
+
+    auto delta = m_animator->GetRootMotionDelta();
+    if (!delta.hasMotion) return;
+
+    // W: character faces camera forward → delta applies as world forward.
+    // S: character faces camera backward → same delta applies as world backward. No negation.
+    m_character.ApplyRootMotion(delta, api::Animator::MotionAuthority::AnimationDriven);
 }
 
 void CharacterTest::Update(float deltaTime) {

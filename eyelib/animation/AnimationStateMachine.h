@@ -46,6 +46,11 @@ public:
 
     StateHandle GetCurrentState() const { return m_currentState; }
     Pose GetCurrentPose() const { return m_currentPose; }
+    /** Time within current state (advances each frame). Used with GetStateClip for root motion sampling. */
+    float GetStateTime() const { return m_stateTime; }
+    /** Clip for a state (for root motion: sample this clip, not the blended pose). */
+    std::shared_ptr<AnimationClip> GetStateClip(StateHandle state) const;
+    float GetStatePlaybackSpeed(StateHandle state) const;
 
     bool IsInTransition() const { return m_activeTransition >= 0; }
     /** When in transition, returns blend weight 0..1 (0=previous state, 1=current). Otherwise 0. */

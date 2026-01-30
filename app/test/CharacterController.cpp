@@ -146,9 +146,16 @@ void CharacterController::ApplyRootMotion(const api::Animator::RootMotionDelta& 
     
     // Transform root motion translation from local to world space
     math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
-    
-    // Apply root motion (AnimationDriven or Hybrid - both use root motion)
-    m_position += math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
+    math::Vec3 motion = math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
+
+    // Keep movement on ground plane (ignore vertical component from animation bob)
+    motion.y = 0.0f;
+
+    // Root motion is in model/skeleton space; character is drawn at 0.02 scale - scale delta to match
+    const float kCharacterScale = 0.02f;
+    motion *= kCharacterScale;
+
+    m_position += motion;
 }
 
 } // namespace test

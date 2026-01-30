@@ -1,5 +1,5 @@
 #include "Animator.h"
-
+#include "BlendSystem.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -27,6 +27,8 @@ void Animator::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
 
 void Animator::SetStateMachine(std::shared_ptr<AnimationStateMachine> sm) {
     m_stateMachine = std::move(sm);
+    m_previousRootMotionState = -1;
+    m_previousRootMotionStateTime = 0.0f;
     if (m_stateMachine && m_skeleton) {
         m_stateMachine->SetBoneCount(m_skeleton->BoneCount());
         m_stateMachine->SetSkeleton(m_skeleton.get());
@@ -242,6 +244,8 @@ void Animator::SetRootMotionBone(int boneIndex) {
     m_hasPreviousRootTransformBeforeCancel = false;
     m_rootMotionDelta.hasMotion = false;
     m_previousRootSampleTime = 0.0f;
+    m_previousRootMotionState = -1;
+    m_previousRootMotionStateTime = 0.0f;
 }
 
 void Animator::SetRootMotionEnabled(bool enabled) {
@@ -315,28 +319,22 @@ void Animator::ExtractRootMotion() {
         const math::Mat4 prevMat = sampleRootAtTime(prevT);
         const math::Mat4 currMat = sampleRootAtTime(currT);
 
-        math::Mat4 deltaMat{1.0f};
+        math::Vec3 deltaPos(0.0f);
         if (m_hasPreviousRootTransformBeforeCancel && loop && currT < prevT) {
-            // Handle wrap: prev->end + start->curr
-            // NOTE: duration normalizes to 0.0f when looping, so sample just before the end.
+            // Handle wrap: position delta = (curr - start) + (end - prev)
             const float endTime = (duration > 0.0f) ? std::nextafter(duration, 0.0f) : duration;
             const math::Mat4 endMat = sampleRootAtTime(endTime);
             const math::Mat4 startMat = sampleRootAtTime(0.0f);
-            const math::Mat4 prevToEnd = endMat * glm::inverse(prevMat);
-            const math::Mat4 startToCurr = currMat * glm::inverse(startMat);
-            deltaMat = startToCurr * prevToEnd;
+            deltaPos = (math::Vec3(currMat[3][0], currMat[3][1], currMat[3][2]) - math::Vec3(startMat[3][0], startMat[3][1], startMat[3][2]))
+                    + (math::Vec3(endMat[3][0], endMat[3][1], endMat[3][2]) - math::Vec3(prevMat[3][0], prevMat[3][1], prevMat[3][2]));
         } else if (m_hasPreviousRootTransformBeforeCancel) {
-            deltaMat = currMat * glm::inverse(prevMat);
+            deltaPos = math::Vec3(currMat[3][0], currMat[3][1], currMat[3][2])
+                     - math::Vec3(prevMat[3][0], prevMat[3][1], prevMat[3][2]);
         }
-
-        // Extract translation and rotation from delta
-        math::Vec3 deltaPos, deltaScale;
-        math::Quat deltaRot;
-        math::Decompose(deltaMat, deltaPos, deltaRot, deltaScale);
 
         if (m_hasPreviousRootTransformBeforeCancel) {
             m_rootMotionDelta.translation = deltaPos;
-            m_rootMotionDelta.rotation = deltaRot;
+            m_rootMotionDelta.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
             m_rootMotionDelta.hasMotion = true;
         } else {
             m_rootMotionDelta.translation = math::Vec3(0.0f);
@@ -348,9 +346,69 @@ void Animator::ExtractRootMotion() {
         m_previousRootTransformBeforeCancel = currMat;
         m_hasPreviousRootTransformBeforeCancel = true;
         return;
+    } else if (m_stateMachine) {
+        // State machine: sample root motion from current state's clip only (not blended pose).
+        // This avoids wrong deltas during transitions (blended pose would lerp root toward other state's bind).
+        const size_t rmb = static_cast<size_t>(m_rootMotionBoneIndex);
+        if (!m_skeleton || rmb >= m_skeleton->BoneCount()) {
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+        const int currentState = m_stateMachine->GetCurrentState();
+        if (currentState < 0) {
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+        auto clip = m_stateMachine->GetStateClip(currentState);
+        if (!clip) {
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+        const float sampleTime = m_stateMachine->GetStateTime() * m_stateMachine->GetStatePlaybackSpeed(currentState);
+        Pose samplePose = BlendSystem::SampleClip(*clip, sampleTime, *m_skeleton);
+        if (rmb >= samplePose.GetBoneCount()) {
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+        animatedRootTransform = samplePose.GetBoneTransform(rmb);
+        math::Mat4 currentRootMat = math::Compose(
+            animatedRootTransform.position, animatedRootTransform.rotation, animatedRootTransform.scale);
+
+        if (currentState != m_previousRootMotionState) {
+            // First frame in this state: no delta (avoid spike from state change)
+            m_previousRootTransformBeforeCancel = currentRootMat;
+            m_previousRootMotionState = currentState;
+            m_previousRootMotionStateTime = sampleTime;
+            m_hasPreviousRootTransformBeforeCancel = true;
+            m_rootMotionDelta.translation = math::Vec3(0.0f);
+            m_rootMotionDelta.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+
+        // Same state: use position difference (straight displacement, no rotation contaminating translation)
+        Pose prevPose = BlendSystem::SampleClip(*clip, m_previousRootMotionStateTime, *m_skeleton);
+        if (rmb >= prevPose.GetBoneCount()) {
+            m_previousRootTransformBeforeCancel = currentRootMat;
+            m_previousRootMotionStateTime = sampleTime;
+            m_rootMotionDelta.hasMotion = false;
+            return;
+        }
+        math::Transform prevRootT = prevPose.GetBoneTransform(rmb);
+        math::Mat4 previousRootMat = math::Compose(prevRootT.position, prevRootT.rotation, prevRootT.scale);
+
+        math::Vec3 deltaPos = math::Vec3(currentRootMat[3][0], currentRootMat[3][1], currentRootMat[3][2])
+                            - math::Vec3(previousRootMat[3][0], previousRootMat[3][1], previousRootMat[3][2]);
+        math::Quat deltaRot = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);  // rotation not used for straight movement
+
+        m_rootMotionDelta.translation = deltaPos;
+        m_rootMotionDelta.rotation = deltaRot;
+        m_rootMotionDelta.hasMotion = true;
+        m_previousRootTransformBeforeCancel = currentRootMat;
+        m_previousRootMotionStateTime = sampleTime;
+        return;
     } else {
-        // For state machine/blend tree: read from pose (before we override it)
-        // Note: These paths override root to identity AFTER pose evaluation, so we read it here
+        // Blend tree: read root from pose (no state machine)
         if (m_pose.GetBoneCount() <= static_cast<size_t>(m_rootMotionBoneIndex)) {
             m_rootMotionDelta.hasMotion = false;
             return;
@@ -358,22 +416,16 @@ void Animator::ExtractRootMotion() {
         animatedRootTransform = m_pose.GetBoneTransform(static_cast<size_t>(m_rootMotionBoneIndex));
     }
     
-    // Get current root transform in local space (WITH root motion)
+    // Shared path (single-clip already returned): get current root transform in local space (WITH root motion)
     math::Mat4 currentRootMat = math::Compose(
         animatedRootTransform.position, animatedRootTransform.rotation, animatedRootTransform.scale);
     
-    // Calculate delta from previous frame's transform (before cancellation)
+    // Calculate delta from previous frame: use position difference (straight displacement)
     if (m_hasPreviousRootTransformBeforeCancel) {
-        // Calculate delta: current * inverse(previous)
-        math::Mat4 deltaMat = currentRootMat * glm::inverse(m_previousRootTransformBeforeCancel);
-        
-        // Extract translation and rotation from delta
-        math::Vec3 deltaPos, deltaScale;
-        math::Quat deltaRot;
-        math::Decompose(deltaMat, deltaPos, deltaRot, deltaScale);
-        
+        math::Vec3 deltaPos = math::Vec3(currentRootMat[3][0], currentRootMat[3][1], currentRootMat[3][2])
+                            - math::Vec3(m_previousRootTransformBeforeCancel[3][0], m_previousRootTransformBeforeCancel[3][1], m_previousRootTransformBeforeCancel[3][2]);
         m_rootMotionDelta.translation = deltaPos;
-        m_rootMotionDelta.rotation = deltaRot;
+        m_rootMotionDelta.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
         m_rootMotionDelta.hasMotion = true;
     } else {
         // First frame - no delta
