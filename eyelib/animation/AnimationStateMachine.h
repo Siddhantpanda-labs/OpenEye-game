@@ -3,6 +3,7 @@
 #include "AnimationClip.h"
 #include "BlendSystem.h"
 #include "Pose.h"
+#include "Skeleton.h"
 #include "StateMachineConditions.h"
 #include "StateMachineTransitions.h"
 
@@ -37,6 +38,8 @@ public:
     bool GetCondition(const std::string& name) const;
     float GetConditionFloat(const std::string& name) const;
     void SetTrigger(const std::string& name);
+    /** Returns true if the named trigger was set this frame (used by TriggerCondition). */
+    bool GetTrigger(const std::string& name) const;
 
     void SetInitialState(StateHandle state);
     void Update(float deltaTime);
@@ -44,7 +47,12 @@ public:
     StateHandle GetCurrentState() const { return m_currentState; }
     Pose GetCurrentPose() const { return m_currentPose; }
 
+    bool IsInTransition() const { return m_activeTransition >= 0; }
+    /** When in transition, returns blend weight 0..1 (0=previous state, 1=current). Otherwise 0. */
+    float GetTransitionWeight() const;
+
     void SetBoneCount(size_t count) { m_boneCount = count; }
+    void SetSkeleton(const Skeleton* skeleton) { m_skeleton = skeleton; }
     float GetCurrentBlendTime() const { return m_activeTransitionDuration; }
 
 private:
@@ -66,7 +74,9 @@ private:
     float m_activeTransitionDuration = 0.0f;
 
     float m_stateTime = 0.0f;
+    float m_previousStateTime = 0.0f;  // Track previous state's time for correct blending
     size_t m_boneCount = 0;
+    const Skeleton* m_skeleton = nullptr;  // When set, SampleClip uses bind pose for bones without channels
     Pose m_currentPose;
 };
 

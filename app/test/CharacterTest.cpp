@@ -6,6 +6,7 @@
 #include "api/debug/Presets.h"
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/animation/All.h"
+#include "eyelib/animation/StateMachineConditions.h"
 #include "eyelib/math/Types.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
@@ -74,7 +75,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     SetupScene();
 
     api::core::Log::Info("Character test initialized successfully");
-    api::core::Log::Info("Controls: WASD = Move, Mouse = Look around, Scroll = Zoom");
+    api::core::Log::Info("Controls: Mouse = Look around, Scroll = Zoom; < and > = Walk/Run blend");
 
     return true;
 }
@@ -230,6 +231,26 @@ void CharacterTest::LoadAnimations(const std::string& idlePath,
                 api::core::Log::WarnF("Failed to load run animation: %s", runPath.c_str());
             }
         }
+
+    // Setup walk/run state machine with blended transitions (in place, no root motion)
+    if (m_animator && m_walkClip && m_runClip) {
+        m_stateMachine = std::make_shared<api::StateMachine>();
+        const int walkState = m_stateMachine->AddState("Walk", m_walkClip, 1.0f, true);
+        const int runState = m_stateMachine->AddState("Run", m_runClip, 1.0f, true);
+        const float blendDuration = 0.3f;
+
+        std::vector<std::shared_ptr<eyelib::animation::Condition>> toRunCond;
+        toRunCond.push_back(std::make_shared<eyelib::animation::TriggerCondition>("toRun"));
+        m_stateMachine->AddTransition(walkState, runState, toRunCond, blendDuration);
+
+        std::vector<std::shared_ptr<eyelib::animation::Condition>> toWalkCond;
+        toWalkCond.push_back(std::make_shared<eyelib::animation::TriggerCondition>("toWalk"));
+        m_stateMachine->AddTransition(runState, walkState, toWalkCond, blendDuration);
+
+        m_stateMachine->SetInitialState(walkState);
+        m_animator->SetStateMachine(m_stateMachine);
+        api::core::Log::Info("Walk/Run state machine: < (Shift+,) = to walk, > (Shift+.) = to run, blended transition 0.3s");
+    }
 }
 
 void CharacterTest::ProcessInput(float deltaTime) {
@@ -242,25 +263,32 @@ void CharacterTest::ProcessInput(float deltaTime) {
     const int KEY_Q = 81;
     const int KEY_E = 69;
     const int KEY_SPACE = 32;
+    const int KEY_COMMA = 44;   // same key as < (with shift)
+    const int KEY_PERIOD = 46;  // same key as > (with shift)
+    const int KEY_LEFT_SHIFT = 340;
+    const int KEY_RIGHT_SHIFT = 344;
 
-    // Camera movement (WASD + QE)
-    math::Vec3 cameraMoveInput(0.0f, 0.0f, 0.0f);
-    if (Input::IsKeyPressed(KEY_W)) cameraMoveInput.y += 1.0f;
-    if (Input::IsKeyPressed(KEY_S)) cameraMoveInput.y -= 1.0f;
-    if (Input::IsKeyPressed(KEY_D)) cameraMoveInput.x += 1.0f;
-    if (Input::IsKeyPressed(KEY_A)) cameraMoveInput.x -= 1.0f;
-    if (Input::IsKeyPressed(KEY_E)) cameraMoveInput.z += 1.0f;  // Up
-    if (Input::IsKeyPressed(KEY_Q)) cameraMoveInput.z -= 1.0f;  // Down
-
-    // Normalize camera movement input if diagonal
-    float cameraMoveLength = glm::length(math::Vec2(cameraMoveInput.x, cameraMoveInput.y));
-    if (cameraMoveLength > 1.0f) {
-        cameraMoveInput.x /= cameraMoveLength;
-        cameraMoveInput.y /= cameraMoveLength;
+    // Walk/Run transition: < (Shift+Comma) = blend to walk, > (Shift+Period) = blend to run
+    if (m_animator && m_stateMachine) {
+        bool shift = Input::IsKeyPressed(KEY_LEFT_SHIFT) || Input::IsKeyPressed(KEY_RIGHT_SHIFT);
+        if (shift && Input::IsKeyPressed(KEY_COMMA)) m_animator->SetTrigger("toWalk");
+        if (shift && Input::IsKeyPressed(KEY_PERIOD)) m_animator->SetTrigger("toRun");
     }
 
-    // Update camera movement
-    m_camera.UpdateMovement(cameraMoveInput, deltaTime);
+    // Camera movement disabled - only look around is active
+    // math::Vec3 cameraMoveInput(0.0f, 0.0f, 0.0f);
+    // if (Input::IsKeyPressed(KEY_W)) cameraMoveInput.y += 1.0f;
+    // if (Input::IsKeyPressed(KEY_S)) cameraMoveInput.y -= 1.0f;
+    // if (Input::IsKeyPressed(KEY_D)) cameraMoveInput.x += 1.0f;
+    // if (Input::IsKeyPressed(KEY_A)) cameraMoveInput.x -= 1.0f;
+    // if (Input::IsKeyPressed(KEY_E)) cameraMoveInput.z += 1.0f;  // Up
+    // if (Input::IsKeyPressed(KEY_Q)) cameraMoveInput.z -= 1.0f;  // Down
+    // float cameraMoveLength = glm::length(math::Vec2(cameraMoveInput.x, cameraMoveInput.y));
+    // if (cameraMoveLength > 1.0f) {
+    //     cameraMoveInput.x /= cameraMoveLength;
+    //     cameraMoveInput.y /= cameraMoveLength;
+    // }
+    // m_camera.UpdateMovement(cameraMoveInput, deltaTime);
 
     // Disabled: No input movement - just play animation in place
     // Character movement (WASD relative to camera)

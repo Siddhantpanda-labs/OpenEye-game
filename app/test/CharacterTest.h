@@ -11,6 +11,7 @@
 #include "api/animation/Animator.h"
 #include "api/animation/Skeleton.h"
 #include "api/animation/AnimationClip.h"
+#include "api/animation/StateMachine.h"
 #include "api/assets/ModelAsset.h"
 #include <memory>
 #include <string>
@@ -103,6 +104,9 @@ private:
     std::shared_ptr<api::AnimationClip> m_idleClip;
     std::shared_ptr<api::AnimationClip> m_walkClip;
     std::shared_ptr<api::AnimationClip> m_runClip;
+
+    // State machine for walk/run transitions (when both clips loaded)
+    std::shared_ptr<api::StateMachine> m_stateMachine;
 
     // Controllers
     ThirdPersonCamera m_camera;

@@ -12,7 +12,10 @@ void Animator::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
     const size_t boneCount = m_skeleton ? m_skeleton->BoneCount() : 0;
     m_pose.Resize(boneCount);
     m_boneMatrices.assign(boneCount, math::Mat4(1.0f));
-    if (m_stateMachine) m_stateMachine->SetBoneCount(boneCount);
+    if (m_stateMachine) {
+        m_stateMachine->SetBoneCount(boneCount);
+        m_stateMachine->SetSkeleton(m_skeleton.get());
+    }
     
     // Reset root motion tracking if bone index is now invalid
     if (m_rootMotionBoneIndex >= 0 && static_cast<size_t>(m_rootMotionBoneIndex) >= boneCount) {
@@ -26,6 +29,7 @@ void Animator::SetStateMachine(std::shared_ptr<AnimationStateMachine> sm) {
     m_stateMachine = std::move(sm);
     if (m_stateMachine && m_skeleton) {
         m_stateMachine->SetBoneCount(m_skeleton->BoneCount());
+        m_stateMachine->SetSkeleton(m_skeleton.get());
     }
 }
 
@@ -171,16 +175,14 @@ void Animator::Update(float dt) {
     if (m_rootMotionEnabled) {
         if (m_rootMotionBoneIndex >= 0) {
             ExtractRootMotion();
-            
-            // IMPORTANT: When root motion is enabled, the root bone must NEVER receive
-            // animated or bind-pose transforms. World motion owns the root.
-            // For clips, this is already done during pose evaluation, but we do it here for state machine/blend tree.
-            if (static_cast<size_t>(m_rootMotionBoneIndex) < m_pose.GetBoneCount()) {
-                math::Transform identityPose;
-                identityPose.position = math::Vec3(0.0f, 0.0f, 0.0f);
-                identityPose.rotation = math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
-                identityPose.scale = math::Vec3(1.0f, 1.0f, 1.0f);
-                m_pose.SetBoneTransform(static_cast<size_t>(m_rootMotionBoneIndex), identityPose);
+            // In-place: keep root motion bone at bind position for skinning, but keep animated rotation/scale.
+            // Always pin to bind (including during transition) so the model never jumps in position.
+            const size_t rmb = static_cast<size_t>(m_rootMotionBoneIndex);
+            if (rmb < m_pose.GetBoneCount()) {
+                const Bone& b = m_skeleton->GetBone(rmb);
+                math::Transform inPlace = m_pose.GetBoneTransform(rmb);
+                inPlace.position = b.bindPosition;
+                m_pose.SetBoneTransform(rmb, inPlace);
             }
         } else {
             // Root motion enabled but bone index not set - neutralize actual root bone anyway

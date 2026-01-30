@@ -22,7 +22,7 @@ bool FloatCondition::Evaluate(const AnimationStateMachine& sm) const {
 }
 
 bool TriggerCondition::Evaluate(const AnimationStateMachine& sm) const {
-    return sm.GetCondition(m_name);
+    return sm.GetTrigger(m_name);
 }
 
 } // namespace animation

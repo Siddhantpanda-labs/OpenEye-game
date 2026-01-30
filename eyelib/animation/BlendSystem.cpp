@@ -11,6 +11,24 @@ Pose BlendSystem::SampleClip(const AnimationClip& clip, float time, size_t boneC
     return p;
 }
 
+Pose BlendSystem::SampleClip(const AnimationClip& clip, float time, const Skeleton& skeleton) {
+    const size_t boneCount = skeleton.BoneCount();
+    Pose p(boneCount);
+    for (size_t i = 0; i < boneCount; ++i) {
+        const Bone& b = skeleton.GetBone(i);
+        if (clip.FindChannel(static_cast<int>(i))) {
+            p.SetBoneTransform(i, clip.Sample(time, static_cast<int>(i)));
+        } else {
+            math::Transform bind;
+            bind.position = b.bindPosition;
+            bind.rotation = b.bindRotation;
+            bind.scale = b.bindScale;
+            p.SetBoneTransform(i, bind);
+        }
+    }
+    return p;
+}
+
 Pose BlendSystem::Blend(const Pose& a, const Pose& b, float weight) {
     return a.Blend(b, weight);
 }
