@@ -10,7 +10,12 @@ math::Transform LerpTransform(const math::Transform& a, const math::Transform& b
     math::Transform out;
     out.position = glm::mix(a.position, b.position, t);
     out.scale = glm::mix(a.scale, b.scale, t);
-    out.rotation = glm::slerp(a.rotation, b.rotation, t);
+    // Ensure slerp takes the short path (q and -q represent same rotation)
+    // out.rotation = glm::slerp(a.rotation, b.rotation, t);
+    math::Quat bRot = b.rotation;
+    if (glm::dot(a.rotation, bRot) < 0.0f)
+        bRot = -bRot;
+    out.rotation = glm::slerp(a.rotation, bRot, t);
     return out;
 }
 } // namespace

@@ -56,7 +56,8 @@ public:
     float GetCurrentBlendTime() const { return m_activeTransitionDuration; }
 
 private:
-    void EvaluateTransitions();
+    /** displayTime = pre-advance state time (time we displayed last frame) so first blend frame matches, no jerk. */
+    void EvaluateTransitions(float displayTime);
     void ApplyStatePose(float deltaTime);
     void ConsumeTriggersForTransition(const Transition& t);
 

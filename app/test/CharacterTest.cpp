@@ -75,7 +75,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     SetupScene();
 
     api::core::Log::Info("Character test initialized successfully");
-    api::core::Log::Info("Controls: Mouse = Look around, Scroll = Zoom; < and > = Walk/Run blend");
+    api::core::Log::Info("Controls: Mouse = Look around; W = walk, W+Space = run, release W = idle");
 
     return true;
 }
@@ -232,24 +232,31 @@ void CharacterTest::LoadAnimations(const std::string& idlePath,
             }
         }
 
-    // Setup walk/run state machine with blended transitions (in place, no root motion)
-    if (m_animator && m_walkClip && m_runClip) {
+    // Idle / Walk / Run state machine: start in Idle; W = walk, W+Space = run, release W = idle
+    if (m_animator && m_idleClip && m_walkClip && m_runClip) {
         m_stateMachine = std::make_shared<api::StateMachine>();
+        const int idleState = m_stateMachine->AddState("Idle", m_idleClip, 1.0f, true);
         const int walkState = m_stateMachine->AddState("Walk", m_walkClip, 1.0f, true);
         const int runState = m_stateMachine->AddState("Run", m_runClip, 1.0f, true);
-        const float blendDuration = 0.3f;
+        const float blendDuration = 0.25f;
 
-        std::vector<std::shared_ptr<eyelib::animation::Condition>> toRunCond;
-        toRunCond.push_back(std::make_shared<eyelib::animation::TriggerCondition>("toRun"));
-        m_stateMachine->AddTransition(walkState, runState, toRunCond, blendDuration);
+        auto toIdle = std::vector<std::shared_ptr<eyelib::animation::Condition>>{
+            std::make_shared<eyelib::animation::TriggerCondition>("toIdle") };
+        auto toWalk = std::vector<std::shared_ptr<eyelib::animation::Condition>>{
+            std::make_shared<eyelib::animation::TriggerCondition>("toWalk") };
+        auto toRun = std::vector<std::shared_ptr<eyelib::animation::Condition>>{
+            std::make_shared<eyelib::animation::TriggerCondition>("toRun") };
 
-        std::vector<std::shared_ptr<eyelib::animation::Condition>> toWalkCond;
-        toWalkCond.push_back(std::make_shared<eyelib::animation::TriggerCondition>("toWalk"));
-        m_stateMachine->AddTransition(runState, walkState, toWalkCond, blendDuration);
+        m_stateMachine->AddTransition(idleState, walkState, toWalk, blendDuration);
+        m_stateMachine->AddTransition(idleState, runState, toRun, blendDuration);
+        m_stateMachine->AddTransition(walkState, idleState, toIdle, blendDuration);
+        m_stateMachine->AddTransition(walkState, runState, toRun, blendDuration);
+        m_stateMachine->AddTransition(runState, idleState, toIdle, blendDuration);
+        m_stateMachine->AddTransition(runState, walkState, toWalk, blendDuration);
 
-        m_stateMachine->SetInitialState(walkState);
+        m_stateMachine->SetInitialState(idleState);
         m_animator->SetStateMachine(m_stateMachine);
-        api::core::Log::Info("Walk/Run state machine: < (Shift+,) = to walk, > (Shift+.) = to run, blended transition 0.3s");
+        api::core::Log::Info("Idle/Walk/Run: W = walk, W+Space = run, release W = idle");
     }
 }
 
@@ -257,22 +264,18 @@ void CharacterTest::ProcessInput(float deltaTime) {
     using namespace api::platform;
 
     const int KEY_W = 87;
-    const int KEY_A = 65;
-    const int KEY_S = 83;
-    const int KEY_D = 68;
-    const int KEY_Q = 81;
-    const int KEY_E = 69;
     const int KEY_SPACE = 32;
-    const int KEY_COMMA = 44;   // same key as < (with shift)
-    const int KEY_PERIOD = 46;  // same key as > (with shift)
-    const int KEY_LEFT_SHIFT = 340;
-    const int KEY_RIGHT_SHIFT = 344;
 
-    // Walk/Run transition: < (Shift+Comma) = blend to walk, > (Shift+Period) = blend to run
+    // Idle / Walk / Run: W = walk, W+Space = run, release W = idle
     if (m_animator && m_stateMachine) {
-        bool shift = Input::IsKeyPressed(KEY_LEFT_SHIFT) || Input::IsKeyPressed(KEY_RIGHT_SHIFT);
-        if (shift && Input::IsKeyPressed(KEY_COMMA)) m_animator->SetTrigger("toWalk");
-        if (shift && Input::IsKeyPressed(KEY_PERIOD)) m_animator->SetTrigger("toRun");
+        bool w = Input::IsKeyPressed(KEY_W);
+        bool space = Input::IsKeyPressed(KEY_SPACE);
+        if (w && space)
+            m_animator->SetTrigger("toRun");
+        else if (w)
+            m_animator->SetTrigger("toWalk");
+        else
+            m_animator->SetTrigger("toIdle");
     }
 
     // Camera movement disabled - only look around is active

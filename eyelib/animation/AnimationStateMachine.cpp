@@ -71,12 +71,14 @@ void AnimationStateMachine::Update(float deltaTime) {
     if (m_currentState < 0 || m_currentState >= static_cast<StateHandle>(m_states.size()))
         return;
 
+    // Pass pre-advance time (time we displayed last frame) so first blend frame shows same pose, no replay/jerk
+    float displayTime = m_stateTime;
     m_stateTime += deltaTime;
-    EvaluateTransitions();
+    EvaluateTransitions(displayTime);
     ApplyStatePose(deltaTime);
 }
 
-void AnimationStateMachine::EvaluateTransitions() {
+void AnimationStateMachine::EvaluateTransitions(float displayTime) {
     for (size_t i = 0; i < m_transitions.size(); ++i) {
         const auto& t = m_transitions[i];
         if (t.fromState != m_currentState) continue;
@@ -86,8 +88,8 @@ void AnimationStateMachine::EvaluateTransitions() {
         }
         if (!ok) continue;
 
-        // Save previous state's time before resetting (for correct blending)
-        m_previousStateTime = m_stateTime;
+        // displayTime = time we displayed last frame (pre-advance m_stateTime) so we don't skip or replay a frame
+        m_previousStateTime = displayTime;
         m_previousState = m_currentState;
         m_currentState = t.toState;
         m_activeTransition = static_cast<TransitionHandle>(i);
@@ -113,25 +115,20 @@ void AnimationStateMachine::ApplyStatePose(float deltaTime) {
         m_previousState < static_cast<StateHandle>(m_states.size())) {
         const State& prev = m_states[m_previousState];
         if (prev.clip && m_activeTransitionDuration > 0.0f) {
-            m_transitionTime += deltaTime;
-            
-            // Calculate blend weight (0 = previous state, 1 = current state)
-            float w = m_transitionTime / m_activeTransitionDuration;
-            if (w < 0.0f) w = 0.0f;
-            if (w > 1.0f) w = 1.0f;
-            
-            // Apply blend mode curve if needed (currently only Linear is implemented)
-            // Future: apply easing curves based on m_transitions[m_activeTransition].blendMode
-            
-            // Sample previous state at its own time (where it was when transition started)
-            // Continue playing previous animation during transition
+            // Sample previous state at current time (before advancing) to avoid one-frame jump at transition start
             float prevTime = (m_previousStateTime + m_transitionTime) * prev.playbackSpeed;
             Pose prevPose = m_skeleton
                 ? BlendSystem::SampleClip(*prev.clip, prevTime, *m_skeleton)
                 : BlendSystem::SampleClip(*prev.clip, prevTime, m_boneCount);
-            
-            // Blend: prevPose (weight 0) -> currentPose (weight 1)
+
+            // Blend weight from current m_transitionTime (before advancing) so first frame uses w=0 = no jerk
+            float w = m_transitionTime / m_activeTransitionDuration;
+            if (w < 0.0f) w = 0.0f;
+            if (w > 1.0f) w = 1.0f;
+
             m_currentPose = prevPose.Blend(currentPose, w);
+
+            m_transitionTime += deltaTime;
             
             if (w >= 1.0f) {
                 m_activeTransition = -1;

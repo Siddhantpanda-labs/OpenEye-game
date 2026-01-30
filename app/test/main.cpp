@@ -38,7 +38,11 @@ bool RunCharacterTest() {
         eyelib::api::core::Log::Warn("Could not load character model. Trying to continue without model...");
     }
 
-    // Try to load additional animations
+    // Try to load idle, walk, run animations (all three needed for Idle/Walk/Run state machine)
+    std::vector<std::string> idlePaths = {
+        "assets/models/animation/Orc_Idle.fbx",
+        "assets/models/animation/orc_idle.fbx"
+    };
     std::vector<std::string> walkPaths = {
         "assets/models/animation/Start_Walking.fbx",
         "assets/models/animation/start_walking.fbx"
@@ -48,19 +52,12 @@ bool RunCharacterTest() {
         "assets/models/animation/running.fbx"
     };
 
-    std::string walkPath, runPath;
-    for (const auto& path : walkPaths) {
-        // Check if file exists (simplified - just try loading)
-        walkPath = path;
-        break; // Use first path
-    }
-    for (const auto& path : runPaths) {
-        runPath = path;
-        break;
-    }
+    std::string idlePath = idlePaths.empty() ? "" : idlePaths[0];
+    std::string walkPath = walkPaths.empty() ? "" : walkPaths[0];
+    std::string runPath = runPaths.empty() ? "" : runPaths[0];
 
-    if (!walkPath.empty() || !runPath.empty()) {
-        test.LoadAnimations("", walkPath, runPath);
+    if (!idlePath.empty() || !walkPath.empty() || !runPath.empty()) {
+        test.LoadAnimations(idlePath, walkPath, runPath);
     }
 
     const auto startTime = std::chrono::steady_clock::now();
