@@ -117,6 +117,8 @@ private:
     bool m_mouseRightPressedLast = false;
     /** 1 = W (forward), -1 = S (backward), 0 = neither. Used for root motion direction. */
     int m_forwardInput = 0;
+    float m_prevYaw = 0.0f;
+    math::Vec3 m_moveDirWorld{0.0f, 0.0f, 0.0f};
 
     // Window dimensions
     int m_windowWidth = 1280;

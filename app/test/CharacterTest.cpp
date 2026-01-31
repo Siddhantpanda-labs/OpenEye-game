@@ -75,7 +75,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     SetupScene();
 
     api::core::Log::Info("Character test initialized successfully");
-    api::core::Log::Info("Controls: Mouse = Look; W = walk forward, S = walk back, W+Space = run; release W = idle");
+    api::core::Log::Info("Controls: Mouse = Look; WASD = walk (smooth turn), +Space = run; release = idle");
 
     return true;
 }
@@ -166,11 +166,19 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
     if (m_skeleton) {
         m_animator = std::make_shared<api::Animator>();
         m_animator->SetSkeleton(m_skeleton);
-        
+
+        // Rotation pivot: use AABB center so the mesh rotates around its visual center
+        if (m_characterMesh && m_characterMesh->IsValid()) {
+            const math::AABB aabb = m_characterMesh->GetAABB();
+            if (aabb.IsValid()) {
+                m_character.SetPivotOffset(aabb.GetCenter());
+            }
+        }
+
         // Root motion: extracted from walk/run clips and applied when W/S pressed
         m_animator->SetRootMotionBone("");
         m_animator->SetRootMotionEnabled(true);
-        
+
         // Set walk animation to play in place
         if (m_walkClip) {
             m_animator->SetClip(m_walkClip);
@@ -264,35 +272,68 @@ void CharacterTest::ProcessInput(float deltaTime) {
     using namespace api::platform;
 
     const int KEY_W = 87;
+    const int KEY_A = 65;
     const int KEY_S = 83;
+    const int KEY_D = 68;
     const int KEY_SPACE = 32;
+    const int KEY_R = 82;
 
     bool w = Input::IsKeyPressed(KEY_W);
+    bool a = Input::IsKeyPressed(KEY_A);
     bool s = Input::IsKeyPressed(KEY_S);
+    bool d = Input::IsKeyPressed(KEY_D);
     bool space = Input::IsKeyPressed(KEY_SPACE);
+    bool r = Input::IsKeyPressed(KEY_R);
 
-    // Idle / Walk / Run: W or S = walk (forward/back), W+Space or S+Space = run, release both = idle
+    bool anyMove = w || a || s || d;
+
+    // Idle / Walk / Run: WASD = walk, WASD+Space = run, release all = idle
     if (m_animator && m_stateMachine) {
-        if ((w || s) && space)
+        if (anyMove && space)
             m_animator->SetTrigger("toRun");
-        else if (w || s)
+        else if (anyMove)
             m_animator->SetTrigger("toWalk");
         else
             m_animator->SetTrigger("toIdle");
     }
 
-    // Forward/backward for root motion: W = forward, S = backward
-    m_forwardInput = w ? 1 : (s ? -1 : 0);
+    m_forwardInput = anyMove ? 1 : 0;
 
-    // Face character toward camera forward (W) or backward (S) when moving
-    if (m_forwardInput != 0) {
+    // Face character toward move direction (W/S/A/D relative to camera), smooth turn
+    if (anyMove) {
         math::Vec3 camFwd = m_camera.GetForward();
+        math::Vec3 camRight = m_camera.GetRight();
         camFwd.y = 0.0f;
+        camRight.y = 0.0f;
         camFwd = glm::normalize(camFwd);
-        if (m_forwardInput == -1)
-            camFwd = -camFwd;
-        float yawDeg = std::atan2(camFwd.x, camFwd.z) * 180.0f / 3.14159265f;
-        m_character.SetRotation(yawDeg);
+        camRight = glm::normalize(camRight);
+
+        math::Vec3 moveDir(0.0f);
+        if (w) moveDir += camFwd;
+        if (s) moveDir -= camFwd;
+        if (d) moveDir += camRight;
+        if (a) moveDir -= camRight;
+        moveDir.y = 0.0f;
+        moveDir = glm::normalize(moveDir);
+        m_moveDirWorld = moveDir;
+
+        float targetYaw = std::atan2(moveDir.x, moveDir.z) * 180.0f / 3.14159265f;
+        float currentYaw = m_character.GetRotation();
+        float diff = targetYaw - currentYaw;
+        while (diff > 180.0f) diff -= 360.0f;
+        while (diff < -180.0f) diff += 360.0f;
+        float maxRot = m_character.GetRotationSpeed() * deltaTime;
+        float deltaRot = std::max(-maxRot, std::min(maxRot, diff));
+        m_character.SetRotation(currentYaw + deltaRot);
+    }
+    if (!anyMove) {
+        m_moveDirWorld = math::Vec3(0.0f, 0.0f, 0.0f);
+    }
+
+    // Debug: hold R to spin continuously around pivot
+    if (r) {
+        float spin = m_character.GetRotationSpeed() * deltaTime;
+        m_character.SetRotation(m_character.GetRotation() + spin);
     }
 
     // Camera movement disabled - only look around is active
@@ -364,9 +405,13 @@ void CharacterTest::UpdateCharacter(float deltaTime) {
     auto delta = m_animator->GetRootMotionDelta();
     if (!delta.hasMotion) return;
 
-    // W: character faces camera forward → delta applies as world forward.
-    // S: character faces camera backward → same delta applies as world backward. No negation.
-    m_character.ApplyRootMotion(delta, api::Animator::MotionAuthority::AnimationDriven);
+    // Apply root motion in world space along input direction (decoupled from yaw)
+    if (glm::length(m_moveDirWorld) > 0.0f) {
+        api::Animator::RootMotionDelta worldDelta = delta;
+        worldDelta.translation = m_moveDirWorld * delta.translation.z;
+        worldDelta.translation.y += delta.translation.y;
+        m_character.ApplyRootMotionWorldSpace(worldDelta, api::Animator::MotionAuthority::AnimationDriven);
+    }
 }
 
 void CharacterTest::Update(float deltaTime) {
@@ -388,6 +433,9 @@ void CharacterTest::Update(float deltaTime) {
             static_cast<float>(w) / static_cast<float>(h),
             0.1f, 1000.0f);
     }
+
+    // Cache yaw before any rotation update (for root motion translation)
+    m_prevYaw = m_character.GetRotation();
 
     // Process input
     ProcessInput(deltaTime);
@@ -440,6 +488,16 @@ void CharacterTest::Update(float deltaTime) {
                     green, 0.0f);
             }
         }
+    }
+
+    // Pivot debug: draw a big red dot at the actual pivot world position
+    {
+        const math::Mat4 charTransform = m_character.GetTransform();
+        const math::Vec3 pivotModel = m_character.GetPivotOffset();
+        const math::Vec4 pivotWorld4 = charTransform * math::Vec4(pivotModel.x, pivotModel.y, pivotModel.z, 1.0f);
+        const math::Vec3 pivotWorld(pivotWorld4.x, pivotWorld4.y, pivotWorld4.z);
+        const math::Vec4 red(1.0f, 0.1f, 0.1f, 1.0f);
+        api::debug::DebugDraw::AddSphere(pivotWorld, 0.15f, red, 0.0f, 16);
     }
 }
 

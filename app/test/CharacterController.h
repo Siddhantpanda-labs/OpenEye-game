@@ -87,6 +87,16 @@ public:
      */
     void ApplyRootMotion(const api::Animator::RootMotionDelta& rootMotionDelta,
                         api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
+    /**
+     * @brief Apply root motion using an explicit yaw (degrees), to decouple translation from current facing.
+     */
+    void ApplyRootMotionWithYaw(const api::Animator::RootMotionDelta& rootMotionDelta, float yawDegrees,
+                        api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
+    /**
+     * @brief Apply root motion in world space (no yaw rotation).
+     */
+    void ApplyRootMotionWorldSpace(const api::Animator::RootMotionDelta& rootMotionDelta,
+                        api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
 
     /**
      * @brief Set movement speed.
@@ -133,8 +143,16 @@ public:
      */
     void SetRunning(bool running) { m_isRunning = running; }
 
+    /**
+     * @brief Set pivot offset in model space (rotation center). Default (0,0,0) = model origin.
+     * If the character orbits when turning, set this to the model-space position of the desired pivot (e.g. feet or center).
+     */
+    void SetPivotOffset(const math::Vec3& offset) { m_pivotOffset = offset; }
+    const math::Vec3& GetPivotOffset() const { return m_pivotOffset; }
+
 private:
     math::Vec3 m_position{0.0f, 0.0f, 0.0f};
+    math::Vec3 m_pivotOffset{0.0f, 0.0f, 0.0f};  // model space; rotation happens around (position + scale*pivotOffset)
     float m_rotation = 0.0f;  // Yaw rotation in degrees
     
     float m_walkSpeed = 3.0f;

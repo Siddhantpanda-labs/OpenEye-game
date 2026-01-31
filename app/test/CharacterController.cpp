@@ -33,11 +33,15 @@ math::Vec3 CharacterController::GetForward() const {
 }
 
 math::Mat4 CharacterController::GetTransform() const {
+    // Rotate around pivot in model space so character turns in place (axis through position).
+    // Build order (GLM right-multiply): T(position) * R * S * T(-pivot)
+    // => apply T(-pivot) first (model space), then scale, rotate, translate.
+    const float kScale = 0.02f;
     math::Mat4 transform(1.0f);
     transform = glm::translate(transform, m_position);
     transform = glm::rotate(transform, glm::radians(m_rotation), math::Vec3(0.0f, 1.0f, 0.0f));
-    // Scale model down by 50x (0.02 scale)
-    transform = glm::scale(transform, math::Vec3(0.02f, 0.02f, 0.02f));
+    transform = glm::scale(transform, math::Vec3(kScale, kScale, kScale));
+    transform = glm::translate(transform, -m_pivotOffset);
     return transform;
 }
 
@@ -148,13 +152,36 @@ void CharacterController::ApplyRootMotion(const api::Animator::RootMotionDelta& 
     math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
     math::Vec3 motion = math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
 
-    // Keep movement on ground plane (ignore vertical component from animation bob)
-    motion.y = 0.0f;
-
     // Root motion is in model/skeleton space; character is drawn at 0.02 scale - scale delta to match
     const float kCharacterScale = 0.02f;
     motion *= kCharacterScale;
 
+    m_position += motion;
+}
+
+void CharacterController::ApplyRootMotionWithYaw(const api::Animator::RootMotionDelta& rootMotionDelta, float yawDegrees,
+                                         api::Animator::MotionAuthority motionAuthority) {
+    if (!rootMotionDelta.hasMotion) return;
+    if (motionAuthority == api::Animator::MotionAuthority::ControllerDriven) return;
+
+    float yawRad = glm::radians(yawDegrees);
+    math::Mat4 rotationMat(1.0f);
+    rotationMat = glm::rotate(rotationMat, yawRad, math::Vec3(0.0f, 1.0f, 0.0f));
+    math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
+    math::Vec3 motion = math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
+    const float kCharacterScale = 0.02f;
+    motion *= kCharacterScale;
+    m_position += motion;
+}
+
+void CharacterController::ApplyRootMotionWorldSpace(const api::Animator::RootMotionDelta& rootMotionDelta,
+                                         api::Animator::MotionAuthority motionAuthority) {
+    if (!rootMotionDelta.hasMotion) return;
+    if (motionAuthority == api::Animator::MotionAuthority::ControllerDriven) return;
+
+    math::Vec3 motion = rootMotionDelta.translation;
+    const float kCharacterScale = 0.02f;
+    motion *= kCharacterScale;
     m_position += motion;
 }
 
