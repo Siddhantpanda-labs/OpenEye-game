@@ -30,6 +30,13 @@ struct RigidBodyTransform {
  */
 class PhysicsWorld {
 public:
+    enum class ContactObjectType : uint8_t { Unknown = 0, RigidBody, SoftBody, CharacterController };
+    struct ContactObject {
+        ContactObjectType type = ContactObjectType::Unknown;
+        uint32_t handle = 0;
+    };
+    using ContactCallbackEx = std::function<void(const ContactObject&, const ContactObject&,
+                                                 const eyelib::math::Vec3&, const eyelib::math::Vec3&)>;
     PhysicsWorld();
     ~PhysicsWorld();
 
@@ -57,6 +64,7 @@ public:
     size_t GetConstraintCount() const;
 
     void SetContactCallback(std::function<void(RigidBodyHandle, RigidBodyHandle, const eyelib::math::Vec3&, const eyelib::math::Vec3&)> cb);
+    void SetContactCallbackEx(ContactCallbackEx cb);
 
     void CollectDebugDrawData();
     const std::vector<DebugLine>& GetDebugDrawData() const;

@@ -48,6 +48,9 @@ public:
     static void SetMass(PhysicsWorld* world, SoftBodyHandle body, float mass);
     static void SetStiffness(PhysicsWorld* world, SoftBodyHandle body, float stiffness);
     static void SetDamping(PhysicsWorld* world, SoftBodyHandle body, float damping);
+    static void SetMaterialStiffness(PhysicsWorld* world, SoftBodyHandle body, int materialIndex, float stiffness);
+    static void SetNodeMass(PhysicsWorld* world, SoftBodyHandle body, int nodeIndex, float mass);
+    static void SetCollisionFilter(PhysicsWorld* world, SoftBodyHandle body, short group, short mask);
 
     static void AttachToRigidBody(PhysicsWorld* world, SoftBodyHandle body, RigidBodyHandle rigidBody,
                                   int nodeIndex, bool disableCollision = true, float influence = 1.0f);

@@ -65,7 +65,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
         m_window->Shutdown();
         return false;
     }
-    m_pipeline->SetMode(api::RenderPipeline::Mode::Forward);  // Deferred = lighting + shadows
+    m_pipeline->SetMode(api::RenderPipeline::Mode::Deferred);  // Deferred = lighting + shadows
 
     // Enable debug draw so skeleton/debug lines are visible (DebugDraw::AddLine, etc.)
     api::debug::Presets::SetDebugDrawEnabled(true);

@@ -40,6 +40,11 @@ eyelib::math::Quat CharacterController::GetRotation(PhysicsWorld& world, Charact
     return w ? w->GetCharacterRotation(handle) : eyelib::math::Quat(1.f, 0.f, 0.f, 0.f);
 }
 
+eyelib::math::Vec3 CharacterController::GetVelocity(PhysicsWorld& world, CharacterControllerHandle handle) {
+    auto* w = world.GetInternal();
+    return w ? w->GetCharacterVelocity(handle) : eyelib::math::Vec3(0.f);
+}
+
 bool CharacterController::IsOnGround(PhysicsWorld& world, CharacterControllerHandle handle) {
     auto* w = world.GetInternal();
     return w ? w->IsCharacterOnGround(handle) : false;
@@ -58,6 +63,31 @@ void CharacterController::SetStepHeight(PhysicsWorld& world, CharacterController
 void CharacterController::SetSlopeLimit(PhysicsWorld& world, CharacterControllerHandle handle, float radians) {
     auto* w = world.GetInternal();
     if (w) w->SetCharacterSlopeLimit(handle, radians);
+}
+
+void CharacterController::SetJumpSpeed(PhysicsWorld& world, CharacterControllerHandle handle, float speed) {
+    auto* w = world.GetInternal();
+    if (w) w->SetCharacterJumpSpeed(handle, speed);
+}
+
+void CharacterController::SetFallSpeed(PhysicsWorld& world, CharacterControllerHandle handle, float speed) {
+    auto* w = world.GetInternal();
+    if (w) w->SetCharacterFallSpeed(handle, speed);
+}
+
+void CharacterController::SetMaxJumpHeight(PhysicsWorld& world, CharacterControllerHandle handle, float height) {
+    auto* w = world.GetInternal();
+    if (w) w->SetCharacterMaxJumpHeight(handle, height);
+}
+
+void CharacterController::SetGravity(PhysicsWorld& world, CharacterControllerHandle handle, const eyelib::math::Vec3& gravity) {
+    auto* w = world.GetInternal();
+    if (w) w->SetCharacterGravity(handle, gravity);
+}
+
+void CharacterController::Jump(PhysicsWorld& world, CharacterControllerHandle handle) {
+    auto* w = world.GetInternal();
+    if (w) w->JumpCharacter(handle);
 }
 
 void CharacterController::SetCollisionFilter(PhysicsWorld& world, CharacterControllerHandle handle, short group, short mask) {

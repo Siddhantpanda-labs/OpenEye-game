@@ -32,6 +32,10 @@ math::Quat CharacterController::GetRotation(PhysicsWorld* world, CharacterContro
     return world ? world->GetCharacterRotation(handle) : math::Quat(1.f, 0.f, 0.f, 0.f);
 }
 
+math::Vec3 CharacterController::GetVelocity(PhysicsWorld* world, CharacterControllerHandle handle) {
+    return world ? world->GetCharacterVelocity(handle) : math::Vec3(0.f);
+}
+
 bool CharacterController::IsOnGround(PhysicsWorld* world, CharacterControllerHandle handle) {
     return world ? world->IsCharacterOnGround(handle) : false;
 }
@@ -46,6 +50,26 @@ void CharacterController::SetStepHeight(PhysicsWorld* world, CharacterController
 
 void CharacterController::SetSlopeLimit(PhysicsWorld* world, CharacterControllerHandle handle, float radians) {
     if (world) world->SetCharacterSlopeLimit(handle, radians);
+}
+
+void CharacterController::SetJumpSpeed(PhysicsWorld* world, CharacterControllerHandle handle, float speed) {
+    if (world) world->SetCharacterJumpSpeed(handle, speed);
+}
+
+void CharacterController::SetFallSpeed(PhysicsWorld* world, CharacterControllerHandle handle, float speed) {
+    if (world) world->SetCharacterFallSpeed(handle, speed);
+}
+
+void CharacterController::SetMaxJumpHeight(PhysicsWorld* world, CharacterControllerHandle handle, float height) {
+    if (world) world->SetCharacterMaxJumpHeight(handle, height);
+}
+
+void CharacterController::SetGravity(PhysicsWorld* world, CharacterControllerHandle handle, const math::Vec3& gravity) {
+    if (world) world->SetCharacterGravity(handle, gravity);
+}
+
+void CharacterController::Jump(PhysicsWorld* world, CharacterControllerHandle handle) {
+    if (world) world->JumpCharacter(handle);
 }
 
 void CharacterController::SetCollisionFilter(PhysicsWorld* world, CharacterControllerHandle handle, short group, short mask) {

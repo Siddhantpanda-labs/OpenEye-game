@@ -24,26 +24,18 @@ void Cloth::SetCollision(PhysicsWorld* world, SoftBodyHandle cloth, bool enabled
     if (!world) return;
     btSoftBody* b = world->GetSoftBodyInternal(cloth);
     if (!b) return;
-    if (enabled) {
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RD;
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDN;
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDF;
-    } else {
-        b->m_cfg.collisions = 0;
-    }
+    const int flags = btSoftBody::fCollision::SDF_RD |
+                      btSoftBody::fCollision::SDF_RDN |
+                      btSoftBody::fCollision::SDF_RDF;
+    if (enabled) b->m_cfg.collisions |= flags;
+    else b->m_cfg.collisions &= ~flags;
 }
 
 void Cloth::SetSelfCollision(PhysicsWorld* world, SoftBodyHandle cloth, bool enabled) {
     if (!world) return;
     btSoftBody* b = world->GetSoftBodyInternal(cloth);
     if (!b) return;
-    if (enabled) {
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RD;
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDN;
-        b->m_cfg.collisions |= btSoftBody::fCollision::SDF_RDF;
-    } else {
-        b->m_cfg.collisions = 0;
-    }
+    b->setSelfCollision(enabled);
 }
 
 void Cloth::SetDamping(PhysicsWorld* world, SoftBodyHandle cloth, float damping) {

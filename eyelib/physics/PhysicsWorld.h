@@ -33,6 +33,13 @@ struct DebugLine {
 class PhysicsWorld {
 public:
     using ContactCallback = std::function<void(RigidBodyHandle, RigidBodyHandle, const math::Vec3&, const math::Vec3&)>;
+    enum class ContactObjectType : uint8_t { Unknown = 0, RigidBody, SoftBody, CharacterController };
+    struct ContactObject {
+        ContactObjectType type = ContactObjectType::Unknown;
+        uint32_t handle = 0;
+    };
+    using ContactCallbackEx = std::function<void(const ContactObject&, const ContactObject&,
+                                                 const math::Vec3&, const math::Vec3&)>;
     PhysicsWorld();
     ~PhysicsWorld();
 
@@ -80,6 +87,7 @@ public:
     void SetSolverIterations(int iterations);
     void SetSolverSubSteps(int subSteps);
     void SetContactCallback(std::function<void(RigidBodyHandle, RigidBodyHandle, const math::Vec3&, const math::Vec3&)> cb);
+    void SetContactCallbackEx(ContactCallbackEx cb);
     void SetCollisionFilter(RigidBodyHandle body, short group, short mask);
     size_t GetBodyCount() const;
     size_t GetConstraintCount() const;
@@ -87,19 +95,35 @@ public:
     const std::vector<DebugLine>& GetDebugDrawData() const;
 
     using ConstraintHandle = uint32_t;
+    enum class ConstraintType : uint8_t {
+        Unknown = 0,
+        Hinge,
+        BallSocket,
+        Slider,
+        Fixed,
+        Spring,
+        SixDof,
+        Gear,
+        Rope
+    };
     ConstraintHandle CreateHingeConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Vec3& pivotA, const math::Vec3& pivotB,
         const math::Vec3& axisA, const math::Vec3& axisB);
+    ConstraintHandle CreateHingeConstraintWorld(RigidBodyHandle body,
+        const math::Vec3& pivot, const math::Vec3& axis);
     ConstraintHandle CreateBallSocketConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Vec3& pivotA, const math::Vec3& pivotB);
     ConstraintHandle CreateSliderConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Mat4& frameA, const math::Mat4& frameB);
+    ConstraintHandle CreateSliderConstraintWorld(RigidBodyHandle body, const math::Mat4& frame);
     ConstraintHandle CreateFixedConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Mat4& frameA, const math::Mat4& frameB);
+    ConstraintHandle CreateFixedConstraintWorld(RigidBodyHandle body, const math::Mat4& frame);
     ConstraintHandle CreateSpringConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Vec3& pivotA, const math::Vec3& pivotB, float stiffness, float damping);
     ConstraintHandle Create6DOFConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Mat4& frameA, const math::Mat4& frameB);
+    ConstraintHandle Create6DOFConstraintWorld(RigidBodyHandle body, const math::Mat4& frame);
     ConstraintHandle CreateGearConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
         const math::Vec3& axisA, const math::Vec3& axisB, float ratio);
     ConstraintHandle CreateRopeConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
@@ -107,6 +131,16 @@ public:
     void DestroyConstraint(ConstraintHandle h);
     void SetHingeLimits(ConstraintHandle h, float lower, float upper);
     void SetHingeMotor(ConstraintHandle h, bool enabled, float targetVelocity, float maxForce);
+    void SetSliderLimits(ConstraintHandle h, float lowerLin, float upperLin, float lowerAng, float upperAng);
+    void SetSliderMotor(ConstraintHandle h, bool linearEnabled, float targetVelocity, float maxForce,
+                        bool angularEnabled, float targetAngVelocity, float maxAngForce);
+    void Set6DOFLimits(ConstraintHandle h, const math::Vec3& linearLower, const math::Vec3& linearUpper,
+                       const math::Vec3& angularLower, const math::Vec3& angularUpper);
+    void Set6DOFSpring(ConstraintHandle h, int axis, bool enabled, float stiffness, float damping);
+    void Set6DOFEquilibrium(ConstraintHandle h, int axis);
+    void SetConstraintBreakingImpulseThreshold(ConstraintHandle h, float threshold);
+    ConstraintType GetConstraintType(ConstraintHandle h) const;
+    bool GetConstraintBodies(ConstraintHandle h, RigidBodyHandle& bodyA, RigidBodyHandle& bodyB) const;
 
     using CharacterControllerHandle = uint32_t;
     CharacterControllerHandle CreateCharacterController(const math::Vec3& position, float radius, float height);
@@ -116,10 +150,16 @@ public:
     math::Vec3 GetCharacterPosition(CharacterControllerHandle h) const;
     void SetCharacterRotation(CharacterControllerHandle h, const math::Quat& rotation);
     math::Quat GetCharacterRotation(CharacterControllerHandle h) const;
+    math::Vec3 GetCharacterVelocity(CharacterControllerHandle h) const;
     bool IsCharacterOnGround(CharacterControllerHandle h) const;
     math::Vec3 GetCharacterGroundNormal(CharacterControllerHandle h) const;
     void SetCharacterStepHeight(CharacterControllerHandle h, float height);
     void SetCharacterSlopeLimit(CharacterControllerHandle h, float radians);
+    void SetCharacterJumpSpeed(CharacterControllerHandle h, float speed);
+    void SetCharacterFallSpeed(CharacterControllerHandle h, float speed);
+    void SetCharacterMaxJumpHeight(CharacterControllerHandle h, float height);
+    void SetCharacterGravity(CharacterControllerHandle h, const math::Vec3& gravity);
+    void JumpCharacter(CharacterControllerHandle h);
     void SetCharacterCollisionFilter(CharacterControllerHandle h, short group, short mask);
 
     btDynamicsWorld* GetWorldInternal();
@@ -128,8 +168,10 @@ public:
 
     using SoftBodyHandle = uint32_t;
     SoftBodyHandle AddSoftBody(btSoftBody* body);
+    SoftBodyHandle AddSoftBody(btSoftBody* body, short group, short mask);
     void RemoveSoftBody(SoftBodyHandle body);
     bool HasSoftBody(SoftBodyHandle body) const;
+    void SetSoftBodyCollisionFilter(SoftBodyHandle body, short group, short mask);
     btSoftBodyWorldInfo& GetSoftBodyWorldInfo();
     btSoftBody* GetSoftBodyInternal(SoftBodyHandle body) const;
 

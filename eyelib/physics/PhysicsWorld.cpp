@@ -71,6 +71,7 @@ public:
     int solverSubSteps = 3;
     int solverIterations = 10;
     PhysicsWorld::ContactCallback contactCallback;
+    PhysicsWorld::ContactCallbackEx contactCallbackEx;
     std::vector<DebugLine> debugLines;
     PhysicsDebugDrawer debugDrawer{ &debugLines };
     btGhostPairCallback* ghostCallback = nullptr;
@@ -88,8 +89,14 @@ public:
     std::unordered_map<RigidBodyHandle, BodyEntry> bodies;
     std::unordered_map<const btRigidBody*, RigidBodyHandle> bodyByPtr;
 
+    struct ConstraintEntry {
+        btTypedConstraint* constraint = nullptr;
+        ConstraintType type = ConstraintType::Unknown;
+        RigidBodyHandle bodyA = 0;
+        RigidBodyHandle bodyB = 0;
+    };
     ConstraintHandle nextConstraintHandle = 1;
-    std::unordered_map<ConstraintHandle, btTypedConstraint*> constraints;
+    std::unordered_map<ConstraintHandle, ConstraintEntry> constraints;
 
     CharacterControllerHandle nextControllerHandle = 1;
     struct ControllerEntry {
@@ -100,18 +107,29 @@ public:
         short mask = static_cast<short>(btBroadphaseProxy::AllFilter);
     };
     std::unordered_map<CharacterControllerHandle, ControllerEntry> controllers;
+    std::unordered_map<const btCollisionObject*, CharacterControllerHandle> controllerByGhost;
 
+    struct SoftBodyEntry {
+        btSoftBody* body = nullptr;
+        short group = static_cast<short>(btBroadphaseProxy::DefaultFilter);
+        short mask = static_cast<short>(btBroadphaseProxy::AllFilter);
+    };
     SoftBodyHandle nextSoftBodyHandle = 1;
-    std::unordered_map<SoftBodyHandle, btSoftBody*> softBodies;
+    std::unordered_map<SoftBodyHandle, SoftBodyEntry> softBodies;
+    std::unordered_map<const btSoftBody*, SoftBodyHandle> softBodyByPtr;
 
     btRigidBody* getBody(RigidBodyHandle h) const {
         auto it = bodies.find(h);
         return (it != bodies.end() && it->second.body) ? it->second.body : nullptr;
     }
 
-    btTypedConstraint* getConstraint(ConstraintHandle h) const {
+    ConstraintEntry* getConstraintEntry(ConstraintHandle h) {
         auto it = constraints.find(h);
-        return (it != constraints.end()) ? it->second : nullptr;
+        return (it != constraints.end()) ? &it->second : nullptr;
+    }
+    const ConstraintEntry* getConstraintEntry(ConstraintHandle h) const {
+        auto it = constraints.find(h);
+        return (it != constraints.end()) ? &it->second : nullptr;
     }
 
     ControllerEntry* getController(CharacterControllerHandle h) {
@@ -134,9 +152,9 @@ public:
 
     void DestroyAllConstraints() {
         if (!world) return;
-        for (auto& [h, c] : constraints) {
+        for (auto& [h, e] : constraints) {
             (void)h;
-            if (c) { world->removeConstraint(c); delete c; }
+            if (e.constraint) { world->removeConstraint(e.constraint); delete e.constraint; }
         }
         constraints.clear();
     }
@@ -152,24 +170,26 @@ public:
             delete c.shape;
         }
         controllers.clear();
+        controllerByGhost.clear();
     }
 
     void DestroyAllSoftBodies() {
         if (!world) return;
-        for (auto& [h, b] : softBodies) {
+        for (auto& [h, e] : softBodies) {
             (void)h;
-            if (b) {
-                world->removeSoftBody(b);
-                delete b;
+            if (e.body) {
+                world->removeSoftBody(e.body);
+                delete e.body;
             }
         }
         softBodies.clear();
+        softBodyByPtr.clear();
     }
 
     static void InternalTickCallback(btDynamicsWorld* w, btScalar) {
         if (!w) return;
         auto* impl = static_cast<Impl*>(w->getWorldUserInfo());
-        if (!impl || !impl->contactCallback) return;
+        if (!impl || (!impl->contactCallback && !impl->contactCallbackEx)) return;
         btDispatcher* dispatcher = w->getDispatcher();
         if (!dispatcher) return;
         const int numManifolds = dispatcher->getNumManifolds();
@@ -190,11 +210,49 @@ public:
                 auto itb = impl->bodyByPtr.find(rb);
                 if (itb != impl->bodyByPtr.end()) hb = itb->second;
             }
-            if (ha == 0 && hb == 0) continue;
             const btManifoldPoint& cp = manifold->getContactPoint(0);
             math::Vec3 point = ToGlm(cp.m_positionWorldOnB);
             math::Vec3 normal = ToGlm(cp.m_normalWorldOnB);
-            impl->contactCallback(ha, hb, point, normal);
+            if (impl->contactCallback && (ha != 0 || hb != 0))
+                impl->contactCallback(ha, hb, point, normal);
+
+            if (impl->contactCallbackEx) {
+                ContactObject oa{};
+                ContactObject ob{};
+                if (ra) { oa.type = ContactObjectType::RigidBody; oa.handle = ha; }
+                if (rb) { ob.type = ContactObjectType::RigidBody; ob.handle = hb; }
+
+                const btSoftBody* sa = btSoftBody::upcast(a);
+                const btSoftBody* sb = btSoftBody::upcast(b);
+                if (sa) {
+                    auto its = impl->softBodyByPtr.find(sa);
+                    if (its != impl->softBodyByPtr.end()) {
+                        oa.type = ContactObjectType::SoftBody;
+                        oa.handle = its->second;
+                    }
+                }
+                if (sb) {
+                    auto its = impl->softBodyByPtr.find(sb);
+                    if (its != impl->softBodyByPtr.end()) {
+                        ob.type = ContactObjectType::SoftBody;
+                        ob.handle = its->second;
+                    }
+                }
+
+                auto itga = impl->controllerByGhost.find(a);
+                if (itga != impl->controllerByGhost.end()) {
+                    oa.type = ContactObjectType::CharacterController;
+                    oa.handle = itga->second;
+                }
+                auto itgb = impl->controllerByGhost.find(b);
+                if (itgb != impl->controllerByGhost.end()) {
+                    ob.type = ContactObjectType::CharacterController;
+                    ob.handle = itgb->second;
+                }
+
+                if (oa.type != ContactObjectType::Unknown || ob.type != ContactObjectType::Unknown)
+                    impl->contactCallbackEx(oa, ob, point, normal);
+            }
         }
     }
 };
@@ -320,6 +378,14 @@ void PhysicsWorld::DestroyRigidBody(RigidBodyHandle body) {
     if (!m_impl || !m_impl->world) return;
     auto it = m_impl->bodies.find(body);
     if (it == m_impl->bodies.end()) return;
+
+    // Remove any constraints that reference this body to avoid dangling pointers.
+    std::vector<ConstraintHandle> toRemove;
+    toRemove.reserve(m_impl->constraints.size());
+    for (const auto& [h, e] : m_impl->constraints) {
+        if (e.bodyA == body || e.bodyB == body) toRemove.push_back(h);
+    }
+    for (ConstraintHandle h : toRemove) DestroyConstraint(h);
 
     auto& e = it->second;
     if (e.body) {
@@ -457,6 +523,13 @@ void PhysicsWorld::SetContactCallback(std::function<void(RigidBodyHandle, RigidB
     m_impl->world->setInternalTickCallback(&Impl::InternalTickCallback, m_impl, true);
 }
 
+void PhysicsWorld::SetContactCallbackEx(ContactCallbackEx cb) {
+    if (!m_impl || !m_impl->world) return;
+    m_impl->contactCallbackEx = std::move(cb);
+    m_impl->world->setWorldUserInfo(m_impl);
+    m_impl->world->setInternalTickCallback(&Impl::InternalTickCallback, m_impl, true);
+}
+
 void PhysicsWorld::SetCollisionFilter(RigidBodyHandle body, short group, short mask) {
     if (!m_impl || !m_impl->world) return;
     auto it = m_impl->bodies.find(body);
@@ -506,7 +579,18 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateHingeConstraint(RigidBodyHand
     auto* c = new btHingeConstraint(*ra, *rb, ToBt(pivotA), ToBt(pivotB), ToBt(axisA), ToBt(axisB));
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::Hinge, bodyA, bodyB };
+    return h;
+}
+
+PhysicsWorld::ConstraintHandle PhysicsWorld::CreateHingeConstraintWorld(RigidBodyHandle body,
+    const math::Vec3& pivot, const math::Vec3& axis) {
+    btRigidBody* rb = m_impl ? m_impl->getBody(body) : nullptr;
+    if (!rb || !m_impl->world) return 0;
+    auto* c = new btHingeConstraint(*rb, ToBt(pivot), ToBt(axis));
+    m_impl->world->addConstraint(c, true);
+    ConstraintHandle h = m_impl->nextConstraintHandle++;
+    m_impl->constraints[h] = { c, ConstraintType::Hinge, body, 0 };
     return h;
 }
 
@@ -518,7 +602,7 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateBallSocketConstraint(RigidBod
     auto* c = new btPoint2PointConstraint(*ra, *rb, ToBt(pivotA), ToBt(pivotB));
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::BallSocket, bodyA, bodyB };
     return h;
 }
 
@@ -530,7 +614,17 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateSliderConstraint(RigidBodyHan
     auto* c = new btSliderConstraint(*ra, *rb, ToBt(frameA), ToBt(frameB), true);
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::Slider, bodyA, bodyB };
+    return h;
+}
+
+PhysicsWorld::ConstraintHandle PhysicsWorld::CreateSliderConstraintWorld(RigidBodyHandle body, const math::Mat4& frame) {
+    btRigidBody* rb = m_impl ? m_impl->getBody(body) : nullptr;
+    if (!rb || !m_impl->world) return 0;
+    auto* c = new btSliderConstraint(*rb, ToBt(frame), true);
+    m_impl->world->addConstraint(c, true);
+    ConstraintHandle h = m_impl->nextConstraintHandle++;
+    m_impl->constraints[h] = { c, ConstraintType::Slider, body, 0 };
     return h;
 }
 
@@ -542,7 +636,21 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateFixedConstraint(RigidBodyHand
     auto* c = new btFixedConstraint(*ra, *rb, ToBt(frameA), ToBt(frameB));
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::Fixed, bodyA, bodyB };
+    return h;
+}
+
+PhysicsWorld::ConstraintHandle PhysicsWorld::CreateFixedConstraintWorld(RigidBodyHandle body, const math::Mat4& frame) {
+    btRigidBody* rb = m_impl ? m_impl->getBody(body) : nullptr;
+    if (!rb || !m_impl->world) return 0;
+    auto* c = new btGeneric6DofConstraint(*rb, ToBt(frame), true);
+    c->setLinearLowerLimit(btVector3(0, 0, 0));
+    c->setLinearUpperLimit(btVector3(0, 0, 0));
+    c->setAngularLowerLimit(btVector3(0, 0, 0));
+    c->setAngularUpperLimit(btVector3(0, 0, 0));
+    m_impl->world->addConstraint(c, true);
+    ConstraintHandle h = m_impl->nextConstraintHandle++;
+    m_impl->constraints[h] = { c, ConstraintType::Fixed, body, 0 };
     return h;
 }
 
@@ -563,7 +671,7 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateSpringConstraint(RigidBodyHan
     }
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::Spring, bodyA, bodyB };
     return h;
 }
 
@@ -575,7 +683,17 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::Create6DOFConstraint(RigidBodyHandl
     auto* c = new btGeneric6DofConstraint(*ra, *rb, ToBt(frameA), ToBt(frameB), true);
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::SixDof, bodyA, bodyB };
+    return h;
+}
+
+PhysicsWorld::ConstraintHandle PhysicsWorld::Create6DOFConstraintWorld(RigidBodyHandle body, const math::Mat4& frame) {
+    btRigidBody* rb = m_impl ? m_impl->getBody(body) : nullptr;
+    if (!rb || !m_impl->world) return 0;
+    auto* c = new btGeneric6DofConstraint(*rb, ToBt(frame), true);
+    m_impl->world->addConstraint(c, true);
+    ConstraintHandle h = m_impl->nextConstraintHandle++;
+    m_impl->constraints[h] = { c, ConstraintType::SixDof, body, 0 };
     return h;
 }
 
@@ -587,36 +705,126 @@ PhysicsWorld::ConstraintHandle PhysicsWorld::CreateGearConstraint(RigidBodyHandl
     auto* c = new btGearConstraint(*ra, *rb, ToBt(axisA), ToBt(axisB), ratio);
     m_impl->world->addConstraint(c, true);
     ConstraintHandle h = m_impl->nextConstraintHandle++;
-    m_impl->constraints[h] = c;
+    m_impl->constraints[h] = { c, ConstraintType::Gear, bodyA, bodyB };
     return h;
 }
 
 PhysicsWorld::ConstraintHandle PhysicsWorld::CreateRopeConstraint(RigidBodyHandle bodyA, RigidBodyHandle bodyB,
     const math::Vec3& pivotA, const math::Vec3& pivotB, float length) {
-    return CreateSpringConstraint(bodyA, bodyB, pivotA, pivotB, 5000.0f, 0.7f);
+    btRigidBody* ra = m_impl ? m_impl->getBody(bodyA) : nullptr;
+    btRigidBody* rb = m_impl ? m_impl->getBody(bodyB) : nullptr;
+    if (!ra || !rb || !m_impl->world) return 0;
+    btTransform fa, fb;
+    fa.setIdentity(); fa.setOrigin(ToBt(pivotA));
+    fb.setIdentity(); fb.setOrigin(ToBt(pivotB));
+    auto* c = new btGeneric6DofConstraint(*ra, *rb, fa, fb, true);
+    const btScalar l = btScalar(length);
+    c->setLinearLowerLimit(btVector3(-l, -l, -l));
+    c->setLinearUpperLimit(btVector3( l,  l,  l));
+    c->setAngularLowerLimit(btVector3(0, 0, 0));
+    c->setAngularUpperLimit(btVector3(0, 0, 0));
+    m_impl->world->addConstraint(c, true);
+    ConstraintHandle h = m_impl->nextConstraintHandle++;
+    m_impl->constraints[h] = { c, ConstraintType::Rope, bodyA, bodyB };
+    return h;
 }
 
 void PhysicsWorld::DestroyConstraint(ConstraintHandle h) {
     if (!m_impl || !m_impl->world) return;
     auto it = m_impl->constraints.find(h);
     if (it == m_impl->constraints.end()) return;
-    btTypedConstraint* c = it->second;
-    m_impl->world->removeConstraint(c);
+    btTypedConstraint* c = it->second.constraint;
+    if (c) m_impl->world->removeConstraint(c);
     delete c;
     m_impl->constraints.erase(it);
 }
 
 void PhysicsWorld::SetHingeLimits(ConstraintHandle h, float lower, float upper) {
-    btTypedConstraint* c = m_impl ? m_impl->getConstraint(h) : nullptr;
-    auto* hinge = dynamic_cast<btHingeConstraint*>(c);
-    if (hinge) { hinge->setLimit(lower, upper); }
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Hinge) return;
+    auto* hinge = static_cast<btHingeConstraint*>(entry->constraint);
+    hinge->setLimit(lower, upper);
 }
 
 void PhysicsWorld::SetHingeMotor(ConstraintHandle h, bool enabled, float targetVelocity, float maxForce) {
-    btTypedConstraint* c = m_impl ? m_impl->getConstraint(h) : nullptr;
-    auto* hinge = dynamic_cast<btHingeConstraint*>(c);
-    if (!hinge) return;
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Hinge) return;
+    auto* hinge = static_cast<btHingeConstraint*>(entry->constraint);
     hinge->enableAngularMotor(enabled, targetVelocity, maxForce);
+}
+
+void PhysicsWorld::SetSliderLimits(ConstraintHandle h, float lowerLin, float upperLin, float lowerAng, float upperAng) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Slider) return;
+    auto* slider = static_cast<btSliderConstraint*>(entry->constraint);
+    slider->setLowerLinLimit(lowerLin);
+    slider->setUpperLinLimit(upperLin);
+    slider->setLowerAngLimit(lowerAng);
+    slider->setUpperAngLimit(upperAng);
+}
+
+void PhysicsWorld::SetSliderMotor(ConstraintHandle h, bool linearEnabled, float targetVelocity, float maxForce,
+                                  bool angularEnabled, float targetAngVelocity, float maxAngForce) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Slider) return;
+    auto* slider = static_cast<btSliderConstraint*>(entry->constraint);
+    slider->setPoweredLinMotor(linearEnabled);
+    slider->setTargetLinMotorVelocity(targetVelocity);
+    slider->setMaxLinMotorForce(maxForce);
+    slider->setPoweredAngMotor(angularEnabled);
+    slider->setTargetAngMotorVelocity(targetAngVelocity);
+    slider->setMaxAngMotorForce(maxAngForce);
+}
+
+void PhysicsWorld::Set6DOFLimits(ConstraintHandle h, const math::Vec3& linearLower, const math::Vec3& linearUpper,
+                                 const math::Vec3& angularLower, const math::Vec3& angularUpper) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint ||
+        (entry->type != ConstraintType::SixDof && entry->type != ConstraintType::Fixed && entry->type != ConstraintType::Rope)) return;
+    auto* dof = static_cast<btGeneric6DofConstraint*>(entry->constraint);
+    dof->setLinearLowerLimit(ToBt(linearLower));
+    dof->setLinearUpperLimit(ToBt(linearUpper));
+    dof->setAngularLowerLimit(ToBt(angularLower));
+    dof->setAngularUpperLimit(ToBt(angularUpper));
+}
+
+void PhysicsWorld::Set6DOFSpring(ConstraintHandle h, int axis, bool enabled, float stiffness, float damping) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Spring || axis < 0 || axis > 5) return;
+    auto* spring = static_cast<btGeneric6DofSpringConstraint*>(entry->constraint);
+    spring->enableSpring(axis, enabled);
+    spring->setStiffness(axis, stiffness);
+    spring->setDamping(axis, damping);
+}
+
+void PhysicsWorld::Set6DOFEquilibrium(ConstraintHandle h, int axis) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint || entry->type != ConstraintType::Spring) return;
+    auto* spring = static_cast<btGeneric6DofSpringConstraint*>(entry->constraint);
+    if (axis < 0) {
+        spring->setEquilibriumPoint();
+    } else if (axis <= 5) {
+        spring->setEquilibriumPoint(axis);
+    }
+}
+
+void PhysicsWorld::SetConstraintBreakingImpulseThreshold(ConstraintHandle h, float threshold) {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry || !entry->constraint) return;
+    entry->constraint->setBreakingImpulseThreshold(threshold);
+}
+
+PhysicsWorld::ConstraintType PhysicsWorld::GetConstraintType(ConstraintHandle h) const {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    return entry ? entry->type : ConstraintType::Unknown;
+}
+
+bool PhysicsWorld::GetConstraintBodies(ConstraintHandle h, RigidBodyHandle& bodyA, RigidBodyHandle& bodyB) const {
+    auto* entry = m_impl ? m_impl->getConstraintEntry(h) : nullptr;
+    if (!entry) return false;
+    bodyA = entry->bodyA;
+    bodyB = entry->bodyB;
+    return true;
 }
 
 PhysicsWorld::CharacterControllerHandle PhysicsWorld::CreateCharacterController(const math::Vec3& position, float radius, float height) {
@@ -643,6 +851,7 @@ PhysicsWorld::CharacterControllerHandle PhysicsWorld::CreateCharacterController(
     e.controller = controller;
     e.shape = shape;
     m_impl->controllers.emplace(h, std::move(e));
+    m_impl->controllerByGhost[ghost] = h;
 
     m_impl->world->addCollisionObject(ghost, e.group, e.mask);
     m_impl->world->addAction(controller);
@@ -656,6 +865,7 @@ void PhysicsWorld::DestroyCharacterController(CharacterControllerHandle h) {
     auto& e = it->second;
     if (e.controller) m_impl->world->removeAction(e.controller);
     if (e.ghost) m_impl->world->removeCollisionObject(e.ghost);
+    if (e.ghost) m_impl->controllerByGhost.erase(e.ghost);
     delete e.controller;
     delete e.ghost;
     delete e.shape;
@@ -697,6 +907,12 @@ math::Quat PhysicsWorld::GetCharacterRotation(CharacterControllerHandle h) const
     return ToGlm(e->ghost->getWorldTransform().getRotation());
 }
 
+math::Vec3 PhysicsWorld::GetCharacterVelocity(CharacterControllerHandle h) const {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (!e || !e->ghost) return math::Vec3(0.f);
+    return ToGlm(e->ghost->getInterpolationLinearVelocity());
+}
+
 bool PhysicsWorld::IsCharacterOnGround(CharacterControllerHandle h) const {
     auto* e = m_impl ? m_impl->getController(h) : nullptr;
     return (e && e->controller) ? e->controller->onGround() : false;
@@ -704,7 +920,26 @@ bool PhysicsWorld::IsCharacterOnGround(CharacterControllerHandle h) const {
 
 math::Vec3 PhysicsWorld::GetCharacterGroundNormal(CharacterControllerHandle h) const {
     auto* e = m_impl ? m_impl->getController(h) : nullptr;
-    return (e && e->controller) ? ToGlm(e->controller->getUp()) : math::Vec3(0.f, 1.f, 0.f);
+    if (!e || !e->controller || !m_impl || !m_impl->world) return math::Vec3(0.f, 1.f, 0.f);
+    const btVector3 up = e->controller->getUp();
+    if (!e->controller->onGround()) return ToGlm(up);
+    const btVector3 pos = e->ghost->getWorldTransform().getOrigin();
+    const btVector3 from = pos + up * btScalar(0.1f);
+    const btVector3 to = pos - up * btScalar(3.0f);
+    struct RayCallback final : public btCollisionWorld::ClosestRayResultCallback {
+        const btCollisionObject* ignore;
+        RayCallback(const btVector3& f, const btVector3& t, const btCollisionObject* ig)
+            : btCollisionWorld::ClosestRayResultCallback(f, t), ignore(ig) {}
+        btScalar addSingleResult(btCollisionWorld::LocalRayResult& rayResult, bool normalInWorldSpace) override {
+            if (rayResult.m_collisionObject == ignore) return btScalar(1.0);
+            return btCollisionWorld::ClosestRayResultCallback::addSingleResult(rayResult, normalInWorldSpace);
+        }
+    };
+    RayCallback cb(from, to, e->ghost);
+    cb.m_collisionFilterGroup = e->group;
+    cb.m_collisionFilterMask = e->mask;
+    m_impl->world->rayTest(from, to, cb);
+    return cb.hasHit() ? ToGlm(cb.m_hitNormalWorld) : ToGlm(up);
 }
 
 void PhysicsWorld::SetCharacterStepHeight(CharacterControllerHandle h, float height) {
@@ -715,6 +950,31 @@ void PhysicsWorld::SetCharacterStepHeight(CharacterControllerHandle h, float hei
 void PhysicsWorld::SetCharacterSlopeLimit(CharacterControllerHandle h, float radians) {
     auto* e = m_impl ? m_impl->getController(h) : nullptr;
     if (e && e->controller) e->controller->setMaxSlope(radians);
+}
+
+void PhysicsWorld::SetCharacterJumpSpeed(CharacterControllerHandle h, float speed) {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (e && e->controller) e->controller->setJumpSpeed(speed);
+}
+
+void PhysicsWorld::SetCharacterFallSpeed(CharacterControllerHandle h, float speed) {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (e && e->controller) e->controller->setFallSpeed(speed);
+}
+
+void PhysicsWorld::SetCharacterMaxJumpHeight(CharacterControllerHandle h, float height) {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (e && e->controller) e->controller->setMaxJumpHeight(height);
+}
+
+void PhysicsWorld::SetCharacterGravity(CharacterControllerHandle h, const math::Vec3& gravity) {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (e && e->controller) e->controller->setGravity(ToBt(gravity));
+}
+
+void PhysicsWorld::JumpCharacter(CharacterControllerHandle h) {
+    auto* e = m_impl ? m_impl->getController(h) : nullptr;
+    if (e && e->controller) e->controller->jump();
 }
 
 void PhysicsWorld::SetCharacterCollisionFilter(CharacterControllerHandle h, short group, short mask) {
@@ -746,10 +1006,17 @@ btRigidBody* PhysicsWorld::GetRigidBodyInternal(RigidBodyHandle body) const {
 }
 
 PhysicsWorld::SoftBodyHandle PhysicsWorld::AddSoftBody(btSoftBody* body) {
+    return AddSoftBody(body,
+        static_cast<short>(btBroadphaseProxy::DefaultFilter),
+        static_cast<short>(btBroadphaseProxy::AllFilter));
+}
+
+PhysicsWorld::SoftBodyHandle PhysicsWorld::AddSoftBody(btSoftBody* body, short group, short mask) {
     if (!m_impl || !m_impl->world || !body) return 0;
-    m_impl->world->addSoftBody(body);
+    m_impl->world->addSoftBody(body, group, mask);
     SoftBodyHandle h = m_impl->nextSoftBodyHandle++;
-    m_impl->softBodies[h] = body;
+    m_impl->softBodies[h] = { body, group, mask };
+    m_impl->softBodyByPtr[body] = h;
     return h;
 }
 
@@ -757,8 +1024,9 @@ void PhysicsWorld::RemoveSoftBody(SoftBodyHandle body) {
     if (!m_impl || !m_impl->world) return;
     auto it = m_impl->softBodies.find(body);
     if (it == m_impl->softBodies.end()) return;
-    btSoftBody* b = it->second;
+    btSoftBody* b = it->second.body;
     m_impl->world->removeSoftBody(b);
+    m_impl->softBodyByPtr.erase(b);
     delete b;
     m_impl->softBodies.erase(it);
 }
@@ -774,7 +1042,18 @@ btSoftBodyWorldInfo& PhysicsWorld::GetSoftBodyWorldInfo() {
 btSoftBody* PhysicsWorld::GetSoftBodyInternal(SoftBodyHandle body) const {
     if (!m_impl) return nullptr;
     auto it = m_impl->softBodies.find(body);
-    return (it != m_impl->softBodies.end()) ? it->second : nullptr;
+    return (it != m_impl->softBodies.end()) ? it->second.body : nullptr;
+}
+
+void PhysicsWorld::SetSoftBodyCollisionFilter(SoftBodyHandle body, short group, short mask) {
+    if (!m_impl || !m_impl->world) return;
+    auto it = m_impl->softBodies.find(body);
+    if (it == m_impl->softBodies.end() || !it->second.body) return;
+    btSoftBody* b = it->second.body;
+    m_impl->world->removeSoftBody(b);
+    it->second.group = group;
+    it->second.mask = mask;
+    m_impl->world->addSoftBody(b, group, mask);
 }
 
 } // namespace physics

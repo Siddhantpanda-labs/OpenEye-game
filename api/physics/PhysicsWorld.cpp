@@ -83,6 +83,23 @@ void PhysicsWorld::SetContactCallback(std::function<void(RigidBodyHandle, RigidB
     m_impl->world.SetContactCallback(std::move(cb));
 }
 
+void PhysicsWorld::SetContactCallbackEx(ContactCallbackEx cb) {
+    auto* w = GetInternal();
+    if (!w) return;
+    w->SetContactCallbackEx([cb](const ::eyelib::physics::PhysicsWorld::ContactObject& a,
+                                 const ::eyelib::physics::PhysicsWorld::ContactObject& b,
+                                 const eyelib::math::Vec3& point, const eyelib::math::Vec3& normal) {
+        if (!cb) return;
+        ContactObject oa{};
+        ContactObject ob{};
+        oa.type = static_cast<ContactObjectType>(a.type);
+        ob.type = static_cast<ContactObjectType>(b.type);
+        oa.handle = a.handle;
+        ob.handle = b.handle;
+        cb(oa, ob, point, normal);
+    });
+}
+
 void PhysicsWorld::CollectDebugDrawData() {
     m_impl->world.CollectDebugDrawData();
     const auto& lines = m_impl->world.GetDebugDrawData();

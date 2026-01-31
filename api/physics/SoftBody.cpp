@@ -47,6 +47,21 @@ void SoftBody::SetDamping(PhysicsWorld& world, SoftBodyHandle body, float dampin
     if (w) eyelib::physics::SoftBodyFactory::SetDamping(w, body, damping);
 }
 
+void SoftBody::SetMaterialStiffness(PhysicsWorld& world, SoftBodyHandle body, int materialIndex, float stiffness) {
+    auto* w = world.GetInternal();
+    if (w) eyelib::physics::SoftBodyFactory::SetMaterialStiffness(w, body, materialIndex, stiffness);
+}
+
+void SoftBody::SetNodeMass(PhysicsWorld& world, SoftBodyHandle body, int nodeIndex, float mass) {
+    auto* w = world.GetInternal();
+    if (w) eyelib::physics::SoftBodyFactory::SetNodeMass(w, body, nodeIndex, mass);
+}
+
+void SoftBody::SetCollisionFilter(PhysicsWorld& world, SoftBodyHandle body, short group, short mask) {
+    auto* w = world.GetInternal();
+    if (w) eyelib::physics::SoftBodyFactory::SetCollisionFilter(w, body, group, mask);
+}
+
 void SoftBody::AttachToRigidBody(PhysicsWorld& world, SoftBodyHandle body, RigidBodyHandle rigidBody,
                                  int nodeIndex, bool disableCollision, float influence) {
     auto* w = world.GetInternal();

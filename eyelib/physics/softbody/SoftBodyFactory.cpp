@@ -154,6 +154,25 @@ void SoftBodyFactory::SetDamping(PhysicsWorld* world, SoftBodyHandle body, float
     if (b) b->m_cfg.kDP = btScalar(damping);
 }
 
+void SoftBodyFactory::SetMaterialStiffness(PhysicsWorld* world, SoftBodyHandle body, int materialIndex, float stiffness) {
+    if (!world) return;
+    btSoftBody* b = world->GetSoftBodyInternal(body);
+    if (!b || materialIndex < 0 || materialIndex >= b->m_materials.size()) return;
+    b->m_materials[materialIndex]->m_kLST = stiffness;
+}
+
+void SoftBodyFactory::SetNodeMass(PhysicsWorld* world, SoftBodyHandle body, int nodeIndex, float mass) {
+    if (!world) return;
+    btSoftBody* b = world->GetSoftBodyInternal(body);
+    if (!b || nodeIndex < 0 || nodeIndex >= b->m_nodes.size()) return;
+    b->setMass(nodeIndex, mass);
+}
+
+void SoftBodyFactory::SetCollisionFilter(PhysicsWorld* world, SoftBodyHandle body, short group, short mask) {
+    if (!world) return;
+    world->SetSoftBodyCollisionFilter(body, group, mask);
+}
+
 void SoftBodyFactory::AttachToRigidBody(PhysicsWorld* world, SoftBodyHandle body, RigidBodyHandle rigidBody,
                                         int nodeIndex, bool disableCollision, float influence) {
     if (!world) return;
