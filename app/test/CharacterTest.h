@@ -13,6 +13,8 @@
 #include "api/animation/AnimationClip.h"
 #include "api/animation/StateMachine.h"
 #include "api/assets/ModelAsset.h"
+#include "api/physics/PhysicsWorld.h"
+#include "api/physics/CharacterController.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -92,6 +94,18 @@ private:
     std::shared_ptr<api::Renderer> m_renderer;
     std::shared_ptr<api::RenderPipeline> m_pipeline;
     api::RenderScene m_scene;
+
+    // Ground plane (visual; collision via physics)
+    std::shared_ptr<api::Mesh> m_groundMesh;
+    std::shared_ptr<api::Material> m_groundMaterial;
+    static constexpr float k_groundY = 0.0f;
+
+    // Physics: gravity, ground collider, character collider (model falls and lands on ground)
+    api::physics::PhysicsWorld m_physicsWorld;
+    api::physics::CharacterControllerHandle m_physicsCharacterHandle = 0;
+    static constexpr float k_spawnHeight = 3.0f;   // spawn above ground, then fall
+    static constexpr float k_physicsCharRadius = 0.4f;
+    static constexpr float k_physicsCharHeight = 1.6f;
 
     // Character
     std::shared_ptr<api::ModelAsset> m_characterModel;

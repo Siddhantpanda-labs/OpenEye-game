@@ -6,6 +6,9 @@
 #include "api/debug/Presets.h"
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/animation/All.h"
+#include "api/geometry/Primitives.h"
+#include "api/physics/PhysicsWorld.h"
+#include "api/physics/CharacterController.h"
 #include "eyelib/animation/StateMachineConditions.h"
 #include "eyelib/math/Types.h"
 #include <glm/gtc/matrix_transform.hpp>
@@ -65,8 +68,8 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     m_camera.SetMoveSpeed(5.0f);
     m_camera.SetSensitivity(0.15f);
 
-    // Setup character
-    m_character.SetPosition(math::Vec3(0.0f, 0.0f, 0.0f));
+    // Setup character (spawn above ground; physics will apply gravity and colliders)
+    m_character.SetPosition(math::Vec3(0.0f, k_spawnHeight, 0.0f));
     m_character.SetWalkSpeed(3.0f);
     m_character.SetRunSpeed(6.0f);
     m_character.SetRotationSpeed(360.0f);
@@ -90,12 +93,31 @@ void CharacterTest::SetupScene() {
         static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight),
         0.1f, 1000.0f);
 
-    // Setup lighting
-    m_scene.light.direction = Vec3(-0.4f, -1.0f, -0.2f);
+    // Directional light from above (used by forward pipeline)
+    m_scene.light.direction = glm::normalize(Vec3(0.0f, -1.0f, 0.0f));  // light falls straight down
     m_scene.light.color = Vec3(1.0f, 1.0f, 1.0f);
     m_scene.light.intensity = 2.0f;
-    m_scene.light.ambient = Vec3(0.1f);
+    m_scene.light.ambient = Vec3(0.15f);
     m_scene.light.exposure = 1.0f;
+
+    // Physics: gravity and colliders (ground + character) so model falls and lands on ground
+    if (m_physicsWorld.Initialize(math::Vec3(0.0f, -9.81f, 0.0f))) {
+        // Ground collider: static box (50x1x50), top at Y=0
+        m_physicsWorld.CreateBoxRigidBody(0.0f, math::Vec3(25.0f, 0.5f, 25.0f), math::Vec3(0.0f, -0.5f, 0.0f));
+        // Character collider: capsule at spawn height (gravity will pull down)
+        m_physicsCharacterHandle = api::physics::CharacterController::Create(
+            m_physicsWorld, math::Vec3(0.0f, k_spawnHeight, 0.0f), k_physicsCharRadius, k_physicsCharHeight);
+    }
+
+    // Ground plane mesh (XZ plane at Y=0, 50x50 units)
+    m_groundMesh = api::geometry::Primitives::CreatePlane(50.0f, 50.0f, 1, 1);
+    m_groundMaterial = std::make_shared<api::Material>();
+    auto groundShader = std::make_shared<api::Shader>();
+    if (groundShader->LoadFromFile("assets/shaders/passes/forward/basic.vert",
+                                    "assets/shaders/passes/forward/basic.frag")) {
+        m_groundMaterial->SetShader(groundShader);
+        m_groundMaterial->SetVec3("u_Albedo", Vec3(0.35f, 0.4f, 0.35f));
+    }
 
     // Load skybox (optional)
     auto skybox = std::make_shared<api::TextureCube>();
@@ -283,7 +305,33 @@ void CharacterTest::ProcessInput(float deltaTime) {
     bool d = Input::IsKeyPressed(KEY_D);
     bool space = Input::IsKeyPressed(KEY_SPACE);
 
-    bool anyMove = w || a || s || d;
+    bool anyKeyMove = w || a || s || d;
+
+    // Compute move direction (guard against opposite keys => zero vector)
+    math::Vec3 moveDir(0.0f);
+    if (anyKeyMove) {
+        math::Vec3 camFwd = m_camera.GetForward();
+        math::Vec3 camRight = m_camera.GetRight();
+        camFwd.y = 0.0f;
+        camRight.y = 0.0f;
+        camFwd = glm::normalize(camFwd);
+        camRight = glm::normalize(camRight);
+
+        if (w) moveDir += camFwd;
+        if (s) moveDir -= camFwd;
+        if (d) moveDir += camRight;
+        if (a) moveDir -= camRight;
+        moveDir.y = 0.0f;
+
+        const float len = glm::length(moveDir);
+        if (len > 0.0001f) {
+            moveDir /= len;
+        } else {
+            moveDir = math::Vec3(0.0f);
+        }
+    }
+
+    const bool anyMove = glm::length(moveDir) > 0.0001f;
 
     // Idle / Walk / Run: WASD = walk, WASD+Space = run, release all = idle
     if (m_animator && m_stateMachine) {
@@ -297,20 +345,6 @@ void CharacterTest::ProcessInput(float deltaTime) {
 
     // Face character toward move direction (W/S/A/D relative to camera), smooth turn
     if (anyMove) {
-        math::Vec3 camFwd = m_camera.GetForward();
-        math::Vec3 camRight = m_camera.GetRight();
-        camFwd.y = 0.0f;
-        camRight.y = 0.0f;
-        camFwd = glm::normalize(camFwd);
-        camRight = glm::normalize(camRight);
-
-        math::Vec3 moveDir(0.0f);
-        if (w) moveDir += camFwd;
-        if (s) moveDir -= camFwd;
-        if (d) moveDir += camRight;
-        if (a) moveDir -= camRight;
-        moveDir.y = 0.0f;
-        moveDir = glm::normalize(moveDir);
         m_moveDirWorld = moveDir;
 
         float targetYaw = std::atan2(moveDir.x, moveDir.z) * 180.0f / 3.14159265f;
@@ -321,8 +355,7 @@ void CharacterTest::ProcessInput(float deltaTime) {
         float maxRot = m_character.GetRotationSpeed() * deltaTime;
         float deltaRot = std::max(-maxRot, std::min(maxRot, diff));
         m_character.SetRotation(currentYaw + deltaRot);
-    }
-    if (!anyMove) {
+    } else {
         m_moveDirWorld = math::Vec3(0.0f, 0.0f, 0.0f);
     }
 
@@ -385,22 +418,46 @@ void CharacterTest::UpdateCharacter(float deltaTime) {
 
     m_animator->Update(deltaTime);
 
-    // Apply root motion when in Walk or Run and there's a move direction
-    if (!m_stateMachine || glm::length(m_moveDirWorld) == 0.0f) return;
+    // Physics: gravity and colliders drive position (no Y constraint; model falls and lands on ground)
+    if (m_physicsCharacterHandle != 0) {
+        // Sync rotation from our input-driven yaw
+        float yawRad = m_character.GetRotation() * (3.14159265f / 180.0f);
+        math::Quat rot = glm::quat(glm::vec3(0.0f, yawRad, 0.0f));
+        api::physics::CharacterController::SetRotation(m_physicsWorld, m_physicsCharacterHandle, rot);
 
-    const int idleState = 0, walkState = 1, runState = 2;
-    int currentState = m_stateMachine->GetInternal()->GetCurrentState();
-    if (currentState != walkState && currentState != runState) return;
+        // Move intent: horizontal direction * speed when walking/running (physics applies gravity)
+        float speed = 0.0f;
+        if (m_stateMachine && glm::length(m_moveDirWorld) > 0.0f) {
+            const int walkState = 1, runState = 2;
+            int currentState = m_stateMachine->GetInternal()->GetCurrentState();
+            speed = (currentState == runState) ? m_character.GetRunSpeed() : m_character.GetWalkSpeed();
+        }
+        math::Vec3 moveDir = m_moveDirWorld * speed;
+        const float physicsDt = std::clamp(deltaTime, 0.0f, 0.1f);
+        api::physics::CharacterController::Move(m_physicsWorld, m_physicsCharacterHandle, moveDir, physicsDt);
 
-    auto delta = m_animator->GetRootMotionDelta();
-    if (!delta.hasMotion) return;
+        m_physicsWorld.Step(physicsDt);
 
-    // Apply root motion in world space along input direction (decoupled from yaw)
-    if (glm::length(m_moveDirWorld) > 0.0f) {
-        api::Animator::RootMotionDelta worldDelta = delta;
-        worldDelta.translation = m_moveDirWorld * delta.translation.z;
-        worldDelta.translation.y += delta.translation.y;
-        m_character.ApplyRootMotionWorldSpace(worldDelta, api::Animator::MotionAuthority::AnimationDriven);
+        math::Vec3 physicsPos = api::physics::CharacterController::GetPosition(m_physicsWorld, m_physicsCharacterHandle);
+        m_character.SetPosition(physicsPos);
+    }
+    else {
+        // Fallback when physics not set up: apply root motion and clamp to ground
+        if (m_stateMachine && glm::length(m_moveDirWorld) > 0.0f) {
+            const int walkState = 1, runState = 2;
+            int currentState = m_stateMachine->GetInternal()->GetCurrentState();
+            if (currentState == walkState || currentState == runState) {
+                auto delta = m_animator->GetRootMotionDelta();
+                if (delta.hasMotion) {
+                    api::Animator::RootMotionDelta worldDelta = delta;
+                    worldDelta.translation = m_moveDirWorld * delta.translation.z;
+                    worldDelta.translation.y += delta.translation.y;
+                    m_character.ApplyRootMotionWorldSpace(worldDelta, api::Animator::MotionAuthority::AnimationDriven);
+                }
+            }
+        }
+        math::Vec3 pos = m_character.GetPosition();
+        if (pos.y < k_groundY) { pos.y = k_groundY; m_character.SetPosition(pos); }
     }
 }
 
@@ -435,7 +492,16 @@ void CharacterTest::Update(float deltaTime) {
 
     // Update scene drawables
     m_scene.opaque.clear();
-    
+
+    // Ground plane (visual; collision via physics ground collider)
+    if (m_groundMesh && m_groundMaterial) {
+        api::Drawable groundDrawable;
+        groundDrawable.mesh = m_groundMesh;
+        groundDrawable.material = m_groundMaterial;
+        groundDrawable.transform = glm::mat4(1.0f);  // centered at origin, top at Y=0
+        m_scene.opaque.push_back(groundDrawable);
+    }
+
     if (m_characterMesh && m_characterMaterial) {
         api::Drawable drawable;
         drawable.mesh = m_characterMesh;
@@ -502,6 +568,11 @@ bool CharacterTest::ShouldClose() const {
 }
 
 void CharacterTest::Shutdown() {
+    if (m_physicsCharacterHandle != 0) {
+        api::physics::CharacterController::Destroy(m_physicsWorld, m_physicsCharacterHandle);
+        m_physicsCharacterHandle = 0;
+    }
+    m_physicsWorld.Shutdown();
     if (m_pipeline) {
         m_pipeline->Shutdown();
         m_pipeline.reset();

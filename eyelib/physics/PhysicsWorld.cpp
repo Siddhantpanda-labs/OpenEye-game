@@ -632,7 +632,10 @@ PhysicsWorld::CharacterControllerHandle PhysicsWorld::CreateCharacterController(
     ghost->setWorldTransform(t);
 
     const btScalar stepHeight = btScalar(0.35f);
-    auto* controller = new btKinematicCharacterController(ghost, shape, stepHeight);
+    // Up = Y axis (default is X, which causes left drift). Gravity is applied along -up.
+    const btVector3 up(0, 1, 0);
+    auto* controller = new btKinematicCharacterController(ghost, shape, stepHeight, up);
+    controller->setGravity(m_impl->world->getGravity());
 
     CharacterControllerHandle h = m_impl->nextControllerHandle++;
     Impl::ControllerEntry e;
