@@ -43,3 +43,7 @@ We rotate around a model‑space pivot to prevent orbiting:
 - **Pivot marker:** A red sphere rendered at the **actual pivot world position**  
 - **Skeleton lines:** Bone line debug in world space
 
+## 7) Input edge case
+If opposite keys are pressed together (e.g. `W+S` or `A+D`), the move vector can become zero.  
+Normalize only when the length is non‑zero to avoid NaNs that can break physics movement.
+

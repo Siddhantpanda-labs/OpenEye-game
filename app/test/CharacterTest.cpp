@@ -72,7 +72,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
     m_character.SetPosition(math::Vec3(0.0f, k_spawnHeight, 0.0f));
     m_character.SetWalkSpeed(3.0f);
     m_character.SetRunSpeed(6.0f);
-    m_character.SetRotationSpeed(360.0f);
+    m_character.SetRotationSpeed(540.0f);
 
     // Setup scene
     SetupScene();
