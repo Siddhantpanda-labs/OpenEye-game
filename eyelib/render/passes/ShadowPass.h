@@ -32,8 +32,10 @@ public:
 
 private:
     void EnsureDefaultShader();
+    void EnsureSkinnedShader();
 
     std::shared_ptr<Shader> m_depthShader;
+    std::shared_ptr<Shader> m_depthSkinnedShader;
     ShadowMap* m_currentShadowMap = nullptr;
 };
 

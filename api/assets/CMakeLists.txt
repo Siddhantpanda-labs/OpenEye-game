@@ -44,5 +44,6 @@ target_include_directories(EyelibAssetsAPI
 target_link_libraries(EyelibAssetsAPI
     PUBLIC
         EyelibAssets
+        EyelibPlatform
 )
 

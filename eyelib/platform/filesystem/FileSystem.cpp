@@ -5,6 +5,13 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+// Avoid Windows macro collisions with our filesystem API.
+#ifdef CreateDirectory
+#undef CreateDirectory
+#endif
+#ifdef DeleteFile
+#undef DeleteFile
+#endif
 #else
 #include <sys/stat.h>
 #endif

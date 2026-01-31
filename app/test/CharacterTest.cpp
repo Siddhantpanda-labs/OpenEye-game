@@ -12,6 +12,7 @@
 #include "eyelib/animation/StateMachineConditions.h"
 #include "eyelib/math/Types.h"
 #include "panels/LightingPanel.h"
+#include "api/platform/FileSystem.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -64,7 +65,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
         m_window->Shutdown();
         return false;
     }
-    m_pipeline->SetMode(api::RenderPipeline::Mode::Deferred);  // Deferred = lighting + shadows
+    m_pipeline->SetMode(api::RenderPipeline::Mode::Forward);  // Deferred = lighting + shadows
 
     // Enable debug draw so skeleton/debug lines are visible (DebugDraw::AddLine, etc.)
     api::debug::Presets::SetDebugDrawEnabled(true);
@@ -81,6 +82,32 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
 
     // Setup scene
     SetupScene();
+
+    // Shader watcher: sync root assets/shaders to runtime assets/shaders on edit
+    m_shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
+    {
+        std::string runtimeAssets = api::platform::filesystem::GetAbsolutePath("assets");
+        std::string sourceAssets;
+        const std::vector<std::string> candidates = {
+            api::platform::filesystem::GetAbsolutePath("../../assets"),
+            api::platform::filesystem::GetAbsolutePath("../../../assets"),
+            api::platform::filesystem::GetAbsolutePath("../../../../assets"),
+            api::platform::filesystem::GetAbsolutePath("../assets"),
+            runtimeAssets
+        };
+        for (const auto& candidate : candidates) {
+            const std::string shadersDir = api::platform::filesystem::NormalizePath(candidate + "/shaders");
+            if (api::platform::filesystem::FileExists(shadersDir)) {
+                sourceAssets = candidate;
+                break;
+            }
+        }
+        if (sourceAssets.empty()) sourceAssets = runtimeAssets;
+        m_shaderWatcher->SetSourceAssetsDir(sourceAssets);
+        m_shaderWatcher->SetRuntimeAssetsDir(runtimeAssets);
+        api::core::Log::InfoF("ShaderWatcher source: %s", sourceAssets.c_str());
+        api::core::Log::InfoF("ShaderWatcher runtime: %s", runtimeAssets.c_str());
+    }
 
     // ImGui for floating panels (e.g. Lighting)
     IMGUI_CHECKVERSION();
@@ -495,6 +522,9 @@ void CharacterTest::Update(float deltaTime) {
             0.1f, 1000.0f);
     }
 
+    // Shader watcher: copy changed shaders from root assets to runtime assets
+    if (m_shaderWatcher) m_shaderWatcher->Tick();
+
     // Process input
     ProcessInput(deltaTime);
 
@@ -593,6 +623,9 @@ bool CharacterTest::ShouldClose() const {
 }
 
 void CharacterTest::Shutdown() {
+    if (m_shutdownDone) return;
+    m_shutdownDone = true;
+
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

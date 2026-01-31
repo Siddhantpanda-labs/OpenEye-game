@@ -202,6 +202,13 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE); // Disable culling to render both front and back faces
+
+    const int kShadowMapUnit = 5;
+    if (m_shadowMap) {
+        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
+        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    }
+
     for (const auto& d : scene.opaque) {
         if (!d.mesh || !d.material) continue;
         d.material->Bind();
@@ -211,12 +218,31 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
             sh->SetMat4("u_View", scene.camera.view);
             sh->SetMat4("u_Projection", scene.camera.projection);
             sh->SetVec3("u_ViewPos", scene.camera.viewPos);
+            sh->SetVec3("u_LightDir", scene.light.direction);
+            sh->SetVec3("u_LightColor", scene.light.color);
+            sh->SetFloat("u_LightIntensity", scene.light.intensity);
+            sh->SetVec3("u_Ambient", scene.light.ambient);
+            sh->SetFloat("u_Exposure", scene.light.exposure);
+            if (m_shadowMap) {
+                sh->SetInt("u_ShadowMap", kShadowMapUnit);
+                sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
+                sh->SetFloat("u_ShadowBias", 0.005f);
+                sh->SetInt("u_UseShadows", 1);
+            } else {
+                sh->SetInt("u_UseShadows", 0);
+            }
             d.mesh->Bind();
             d.mesh->Draw();
             d.mesh->Unbind();
             sh->Unbind();
         }
     }
+
+    if (m_shadowMap) {
+        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
     TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
     glEnable(GL_CULL_FACE); // Re-enable culling for other passes
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -326,6 +352,11 @@ void RenderPipeline::Render(const RenderScene& scene) {
         BuildAndExecuteFrameGraph(scene);
         break;
     case PipelineMode::Forward:
+        if (m_shadowMap && m_shadowPass) {
+            m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
+                scene.camera.view, scene.camera.projection, scene.camera.viewPos,
+                scene.camera.nearPlane, scene.camera.farPlane);
+        }
         RenderForward(scene);
         break;
     case PipelineMode::ForwardPlus:

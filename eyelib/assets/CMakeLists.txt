@@ -3,6 +3,8 @@
 set(ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetId.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetId.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetTypes.h
@@ -53,6 +55,7 @@ target_link_libraries(EyelibAssets
         EyelibMath
         EyelibRender
         EyelibAnimation
+        EyelibPlatform
 )
 
 if(OPENEYE_USE_LZ4 AND OPENEYE_LZ4_AVAILABLE)

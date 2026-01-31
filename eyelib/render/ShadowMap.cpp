@@ -1,6 +1,7 @@
 #include "eyelib/render/ShadowMap.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cmath>
 
 namespace eyelib {
 namespace render {
@@ -60,13 +61,23 @@ void ShadowMap::UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& vie
                                const math::Vec3& cameraPos, float nearPlane, float farPlane) {
     (void)view;
     (void)proj;
-    (void)nearPlane;
-    (void)farPlane;
-    glm::vec3 pos(cameraPos.x, cameraPos.y, cameraPos.z);
     glm::vec3 dir(lightDir.x, lightDir.y, lightDir.z);
-    glm::mat4 lightView = glm::lookAt(pos, pos - dir, glm::vec3(0, 1, 0));
-    float extent = 50.f;
-    glm::mat4 lightProj = glm::ortho(-extent, extent, -extent, extent, 0.1f, 200.f);
+    float len = glm::length(dir);
+    if (len < 1e-6f) len = 1.f;
+    dir /= len;
+    // Scene center: use camera position so shadow map follows the view
+    glm::vec3 center(cameraPos.x, cameraPos.y, cameraPos.z);
+    // Light "camera" is in the direction the light comes from, looking at the scene
+    const float lightDistance = 80.f;
+    glm::vec3 lightEye = center - dir * lightDistance;
+    // Up vector: perpendicular to light dir so view is stable (e.g. light from +Y -> up = +Z)
+    glm::vec3 up(0.f, 1.f, 0.f);
+    if (std::abs(glm::dot(up, dir)) > 0.99f) up = glm::vec3(0.f, 0.f, 1.f);
+    glm::mat4 lightView = glm::lookAt(lightEye, center, up);
+    float extent = 55.f;
+    // Fixed depth range for good precision; light view already covers scene around camera
+    const float orthoNear = 1.f, orthoFar = 200.f;
+    glm::mat4 lightProj = glm::ortho(-extent, extent, -extent, extent, orthoNear, orthoFar);
     m_lightView = math::Mat4(lightView);
     m_lightProj = math::Mat4(lightProj);
     m_shadowMatrix = m_lightProj * m_lightView;

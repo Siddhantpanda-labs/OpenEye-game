@@ -25,8 +25,26 @@ uniform vec3 u_LightDir;
 uniform vec3 u_LightColor;
 uniform vec3 u_ViewPos;
 uniform float u_LightIntensity;
+uniform vec3 u_Ambient = vec3(0.05);
+uniform float u_Exposure = 1.2;
+
+uniform sampler2D u_ShadowMap;
+uniform mat4 u_LightSpaceMatrix;
+uniform float u_ShadowBias = 0.005;
+uniform int u_UseShadows = 0;
 
 out vec4 FragColor;
+
+float shadowFactor(vec3 worldPos) {
+    if (u_UseShadows <= 0) return 0.0;
+    vec4 lightSpacePos = u_LightSpaceMatrix * vec4(worldPos, 1.0);
+    vec3 ndc = lightSpacePos.xyz / lightSpacePos.w;
+    ndc = ndc * 0.5 + 0.5;
+    if (ndc.z > 1.0 || ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0)
+        return 0.0;
+    float depth = texture(u_ShadowMap, ndc.xy).r;
+    return (ndc.z - u_ShadowBias > depth) ? 1.0 : 0.0;
+}
 
 const float PI = 3.14159265359;
 
@@ -91,6 +109,8 @@ void main() {
         metallic = mix(metallic, mr.x, 1.0);
         roughness = mix(roughness, mr.y, 1.0);
     }
+    // Shinier: lower effective roughness for stronger specular
+    roughness = max(roughness * 0.65, 0.035);
     
     float ao = u_AO;
     if (u_HasAOTexture > 0.5) {
@@ -118,20 +138,28 @@ void main() {
     vec3 numerator = NDF * G * F;
     float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
     vec3 specular = numerator / denominator;
+    specular *= 1.35;
     
     float NdotL = max(dot(N, L), 0.0);
-    vec3 Lo = (kD * albedoColor / PI + specular) * u_LightColor * u_LightIntensity * NdotL;
-    
+    float shadow = shadowFactor(v_Position);
+    float lightVis = 1.0 - shadow;
+    vec3 Lo = (kD * albedoColor / PI + specular) * u_LightColor * u_LightIntensity * NdotL * lightVis;
+
     // Ambient lighting
-    vec3 ambient = vec3(0.03) * albedoColor * ao;
+    vec3 ambient = u_Ambient * albedoColor * ao;
+
+    vec3 color = (ambient + Lo + emission) * u_Exposure;
     
-    vec3 color = ambient + Lo + emission;
-    
-    // HDR tonemapping (simple Reinhard)
-    color = color / (color + vec3(1.0));
+    // HDR tonemapping (ACES fitted)
+    color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
     
     // Gamma correction
     color = pow(color, vec3(1.0/2.2));
+    
+    // Vibrancy: stronger saturation boost so colors pop
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(lum), color, 1.3);
+    color = clamp(color, vec3(0.0), vec3(1.0));
     
     FragColor = vec4(color, 1.0);
 }

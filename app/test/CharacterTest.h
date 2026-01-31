@@ -13,6 +13,7 @@
 #include "api/animation/AnimationClip.h"
 #include "api/animation/StateMachine.h"
 #include "api/assets/ModelAsset.h"
+#include "eyelib/assets/ShaderWatcher.h"
 #include "api/physics/PhysicsWorld.h"
 #include "api/physics/CharacterController.h"
 #include <memory>
@@ -90,6 +91,9 @@ private:
     void SetupScene();
     void RenderPanels();
 
+    // Shader file watcher: sync root assets/shaders -> runtime assets/shaders
+    std::unique_ptr<eyelib::assets::ShaderWatcher> m_shaderWatcher;
+
     // Window and rendering
     std::shared_ptr<api::Window> m_window;
     std::shared_ptr<api::Renderer> m_renderer;
@@ -135,6 +139,8 @@ private:
     // Window dimensions
     int m_windowWidth = 1280;
     int m_windowHeight = 720;
+
+    bool m_shutdownDone = false;
 };
 
 } // namespace test

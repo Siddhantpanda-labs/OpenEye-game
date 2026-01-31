@@ -35,4 +35,6 @@ target_link_libraries(OpenEyeApiTests
         EyelibDebugAPI
         EyelibGeometryAPI
         OpenEyeImGui
+        # After Assets so linker pulls FileSystem.obj (CreateDirectory) when resolving ShaderWatcher
+        EyelibPlatform
 )

@@ -37,6 +37,8 @@ void main() {
     vec2 mr = texture(u_PBR, v_TexCoord).rg;
     float metallic = mr.r;
     float roughness = max(mr.g, 0.04);
+    // Shinier: lower effective roughness for stronger specular
+    roughness = max(roughness * 0.8, 0.04);
 
     vec3 V = normalize(u_ViewPos - pos);
     vec3 L = normalize(-u_LightDir);
@@ -55,5 +57,11 @@ void main() {
     float spec = pow(NdotH, 64.0 * (1.0 - roughness));
     diff += (0.04 + albedo * metallic) * u_LightColor * u_LightIntensity * spec * lightVis;
 
-    o_Color = vec4(diff * u_Exposure, 1.0);
+    vec3 color = diff * u_Exposure;
+    // Vibrancy: slight saturation boost
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(lum), color, 1.15);
+    color = clamp(color, vec3(0.0), vec3(10.0));
+
+    o_Color = vec4(color, 1.0);
 }
