@@ -1,96 +1,83 @@
-# OpenEye - Multiplayer VR City Sandbox Engine
+# OpenEye
 
-A professional-grade 3D game engine built with pure OpenGL, designed for creating large-scale multiplayer VR city sandbox experiences.
+OpenEye is a **C++20 3D engine library** (`eyelib/`) with a **stable public API layer** (`api/`) and a set of apps/tests (`app/`) built on top of that API.
 
-## Features
+The long-term direction is an **AI-operable simulation world** where *all world edits* flow through a single **World Mutation System** (commands, validation, transactions, snapshots), enabling deterministic replay, tooling, and safe automation.
 
-- **Pure OpenGL 4.5 Rendering** - High-performance deferred rendering pipeline
-- **Large Scene Support** - Efficient culling, LOD, instancing, and batching for city-scale worlds
-- **Post-Processing Pipeline** - HDR, tone mapping, bloom, SSAO, SSR, and anti-aliasing
-- **Render-to-Texture** - Video playback and future browser rendering on 3D quads
-- **Bullet Physics** - Full physics integration for realistic interactions
-- **Lua Scripting** - Hot-reloadable scripting system for game logic
-- **Development Editor** - Visual world building tools with ImGui
-- **VR Ready** - Designed for VR integration from the ground up
+## Key ideas (how this repo is shaped)
 
-## Building
+- **API-first**: apps should include headers from `api/`, not `eyelib/`. The API uses an ABI-friendly style (PIMPL where appropriate).
+- **One writer**: the world is mutated only through commands (editor/AI/gameplay/network are all *command producers*).
+- **One world, many regions**: “games” are region-scoped rules/systems inside one continuous simulation world (arena inside a city, etc.).
 
-### Prerequisites
-
-- CMake 3.20 or later
-- Visual Studio 2019 or later (with C++20 support)
-- Windows 10 or later
-
-### Build Steps
-
-```bash
-# Create build directory
-mkdir build
-cd build
-
-# Configure with CMake
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-
-# Build
-cmake --build . --config Debug
-```
-
-The executables will be in `build/bin/Debug/`:
-- `Editor.exe` - Development environment with UI tools
-- `Game.exe` - Final game runtime (no editor tools)
-
-### CMake Options
-
-- `OPENEYE_BUILD_EDITOR` (ON by default) - Build the development editor
-- `OPENEYE_BUILD_GAME` (ON by default) - Build the final game executable
-- `CMAKE_BUILD_TYPE` - Debug or Release
-
-## Project Structure
+## Repo layout
 
 ```
 OpenEye/
-├── src/                    # Source code
-│   ├── core/              # Core systems (window, input, time, logging)
-│   ├── ecs/               # Entity Component System (EnTT)
-│   ├── rendering/         # Rendering systems (to be implemented)
-│   ├── physics/           # Physics integration (to be implemented)
-│   ├── scripting/         # Lua scripting (to be implemented)
-│   ├── editor/            # Development editor tools
-│   └── game/              # Game-specific code
-├── assets/                # Game assets (models, textures, scripts, scenes)
-├── thirdparty/            # Third-party libraries
-└── CMakeLists.txt         # Build configuration
+├── api/             # Public stable API surface (client-facing)
+├── eyelib/          # Engine/library implementation (internal)
+├── app/             # Apps built using api/ (tests, experiments)
+├── assets/          # Shaders, textures, scripts, sample assets
+├── documentation/   # Project vision + architecture/implementation docs
+├── thirdparty/      # Vendored dependencies (glfw, glad, imgui, bullet3, lua, ...)
+└── CMakeLists.txt
 ```
 
-## Current Status
+## Building
 
-### ✅ Phase 0: Bootstrap & Build System (COMPLETE)
-- Window management with GLFW
-- OpenGL 4.5 context initialization
-- Logging system
-- Input handling
-- Time management
-- Basic ECS foundation
+See `BUILD.md` for the authoritative build steps and troubleshooting.
 
-### 🚧 Next: Phase 1 - Resource & Shader System
-- Shader manager with hot-reload
-- Texture loading (stb_image)
-- Mesh loading (Assimp)
-- Material system
+### Prerequisites
 
-## Development Plan
+- CMake 3.20+
+- Visual Studio 2022 (recommended) or another C++20-capable toolchain
+- Windows 10+
 
-See [plan.md](plan.md) for the complete sequential development plan.
+### Quick start (Windows / VS 2022)
+
+```powershell
+mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022" -A x64
+cmake --build . --config Debug
+```
+
+### What gets built
+
+- **Libraries**: `Eyelib*` modules + `Eyelib*API` modules (e.g. `EyelibWorld` and `EyelibWorldAPI`).
+- **Executable(s)**:
+  - `OpenEyeApiTests` (from `app/test/`) when `OPENEYE_BUILD_TESTS=ON` (default).
+  - A “game app” is scaffolded to live under `app/openmeta`, but game/editor targets are currently forced off in the root CMake configuration.
+
+### Useful CMake options
+
+- `OPENEYE_BUILD_EYELIB` (default ON): build the `eyelib/` + `api/` module set
+- `OPENEYE_BUILD_TESTS` (default ON): build `OpenEyeApiTests`
+- `OPENEYE_USE_LZ4`, `OPENEYE_USE_ZSTD`: compression toggles used by serialization/assets
+
+## Documentation (recommended reading order)
+
+- `documentation/intro.md`: overall intent and architecture principles
+- `documentation/World_kernel_Ai.md`: World Kernel requirements (determinism, commands, regions, introspection)
+- `documentation/plans/world_mutation_system_implementation_plan.md`: concrete module layout + implementation progress
+- `documentation/reports/Scripting_System_Assessment.md`: Lua scripting status and production gaps
+
+## Current focus
+
+The most important subsystem in this repo is the **World Mutation System** (`eyelib/world/` + `api/world/`):
+
+- deterministic scheduling/time modes
+- command buffer + validation
+- transactions (undo/redo scaffolding)
+- serialization/snapshots (single serializer pipeline)
+- region support for “games inside the world”
 
 ## License
 
-[Add your license here]
+TBD (not yet specified).
 
 ## Contributing
 
-This is a professional development project. Code should be:
-- Well-organized and documented
-- Follow C++20 best practices
-- Performance-conscious
-- Maintainable and scalable
+- Keep `api/` stable; refactor freely behind it in `eyelib/`.
+- Prefer deterministic, testable, data-driven systems (especially in world/serialization).
 
