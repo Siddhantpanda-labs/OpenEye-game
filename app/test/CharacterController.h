@@ -88,11 +88,6 @@ public:
     void ApplyRootMotion(const api::Animator::RootMotionDelta& rootMotionDelta,
                         api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
     /**
-     * @brief Apply root motion using an explicit yaw (degrees), to decouple translation from current facing.
-     */
-    void ApplyRootMotionWithYaw(const api::Animator::RootMotionDelta& rootMotionDelta, float yawDegrees,
-                        api::Animator::MotionAuthority motionAuthority = api::Animator::MotionAuthority::AnimationDriven);
-    /**
      * @brief Apply root motion in world space (no yaw rotation).
      */
     void ApplyRootMotionWorldSpace(const api::Animator::RootMotionDelta& rootMotionDelta,

@@ -159,21 +159,6 @@ void CharacterController::ApplyRootMotion(const api::Animator::RootMotionDelta& 
     m_position += motion;
 }
 
-void CharacterController::ApplyRootMotionWithYaw(const api::Animator::RootMotionDelta& rootMotionDelta, float yawDegrees,
-                                         api::Animator::MotionAuthority motionAuthority) {
-    if (!rootMotionDelta.hasMotion) return;
-    if (motionAuthority == api::Animator::MotionAuthority::ControllerDriven) return;
-
-    float yawRad = glm::radians(yawDegrees);
-    math::Mat4 rotationMat(1.0f);
-    rotationMat = glm::rotate(rotationMat, yawRad, math::Vec3(0.0f, 1.0f, 0.0f));
-    math::Vec4 motionWorld = rotationMat * math::Vec4(rootMotionDelta.translation, 0.0f);
-    math::Vec3 motion = math::Vec3(motionWorld.x, motionWorld.y, motionWorld.z);
-    const float kCharacterScale = 0.02f;
-    motion *= kCharacterScale;
-    m_position += motion;
-}
-
 void CharacterController::ApplyRootMotionWorldSpace(const api::Animator::RootMotionDelta& rootMotionDelta,
                                          api::Animator::MotionAuthority motionAuthority) {
     if (!rootMotionDelta.hasMotion) return;

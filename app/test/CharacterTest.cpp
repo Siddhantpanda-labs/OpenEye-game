@@ -276,14 +276,12 @@ void CharacterTest::ProcessInput(float deltaTime) {
     const int KEY_S = 83;
     const int KEY_D = 68;
     const int KEY_SPACE = 32;
-    const int KEY_R = 82;
 
     bool w = Input::IsKeyPressed(KEY_W);
     bool a = Input::IsKeyPressed(KEY_A);
     bool s = Input::IsKeyPressed(KEY_S);
     bool d = Input::IsKeyPressed(KEY_D);
     bool space = Input::IsKeyPressed(KEY_SPACE);
-    bool r = Input::IsKeyPressed(KEY_R);
 
     bool anyMove = w || a || s || d;
 
@@ -296,8 +294,6 @@ void CharacterTest::ProcessInput(float deltaTime) {
         else
             m_animator->SetTrigger("toIdle");
     }
-
-    m_forwardInput = anyMove ? 1 : 0;
 
     // Face character toward move direction (W/S/A/D relative to camera), smooth turn
     if (anyMove) {
@@ -328,12 +324,6 @@ void CharacterTest::ProcessInput(float deltaTime) {
     }
     if (!anyMove) {
         m_moveDirWorld = math::Vec3(0.0f, 0.0f, 0.0f);
-    }
-
-    // Debug: hold R to spin continuously around pivot
-    if (r) {
-        float spin = m_character.GetRotationSpeed() * deltaTime;
-        m_character.SetRotation(m_character.GetRotation() + spin);
     }
 
     // Camera movement disabled - only look around is active
@@ -395,8 +385,8 @@ void CharacterTest::UpdateCharacter(float deltaTime) {
 
     m_animator->Update(deltaTime);
 
-    // Apply root motion when in Walk or Run and W (forward) or S (backward) is pressed
-    if (!m_stateMachine || m_forwardInput == 0) return;
+    // Apply root motion when in Walk or Run and there's a move direction
+    if (!m_stateMachine || glm::length(m_moveDirWorld) == 0.0f) return;
 
     const int idleState = 0, walkState = 1, runState = 2;
     int currentState = m_stateMachine->GetInternal()->GetCurrentState();
@@ -433,9 +423,6 @@ void CharacterTest::Update(float deltaTime) {
             static_cast<float>(w) / static_cast<float>(h),
             0.1f, 1000.0f);
     }
-
-    // Cache yaw before any rotation update (for root motion translation)
-    m_prevYaw = m_character.GetRotation();
 
     // Process input
     ProcessInput(deltaTime);
