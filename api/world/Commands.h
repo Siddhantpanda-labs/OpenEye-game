@@ -1,0 +1,44 @@
+#pragma once
+
+#include "eyelib/world/Commands/CommandTypes.h"
+#include "eyelib/world/components/Region.h"
+#include "eyelib/world/components/RegionMembership.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace eyelib {
+namespace api {
+namespace world {
+
+using CommandPtr = std::unique_ptr<::eyelib::world::Command>;
+
+CommandPtr CreateEntity(const std::string& name = "");
+CommandPtr DestroyEntity(::eyelib::world::EntityId entity);
+CommandPtr ReparentEntity(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent);
+CommandPtr SetName(::eyelib::world::EntityId entity, const std::string& name);
+CommandPtr CreateRegion(const ::eyelib::world::components::Region& region, const std::string& name = "Region");
+CommandPtr SetRegionData(::eyelib::world::EntityId entity, const ::eyelib::world::components::Region& region);
+CommandPtr AttachRegionRules(::eyelib::world::EntityId entity, const std::vector<std::string>& ruleIds);
+CommandPtr EnableSystemInRegion(::eyelib::world::EntityId entity, const std::string& systemName, bool enable);
+CommandPtr AddRegionMembership(::eyelib::world::EntityId entity);
+
+template<typename T>
+CommandPtr AddComponent(::eyelib::world::EntityId entity, const T& value = T()) {
+    return std::make_unique<::eyelib::world::AddComponentCommand<T>>(entity, value);
+}
+
+template<typename T>
+CommandPtr RemoveComponent(::eyelib::world::EntityId entity) {
+    return std::make_unique<::eyelib::world::RemoveComponentCommand<T>>(entity);
+}
+
+template<typename T>
+CommandPtr SetComponentData(::eyelib::world::EntityId entity, const T& value) {
+    return std::make_unique<::eyelib::world::SetComponentDataCommand<T>>(entity, value);
+}
+
+} // namespace world
+} // namespace api
+} // namespace eyelib

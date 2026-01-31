@@ -245,6 +245,9 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib serialize module
     add_subdirectory(eyelib/serialize)
     add_subdirectory(api/serialize)
+    # Eyelib world mutation module
+    add_subdirectory(eyelib/world)
+    add_subdirectory(api/world)
     # Eyelib particles module
     add_subdirectory(eyelib/particles)
     add_subdirectory(api/particles)
