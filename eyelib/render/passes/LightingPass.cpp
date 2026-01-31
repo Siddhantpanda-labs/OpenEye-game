@@ -1,5 +1,6 @@
 #include "eyelib/render/passes/LightingPass.h"
 #include "eyelib/render/FullscreenQuad.h"
+#include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/resources/Shader.h"
 #include <glad/glad.h>
 
@@ -22,7 +23,8 @@ void LightingPass::Render(GBuffer& gbuffer,
                           const LightParams& light,
                           const math::Mat4& view,
                           const math::Mat4& projection,
-                          const math::Vec3& viewPos) {
+                          const math::Vec3& viewPos,
+                          ShadowMap* shadowMap) {
     (void)view;
     (void)projection;
     EnsureDefaultShader();
@@ -30,6 +32,14 @@ void LightingPass::Render(GBuffer& gbuffer,
 
     gbuffer.BindForLightingPass();
     m_lightingShader->Bind();
+    if (shadowMap) {
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, shadowMap->GetDepthTexture());
+        m_lightingShader->SetMat4("u_LightSpaceMatrix", shadowMap->GetShadowMatrix());
+        m_lightingShader->SetFloat("u_ShadowBias", 0.005f);
+    }
+    m_lightingShader->SetInt("u_ShadowMap", 5);
+    m_lightingShader->SetInt("u_UseShadows", shadowMap ? 1 : 0);
     m_lightingShader->SetVec3("u_ViewPos", viewPos);
     m_lightingShader->SetVec3("u_LightDir", light.direction);
     m_lightingShader->SetVec3("u_LightColor", light.color);
@@ -42,6 +52,10 @@ void LightingPass::Render(GBuffer& gbuffer,
     quad.Render();
     glEnable(GL_DEPTH_TEST);
 
+    if (shadowMap) {
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     m_lightingShader->Unbind();
 }
 

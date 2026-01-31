@@ -169,10 +169,10 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
             glViewport(0, 0, m_width, m_height);
             glClearColor(0, 0, 0, 1);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos);
+            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, m_shadowMap.get());
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
-        { gbPos, gbNorm, gbAlb, gbPBR }, { hdrColor }, true);
+        { gbPos, gbNorm, gbAlb, gbPBR, shadowTex }, { hdrColor }, true);
 
     m_frameGraph->AddPass("Transparency",
         [this, &scene, &cam](const FGPassResources&) {
@@ -407,6 +407,7 @@ void RenderPipeline::RenderSkybox(const RenderScene& scene, bool useGbufferDepth
                           0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
     }
 
     glEnable(GL_DEPTH_TEST);

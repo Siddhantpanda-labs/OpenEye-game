@@ -76,6 +76,7 @@ public:
     void ForEachFloat(std::function<void(const std::string&, float)> fn) const;
     void ForEachVec3(std::function<void(const std::string&, const math::Vec3&)> fn) const;
     void ForEachVec4(std::function<void(const std::string&, const math::Vec4&)> fn) const;
+    void ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const;
 
 private:
     void UpdateHash() const;

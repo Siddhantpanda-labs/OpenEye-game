@@ -88,6 +88,7 @@ private:
     void UpdateCamera(float deltaTime);
     void UpdateCharacter(float deltaTime);
     void SetupScene();
+    void RenderPanels();
 
     // Window and rendering
     std::shared_ptr<api::Window> m_window;

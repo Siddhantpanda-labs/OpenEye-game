@@ -40,6 +40,9 @@ public:
     int Height() const;
     float AspectRatio() const;
 
+    /** @brief Native window handle (e.g. GLFWwindow*) for ImGui etc. */
+    void* GetNativeHandle() const;
+
 private:
     class Impl;
     Impl* m_impl = nullptr;

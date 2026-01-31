@@ -3,97 +3,92 @@
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec2 a_TexCoord;
+layout(location = 7) in vec2 a_TexCoord1;
 layout(location = 3) in vec3 a_Tangent;
-layout(location = 4) in vec3 a_Bitangent;
-layout(location = 5) in ivec4 a_BoneIndices;  // 4 bone indices per vertex
-layout(location = 6) in vec4 a_BoneWeights;   // 4 bone weights per vertex
+layout(location = 5) in ivec4 a_BoneIndices;
+layout(location = 6) in vec4 a_BoneWeights;
 
 uniform mat4 u_Model;
-uniform bool u_IsInstanced = false;
-// Note: use distinct attribute locations for instanced model matrix to avoid
-// colliding with bone attributes (5 and 6). We aren't instancing skinned meshes
-// currently, but keeping this for future compatibility.
-layout(location = 7) in mat4 i_Model;
+uniform mat4 u_View;
+uniform mat4 u_Projection;
+uniform mat4 u_PrevView;
+uniform mat4 u_PrevProjection;
 
-// Bone matrices via UBO to avoid vertex uniform limits
+uniform vec4 u_UVTransform = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float u_UVRotation = 0.0;
+uniform float u_TexCoordIndex = 0.0;
+uniform float u_FlipV = 0.0;
+
 #define MAX_BONES 512
 layout(std140, binding = 3) uniform Bones {
-    mat4 u_BoneMatrices[MAX_BONES];
+    mat4 u_Bones[MAX_BONES];
 };
 
-#include "../../common/camera.glsl"
-
-out vec3 v_Position;
-out vec3 v_Normal;
+out vec3 v_WorldPos;
+out vec3 v_WorldNormal;
 out vec2 v_TexCoord;
-out mat3 v_TBN; // Tangent-Bitangent-Normal matrix for normal mapping
+out vec2 v_Velocity;
+out mat3 v_TBN;
 
 void main() {
-    mat4 modelMatrix = u_Model;
-    if (u_IsInstanced) {
-        modelMatrix = i_Model;
-    }
-    
-    // Apply bone skinning (GPU skinning)
-    vec4 skinnedPosition = vec4(a_Position, 1.0);
-    vec3 skinnedNormal = a_Normal;
-    vec3 skinnedTangent = a_Tangent;
-    vec3 skinnedBitangent = a_Bitangent;
-    
-    // Only apply skinning if bone weights are non-zero
-    if (dot(a_BoneWeights, vec4(1.0)) > 0.001) {
-        // Initialize skinning matrices to zero (will accumulate)
-        mat4 boneTransform = mat4(0.0);
-        mat3 boneNormalTransform = mat3(0.0);
-        float totalWeight = 0.0;
-        
-        // Accumulate bone influences (up to 4 bones per vertex)
-        for (int i = 0; i < 4; i++) {
-            if (a_BoneIndices[i] >= 0 && a_BoneIndices[i] < MAX_BONES && a_BoneWeights[i] > 0.0) {
-                mat4 boneMatrix = u_BoneMatrices[a_BoneIndices[i]];
-                
-                // Check if bone matrix is valid (not all zeros, not NaN)
-                // Check if any column has non-zero length
-                bool isValid = (length(boneMatrix[0]) > 0.001 || length(boneMatrix[1]) > 0.001 || 
-                               length(boneMatrix[2]) > 0.001 || length(boneMatrix[3]) > 0.001);
-                
-                if (isValid) {
-                    boneTransform += boneMatrix * a_BoneWeights[i];
-                    mat3 boneMatrix3x3 = mat3(boneMatrix);
-                    boneNormalTransform += boneMatrix3x3 * a_BoneWeights[i];
-                    totalWeight += a_BoneWeights[i];
-                }
-            }
-        }
-        
-        // Only apply bone transformation if we accumulated valid bones
-        // If totalWeight is too small, use identity (no transformation)
-        if (totalWeight > 0.001) {
-            skinnedPosition = boneTransform * vec4(a_Position, 1.0);
-            skinnedNormal = boneNormalTransform * a_Normal;
-            skinnedTangent = boneNormalTransform * a_Tangent;
-            skinnedBitangent = boneNormalTransform * a_Bitangent;
-        }
-        // If totalWeight is 0, skinnedPosition/normal/tangent/bitangent remain unchanged (original values)
-    }
-    
-    // Apply model matrix to skinned position
-    mat3 normalMatrix = mat3(transpose(inverse(modelMatrix)));
-    vec4 worldPos = modelMatrix * skinnedPosition;
-    v_Position = worldPos.xyz;
-    v_Normal = normalize(normalMatrix * skinnedNormal);
-    // For FBX files, Assimp already flips UVs with aiProcess_FlipUVs, so don't flip again
-    // For glTF files, we would need to flip, but since we're mainly using FBX, we don't flip
-    v_TexCoord = a_TexCoord;
-    
-    // Build TBN matrix for normal mapping
-    vec3 T = normalize(normalMatrix * skinnedTangent);
-    vec3 N = normalize(normalMatrix * skinnedNormal);
-    T = normalize(T - dot(T, N) * N); // Gram-Schmidt reorthogonalization
-    vec3 B = normalize(normalMatrix * skinnedBitangent);
-    B = normalize(B - dot(B, N) * N - dot(B, T) * T);
-    v_TBN = mat3(T, B, N);
-    
-    gl_Position = u_ProjectionMatrix * u_ViewMatrix * worldPos;
-}
+    vec4 pos = vec4(a_Position, 1.0);
+    vec3 nrm = a_Normal;
+    vec3 tang = a_Tangent;
 
+    // Skinning (same as forward skinned.vert)
+    mat4 skin = mat4(0.0);
+    float totalWeight = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        int idx = a_BoneIndices[i];
+        float w = a_BoneWeights[i];
+        if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
+            skin += u_Bones[idx] * w;
+            totalWeight += w;
+        }
+    }
+    if (totalWeight <= 0.0) {
+        // Non-skinned mesh: use identity skinning
+        skin = mat4(1.0);
+    }
+    pos = skin * pos;
+    nrm = mat3(skin) * nrm;
+    tang = mat3(skin) * tang;
+
+    vec4 worldPos = u_Model * pos;
+    mat3 normalMatrix = mat3(transpose(inverse(u_Model)));
+    vec3 worldNormal = normalize(normalMatrix * nrm);
+    vec3 worldTangent;
+    if (length(tang) < 0.001) {
+        // No tangent: build TBN from normal (e.g. for normal map in world space fallback)
+        vec3 up = abs(worldNormal.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        worldTangent = normalize(cross(up, worldNormal));
+    } else {
+        worldTangent = normalize(normalMatrix * tang);
+    }
+
+    v_WorldPos = worldPos.xyz;
+    v_WorldNormal = worldNormal;
+    // UV transform (same as forward)
+    vec2 baseUv = mix(a_TexCoord, a_TexCoord1, step(0.5, u_TexCoordIndex));
+    vec2 uv = baseUv * u_UVTransform.zw;
+    float c = cos(u_UVRotation);
+    float s = sin(u_UVRotation);
+    uv = mat2(c, -s, s, c) * uv;
+    uv += u_UVTransform.xy;
+    if (u_FlipV > 0.5) uv.y = 1.0 - uv.y;
+    v_TexCoord = uv;
+
+    // Velocity (same as gbuffer.vert)
+    vec4 currentPos = u_Projection * u_View * worldPos;
+    vec4 prevPos = u_PrevProjection * u_PrevView * worldPos;
+    vec2 currentNDC = currentPos.xy / currentPos.w;
+    vec2 prevNDC = prevPos.xy / prevPos.w;
+    v_Velocity = currentNDC - prevNDC;
+
+    // TBN for normal mapping
+    vec3 T = normalize(worldTangent - dot(worldTangent, worldNormal) * worldNormal);
+    vec3 B = cross(worldNormal, T);
+    v_TBN = mat3(T, B, worldNormal);
+
+    gl_Position = currentPos;
+}

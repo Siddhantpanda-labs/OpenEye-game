@@ -9,7 +9,9 @@ namespace render {
 
 class Shader;
 
-/** Deferred lighting: reads G-buffer, outputs lit HDR color to current FBO. */
+class ShadowMap;
+
+/** Deferred lighting: reads G-buffer, outputs lit HDR color to current FBO. Optional shadow map. */
 class LightingPass {
 public:
     LightingPass();
@@ -18,12 +20,13 @@ public:
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
 
-    /** Render to currently bound FBO (viewport must be set). Binds GBuffer textures to units 0–4. */
+    /** Render to currently bound FBO. Binds GBuffer to units 0–4. If shadowMap non-null, binds shadow to unit 5 and applies shadows. */
     void Render(GBuffer& gbuffer,
                 const LightParams& light,
                 const math::Mat4& view,
                 const math::Mat4& projection,
-                const math::Vec3& viewPos);
+                const math::Vec3& viewPos,
+                ShadowMap* shadowMap = nullptr);
 
 private:
     void EnsureDefaultShader();

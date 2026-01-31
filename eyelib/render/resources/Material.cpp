@@ -155,5 +155,12 @@ void Material::ForEachVec4(std::function<void(const std::string&, const math::Ve
     for (const auto& p : m_vec4s) fn(p.first, p.second);
 }
 
+void Material::ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const {
+    for (const auto& p : m_mat4Arrays) {
+        if (!p.second.empty())
+            fn(p.first, p.second.data(), p.second.size());
+    }
+}
+
 } // namespace render
 } // namespace eyelib

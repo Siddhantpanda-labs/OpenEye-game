@@ -82,6 +82,11 @@ float Window::AspectRatio() const {
     return m_impl->window.AspectRatio();
 }
 
+void* Window::GetNativeHandle() const {
+    if (!m_impl) return nullptr;
+    return m_impl->window.NativeHandle();
+}
+
 } // namespace api
 } // namespace eyelib
 

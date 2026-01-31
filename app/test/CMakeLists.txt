@@ -5,6 +5,7 @@ set(TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ThirdPersonCamera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/CharacterController.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/CharacterTest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/LightingPanel.cpp
 )
 
 add_executable(OpenEyeApiTests ${TEST_SOURCES})
@@ -13,6 +14,7 @@ target_include_directories(OpenEyeApiTests
     PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/api
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(OpenEyeApiTests
@@ -32,4 +34,5 @@ target_link_libraries(OpenEyeApiTests
         EyelibAudioAPI
         EyelibDebugAPI
         EyelibGeometryAPI
+        OpenEyeImGui
 )

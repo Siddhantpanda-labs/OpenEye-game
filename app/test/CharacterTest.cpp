@@ -11,6 +11,11 @@
 #include "api/physics/CharacterController.h"
 #include "eyelib/animation/StateMachineConditions.h"
 #include "eyelib/math/Types.h"
+#include "panels/LightingPanel.h"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <algorithm>
@@ -59,7 +64,7 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
         m_window->Shutdown();
         return false;
     }
-    m_pipeline->SetMode(api::RenderPipeline::Mode::Forward);
+    m_pipeline->SetMode(api::RenderPipeline::Mode::Deferred);  // Deferred = lighting + shadows
 
     // Enable debug draw so skeleton/debug lines are visible (DebugDraw::AddLine, etc.)
     api::debug::Presets::SetDebugDrawEnabled(true);
@@ -76,6 +81,15 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
 
     // Setup scene
     SetupScene();
+
+    // ImGui for floating panels (e.g. Lighting)
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(m_window->GetNativeHandle()), true);
+    ImGui_ImplOpenGL3_Init("#version 450");
 
     api::core::Log::Info("Character test initialized successfully");
     api::core::Log::Info("Controls: Mouse = Look; WASD = walk (smooth turn), +Space = run; release = idle");
@@ -554,12 +568,23 @@ void CharacterTest::Update(float deltaTime) {
     }
 }
 
+void CharacterTest::RenderPanels() {
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    LightingPanel::Render(m_scene.light);
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
 void CharacterTest::Render() {
     if (!m_renderer || !m_pipeline) return;
 
+    // Deferred mode: light is applied in lighting pass. No per-material light here.
     m_renderer->Clear(0.1f, 0.1f, 0.15f, 1.0f);
     m_pipeline->Render(m_scene);
     m_pipeline->BlitToScreen();
+    RenderPanels();
     m_window->SwapBuffers();
 }
 
@@ -568,6 +593,9 @@ bool CharacterTest::ShouldClose() const {
 }
 
 void CharacterTest::Shutdown() {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     if (m_physicsCharacterHandle != 0) {
         api::physics::CharacterController::Destroy(m_physicsWorld, m_physicsCharacterHandle);
         m_physicsCharacterHandle = 0;
