@@ -2,8 +2,12 @@
 
 #include "api/assets/AssetId.h"
 #include "api/assets/AssetTypes.h"
+#include "api/animation/AnimationClip.h"
+#include "api/animation/Skeleton.h"
+#include "api/render/Material.h"
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,6 +39,13 @@ public:
     AssetType GetAssetType(const AssetId& id) const;
     size_t GetAssetSize(const AssetId& id) const;
     size_t GetAssetMemoryUsage() const;
+
+    std::shared_ptr<AnimationClip> GetAnimationClip(const AssetId& id, size_t index = 0) const;
+    std::shared_ptr<AnimationClip> GetAnimationClip(const std::string& path, size_t index = 0) const;
+    std::shared_ptr<Skeleton> GetSkeleton(const AssetId& id) const;
+    std::shared_ptr<Skeleton> GetSkeleton(const std::string& path) const;
+    std::shared_ptr<Material> GetMaterial(const AssetId& id) const;
+    std::shared_ptr<Material> GetMaterial(const std::string& path) const;
 
     void AddDependency(const AssetId& asset, const AssetId& dependency);
     void RemoveDependency(const AssetId& asset, const AssetId& dependency);

@@ -12,6 +12,7 @@ namespace {
     ::eyelib::render::Drawable out;
     out.mesh = d.mesh ? d.mesh->GetInternal() : nullptr;
     out.material = d.material ? d.material->GetInternal() : nullptr;
+    out.materialInstance = d.materialInstance ? d.materialInstance->GetInternal() : nullptr;
     out.transform = d.transform;
     return out;
 }

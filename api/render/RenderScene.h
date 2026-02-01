@@ -2,6 +2,7 @@
 
 #include "api/render/Mesh.h"
 #include "api/render/Material.h"
+#include "api/render/MaterialInstance.h"
 #include "api/render/Light.h"
 #include "api/render/TextureCube.h"
 #include "eyelib/math/Types.h"
@@ -14,6 +15,7 @@ namespace api {
 struct Drawable {
     std::shared_ptr<Mesh> mesh;
     std::shared_ptr<Material> material;
+    std::shared_ptr<MaterialInstance> materialInstance;
     math::Mat4 transform{1.0f};
 };
 

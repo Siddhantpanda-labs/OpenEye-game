@@ -2,6 +2,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/resources/MaterialInstance.h"
 #include <glad/glad.h>
 
 namespace eyelib {
@@ -49,16 +50,26 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
     for (const auto& d : drawables) {
-        if (!d.mesh || !d.material) continue;
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (!d.mesh || !material) continue;
 
         const math::Mat4* bonePtr = nullptr;
         size_t boneCount = 0;
-        d.material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
-            if (name == "u_Bones" && count > 0) {
-                bonePtr = values;
-                boneCount = count;
-            }
-        });
+        if (d.materialInstance) {
+            d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && count > 0) {
+                    bonePtr = values;
+                    boneCount = count;
+                }
+            });
+        } else {
+            material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && count > 0) {
+                    bonePtr = values;
+                    boneCount = count;
+                }
+            });
+        }
 
         if (bonePtr && boneCount > 0 && m_depthSkinnedShader->IsValid()) {
             m_depthSkinnedShader->Bind();

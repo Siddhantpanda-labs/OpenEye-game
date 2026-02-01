@@ -20,6 +20,9 @@ void MaterialInstance::SetAlphaOverride(float v) { m_alphaOverride = v; }
 void MaterialInstance::SetFloatOverride(const std::string& name, float value) { m_floatOverrides[name] = value; }
 void MaterialInstance::SetVec3Override(const std::string& name, const math::Vec3& value) { m_vec3Overrides[name] = value; }
 void MaterialInstance::SetVec4Override(const std::string& name, const math::Vec4& value) { m_vec4Overrides[name] = value; }
+void MaterialInstance::SetMat4ArrayOverride(const std::string& name, const std::vector<math::Mat4>& values) {
+    m_mat4ArrayOverrides[name] = values;
+}
 
 void MaterialInstance::ClearOverrides() {
     m_textureOverrides.clear();
@@ -31,6 +34,69 @@ void MaterialInstance::ClearOverrides() {
     m_floatOverrides.clear();
     m_vec3Overrides.clear();
     m_vec4Overrides.clear();
+    m_mat4ArrayOverrides.clear();
+}
+
+std::shared_ptr<Texture2D> MaterialInstance::GetTexture(const std::string& name) const {
+    auto it = m_textureOverrides.find(name);
+    if (it != m_textureOverrides.end()) {
+        return it->second;
+    }
+    return m_base ? m_base->GetTexture(name) : nullptr;
+}
+
+math::Vec3 MaterialInstance::GetAlbedo() const {
+    return m_albedoOverride ? *m_albedoOverride : (m_base ? m_base->GetAlbedo() : math::Vec3(0.0f));
+}
+
+float MaterialInstance::GetMetallic() const {
+    return m_metallicOverride ? *m_metallicOverride : (m_base ? m_base->GetMetallic() : 0.0f);
+}
+
+float MaterialInstance::GetRoughness() const {
+    return m_roughnessOverride ? *m_roughnessOverride : (m_base ? m_base->GetRoughness() : 0.0f);
+}
+
+math::Vec3 MaterialInstance::GetEmission() const {
+    return m_emissionOverride ? *m_emissionOverride : (m_base ? m_base->GetEmission() : math::Vec3(0.0f));
+}
+
+float MaterialInstance::GetAO() const {
+    return m_base ? m_base->GetAO() : 1.0f;
+}
+
+float MaterialInstance::GetAlpha() const {
+    return m_alphaOverride ? *m_alphaOverride : (m_base ? m_base->GetAlpha() : 1.0f);
+}
+
+float MaterialInstance::GetFloat(const std::string& name, float defaultValue) const {
+    auto it = m_floatOverrides.find(name);
+    if (it != m_floatOverrides.end()) return it->second;
+    return m_base ? m_base->GetFloat(name, defaultValue) : defaultValue;
+}
+
+math::Vec3 MaterialInstance::GetVec3(const std::string& name, const math::Vec3& defaultValue) const {
+    auto it = m_vec3Overrides.find(name);
+    if (it != m_vec3Overrides.end()) return it->second;
+    return m_base ? m_base->GetVec3(name, defaultValue) : defaultValue;
+}
+
+math::Vec4 MaterialInstance::GetVec4(const std::string& name, const math::Vec4& defaultValue) const {
+    auto it = m_vec4Overrides.find(name);
+    if (it != m_vec4Overrides.end()) return it->second;
+    return m_base ? m_base->GetVec4(name, defaultValue) : defaultValue;
+}
+
+void MaterialInstance::ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const {
+    if (!fn) return;
+    if (m_base) {
+        m_base->ForEachMat4Array(fn);
+    }
+    for (const auto& p : m_mat4ArrayOverrides) {
+        if (!p.second.empty()) {
+            fn(p.first, p.second.data(), p.second.size());
+        }
+    }
 }
 
 void MaterialInstance::Bind() const {
@@ -71,6 +137,11 @@ void MaterialInstance::Bind() const {
     for (const auto& p : m_floatOverrides) sh->SetFloat(p.first, p.second);
     for (const auto& p : m_vec3Overrides) sh->SetVec3(p.first, p.second);
     for (const auto& p : m_vec4Overrides) sh->SetVec4(p.first, p.second);
+    for (const auto& p : m_mat4ArrayOverrides) {
+        if (!p.second.empty()) {
+            sh->SetMat4Array(p.first, p.second.data(), p.second.size());
+        }
+    }
 }
 
 } // namespace render

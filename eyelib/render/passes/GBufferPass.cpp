@@ -1,6 +1,7 @@
 #include "eyelib/render/passes/GBufferPass.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include <glad/glad.h>
@@ -43,28 +44,48 @@ void GBufferPass::Render(GBuffer& gbuffer,
     glDepthMask(GL_TRUE);
 
     for (const auto& d : drawables) {
-        if (!d.mesh || !d.material) continue;
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (!d.mesh || !material) continue;
+
+        auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
+            return d.materialInstance ? d.materialInstance->GetVec4(name, def) : material->GetVec4(name, def);
+        };
+        auto getFloat = [&](const std::string& name, float def) {
+            return d.materialInstance ? d.materialInstance->GetFloat(name, def) : material->GetFloat(name, def);
+        };
+        auto getTexture = [&](const std::string& name) {
+            return d.materialInstance ? d.materialInstance->GetTexture(name) : material->GetTexture(name);
+        };
 
         m_geometryShader->SetMat4("u_Model", d.transform);
-        m_geometryShader->SetVec3("u_Albedo", d.material->GetAlbedo());
-        m_geometryShader->SetFloat("u_Metallic", d.material->GetMetallic());
-        m_geometryShader->SetFloat("u_Roughness", d.material->GetRoughness());
-        m_geometryShader->SetFloat("u_AO", d.material->GetAO());
+        m_geometryShader->SetVec3("u_Albedo", d.materialInstance ? d.materialInstance->GetAlbedo() : material->GetAlbedo());
+        m_geometryShader->SetFloat("u_Metallic", d.materialInstance ? d.materialInstance->GetMetallic() : material->GetMetallic());
+        m_geometryShader->SetFloat("u_Roughness", d.materialInstance ? d.materialInstance->GetRoughness() : material->GetRoughness());
+        m_geometryShader->SetFloat("u_AO", d.materialInstance ? d.materialInstance->GetAO() : material->GetAO());
 
         // UV params (same as forward skinned)
-        m_geometryShader->SetVec4("u_UVTransform", d.material->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
-        m_geometryShader->SetFloat("u_UVRotation", d.material->GetFloat("u_UVRotation", 0.0f));
-        m_geometryShader->SetFloat("u_TexCoordIndex", d.material->GetFloat("u_TexCoordIndex", 0.0f));
-        m_geometryShader->SetFloat("u_FlipV", d.material->GetFloat("u_FlipV", 0.0f));
+        m_geometryShader->SetVec4("u_UVTransform", getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
+        m_geometryShader->SetFloat("u_UVRotation", getFloat("u_UVRotation", 0.0f));
+        m_geometryShader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
+        m_geometryShader->SetFloat("u_FlipV", getFloat("u_FlipV", 0.0f));
 
         // Bone matrices for skinning (same as forward: u_Bones UBO). Non-skinned: identity at 0.
         bool hasBones = false;
-        d.material->ForEachMat4Array([this, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
-            if (values && count > 0) {
-                m_geometryShader->SetMat4Array(name, values, count);
-                hasBones = true;
-            }
-        });
+        if (d.materialInstance) {
+            d.materialInstance->ForEachMat4Array([this, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
+                if (values && count > 0) {
+                    m_geometryShader->SetMat4Array(name, values, count);
+                    hasBones = true;
+                }
+            });
+        } else {
+            material->ForEachMat4Array([this, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
+                if (values && count > 0) {
+                    m_geometryShader->SetMat4Array(name, values, count);
+                    hasBones = true;
+                }
+            });
+        }
         if (!hasBones) {
             static const math::Mat4 identityBone = math::Mat4(1.0f);
             m_geometryShader->SetMat4Array("u_Bones", &identityBone, 1);
@@ -77,19 +98,23 @@ void GBufferPass::Render(GBuffer& gbuffer,
         };
         int unit = 0;
         for (const char* texName : textureOrder) {
-            auto tex = d.material->GetTexture(texName);
+            auto tex = getTexture(texName);
             if (tex && tex->IsValid()) {
                 tex->Bind(unit);
                 m_geometryShader->SetInt(texName, unit);
                 ++unit;
             }
         }
-        m_geometryShader->SetFloat("u_HasAlbedoTexture", d.material->GetTexture("u_AlbedoTexture") && d.material->GetTexture("u_AlbedoTexture")->IsValid() ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasNormalTexture", d.material->GetTexture("u_NormalTexture") && d.material->GetTexture("u_NormalTexture")->IsValid() ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasMetallicRoughnessTexture", d.material->GetTexture("u_MetallicRoughnessTexture") && d.material->GetTexture("u_MetallicRoughnessTexture")->IsValid() ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasAOTexture", d.material->GetTexture("u_AOTexture") && d.material->GetTexture("u_AOTexture")->IsValid() ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasMetallicTexture", d.material->GetTexture("u_MetallicTexture") && d.material->GetTexture("u_MetallicTexture")->IsValid() ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasRoughnessTexture", d.material->GetTexture("u_RoughnessTexture") && d.material->GetTexture("u_RoughnessTexture")->IsValid() ? 1.0f : 0.0f);
+        auto hasTex = [&](const std::string& name) {
+            auto t = getTexture(name);
+            return (t && t->IsValid()) ? 1.0f : 0.0f;
+        };
+        m_geometryShader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
+        m_geometryShader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
+        m_geometryShader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
+        m_geometryShader->SetFloat("u_HasAOTexture", hasTex("u_AOTexture"));
+        m_geometryShader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
+        m_geometryShader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
 
         d.mesh->Bind();
         d.mesh->Draw();

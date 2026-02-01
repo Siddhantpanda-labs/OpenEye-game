@@ -1,6 +1,7 @@
 #include "eyelib/render/passes/TransparencyPass.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include <glad/glad.h>
 #include <algorithm>
@@ -30,8 +31,10 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
     std::vector<Entry> sorted;
     sorted.reserve(transparent.size());
     for (size_t i = 0; i < transparent.size(); ++i) {
-        if (!transparent[i].mesh || !transparent[i].material) continue;
-        if (transparent[i].material->GetAlpha() >= 0.99f) continue;
+        const auto material = transparent[i].materialInstance ? transparent[i].materialInstance->GetMaterial() : transparent[i].material;
+        if (!transparent[i].mesh || !material) continue;
+        const float alpha = transparent[i].materialInstance ? transparent[i].materialInstance->GetAlpha() : material->GetAlpha();
+        if (alpha >= 0.99f) continue;
         float d = distanceToCamera(transparent[i].transform, viewPos);
         sorted.push_back({i, d});
     }
@@ -46,14 +49,20 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
 
     for (const auto& e : sorted) {
         const auto& d = transparent[e.idx];
-        d.material->Bind();
-        Shader* sh = d.material->GetShader().get();
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (d.materialInstance) {
+            d.materialInstance->Bind();
+        } else if (material) {
+            material->Bind();
+        }
+        Shader* sh = material ? material->GetShader().get() : nullptr;
         if (!sh) continue;
         sh->SetMat4("u_Model", d.transform);
         sh->SetMat4("u_View", view);
         sh->SetMat4("u_Projection", projection);
         sh->SetVec3("u_ViewPos", viewPos);
-        sh->SetFloat("u_Alpha", d.material->GetAlpha());
+        const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
+        sh->SetFloat("u_Alpha", alpha);
         d.mesh->Bind();
         d.mesh->Draw();
         d.mesh->Unbind();

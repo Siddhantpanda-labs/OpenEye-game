@@ -32,8 +32,21 @@ public:
     void SetFloatOverride(const std::string& name, float value);
     void SetVec3Override(const std::string& name, const math::Vec3& value);
     void SetVec4Override(const std::string& name, const math::Vec4& value);
+    void SetMat4ArrayOverride(const std::string& name, const std::vector<math::Mat4>& values);
 
     void ClearOverrides();
+
+    std::shared_ptr<Texture2D> GetTexture(const std::string& name) const;
+    math::Vec3 GetAlbedo() const;
+    float GetMetallic() const;
+    float GetRoughness() const;
+    math::Vec3 GetEmission() const;
+    float GetAO() const;
+    float GetAlpha() const;
+    float GetFloat(const std::string& name, float defaultValue = 0.0f) const;
+    math::Vec3 GetVec3(const std::string& name, const math::Vec3& defaultValue = math::Vec3(0.0f)) const;
+    math::Vec4 GetVec4(const std::string& name, const math::Vec4& defaultValue = math::Vec4(0.0f)) const;
+    void ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const;
 
     void Bind() const;
 
@@ -48,6 +61,7 @@ private:
     std::unordered_map<std::string, float> m_floatOverrides;
     std::unordered_map<std::string, math::Vec3> m_vec3Overrides;
     std::unordered_map<std::string, math::Vec4> m_vec4Overrides;
+    std::unordered_map<std::string, std::vector<math::Mat4>> m_mat4ArrayOverrides;
 };
 
 } // namespace render

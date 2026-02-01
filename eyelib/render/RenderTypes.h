@@ -9,12 +9,14 @@ namespace render {
 
 class Mesh;
 class Material;
+class MaterialInstance;
 class TextureCube;
 
 /** Single drawable: mesh + material + world transform */
 struct Drawable {
     std::shared_ptr<Mesh> mesh;
     std::shared_ptr<Material> material;
+    std::shared_ptr<MaterialInstance> materialInstance;
     math::Mat4 transform{1.0f};
 };
 

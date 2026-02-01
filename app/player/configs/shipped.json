@@ -1,0 +1,15 @@
+{
+  "profile": "shipped",
+  "scenePath": "scenes/main.json",
+  "assetRoots": ["assets"],
+  "logPath": "OpenEyePlayer.log",
+  "title": "OpenEye Player",
+  "width": 1280,
+  "height": 720,
+  "timeMode": "fixed",
+  "fixedTimestep": 0.0166667,
+  "maxSubsteps": 8,
+  "overlay": false,
+  "stats": false,
+  "strictAssets": true
+}

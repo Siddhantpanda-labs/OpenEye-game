@@ -1,0 +1,14 @@
+{
+  "profile": "dev",
+  "scenePath": "scenes/main.json",
+  "assetRoots": ["assets"],
+  "logPath": "OpenEyePlayer.log",
+  "title": "OpenEye Player (Dev)",
+  "width": 1280,
+  "height": 720,
+  "timeMode": "realtime",
+  "maxSubsteps": 8,
+  "overlay": true,
+  "stats": true,
+  "strictAssets": false
+}
