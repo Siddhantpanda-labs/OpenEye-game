@@ -153,9 +153,6 @@ std::shared_ptr<Material> AssetRegistry::GetMaterial(const AssetId& id) const {
 
 std::shared_ptr<Material> AssetRegistry::GetMaterial(const std::string& path) const {
     auto id = GetId(path);
-    if (!id.IsValid()) {
-        id = LoadAsset(path, AssetType::Material);
-    }
     return GetMaterial(id);
 }
 

@@ -15,6 +15,9 @@ public:
     void BuildFromWorld(const eyelib::api::world::World& world, eyelib::api::AssetRegistry& registry);
     void Update(float deltaSeconds);
     const std::vector<eyelib::math::Mat4>* GetBoneMatrices(::eyelib::world::EntityId entity) const;
+    bool SetFloat(::eyelib::world::EntityId entity, const std::string& name, float value);
+    bool SetBool(::eyelib::world::EntityId entity, const std::string& name, bool value);
+    bool SetTrigger(::eyelib::world::EntityId entity, const std::string& name);
 
 private:
     struct AnimatorBinding {
@@ -31,7 +34,7 @@ private:
 
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::AnimationClip>> m_clipCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::Skeleton>> m_skeletonCache;
-    std::unordered_map<::eyelib::world::EntityId, AnimatorBinding> m_animators;
+    std::unordered_map<::eyelib::world::EntityId, AnimatorBinding, ::eyelib::world::EntityIdHash> m_animators;
     std::vector<BoneEntry> m_bones;
 };
 

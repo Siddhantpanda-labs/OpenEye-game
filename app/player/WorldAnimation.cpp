@@ -94,4 +94,31 @@ const std::vector<eyelib::math::Mat4>* WorldAnimationBridge::GetBoneMatrices(::e
     return nullptr;
 }
 
+bool WorldAnimationBridge::SetFloat(::eyelib::world::EntityId entity, const std::string& name, float value) {
+    auto it = m_animators.find(entity);
+    if (it == m_animators.end() || !it->second.animator) {
+        return false;
+    }
+    it->second.animator->SetParameter(name, value);
+    return true;
+}
+
+bool WorldAnimationBridge::SetBool(::eyelib::world::EntityId entity, const std::string& name, bool value) {
+    auto it = m_animators.find(entity);
+    if (it == m_animators.end() || !it->second.animator) {
+        return false;
+    }
+    it->second.animator->SetParameter(name, value);
+    return true;
+}
+
+bool WorldAnimationBridge::SetTrigger(::eyelib::world::EntityId entity, const std::string& name) {
+    auto it = m_animators.find(entity);
+    if (it == m_animators.end() || !it->second.animator) {
+        return false;
+    }
+    it->second.animator->SetTrigger(name);
+    return true;
+}
+
 } // namespace openeye::player

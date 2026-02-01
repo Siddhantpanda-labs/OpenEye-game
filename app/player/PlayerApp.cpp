@@ -299,6 +299,8 @@ int RunPlayer(int argc, char** argv) {
     animationBridge.BuildFromWorld(world, assetRegistry);
 
     WorldScriptingBridge scriptingBridge;
+    scriptingBridge.SetPhysicsBridge(&physicsBridge);
+    scriptingBridge.SetAnimationBridge(&animationBridge);
     scriptingBridge.BuildFromWorld(world, options.assetRoots);
 
     struct RuntimeStats {
@@ -317,7 +319,7 @@ int RunPlayer(int argc, char** argv) {
         physicsBridge.Step(world, deltaSeconds, options.maxSubsteps,
                            options.fixedTimestep > 0.0f ? options.fixedTimestep : 0.0f);
         animationBridge.Update(deltaSeconds);
-        scriptingBridge.Update(world, options.assetRoots);
+        scriptingBridge.Update(world, options.assetRoots, deltaSeconds);
         world.Update(deltaSeconds);
 
         if (options.stats) {

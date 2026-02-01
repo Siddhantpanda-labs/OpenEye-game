@@ -16,8 +16,14 @@ set(PLAYER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/WorldScripting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldScripting.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaBindings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaBindings.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaHelpers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaHelpers.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaJson.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaJson.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldScriptingBridge.cpp
 )
 
 add_executable(OpenEyePlayer ${PLAYER_SOURCES})

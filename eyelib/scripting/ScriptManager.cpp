@@ -134,6 +134,81 @@ std::vector<ScriptHandle> ScriptManager::GetDependencies(ScriptHandle handle) co
     return info ? info->dependencies : std::vector<ScriptHandle>();
 }
 
+namespace {
+
+bool CallFunction(LuaVM& vm, const std::string& tableName, const char* functionName, bool withDelta, float deltaTime, std::string& errorOut) {
+    lua_State* L = vm.GetState();
+    lua_getglobal(L, tableName.c_str());
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return false;
+    }
+
+    lua_getfield(L, -1, functionName);
+    if (!lua_isfunction(L, -1)) {
+        lua_pop(L, 2);
+        return false;
+    }
+
+    lua_pushvalue(L, -2); // self table
+    int argc = 1;
+    if (withDelta) {
+        lua_pushnumber(L, static_cast<lua_Number>(deltaTime));
+        argc = 2;
+    }
+
+    if (lua_pcall(L, argc, 0, 0) != LUA_OK) {
+        errorOut = lua_tostring(L, -1);
+        lua_pop(L, 1);
+        lua_pop(L, 1); // pop table
+        return false;
+    }
+
+    lua_pop(L, 1); // pop table
+    return true;
+}
+
+} // namespace
+
+bool ScriptManager::CallUpdate(ScriptHandle handle, float deltaTime) {
+    auto* info = GetScriptInfo(handle);
+    if (!info || !info->isValid || !info->vm) {
+        return false;
+    }
+    std::string err;
+    const bool ok = CallFunction(*info->vm, info->scriptName, "Update", true, deltaTime, err);
+    if (!ok && !err.empty()) {
+        core::Log::WarnF("Script Update failed: %s - %s", info->scriptName.c_str(), err.c_str());
+    }
+    return ok;
+}
+
+bool ScriptManager::CallStart(ScriptHandle handle) {
+    auto* info = GetScriptInfo(handle);
+    if (!info || !info->isValid || !info->vm) {
+        return false;
+    }
+    std::string err;
+    const bool ok = CallFunction(*info->vm, info->scriptName, "Start", false, 0.0f, err);
+    if (!ok && !err.empty()) {
+        core::Log::WarnF("Script Start failed: %s - %s", info->scriptName.c_str(), err.c_str());
+    }
+    return ok;
+}
+
+bool ScriptManager::CallStop(ScriptHandle handle) {
+    auto* info = GetScriptInfo(handle);
+    if (!info || !info->isValid || !info->vm) {
+        return false;
+    }
+    std::string err;
+    const bool ok = CallFunction(*info->vm, info->scriptName, "Stop", false, 0.0f, err);
+    if (!ok && !err.empty()) {
+        core::Log::WarnF("Script Stop failed: %s - %s", info->scriptName.c_str(), err.c_str());
+    }
+    return ok;
+}
+
 ScriptManager::ScriptInfo* ScriptManager::GetScriptInfo(ScriptHandle handle) {
     auto it = m_scripts.find(handle);
     return (it != m_scripts.end()) ? &it->second : nullptr;

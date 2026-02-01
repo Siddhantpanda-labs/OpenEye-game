@@ -17,6 +17,11 @@ public:
     void Step(eyelib::api::world::World& world, float deltaSeconds,
               int maxSubSteps, float fixedTimeStep);
 
+    bool GetVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out);
+    bool SetVelocity(::eyelib::world::EntityId entity, const eyelib::math::Vec3& value);
+    bool GetAngularVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out);
+    bool SetAngularVelocity(::eyelib::world::EntityId entity, const eyelib::math::Vec3& value);
+
 private:
     struct BodyBinding {
         ::eyelib::world::EntityId entity;
@@ -32,6 +37,8 @@ private:
     const eyelib::api::world::World::RigidBodyEntry* FindRigidBody(
         const std::vector<eyelib::api::world::World::RigidBodyEntry>& rigidBodies,
         ::eyelib::world::EntityId entity) const;
+    const BodyBinding* FindBinding(::eyelib::world::EntityId entity) const;
+    BodyBinding* FindBinding(::eyelib::world::EntityId entity);
 
     bool BuildBodyForCollider(eyelib::api::world::World& world,
                               const eyelib::api::world::World::ColliderEntry& collider,

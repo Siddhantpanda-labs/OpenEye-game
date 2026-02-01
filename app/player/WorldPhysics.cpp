@@ -54,6 +54,24 @@ const eyelib::api::world::World::RigidBodyEntry* WorldPhysicsBridge::FindRigidBo
     return nullptr;
 }
 
+const WorldPhysicsBridge::BodyBinding* WorldPhysicsBridge::FindBinding(::eyelib::world::EntityId entity) const {
+    for (const auto& binding : m_bindings) {
+        if (binding.entity == entity) {
+            return &binding;
+        }
+    }
+    return nullptr;
+}
+
+WorldPhysicsBridge::BodyBinding* WorldPhysicsBridge::FindBinding(::eyelib::world::EntityId entity) {
+    for (auto& binding : m_bindings) {
+        if (binding.entity == entity) {
+            return &binding;
+        }
+    }
+    return nullptr;
+}
+
 bool WorldPhysicsBridge::BuildBodyForCollider(
     eyelib::api::world::World& world,
     const eyelib::api::world::World::ColliderEntry& collider,
@@ -150,6 +168,54 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         updated.rotation = transform->rotation;
         world.SetTransform(binding.entity, updated);
     }
+}
+
+bool WorldPhysicsBridge::GetVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out) {
+    if (!m_ready) {
+        return false;
+    }
+    const auto* binding = FindBinding(entity);
+    if (!binding || binding->body == 0) {
+        return false;
+    }
+    out = eyelib::api::physics::RigidBody::GetVelocity(m_physics, binding->body);
+    return true;
+}
+
+bool WorldPhysicsBridge::SetVelocity(::eyelib::world::EntityId entity, const eyelib::math::Vec3& value) {
+    if (!m_ready) {
+        return false;
+    }
+    auto* binding = FindBinding(entity);
+    if (!binding || binding->body == 0) {
+        return false;
+    }
+    eyelib::api::physics::RigidBody::SetVelocity(m_physics, binding->body, value);
+    return true;
+}
+
+bool WorldPhysicsBridge::GetAngularVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out) {
+    if (!m_ready) {
+        return false;
+    }
+    const auto* binding = FindBinding(entity);
+    if (!binding || binding->body == 0) {
+        return false;
+    }
+    out = eyelib::api::physics::RigidBody::GetAngularVelocity(m_physics, binding->body);
+    return true;
+}
+
+bool WorldPhysicsBridge::SetAngularVelocity(::eyelib::world::EntityId entity, const eyelib::math::Vec3& value) {
+    if (!m_ready) {
+        return false;
+    }
+    auto* binding = FindBinding(entity);
+    if (!binding || binding->body == 0) {
+        return false;
+    }
+    eyelib::api::physics::RigidBody::SetAngularVelocity(m_physics, binding->body, value);
+    return true;
 }
 
 } // namespace openeye::player

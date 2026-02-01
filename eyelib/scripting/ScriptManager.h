@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LuaVM.h"
+#include "ScriptHandle.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -9,9 +10,6 @@
 
 namespace eyelib {
 namespace scripting {
-
-using ScriptHandle = size_t;
-constexpr ScriptHandle InvalidScriptHandle = 0;
 
 /**
  * @brief Manages script loading, caching, and hot-reloading.
@@ -36,6 +34,10 @@ public:
     std::string GetScriptError(ScriptHandle handle) const;
     bool IsScriptValid(ScriptHandle handle) const;
     std::shared_ptr<LuaVM> GetScriptVM(ScriptHandle handle) const;
+
+    bool CallUpdate(ScriptHandle handle, float deltaTime);
+    bool CallStart(ScriptHandle handle);
+    bool CallStop(ScriptHandle handle);
 
     // Dependency tracking
     std::vector<ScriptHandle> GetDependencies(ScriptHandle handle) const;

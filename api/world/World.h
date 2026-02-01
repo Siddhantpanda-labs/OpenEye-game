@@ -10,7 +10,14 @@
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Script.h"
 #include "eyelib/world/components/Transform.h"
+#include "eyelib/world/components/Name.h"
+#include "eyelib/world/components/Region.h"
+#include "eyelib/world/components/RegionMembership.h"
+#include "eyelib/world/components/AABB.h"
+#include "eyelib/world/components/SystemBindings.h"
+#include "eyelib/world/components/ActiveSystems.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +53,46 @@ public:
     void SetTimeMode(::eyelib::world::WorldScheduler::TimeMode mode);
     ::eyelib::world::WorldScheduler::TimeMode GetTimeMode() const;
     void SetReplayDelta(float seconds);
+
+    ::eyelib::world::EntityId CreateEntity(const std::string& name = "");
+    bool DestroyEntity(::eyelib::world::EntityId entity);
+    bool SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent);
+    void ClearParent(::eyelib::world::EntityId child);
+    ::eyelib::world::EntityId GetParent(::eyelib::world::EntityId child) const;
+    std::vector<::eyelib::world::EntityId> GetChildren(::eyelib::world::EntityId parent) const;
+    std::vector<::eyelib::world::EntityId> GetAncestors(::eyelib::world::EntityId entity) const;
+    std::vector<::eyelib::world::EntityId> GetDescendants(::eyelib::world::EntityId entity) const;
+
+    void AddTag(::eyelib::world::EntityId entity, const std::string& tag);
+    void RemoveTag(::eyelib::world::EntityId entity, const std::string& tag);
+    bool HasTag(::eyelib::world::EntityId entity, const std::string& tag) const;
+    std::vector<std::string> GetTags(::eyelib::world::EntityId entity) const;
+    std::vector<::eyelib::world::EntityId> GetEntitiesWithTag(const std::string& tag) const;
+    std::vector<::eyelib::world::EntityId> GetEntitiesWithTags(const std::vector<std::string>& tags) const;
+
+    bool SetMetadata(::eyelib::world::EntityId entity, const std::string& name, uint32_t flags);
+    bool GetMetadata(::eyelib::world::EntityId entity, std::string& name, uint32_t& flags) const;
+    bool ClearMetadata(::eyelib::world::EntityId entity);
+    bool GetEntityName(::eyelib::world::EntityId entity, std::string& name) const;
+    bool SetEntityName(::eyelib::world::EntityId entity, const std::string& name);
+
+    ::eyelib::world::EntityId FindEntityByName(const std::string& name) const;
+    std::vector<::eyelib::world::EntityId> FindEntitiesByName(const std::string& name) const;
+    std::vector<::eyelib::world::EntityId> FindEntitiesByNameContains(const std::string& namePart) const;
+    std::vector<::eyelib::world::EntityId> FindEntitiesByFlags(uint32_t flagsMask, bool exactMatch = false) const;
+
+    std::vector<::eyelib::world::EntityId> GetEntities() const;
+    std::vector<::eyelib::world::EntityId> GetEntitiesWithComponent(const std::string& componentName) const;
+    std::vector<::eyelib::world::EntityId> GetEntitiesWithComponents(
+        const std::vector<std::string>& componentNames) const;
+    std::vector<std::string> GetComponentNames(::eyelib::world::EntityId entity) const;
+
+    bool GetComponentJson(::eyelib::world::EntityId entity,
+                          const std::string& componentName,
+                          std::string& outJson) const;
+    bool SetComponentJson(::eyelib::world::EntityId entity,
+                          const std::string& componentName,
+                          const std::string& json);
 
     enum class AssetRefKind {
         Mesh,
@@ -116,12 +163,68 @@ public:
     std::vector<AnimatorEntry> GetAnimators() const;
     std::vector<ScriptEntry> GetScripts() const;
 
+    bool IsAlive(::eyelib::world::EntityId entity) const;
+    bool GetTransform(::eyelib::world::EntityId entity,
+                      ::eyelib::world::components::Transform& out) const;
+    bool GetCamera(::eyelib::world::EntityId entity,
+                   ::eyelib::world::components::Camera& out) const;
+    bool GetLight(::eyelib::world::EntityId entity,
+                  ::eyelib::world::components::Light& out) const;
+    bool GetRenderable(::eyelib::world::EntityId entity,
+                       ::eyelib::world::components::Renderable& out) const;
+    bool GetMeshRenderer(::eyelib::world::EntityId entity,
+                         ::eyelib::world::components::MeshRenderer& out) const;
+    bool GetCollider(::eyelib::world::EntityId entity,
+                     ::eyelib::world::components::Collider& out) const;
+    bool GetScript(::eyelib::world::EntityId entity,
+                   ::eyelib::world::components::Script& out) const;
+    bool GetRigidBody(::eyelib::world::EntityId entity,
+                      ::eyelib::world::components::RigidBody& out) const;
+    bool GetAnimator(::eyelib::world::EntityId entity,
+                     ::eyelib::world::components::Animator& out) const;
+    bool GetName(::eyelib::world::EntityId entity,
+                 ::eyelib::world::components::Name& out) const;
+    bool GetRegion(::eyelib::world::EntityId entity,
+                   ::eyelib::world::components::Region& out) const;
+    bool GetRegionMembership(::eyelib::world::EntityId entity,
+                             ::eyelib::world::components::RegionMembership& out) const;
+    bool GetAABB(::eyelib::world::EntityId entity,
+                 ::eyelib::world::components::AABB& out) const;
+    bool GetSystemBindings(::eyelib::world::EntityId entity,
+                           ::eyelib::world::components::SystemBindings& out) const;
+    bool GetActiveSystems(::eyelib::world::EntityId entity,
+                          ::eyelib::world::components::ActiveSystems& out) const;
+
     bool SetTransform(::eyelib::world::EntityId entity,
                       const ::eyelib::world::components::Transform& transform);
-    bool SetRigidBody(::eyelib::world::EntityId entity,
-                      const ::eyelib::world::components::RigidBody& rigidBody);
+    bool SetCamera(::eyelib::world::EntityId entity,
+                   const ::eyelib::world::components::Camera& camera);
+    bool SetLight(::eyelib::world::EntityId entity,
+                  const ::eyelib::world::components::Light& light);
+    bool SetRenderable(::eyelib::world::EntityId entity,
+                       const ::eyelib::world::components::Renderable& renderable);
+    bool SetMeshRenderer(::eyelib::world::EntityId entity,
+                         const ::eyelib::world::components::MeshRenderer& renderer);
+    bool SetCollider(::eyelib::world::EntityId entity,
+                     const ::eyelib::world::components::Collider& collider);
     bool SetScript(::eyelib::world::EntityId entity,
                    const ::eyelib::world::components::Script& script);
+    bool SetRigidBody(::eyelib::world::EntityId entity,
+                      const ::eyelib::world::components::RigidBody& rigidBody);
+    bool SetAnimator(::eyelib::world::EntityId entity,
+                     const ::eyelib::world::components::Animator& animator);
+    bool SetName(::eyelib::world::EntityId entity,
+                 const ::eyelib::world::components::Name& name);
+    bool SetRegion(::eyelib::world::EntityId entity,
+                   const ::eyelib::world::components::Region& region);
+    bool SetRegionMembership(::eyelib::world::EntityId entity,
+                             const ::eyelib::world::components::RegionMembership& membership);
+    bool SetAABB(::eyelib::world::EntityId entity,
+                 const ::eyelib::world::components::AABB& aabb);
+    bool SetSystemBindings(::eyelib::world::EntityId entity,
+                           const ::eyelib::world::components::SystemBindings& bindings);
+    bool SetActiveSystems(::eyelib::world::EntityId entity,
+                          const ::eyelib::world::components::ActiveSystems& systems);
 
     bool LoadScene(const std::string& path);
     size_t GetEntityCount() const;

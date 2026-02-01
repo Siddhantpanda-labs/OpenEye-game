@@ -3,6 +3,8 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 
+#include "scripting/WorldLuaBindings.h"
+
 namespace openeye::player {
 
 namespace {
@@ -44,6 +46,9 @@ void WorldScriptingBridge::UnloadBinding(const ::eyelib::world::EntityId& entity
         return;
     }
     if (it->second.handle != eyelib::scripting::InvalidScriptHandle) {
+        eyelib::api::Script::CallStop(it->second.handle);
+    }
+    if (it->second.handle != eyelib::scripting::InvalidScriptHandle) {
         eyelib::api::Script::Unload(it->second.handle);
     }
     m_bindings.erase(it);
@@ -72,6 +77,11 @@ void WorldScriptingBridge::LoadOrReload(eyelib::api::world::World& world,
             return;
         }
         m_bindings.emplace(script.entity, ScriptBinding{ script.entity, handle, resolved });
+        if (auto* state = eyelib::api::Script::GetState(handle)) {
+            scripting::RegisterWorldBindings(state, &world, m_physics, m_animation);
+            scripting::BindScriptInstance(state, eyelib::api::Script::GetName(handle), script.entity, script.component);
+        }
+        eyelib::api::Script::CallStart(handle);
         return;
     }
 
@@ -81,6 +91,12 @@ void WorldScriptingBridge::LoadOrReload(eyelib::api::world::World& world,
             eyelib::api::core::Log::WarnF("Failed to reload script: %s", resolved.c_str());
         }
         it->second.resolvedPath = resolved;
+        if (auto* state = eyelib::api::Script::GetState(it->second.handle)) {
+            scripting::RegisterWorldBindings(state, &world, m_physics, m_animation);
+            scripting::BindScriptInstance(state, eyelib::api::Script::GetName(it->second.handle),
+                                          script.entity, script.component);
+        }
+        eyelib::api::Script::CallStart(it->second.handle);
 
         auto updated = script.component;
         updated.needsReload = false;
@@ -98,13 +114,18 @@ void WorldScriptingBridge::BuildFromWorld(eyelib::api::world::World& world,
 }
 
 void WorldScriptingBridge::Update(eyelib::api::world::World& world,
-                                  const std::vector<std::string>& assetRoots) {
+                                  const std::vector<std::string>& assetRoots,
+                                  float deltaTime) {
     const auto scripts = world.GetScripts();
-    std::unordered_map<::eyelib::world::EntityId, bool> active;
+    std::unordered_map<::eyelib::world::EntityId, bool, ::eyelib::world::EntityIdHash> active;
     active.reserve(scripts.size());
+    std::unordered_map<::eyelib::world::EntityId, ::eyelib::world::components::Script,
+                       ::eyelib::world::EntityIdHash> scriptData;
+    scriptData.reserve(scripts.size());
 
     for (const auto& entry : scripts) {
         active[entry.entity] = entry.component.isEnabled;
+        scriptData.emplace(entry.entity, entry.component);
         if (entry.component.isEnabled && entry.component.needsReload) {
             LoadOrReload(world, entry, assetRoots, true);
         }
@@ -112,6 +133,7 @@ void WorldScriptingBridge::Update(eyelib::api::world::World& world,
 
     for (auto it = m_bindings.begin(); it != m_bindings.end(); ) {
         if (active.find(it->first) == active.end() || !active[it->first]) {
+            eyelib::api::Script::CallStop(it->second.handle);
             if (it->second.handle != eyelib::scripting::InvalidScriptHandle) {
                 eyelib::api::Script::Unload(it->second.handle);
             }
@@ -120,6 +142,34 @@ void WorldScriptingBridge::Update(eyelib::api::world::World& world,
         }
         ++it;
     }
+
+    for (const auto& [entity, binding] : m_bindings) {
+        (void)entity;
+        if (binding.handle != eyelib::scripting::InvalidScriptHandle) {
+            eyelib::api::Script::CallUpdate(binding.handle, deltaTime);
+            auto scriptIt = scriptData.find(entity);
+            if (scriptIt != scriptData.end()) {
+                if (auto* state = eyelib::api::Script::GetState(binding.handle)) {
+                    std::unordered_map<std::string, ::eyelib::world::components::ScriptValue> props;
+                    if (scripting::ReadProperties(state, eyelib::api::Script::GetName(binding.handle), props)) {
+                        if (!scripting::PropertiesEqual(scriptIt->second.properties, props)) {
+                            auto updated = scriptIt->second;
+                            updated.properties = std::move(props);
+                            world.SetScript(entity, updated);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void WorldScriptingBridge::SetPhysicsBridge(WorldPhysicsBridge* physics) {
+    m_physics = physics;
+}
+
+void WorldScriptingBridge::SetAnimationBridge(WorldAnimationBridge* animation) {
+    m_animation = animation;
 }
 
 } // namespace openeye::player

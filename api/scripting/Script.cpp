@@ -46,5 +46,22 @@ std::string Script::GetError(scripting::ScriptHandle handle) {
     return scripting::ScriptManager::Get().GetScriptError(handle);
 }
 
+bool Script::CallStart(scripting::ScriptHandle handle) {
+    return scripting::ScriptManager::Get().CallStart(handle);
+}
+
+bool Script::CallUpdate(scripting::ScriptHandle handle, float deltaTime) {
+    return scripting::ScriptManager::Get().CallUpdate(handle, deltaTime);
+}
+
+bool Script::CallStop(scripting::ScriptHandle handle) {
+    return scripting::ScriptManager::Get().CallStop(handle);
+}
+
+lua_State* Script::GetState(scripting::ScriptHandle handle) {
+    auto vm = scripting::ScriptManager::Get().GetScriptVM(handle);
+    return vm ? vm->GetState() : nullptr;
+}
+
 } // namespace api
 } // namespace eyelib

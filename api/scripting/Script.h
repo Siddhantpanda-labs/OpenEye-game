@@ -3,12 +3,11 @@
 #include <memory>
 #include <string>
 
-namespace eyelib {
-namespace scripting {
-    using ScriptHandle = size_t;
-    constexpr ScriptHandle InvalidScriptHandle = 0;
-}
+#include "eyelib/scripting/ScriptHandle.h"
 
+struct lua_State;
+
+namespace eyelib {
 namespace api {
 
 /**
@@ -29,38 +28,43 @@ public:
      * @brief Load a script from file path.
      * @return ScriptHandle (0 if failed)
      */
-    static scripting::ScriptHandle Load(const std::string& path);
+    static ::eyelib::scripting::ScriptHandle Load(const std::string& path);
     
     /**
      * @brief Unload a script.
      */
-    static void Unload(scripting::ScriptHandle handle);
+    static void Unload(::eyelib::scripting::ScriptHandle handle);
     
     /**
      * @brief Reload a script (hot-reload).
      * @return true if successful
      */
-    static bool Reload(scripting::ScriptHandle handle);
+    static bool Reload(::eyelib::scripting::ScriptHandle handle);
     
     /**
      * @brief Get script path.
      */
-    static std::string GetPath(scripting::ScriptHandle handle);
+    static std::string GetPath(::eyelib::scripting::ScriptHandle handle);
     
     /**
      * @brief Get script name (extracted from path).
      */
-    static std::string GetName(scripting::ScriptHandle handle);
+    static std::string GetName(::eyelib::scripting::ScriptHandle handle);
     
     /**
      * @brief Check if script is valid.
      */
-    static bool IsValid(scripting::ScriptHandle handle);
+    static bool IsValid(::eyelib::scripting::ScriptHandle handle);
     
     /**
      * @brief Get last error message for script.
      */
-    static std::string GetError(scripting::ScriptHandle handle);
+    static std::string GetError(::eyelib::scripting::ScriptHandle handle);
+
+    static bool CallStart(::eyelib::scripting::ScriptHandle handle);
+    static bool CallUpdate(::eyelib::scripting::ScriptHandle handle, float deltaTime);
+    static bool CallStop(::eyelib::scripting::ScriptHandle handle);
+    static lua_State* GetState(::eyelib::scripting::ScriptHandle handle);
 
 private:
     class Impl;

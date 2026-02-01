@@ -9,10 +9,15 @@
 
 namespace openeye::player {
 
+class WorldPhysicsBridge;
+class WorldAnimationBridge;
+
 class WorldScriptingBridge {
 public:
     void BuildFromWorld(eyelib::api::world::World& world, const std::vector<std::string>& assetRoots);
-    void Update(eyelib::api::world::World& world, const std::vector<std::string>& assetRoots);
+    void Update(eyelib::api::world::World& world, const std::vector<std::string>& assetRoots, float deltaTime);
+    void SetPhysicsBridge(WorldPhysicsBridge* physics);
+    void SetAnimationBridge(WorldAnimationBridge* animation);
 
 private:
     struct ScriptBinding {
@@ -28,7 +33,9 @@ private:
                       bool forceReload);
     void UnloadBinding(const ::eyelib::world::EntityId& entity);
 
-    std::unordered_map<::eyelib::world::EntityId, ScriptBinding> m_bindings;
+    std::unordered_map<::eyelib::world::EntityId, ScriptBinding, ::eyelib::world::EntityIdHash> m_bindings;
+    WorldPhysicsBridge* m_physics = nullptr;
+    WorldAnimationBridge* m_animation = nullptr;
 };
 
 } // namespace openeye::player
