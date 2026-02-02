@@ -43,7 +43,7 @@
         { "entity": { "index": 3, "generation": 0 }, "data": { "position": [3.0, 2.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
         { "entity": { "index": 4, "generation": 0 }, "data": { "position": [0.0, 1.0, 2.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
         { "entity": { "index": 5, "generation": 0 }, "data": { "position": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.5, 1.5, 1.5] } },
-        { "entity": { "index": 6, "generation": 0 }, "data": { "position": [-2.5, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
+        { "entity": { "index": 6, "generation": 0 }, "data": { "position": [-2.5, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.02, 0.02, 0.02] } },
         { "entity": { "index": 7, "generation": 0 }, "data": { "position": [2.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
         { "entity": { "index": 8, "generation": 0 }, "data": { "position": [0.0, 0.5, -2.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } }
       ]
@@ -134,7 +134,7 @@
         {
           "entity": { "index": 6, "generation": 0 },
           "data": {
-            "meshAssetId": "models/it.glb",
+            "meshAssetId": "models/animation/Running.fbx",
             "materialAssetId": "",
             "visible": true,
             "activeLOD": 0,

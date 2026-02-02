@@ -227,8 +227,12 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
 
     for (const auto& d : scene.opaque) {
         if (!d.mesh || !d.material) continue;
-        d.material->Bind();
-        Shader* sh = d.material->GetShader().get();
+        if (d.materialInstance) {
+            d.materialInstance->Bind();
+        } else {
+            d.material->Bind();
+        }
+        Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
         if (sh) {
             sh->SetMat4("u_Model", d.transform);
             sh->SetMat4("u_View", scene.camera.view);
