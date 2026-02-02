@@ -125,26 +125,34 @@ AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
     }
     m_refCounts[id] = 1;
 
-    switch (type) {
-        case AssetType::Mesh: MeshLoader::LoadMesh(filePath); break;
-        case AssetType::Texture: TextureLoader::LoadTexture(filePath, true); break;
-        case AssetType::Shader: {
-            const std::string lower = filePath;
-            if (lower.rfind(".vert") != std::string::npos) {
-                const std::string frag = filePath.substr(0, filePath.size() - 5) + ".frag";
-                ShaderLoader::LoadShader(filePath, frag);
-            } else if (lower.rfind(".frag") != std::string::npos) {
-                const std::string vert = filePath.substr(0, filePath.size() - 5) + ".vert";
-                ShaderLoader::LoadShader(vert, filePath);
-            } else {
-                ShaderLoader::LoadShader(filePath, filePath);
+    try {
+        switch (type) {
+            case AssetType::Mesh: MeshLoader::LoadMesh(filePath); break;
+            case AssetType::Texture: TextureLoader::LoadTexture(filePath, true); break;
+            case AssetType::Shader: {
+                const std::string lower = filePath;
+                if (lower.rfind(".vert") != std::string::npos) {
+                    const std::string frag = filePath.substr(0, filePath.size() - 5) + ".frag";
+                    ShaderLoader::LoadShader(filePath, frag);
+                } else if (lower.rfind(".frag") != std::string::npos) {
+                    const std::string vert = filePath.substr(0, filePath.size() - 5) + ".vert";
+                    ShaderLoader::LoadShader(vert, filePath);
+                } else {
+                    ShaderLoader::LoadShader(filePath, filePath);
+                }
+                break;
             }
-            break;
+            case AssetType::Audio: AudioLoader::LoadAudio(filePath); break;
+            case AssetType::Animation: AnimationLoader::LoadAnimation(filePath); break;
+            case AssetType::Material: MaterialLoader::LoadMaterial(filePath); break;
+            default: break;
         }
-        case AssetType::Audio: AudioLoader::LoadAudio(filePath); break;
-        case AssetType::Animation: AnimationLoader::LoadAnimation(filePath); break;
-        case AssetType::Material: MaterialLoader::LoadMaterial(filePath); break;
-        default: break;
+    } catch (const std::exception& e) {
+        core::Log::ErrorF("AssetRegistry: load failed for '%s' - %s", filePath.c_str(), e.what());
+        return id;
+    } catch (...) {
+        core::Log::ErrorF("AssetRegistry: load failed for '%s' (unknown exception)", filePath.c_str());
+        return id;
     }
 
     m_memoryUsage += GetAssetSize(id);

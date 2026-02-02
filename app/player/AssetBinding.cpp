@@ -86,9 +86,17 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
             continue;
         }
 
-        registry.LoadAsset(resolved, type);
-        eyelib::api::core::Log::InfoF("Loaded asset: %s", resolved.c_str());
-        stats.loaded += 1;
+        try {
+            registry.LoadAsset(resolved, type);
+            eyelib::api::core::Log::InfoF("Loaded asset: %s", resolved.c_str());
+            stats.loaded += 1;
+        } catch (const std::exception& e) {
+            eyelib::api::core::Log::ErrorF("Failed to load asset: %s - %s", resolved.c_str(), e.what());
+            stats.missing += 1;
+        } catch (...) {
+            eyelib::api::core::Log::ErrorF("Failed to load asset: %s (unknown exception)", resolved.c_str());
+            stats.missing += 1;
+        }
     }
 
     return stats;

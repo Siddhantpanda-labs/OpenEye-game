@@ -9,6 +9,7 @@
 #include "WorldAnimation.h"
 
 #include <cmath>
+#include <exception>
 #include <glm/glm.hpp>
 
 namespace openeye::player {
@@ -185,7 +186,18 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::strin
     }
 
     ModelEntry entry{};
-    auto model = eyelib::api::ModelLoader::LoadModel(path);
+    std::shared_ptr<eyelib::api::ModelAsset> model;
+    try {
+        model = eyelib::api::ModelLoader::LoadModel(path);
+    } catch (const std::exception& e) {
+        eyelib::api::core::Log::ErrorF("Failed to load model: %s - %s", path.c_str(), e.what());
+        m_modelCache.emplace(path, entry);
+        return entry;
+    } catch (...) {
+        eyelib::api::core::Log::ErrorF("Failed to load model: %s (unknown exception)", path.c_str());
+        m_modelCache.emplace(path, entry);
+        return entry;
+    }
     if (!model) {
         eyelib::api::core::Log::WarnF("Failed to load model: %s", path.c_str());
         m_modelCache.emplace(path, entry);

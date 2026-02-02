@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <thread>
 
@@ -208,7 +209,16 @@ std::shared_ptr<render::Mesh> MeshLoader::CreateFromDecoded(const DecodedMeshDat
 AssetId MeshLoader::LoadMesh(const std::string& path) {
     auto& manager = AssetManager::Get();
     const AssetId id = manager.Registry().RegisterAsset(path, "Mesh");
-    auto mesh = LoadSingle(path);
+    std::shared_ptr<render::Mesh> mesh;
+    try {
+        mesh = LoadSingle(path);
+    } catch (const std::exception& e) {
+        core::Log::ErrorF("MeshLoader: failed to load '%s' - %s", path.c_str(), e.what());
+        return id;
+    } catch (...) {
+        core::Log::ErrorF("MeshLoader: failed to load '%s' (unknown exception)", path.c_str());
+        return id;
+    }
     if (mesh) {
         mesh->SetAssetId(id);
         manager.Cache().Store(id, mesh, "Mesh");

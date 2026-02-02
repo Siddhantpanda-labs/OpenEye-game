@@ -112,7 +112,7 @@
         {
           "entity": { "index": 2, "generation": 0 },
           "data": {
-            "meshAssetId": "models/Spaceship.obj",
+            "meshAssetId": "models/cube.obj",
             "materialAssetId": "materials/solid_red.mat",
             "visible": true,
             "activeLOD": 0,
