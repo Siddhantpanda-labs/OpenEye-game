@@ -1,6 +1,7 @@
 #include "api/assets/AssetRegistry.h"
 
 #include "eyelib/assets/AssetRegistry.h"
+#include "eyelib/assets/AssetManager.h"
 #include "eyelib/assets/AssetTypes.h"
 #include "eyelib/assets/AnimationAsset.h"
 #include "eyelib/render/resources/Material.h"
@@ -48,7 +49,8 @@ static AssetType ToApiType(eyelib::assets::AssetType type) {
 
 class AssetRegistry::Impl {
 public:
-    eyelib::assets::AssetRegistry reg{};
+    Impl() : reg(eyelib::assets::AssetManager::Get().Registry()) {}
+    eyelib::assets::AssetRegistry& reg;
 };
 
 AssetRegistry::AssetRegistry() : m_impl(new Impl()) {}

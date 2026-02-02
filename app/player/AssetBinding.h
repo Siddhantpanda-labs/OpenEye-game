@@ -17,6 +17,7 @@ struct AssetBindStats {
 
 AssetBindStats BindAssets(const eyelib::api::world::World& world,
                           const std::vector<std::string>& assetRoots,
-                          eyelib::api::AssetRegistry& registry);
+                          eyelib::api::AssetRegistry& registry,
+                          bool allowGpuAssets);
 
 } // namespace openeye::player

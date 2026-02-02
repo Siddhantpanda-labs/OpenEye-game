@@ -56,6 +56,9 @@ std::string GetFilename(const std::string& path);
 /** Parent directory path. */
 std::string GetDirectory(const std::string& path);
 
+/** Full path to the current executable. Empty on failure. */
+std::string GetExecutablePath();
+
 } // namespace filesystem
 } // namespace platform
 } // namespace eyelib

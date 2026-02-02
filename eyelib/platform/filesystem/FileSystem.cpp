@@ -15,6 +15,12 @@
 #else
 #include <sys/stat.h>
 #endif
+#if defined(__linux__) || defined(__ANDROID__)
+#include <unistd.h>
+#endif
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -121,6 +127,31 @@ std::string GetFilename(const std::string& path) {
 
 std::string GetDirectory(const std::string& path) {
     return fs::path(path).parent_path().string();
+}
+
+std::string GetExecutablePath() {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD n = GetModuleFileNameA(nullptr, buf, static_cast<DWORD>(sizeof(buf)));
+    if (n == 0 || n >= sizeof(buf))
+        return {};
+    return NormalizePath(std::string(buf, n));
+#elif defined(__linux__) || defined(__ANDROID__)
+    char buf[4096];
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0)
+        return {};
+    buf[n] = '\0';
+    return NormalizePath(buf);
+#elif defined(__APPLE__)
+    char buf[4096];
+    uint32_t size = static_cast<uint32_t>(sizeof(buf));
+    if (_NSGetExecutablePath(buf, &size) != 0)
+        return {};
+    return NormalizePath(buf);
+#else
+    return {};
+#endif
 }
 
 } // namespace filesystem

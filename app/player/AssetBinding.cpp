@@ -32,7 +32,8 @@ static std::string ResolveAssetPath(const std::string& id, const std::vector<std
 
 AssetBindStats BindAssets(const eyelib::api::world::World& world,
                           const std::vector<std::string>& assetRoots,
-                          eyelib::api::AssetRegistry& registry) {
+                          eyelib::api::AssetRegistry& registry,
+                          bool allowGpuAssets) {
     AssetBindStats stats{};
     const auto refs = world.CollectAssetReferences();
     for (const auto& ref : refs) {
@@ -73,6 +74,15 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
         if (type == eyelib::api::AssetType::Unknown) {
             eyelib::api::core::Log::WarnF("Unknown asset type for: %s", resolved.c_str());
             stats.unknownType += 1;
+            continue;
+        }
+
+        if (!allowGpuAssets
+            && (type == eyelib::api::AssetType::Mesh
+                || type == eyelib::api::AssetType::Material
+                || type == eyelib::api::AssetType::Shader
+                || type == eyelib::api::AssetType::Texture)) {
+            eyelib::api::core::Log::InfoF("Skipping GPU asset load (headless): %s", resolved.c_str());
             continue;
         }
 

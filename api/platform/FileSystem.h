@@ -23,6 +23,7 @@ using eyelib::platform::filesystem::NormalizePath;
 using eyelib::platform::filesystem::GetExtension;
 using eyelib::platform::filesystem::GetFilename;
 using eyelib::platform::filesystem::GetDirectory;
+using eyelib::platform::filesystem::GetExecutablePath;
 
 } // namespace filesystem
 } // namespace platform

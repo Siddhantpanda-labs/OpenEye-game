@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "registry": {
+    "generations": [0, 0, 0],
+    "freeList": []
+  },
+  "graph": {
+    "metadata": [
+      {
+        "entity": { "index": 0, "generation": 0 },
+        "name": "MainCamera",
+        "flags": 0
+      },
+      {
+        "entity": { "index": 1, "generation": 0 },
+        "name": "MainLight",
+        "flags": 0
+      },
+      {
+        "entity": { "index": 2, "generation": 0 },
+        "name": "Cube",
+        "flags": 0
+      }
+    ],
+    "hierarchy": [],
+    "tags": []
+  },
+  "components": {
+    "Name": {
+      "version": 1,
+      "items": [
+        {
+          "entity": { "index": 0, "generation": 0 },
+          "data": "MainCamera"
+        },
+        {
+          "entity": { "index": 1, "generation": 0 },
+          "data": "MainLight"
+        },
+        {
+          "entity": { "index": 2, "generation": 0 },
+          "data": "Cube"
+        }
+      ]
+    },
+    "Transform": {
+      "version": 1,
+      "items": [
+        {
+          "entity": { "index": 0, "generation": 0 },
+          "data": {
+            "position": [0.0, 1.0, 5.0],
+            "rotation": [1.0, 0.0, 0.0, 0.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        },
+        {
+          "entity": { "index": 1, "generation": 0 },
+          "data": {
+            "position": [2.0, 4.0, 2.0],
+            "rotation": [1.0, 0.0, 0.0, 0.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        },
+        {
+          "entity": { "index": 2, "generation": 0 },
+          "data": {
+            "position": [0.0, 0.0, 0.0],
+            "rotation": [1.0, 0.0, 0.0, 0.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        }
+      ]
+    },
+    "Camera": {
+      "version": 1,
+      "items": [
+        {
+          "entity": { "index": 0, "generation": 0 },
+          "data": {
+            "isPrimary": true,
+            "isPerspective": true,
+            "fov": 45.0,
+            "aspect": 1.7777778,
+            "near": 0.1,
+            "far": 1000.0,
+            "orthoSize": 10.0
+          }
+        }
+      ]
+    },
+    "Light": {
+      "version": 1,
+      "items": [
+        {
+          "entity": { "index": 1, "generation": 0 },
+          "data": {
+            "type": 0,
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 3.0,
+            "range": 20.0,
+            "innerCone": 15.0,
+            "outerCone": 30.0,
+            "castShadows": true
+          }
+        }
+      ]
+    },
+    "Renderable": {
+      "version": 1,
+      "items": [
+        {
+          "entity": { "index": 2, "generation": 0 },
+          "data": {
+            "meshAssetId": "models/Spaceship.obj",
+            "materialAssetId": "materials/solid_red.mat",
+            "visible": true,
+            "activeLOD": 0,
+            "lodMeshAssetIds": []
+          }
+        }
+      ]
+    }
+  }
+}

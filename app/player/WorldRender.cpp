@@ -1,8 +1,10 @@
 #include "WorldRender.h"
 
 #include "api/assets/loaders/ModelLoader.h"
+#include "api/animation/Skeleton.h"
 #include "api/core/All.h"
 #include "api/math/TransformUtils.h"
+#include "api/platform/All.h"
 #include "api/render/RenderScene.h"
 #include "WorldAnimation.h"
 
@@ -13,8 +15,69 @@ namespace openeye::player {
 
 namespace {
 
+static std::string JoinPath(const std::string& base, const std::string& leaf) {
+    if (base.empty()) return leaf;
+    const char last = base.back();
+    if (last == '/' || last == '\\') return base + leaf;
+    return base + "/" + leaf;
+}
+
+static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots) {
+    using eyelib::api::platform::filesystem::FileExists;
+    if (id.empty()) return {};
+    if (FileExists(id)) return id;
+    for (const auto& root : roots) {
+        const std::string candidate = JoinPath(root, id);
+        if (FileExists(candidate)) return candidate;
+    }
+    return {};
+}
+
 float DegreesToRadians(float degrees) {
     return degrees * 0.017453292519943295f;
+}
+
+std::vector<eyelib::math::Mat4> BuildBindPoseMatrices(const std::shared_ptr<eyelib::api::Skeleton>& skeleton) {
+    if (!skeleton) {
+        return {};
+    }
+    auto internal = skeleton->GetInternal();
+    if (!internal || internal->BoneCount() == 0) {
+        return {};
+    }
+    const size_t count = internal->BoneCount();
+    std::vector<eyelib::math::Mat4> local(count, eyelib::math::Mat4(1.0f));
+    for (size_t i = 0; i < count; ++i) {
+        const auto& bone = internal->GetBone(i);
+        local[i] = eyelib::math::Compose(bone.bindPosition, bone.bindRotation, bone.bindScale);
+    }
+
+    std::vector<eyelib::math::Mat4> global(count, eyelib::math::Mat4(1.0f));
+    std::vector<uint8_t> computed(count, 0);
+    std::function<void(size_t)> computeGlobal = [&](size_t idx) {
+        if (computed[idx]) return;
+        const auto& bone = internal->GetBone(idx);
+        if (bone.parentIndex >= 0) {
+            const size_t parent = static_cast<size_t>(bone.parentIndex);
+            if (parent < count) {
+                computeGlobal(parent);
+                global[idx] = global[parent] * local[idx];
+            } else {
+                global[idx] = local[idx];
+            }
+        } else {
+            global[idx] = local[idx];
+        }
+        computed[idx] = 1;
+    };
+
+    std::vector<eyelib::math::Mat4> out(count, eyelib::math::Mat4(1.0f));
+    for (size_t i = 0; i < count; ++i) {
+        computeGlobal(i);
+        const auto& bone = internal->GetBone(i);
+        out[i] = internal->GetGlobalInverseTransform() * global[i] * bone.inverseBindMatrix;
+    }
+    return out;
 }
 
 eyelib::math::Mat4 TransformToMatrix(const eyelib::world::components::Transform& transform) {
@@ -137,6 +200,8 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::strin
     if (!materials.empty()) {
         entry.material = materials.front();
     }
+    entry.skeleton = model->GetSkeleton();
+    entry.bindPoseMatrices = BuildBindPoseMatrices(entry.skeleton);
 
     if (!entry.material) {
         EnsureDefaultMaterial();
@@ -195,11 +260,12 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
-        if (meshId.empty()) {
+        const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+        if (meshResolved.empty()) {
             continue;
         }
 
-        auto modelEntry = LoadModelEntry(meshId);
+        auto modelEntry = LoadModelEntry(meshResolved);
         if (!modelEntry.mesh) {
             continue;
         }
@@ -208,19 +274,30 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderable.materialAssetId.empty()) {
-            if (auto material = ResolveMaterial(renderable.materialAssetId, assetRegistry)) {
-                drawable.material = material;
+            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, options.assetRoots);
+            if (!matResolved.empty() && assetRegistry) {
+                if (auto material = assetRegistry->GetMaterial(matResolved)) {
+                    drawable.material = material;
+                }
             }
         }
         if (const auto* transform = findTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
-        if (animationBridge && drawable.material) {
-            if (const auto* bones = animationBridge->GetBoneMatrices(entry.entity)) {
-                if (!bones->empty()) {
-                    drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
-                    drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
+        if (drawable.material) {
+            const std::vector<eyelib::math::Mat4>* bones = nullptr;
+            if (animationBridge) {
+                bones = animationBridge->GetBoneMatrices(entry.entity);
+                if (bones && bones->empty()) {
+                    bones = nullptr;
                 }
+            }
+            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
+                bones = &modelEntry.bindPoseMatrices;
+            }
+            if (bones) {
+                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
+                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
             }
         }
         scene.opaque.push_back(drawable);
@@ -232,7 +309,11 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (!renderer.visible || renderer.meshAssetId.empty()) {
             continue;
         }
-        auto modelEntry = LoadModelEntry(renderer.meshAssetId);
+        const std::string meshResolved = ResolveAssetPath(renderer.meshAssetId, options.assetRoots);
+        if (meshResolved.empty()) {
+            continue;
+        }
+        auto modelEntry = LoadModelEntry(meshResolved);
         if (!modelEntry.mesh) {
             continue;
         }
@@ -240,19 +321,30 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderer.materialAssetId.empty()) {
-            if (auto material = ResolveMaterial(renderer.materialAssetId, assetRegistry)) {
-                drawable.material = material;
+            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, options.assetRoots);
+            if (!matResolved.empty() && assetRegistry) {
+                if (auto material = assetRegistry->GetMaterial(matResolved)) {
+                    drawable.material = material;
+                }
             }
         }
         if (const auto* transform = findTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
-        if (animationBridge && drawable.material) {
-            if (const auto* bones = animationBridge->GetBoneMatrices(entry.entity)) {
-                if (!bones->empty()) {
-                    drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
-                    drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
+        if (drawable.material) {
+            const std::vector<eyelib::math::Mat4>* bones = nullptr;
+            if (animationBridge) {
+                bones = animationBridge->GetBoneMatrices(entry.entity);
+                if (bones && bones->empty()) {
+                    bones = nullptr;
                 }
+            }
+            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
+                bones = &modelEntry.bindPoseMatrices;
+            }
+            if (bones) {
+                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
+                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
             }
         }
         scene.opaque.push_back(drawable);

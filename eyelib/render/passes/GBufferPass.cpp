@@ -42,6 +42,8 @@ void GBufferPass::Render(GBuffer& gbuffer,
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
+    const GLboolean wasCullEnabled = glIsEnabled(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE);
 
     for (const auto& d : drawables) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
@@ -124,6 +126,9 @@ void GBufferPass::Render(GBuffer& gbuffer,
     m_geometryShader->Unbind();
     gbuffer.Unbind();
     m_currentGBuffer = nullptr;
+    if (wasCullEnabled) {
+        glEnable(GL_CULL_FACE);
+    }
 }
 
 } // namespace render

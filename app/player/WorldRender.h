@@ -27,6 +27,8 @@ private:
     struct ModelEntry {
         std::shared_ptr<eyelib::api::Mesh> mesh;
         std::shared_ptr<eyelib::api::Material> material;
+        std::shared_ptr<eyelib::api::Skeleton> skeleton;
+        std::vector<eyelib::math::Mat4> bindPoseMatrices;
     };
     struct SkinnedMaterialEntry {
         ::eyelib::world::EntityId entity;

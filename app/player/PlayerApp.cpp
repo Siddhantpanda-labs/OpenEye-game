@@ -16,6 +16,12 @@
 #include <functional>
 #include <iostream>
 #include <utility>
+#include <cstdio>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace openeye::player {
 
@@ -77,7 +83,8 @@ std::string NormalizePath(const std::string& path) {
     if (path.empty()) {
         return {};
     }
-    return NormalizePath(GetAbsolutePath(path));
+    std::string absolute = GetAbsolutePath(path);
+    return eyelib::api::platform::filesystem::NormalizePath(absolute);
 }
 
 std::vector<std::string> NormalizeRoots(const std::vector<std::string>& roots) {
@@ -87,6 +94,38 @@ std::vector<std::string> NormalizeRoots(const std::vector<std::string>& roots) {
         out.push_back(NormalizePath(root));
     }
     return out;
+}
+
+static bool IsAbsolutePath(const std::string& path) {
+    if (path.empty()) return false;
+#ifdef _WIN32
+    if (path.size() > 1 && path[1] == ':') return true;
+#endif
+    return path[0] == '/' || path[0] == '\\';
+}
+
+static void AttachConsoleIfNeeded() {
+#ifdef _WIN32
+    if (GetConsoleWindow() == NULL && AllocConsole()) {
+        (void)freopen("CONOUT$", "w", stdout);
+        (void)freopen("CONOUT$", "w", stderr);
+        std::ios_base::sync_with_stdio(true);
+    }
+#endif
+}
+
+static void ResolveLogPathToExeDir(RuntimeOptions& options) {
+    using namespace eyelib::api::platform::filesystem;
+    std::string exePath = GetExecutablePath();
+    if (exePath.empty()) return;
+    std::string exeDir = GetDirectory(exePath);
+    if (exeDir.empty()) return;
+    if (!IsAbsolutePath(options.logPath)) {
+        if (!exeDir.empty() && exeDir.back() != '/' && exeDir.back() != '\\')
+            exeDir += "/";
+        std::string full = GetAbsolutePath(exeDir + options.logPath);
+        options.logPath = eyelib::api::platform::filesystem::NormalizePath(full);
+    }
 }
 
 void ApplyDefaults(RuntimeOptions& options) {
@@ -158,6 +197,8 @@ void LogOptions(const RuntimeOptions& options) {
 } // namespace
 
 int RunPlayer(int argc, char** argv) {
+    AttachConsoleIfNeeded();
+
     RuntimeOptions options;
     std::string error;
     const std::string configPath = FindConfigPath(argc, argv);
@@ -191,6 +232,7 @@ int RunPlayer(int argc, char** argv) {
     ApplyDefaults(options);
     options.scenePath = NormalizePath(options.scenePath);
     options.assetRoots = NormalizeRoots(options.assetRoots);
+    ResolveLogPathToExeDir(options);
 
     eyelib::api::core::Engine::Config config;
     config.enableLogging = true;
@@ -244,19 +286,6 @@ int RunPlayer(int argc, char** argv) {
         return static_cast<int>(ExitCode::SceneLoadFailed);
     }
 
-    eyelib::api::AssetRegistry assetRegistry;
-    const auto assetStats = BindAssets(world, options.assetRoots, assetRegistry);
-    if (assetStats.referenced > 0) {
-        eyelib::api::core::Log::InfoF(
-            "Assets: referenced=%d loaded=%d missing=%d unknownType=%d",
-            assetStats.referenced, assetStats.loaded, assetStats.missing, assetStats.unknownType
-        );
-    }
-    if (options.strictAssets && (assetStats.missing > 0 || assetStats.unknownType > 0)) {
-        eyelib::api::core::Log::Error("Strict asset mode: missing or unknown assets detected.");
-        return static_cast<int>(ExitCode::AssetStrictFailed);
-    }
-
     eyelib::api::Window window;
     ScopedWindow windowGuard;
     if (!options.headless) {
@@ -284,6 +313,20 @@ int RunPlayer(int argc, char** argv) {
             eyelib::api::core::Log::Error("Failed to initialize renderer or pipeline.");
             return static_cast<int>(ExitCode::RenderInitFailed);
         }
+    }
+
+    eyelib::api::AssetRegistry assetRegistry;
+    const bool allowGpuAssets = !options.headless;
+    const auto assetStats = BindAssets(world, options.assetRoots, assetRegistry, allowGpuAssets);
+    if (assetStats.referenced > 0) {
+        eyelib::api::core::Log::InfoF(
+            "Assets: referenced=%d loaded=%d missing=%d unknownType=%d",
+            assetStats.referenced, assetStats.loaded, assetStats.missing, assetStats.unknownType
+        );
+    }
+    if (options.strictAssets && (assetStats.missing > 0 || assetStats.unknownType > 0)) {
+        eyelib::api::core::Log::Error("Strict asset mode: missing or unknown assets detected.");
+        return static_cast<int>(ExitCode::AssetStrictFailed);
     }
 
     WorldPhysicsBridge physicsBridge;
