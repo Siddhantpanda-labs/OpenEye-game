@@ -4,11 +4,25 @@ in vec3 v_WorldPos;
 in vec3 v_ViewPos;
 in vec3 v_WorldNormal;
 in vec2 v_TexCoord;
+in mat3 v_TBN;
 
 uniform vec3 u_ViewPos;
 uniform vec3 u_Albedo;
 uniform float u_Metallic;
 uniform float u_Roughness;
+uniform float u_AO;
+uniform sampler2D u_AlbedoTexture;
+uniform int u_UseAlbedoTexture;
+uniform sampler2D u_NormalTexture;
+uniform int u_UseNormalTexture;
+uniform sampler2D u_MetallicRoughnessTexture;
+uniform int u_UseMetallicRoughnessTexture;
+uniform sampler2D u_AOTexture;
+uniform int u_UseAOTexture;
+uniform sampler2D u_EmissiveTexture;
+uniform int u_UseEmissiveTexture;
+uniform vec3 u_Emission;
+uniform float u_Alpha;
 uniform vec3 u_DirLightDir;
 uniform vec3 u_DirLightColor;
 uniform float u_DirLightIntensity;
@@ -25,6 +39,10 @@ uniform float u_NearPlane;
 uniform float u_FarPlane;
 uniform int u_PointLightCount;
 uniform int u_SpotLightCount;
+uniform sampler2D u_ShadowMap;
+uniform mat4 u_LightSpaceMatrix;
+uniform float u_ShadowBias;
+uniform int u_UseShadows;
 
 layout(binding = 2) restrict readonly buffer LightIndexBuffer { uint lightIndices[]; };
 
@@ -55,6 +73,17 @@ layout(binding = 3) restrict readonly buffer PointLightBuffer { PointLight point
 layout(binding = 4) restrict readonly buffer SpotLightBuffer { SpotLight spotLights[]; };
 
 layout(location = 0) out vec4 o_Color;
+
+float shadowFactor(vec3 worldPos) {
+    if (u_UseShadows <= 0) return 0.0;
+    vec4 lightSpacePos = u_LightSpaceMatrix * vec4(worldPos, 1.0);
+    vec3 ndc = lightSpacePos.xyz / lightSpacePos.w;
+    ndc = ndc * 0.5 + 0.5;
+    if (ndc.z > 1.0 || ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0)
+        return 0.0;
+    float depth = texture(u_ShadowMap, ndc.xy).r;
+    return (ndc.z - u_ShadowBias > depth) ? 1.0 : 0.0;
+}
 
 vec3 calc_point_light(vec3 pos, vec3 color, float intensity, float radius,
     vec3 fragPos, vec3 normal, vec3 viewDir, vec3 albedo, float metallic, float roughness) {
@@ -89,15 +118,39 @@ vec3 calc_spot_light(vec3 pos, vec3 dir, vec3 color, float intensity, float rang
 
 void main() {
     vec3 N = normalize(v_WorldNormal);
+    if (u_UseNormalTexture > 0) {
+        vec3 n = texture(u_NormalTexture, v_TexCoord).xyz * 2.0 - 1.0;
+        N = normalize(v_TBN * n);
+    }
     vec3 V = normalize(u_ViewPos - v_WorldPos);
-    vec3 albedo = u_Albedo;
+    vec3 albedo = u_UseAlbedoTexture > 0
+        ? texture(u_AlbedoTexture, v_TexCoord).rgb * u_Albedo
+        : u_Albedo;
     float metallic = u_Metallic;
-    float roughness = max(u_Roughness, 0.04);
+    float roughness = u_Roughness;
+    if (u_UseMetallicRoughnessTexture > 0) {
+        vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg;
+        metallic = mr.x;
+        roughness = mr.y;
+    }
+    roughness = max(roughness, 0.04);
 
-    vec3 result = albedo * u_Ambient;
+    float ao = u_AO;
+    if (u_UseAOTexture > 0) {
+        ao = texture(u_AOTexture, v_TexCoord).r;
+    }
+
+    vec3 emission = u_Emission;
+    if (u_UseEmissiveTexture > 0) {
+        emission = texture(u_EmissiveTexture, v_TexCoord).rgb;
+    }
+
+    vec3 result = albedo * u_Ambient * ao;
     vec3 L = normalize(-u_DirLightDir);
     float NdotL = max(dot(N, L), 0.0);
-    result += albedo * u_DirLightColor * u_DirLightIntensity * NdotL;
+    float shadow = shadowFactor(v_WorldPos);
+    float lightVis = 1.0 - shadow;
+    result += albedo * u_DirLightColor * u_DirLightIntensity * NdotL * lightVis;
 
     float viewZ = abs(v_ViewPos.z);
     float viewZClamped = clamp(viewZ, u_NearPlane, u_FarPlane);
@@ -130,5 +183,6 @@ void main() {
         }
     }
 
-    o_Color = vec4(result * u_Exposure, 1.0);
+    result += emission;
+    o_Color = vec4(result * u_Exposure, u_Alpha);
 }

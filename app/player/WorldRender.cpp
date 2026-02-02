@@ -100,7 +100,7 @@ bool WorldRenderBridge::Initialize(uint32_t width, uint32_t height) {
         m_renderer.Shutdown();
         return false;
     }
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     m_width = width;
     m_height = height;
     m_ready = true;
@@ -428,6 +428,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
             scene.light.direction = glm::normalize(direction);
             scene.light.color = light.color;
             scene.light.intensity = light.intensity;
+            scene.light.castShadows = light.castShadows;
             directionalSet = true;
         } else if (light.type == eyelib::world::components::Light::Type::Point) {
             eyelib::api::render::PointLight point{};

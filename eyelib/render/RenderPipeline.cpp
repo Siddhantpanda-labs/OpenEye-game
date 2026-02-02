@@ -11,13 +11,17 @@
 #include "eyelib/debug/Presets.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/TextureCube.h"
 #include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/core/Time.h"
+#include <algorithm>
 #include <glad/glad.h>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <string>
 
 namespace eyelib {
 namespace render {
@@ -35,6 +39,7 @@ void RenderPipeline::Shutdown() {
     if (m_lightIndexSSBO) { glDeleteBuffers(1, &m_lightIndexSSBO); m_lightIndexSSBO = 0; }
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
+    m_forwardPlusSkinnedShader.reset();
     m_clusteredLightGrid.reset();
     m_frameGraph.reset();
     m_lightingPass.reset();
@@ -150,12 +155,14 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
     auto gbDepth = m_frameGraph->ImportTexture("GBufferDepth", m_gbuffer->GetDepthTexture(), m_width, m_height);
     auto shadowTex = m_frameGraph->ImportTexture("Shadow", m_shadowMap->GetDepthTexture(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
 
-    m_frameGraph->AddPass("Shadow",
-        [this, &scene, &light, &cam](const FGPassResources&) {
-            m_shadowPass->Render(*m_shadowMap, scene.opaque, light.direction,
-                cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
-        },
-        {}, { shadowTex }, true);
+    if (light.castShadows) {
+        m_frameGraph->AddPass("Shadow",
+            [this, &scene, &light, &cam](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, scene.opaque, light.direction,
+                    cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
+            },
+            {}, { shadowTex }, true);
+    }
 
     m_frameGraph->AddPass("GBuffer",
         [this, &scene, &cam](const FGPassResources&) {
@@ -163,16 +170,20 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
 
+    std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
+    if (light.castShadows) lightingReads.push_back(shadowTex);
     m_frameGraph->AddPass("Lighting",
         [this, &scene, &cam](const FGPassResources&) {
             glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
             glViewport(0, 0, m_width, m_height);
             glClearColor(0, 0, 0, 1);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, m_shadowMap.get());
+            ShadowMap* shadowMapForLighting = scene.light.castShadows ? m_shadowMap.get() : nullptr;
+            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
+                &scene.pointLights, &scene.spotLights);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
-        { gbPos, gbNorm, gbAlb, gbPBR, shadowTex }, { hdrColor }, true);
+        lightingReads, { hdrColor }, true);
 
     m_frameGraph->AddPass("Transparency",
         [this, &scene, &cam](const FGPassResources&) {
@@ -209,6 +220,11 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
         glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
     }
 
+    const int kMaxPointLights = 8;
+    const int kMaxSpotLights = 4;
+    const int numPoint = static_cast<int>(std::min(scene.pointLights.size(), size_t(kMaxPointLights)));
+    const int numSpot = static_cast<int>(std::min(scene.spotLights.size(), size_t(kMaxSpotLights)));
+
     for (const auto& d : scene.opaque) {
         if (!d.mesh || !d.material) continue;
         d.material->Bind();
@@ -230,6 +246,25 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
                 sh->SetInt("u_UseShadows", 1);
             } else {
                 sh->SetInt("u_UseShadows", 0);
+            }
+            sh->SetInt("u_PointLightCount", numPoint);
+            for (int i = 0; i < numPoint; ++i) {
+                const auto& p = scene.pointLights[static_cast<size_t>(i)];
+                sh->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
+                sh->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
+                sh->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
+                sh->SetFloat("u_PointLightRadius[" + std::to_string(i) + "]", p.radius);
+            }
+            sh->SetInt("u_SpotLightCount", numSpot);
+            for (int i = 0; i < numSpot; ++i) {
+                const auto& s = scene.spotLights[static_cast<size_t>(i)];
+                sh->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
+                sh->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
+                sh->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
+                sh->SetFloat("u_SpotLightIntensity[" + std::to_string(i) + "]", s.intensity);
+                sh->SetFloat("u_SpotLightRange[" + std::to_string(i) + "]", s.range);
+                sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
+                sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
             }
             d.mesh->Bind();
             d.mesh->Draw();
@@ -289,6 +324,12 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
     // Upload clustered light grid
     m_clusteredLightGrid->UploadToGPU(m_lightIndexSSBO, m_lightIndexSSBO);
 
+    if (scene.light.castShadows && m_shadowMap && m_shadowPass) {
+        m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
+            scene.camera.view, scene.camera.projection, scene.camera.viewPos,
+            scene.camera.nearPlane, scene.camera.farPlane);
+    }
+
     // Ensure forward+ shader exists
     if (!m_forwardPlusShader || !m_forwardPlusShader->IsValid()) {
         m_forwardPlusShader = std::make_shared<Shader>();
@@ -300,46 +341,165 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
         return;
     }
 
+    if (!m_forwardPlusSkinnedShader || !m_forwardPlusSkinnedShader->IsValid()) {
+        m_forwardPlusSkinnedShader = std::make_shared<Shader>();
+        m_forwardPlusSkinnedShader->LoadFromFile("assets/shaders/passes/forward/forwardplus_skinned.vert", "assets/shaders/passes/forward/forwardplus.frag");
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
     glViewport(0, 0, m_width, m_height);
     glClearColor(0.1f, 0.1f, 0.15f, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE); // Match Forward: render both sides so orientation matches
 
-    m_forwardPlusShader->Bind();
-    m_forwardPlusShader->SetMat4("u_View", scene.camera.view);
-    m_forwardPlusShader->SetMat4("u_Projection", scene.camera.projection);
-    m_forwardPlusShader->SetVec3("u_ViewPos", scene.camera.viewPos);
-    m_forwardPlusShader->SetVec3("u_DirLightDir", scene.light.direction);
-    m_forwardPlusShader->SetVec3("u_DirLightColor", scene.light.color);
-    m_forwardPlusShader->SetFloat("u_DirLightIntensity", scene.light.intensity);
-    m_forwardPlusShader->SetVec3("u_Ambient", scene.light.ambient);
-    m_forwardPlusShader->SetFloat("u_Exposure", scene.light.exposure);
-    m_forwardPlusShader->SetInt("u_ScreenWidth", static_cast<int>(m_width));
-    m_forwardPlusShader->SetInt("u_ScreenHeight", static_cast<int>(m_height));
-    m_forwardPlusShader->SetInt("u_TileCountX", static_cast<int>(m_clusteredLightGrid->GetTileCountX()));
-    m_forwardPlusShader->SetInt("u_TileCountY", static_cast<int>(m_clusteredLightGrid->GetTileCountY()));
-    m_forwardPlusShader->SetInt("u_SliceCount", static_cast<int>(m_clusteredLightGrid->GetSliceCount()));
-    m_forwardPlusShader->SetFloat("u_LogNear", m_clusteredLightGrid->GetLogNear());
-    m_forwardPlusShader->SetFloat("u_LogFar", m_clusteredLightGrid->GetLogFar());
-    m_forwardPlusShader->SetFloat("u_NearPlane", m_clusteredLightGrid->GetNearPlane());
-    m_forwardPlusShader->SetFloat("u_FarPlane", m_clusteredLightGrid->GetFarPlane());
-    m_forwardPlusShader->SetInt("u_PointLightCount", static_cast<int>(scene.pointLights.size()));
-    m_forwardPlusShader->SetInt("u_SpotLightCount", static_cast<int>(scene.spotLights.size()));
+    const int kShadowMapUnit = 5;
+    if (scene.light.castShadows && m_shadowMap) {
+        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
+        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    }
+
+    auto setCommonForwardPlusUniforms = [&](Shader* sh) {
+        sh->SetMat4("u_View", scene.camera.view);
+        sh->SetMat4("u_Projection", scene.camera.projection);
+        sh->SetVec3("u_ViewPos", scene.camera.viewPos);
+        sh->SetVec3("u_DirLightDir", scene.light.direction);
+        sh->SetVec3("u_DirLightColor", scene.light.color);
+        sh->SetFloat("u_DirLightIntensity", scene.light.intensity);
+        sh->SetVec3("u_Ambient", scene.light.ambient);
+        sh->SetFloat("u_Exposure", scene.light.exposure);
+        sh->SetInt("u_ScreenWidth", static_cast<int>(m_width));
+        sh->SetInt("u_ScreenHeight", static_cast<int>(m_height));
+        sh->SetInt("u_TileCountX", static_cast<int>(m_clusteredLightGrid->GetTileCountX()));
+        sh->SetInt("u_TileCountY", static_cast<int>(m_clusteredLightGrid->GetTileCountY()));
+        sh->SetInt("u_SliceCount", static_cast<int>(m_clusteredLightGrid->GetSliceCount()));
+        sh->SetFloat("u_LogNear", m_clusteredLightGrid->GetLogNear());
+        sh->SetFloat("u_LogFar", m_clusteredLightGrid->GetLogFar());
+        sh->SetFloat("u_NearPlane", m_clusteredLightGrid->GetNearPlane());
+        sh->SetFloat("u_FarPlane", m_clusteredLightGrid->GetFarPlane());
+        sh->SetInt("u_PointLightCount", static_cast<int>(scene.pointLights.size()));
+        sh->SetInt("u_SpotLightCount", static_cast<int>(scene.spotLights.size()));
+        if (scene.light.castShadows && m_shadowMap) {
+            sh->SetInt("u_ShadowMap", kShadowMapUnit);
+            sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
+            sh->SetFloat("u_ShadowBias", 0.005f);
+            sh->SetInt("u_UseShadows", 1);
+        } else {
+            sh->SetInt("u_UseShadows", 0);
+        }
+    };
+
+    const int kAlbedoTextureUnit = 0;
+    const int kNormalTextureUnit = 1;
+    const int kMetallicRoughnessTextureUnit = 2;
+    const int kAOTextureUnit = 3;
+    const int kEmissiveTextureUnit = 4;
+    const math::Vec4 kDefaultUVTransform(0.0f, 0.0f, 1.0f, 1.0f);
+    bool commonSetNonSkinned = false;
+    bool commonSetSkinned = false;
 
     for (const auto& d : scene.opaque) {
-        if (!d.mesh || !d.material) continue;
-        m_forwardPlusShader->SetMat4("u_Model", d.transform);
-        m_forwardPlusShader->SetVec3("u_Albedo", d.material->GetAlbedo());
-        m_forwardPlusShader->SetFloat("u_Metallic", d.material->GetMetallic());
-        m_forwardPlusShader->SetFloat("u_Roughness", d.material->GetRoughness());
+        if (!d.mesh) continue;
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (!material) continue;
+
+        const math::Mat4* bonePtr = nullptr;
+        size_t boneCount = 0;
+        auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
+            if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+        };
+        if (d.materialInstance) d.materialInstance->ForEachMat4Array(collectBones);
+        else material->ForEachMat4Array(collectBones);
+
+        const bool useSkinned = (bonePtr && boneCount > 0 && m_forwardPlusSkinnedShader && m_forwardPlusSkinnedShader->IsValid());
+        Shader* sh = useSkinned ? m_forwardPlusSkinnedShader.get() : m_forwardPlusShader.get();
+        sh->Bind();
+
+        if (useSkinned) {
+            if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; }
+        } else {
+            if (!commonSetNonSkinned) { setCommonForwardPlusUniforms(sh); commonSetNonSkinned = true; }
+        }
+
+        sh->SetMat4("u_Model", d.transform);
+        if (useSkinned) sh->SetMat4Array("u_Bones", bonePtr, boneCount);
+
+        const math::Vec4 uvTransform = d.materialInstance ? d.materialInstance->GetVec4("u_UVTransform", kDefaultUVTransform) : material->GetVec4("u_UVTransform", kDefaultUVTransform);
+        const float uvRotation = d.materialInstance ? d.materialInstance->GetFloat("u_UVRotation", 0.0f) : material->GetFloat("u_UVRotation", 0.0f);
+        const float texCoordIndex = d.materialInstance ? d.materialInstance->GetFloat("u_TexCoordIndex", 0.0f) : material->GetFloat("u_TexCoordIndex", 0.0f);
+        const float flipV = d.materialInstance ? d.materialInstance->GetFloat("u_FlipV", 0.0f) : material->GetFloat("u_FlipV", 0.0f);
+        sh->SetVec4("u_UVTransform", uvTransform);
+        sh->SetFloat("u_UVRotation", uvRotation);
+        sh->SetFloat("u_TexCoordIndex", texCoordIndex);
+        sh->SetFloat("u_FlipV", flipV);
+
+        const math::Vec3 albedo = d.materialInstance ? d.materialInstance->GetAlbedo() : material->GetAlbedo();
+        const float metallic = d.materialInstance ? d.materialInstance->GetMetallic() : material->GetMetallic();
+        const float roughness = d.materialInstance ? d.materialInstance->GetRoughness() : material->GetRoughness();
+        const float ao = d.materialInstance ? d.materialInstance->GetAO() : material->GetAO();
+        const math::Vec3 emission = d.materialInstance ? d.materialInstance->GetEmission() : material->GetEmission();
+        const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
+        sh->SetVec3("u_Albedo", albedo);
+        sh->SetFloat("u_Metallic", metallic);
+        sh->SetFloat("u_Roughness", roughness);
+        sh->SetFloat("u_AO", ao);
+        sh->SetVec3("u_Emission", emission);
+        sh->SetFloat("u_Alpha", alpha);
+
+        auto albedoTex = d.materialInstance ? d.materialInstance->GetTexture("u_AlbedoTexture") : material->GetTexture("u_AlbedoTexture");
+        if (albedoTex && albedoTex->IsValid()) {
+            albedoTex->Bind(kAlbedoTextureUnit);
+            sh->SetInt("u_AlbedoTexture", kAlbedoTextureUnit);
+            sh->SetInt("u_UseAlbedoTexture", 1);
+        } else {
+            sh->SetInt("u_UseAlbedoTexture", 0);
+        }
+        auto normalTex = d.materialInstance ? d.materialInstance->GetTexture("u_NormalTexture") : material->GetTexture("u_NormalTexture");
+        if (normalTex && normalTex->IsValid()) {
+            normalTex->Bind(kNormalTextureUnit);
+            sh->SetInt("u_NormalTexture", kNormalTextureUnit);
+            sh->SetInt("u_UseNormalTexture", 1);
+        } else {
+            sh->SetInt("u_UseNormalTexture", 0);
+        }
+        auto mrTex = d.materialInstance ? d.materialInstance->GetTexture("u_MetallicRoughnessTexture") : material->GetTexture("u_MetallicRoughnessTexture");
+        if (mrTex && mrTex->IsValid()) {
+            mrTex->Bind(kMetallicRoughnessTextureUnit);
+            sh->SetInt("u_MetallicRoughnessTexture", kMetallicRoughnessTextureUnit);
+            sh->SetInt("u_UseMetallicRoughnessTexture", 1);
+        } else {
+            sh->SetInt("u_UseMetallicRoughnessTexture", 0);
+        }
+        auto aoTex = d.materialInstance ? d.materialInstance->GetTexture("u_AOTexture") : material->GetTexture("u_AOTexture");
+        if (aoTex && aoTex->IsValid()) {
+            aoTex->Bind(kAOTextureUnit);
+            sh->SetInt("u_AOTexture", kAOTextureUnit);
+            sh->SetInt("u_UseAOTexture", 1);
+        } else {
+            sh->SetInt("u_UseAOTexture", 0);
+        }
+        auto emissiveTex = d.materialInstance ? d.materialInstance->GetTexture("u_EmissiveTexture") : material->GetTexture("u_EmissiveTexture");
+        if (emissiveTex && emissiveTex->IsValid()) {
+            emissiveTex->Bind(kEmissiveTextureUnit);
+            sh->SetInt("u_EmissiveTexture", kEmissiveTextureUnit);
+            sh->SetInt("u_UseEmissiveTexture", 1);
+        } else {
+            sh->SetInt("u_UseEmissiveTexture", 0);
+        }
+
         d.mesh->Bind();
         d.mesh->Draw();
         d.mesh->Unbind();
     }
 
     m_forwardPlusShader->Unbind();
+    if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
+    glEnable(GL_CULL_FACE);
     TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    if (scene.light.castShadows && m_shadowMap) {
+        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

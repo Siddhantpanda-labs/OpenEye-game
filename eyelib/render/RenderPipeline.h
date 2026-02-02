@@ -78,6 +78,7 @@ private:
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
     std::shared_ptr<Shader> m_forwardPlusShader;
+    std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
     std::shared_ptr<Shader> m_skyboxShader;
 
     unsigned int m_hdrFBO = 0;

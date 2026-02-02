@@ -39,6 +39,7 @@ namespace {
     out.light.intensity = scene.light.intensity;
     out.light.ambient = scene.light.ambient;
     out.light.exposure = scene.light.exposure;
+    out.light.castShadows = scene.light.castShadows;
     out.skybox = scene.skybox ? scene.skybox->GetInternal() : nullptr;
 
     out.pointLights.reserve(scene.pointLights.size());

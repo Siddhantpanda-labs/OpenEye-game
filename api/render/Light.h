@@ -15,6 +15,7 @@ struct DirectionalLight {
     float intensity = 3.0f;
     math::Vec3 ambient{0.08f};
     float exposure = 1.0f;
+    bool castShadows = true;
 };
 
 struct PointLight {

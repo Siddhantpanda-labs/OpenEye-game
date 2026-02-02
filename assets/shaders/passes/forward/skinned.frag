@@ -28,6 +28,23 @@ uniform float u_LightIntensity;
 uniform vec3 u_Ambient = vec3(0.05);
 uniform float u_Exposure = 1.2;
 
+#define MAX_POINT_LIGHTS 8
+#define MAX_SPOT_LIGHTS 4
+uniform int u_PointLightCount;
+uniform vec3 u_PointLightPos[MAX_POINT_LIGHTS];
+uniform vec3 u_PointLightColor[MAX_POINT_LIGHTS];
+uniform float u_PointLightIntensity[MAX_POINT_LIGHTS];
+uniform float u_PointLightRadius[MAX_POINT_LIGHTS];
+
+uniform int u_SpotLightCount;
+uniform vec3 u_SpotLightPos[MAX_SPOT_LIGHTS];
+uniform vec3 u_SpotLightDir[MAX_SPOT_LIGHTS];
+uniform vec3 u_SpotLightColor[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightIntensity[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightRange[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightInnerCos[MAX_SPOT_LIGHTS];
+uniform float u_SpotLightOuterCos[MAX_SPOT_LIGHTS];
+
 uniform sampler2D u_ShadowMap;
 uniform mat4 u_LightSpaceMatrix;
 uniform float u_ShadowBias = 0.005;
@@ -81,6 +98,43 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
 // Fresnel-Schlick approximation
 vec3 FresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+vec3 evalPointLight(vec3 pos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
+    vec3 lightPos, vec3 lightColor, float intensity, float radius) {
+    vec3 L = lightPos - pos;
+    float dist = length(L);
+    if (dist >= radius) return vec3(0.0);
+    L /= dist;
+    float att = 1.0 - smoothstep(radius * 0.5, radius, dist);
+    att *= att;
+    float NdotL = max(dot(N, L), 0.0);
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float spec = pow(NdotH, 64.0 * (1.0 - roughness));
+    vec3 diff = albedo * (1.0 - metallic) * lightColor * intensity * NdotL * att;
+    diff += (0.04 + albedo * metallic) * lightColor * intensity * spec * att;
+    return diff;
+}
+
+vec3 evalSpotLight(vec3 pos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
+    vec3 lightPos, vec3 lightDir, vec3 lightColor, float intensity, float range,
+    float innerCos, float outerCos) {
+    vec3 L = lightPos - pos;
+    float dist = length(L);
+    if (dist >= range) return vec3(0.0);
+    L /= dist;
+    float cosTheta = dot(-L, lightDir);
+    float spot = smoothstep(outerCos, innerCos, cosTheta);
+    float att = (1.0 - dist / range);
+    att = att * att * spot;
+    float NdotL = max(dot(N, L), 0.0);
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float spec = pow(NdotH, 64.0 * (1.0 - roughness));
+    vec3 diff = albedo * (1.0 - metallic) * lightColor * intensity * NdotL * att;
+    diff += (0.04 + albedo * metallic) * lightColor * intensity * spec * att;
+    return diff;
 }
 
 void main() {
@@ -148,7 +202,20 @@ void main() {
     // Ambient lighting
     vec3 ambient = u_Ambient * albedoColor * ao;
 
-    vec3 color = (ambient + Lo + emission) * u_Exposure;
+    vec3 color = ambient + Lo;
+
+    for (int i = 0; i < u_PointLightCount && i < MAX_POINT_LIGHTS; i++) {
+        color += evalPointLight(v_Position, N, V, albedoColor, metallic, roughness,
+            u_PointLightPos[i], u_PointLightColor[i], u_PointLightIntensity[i], u_PointLightRadius[i]);
+    }
+    for (int i = 0; i < u_SpotLightCount && i < MAX_SPOT_LIGHTS; i++) {
+        color += evalSpotLight(v_Position, N, V, albedoColor, metallic, roughness,
+            u_SpotLightPos[i], normalize(u_SpotLightDir[i]), u_SpotLightColor[i],
+            u_SpotLightIntensity[i], u_SpotLightRange[i],
+            u_SpotLightInnerCos[i], u_SpotLightOuterCos[i]);
+    }
+
+    color = (color + emission) * u_Exposure;
     
     // HDR tonemapping (ACES fitted)
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);

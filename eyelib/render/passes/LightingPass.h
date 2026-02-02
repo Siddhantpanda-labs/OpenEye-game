@@ -26,7 +26,9 @@ public:
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Vec3& viewPos,
-                ShadowMap* shadowMap = nullptr);
+                ShadowMap* shadowMap = nullptr,
+                const std::vector<PointLight>* pointLights = nullptr,
+                const std::vector<SpotLight>* spotLights = nullptr);
 
 private:
     void EnsureDefaultShader();

@@ -12,6 +12,7 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 #include "api/world/All.h"
+#include "eyelib/assets/ShaderWatcher.h"
 
 #include <functional>
 #include <iostream>
@@ -346,13 +347,50 @@ int RunPlayer(int argc, char** argv) {
     scriptingBridge.SetAnimationBridge(&animationBridge);
     scriptingBridge.BuildFromWorld(world, options.assetRoots);
 
+    std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher;
+    if (!options.headless) {
+        shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
+        std::string exePath = eyelib::api::platform::filesystem::GetExecutablePath();
+        std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(exePath);
+        std::string runtimeAssets = exeDir.empty()
+            ? eyelib::api::platform::filesystem::GetAbsolutePath("assets")
+            : eyelib::api::platform::filesystem::NormalizePath(
+                exeDir + (exeDir.back() == '/' || exeDir.back() == '\\' ? "" : "/") + "assets");
+        std::string sourceAssets;
+        const std::vector<std::string> candidates = {
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("assets"),
+            runtimeAssets
+        };
+        for (const auto& candidate : candidates) {
+            std::string shadersDir = candidate;
+            if (!shadersDir.empty() && shadersDir.back() != '/' && shadersDir.back() != '\\')
+                shadersDir += "/shaders";
+            else
+                shadersDir += "shaders";
+            if (eyelib::api::platform::filesystem::FileExists(shadersDir)) {
+                sourceAssets = candidate;
+                break;
+            }
+        }
+        if (sourceAssets.empty()) sourceAssets = runtimeAssets;
+        shaderWatcher->SetSourceAssetsDir(sourceAssets);
+        shaderWatcher->SetRuntimeAssetsDir(runtimeAssets);
+        eyelib::api::core::Log::InfoF("ShaderWatcher source: %s", sourceAssets.c_str());
+        eyelib::api::core::Log::InfoF("ShaderWatcher runtime: %s", runtimeAssets.c_str());
+    }
+
     struct RuntimeStats {
         float accum = 0.0f;
         int frames = 0;
     } stats;
 
-    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge, &scriptingBridge](float deltaSeconds) {
+    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge, &scriptingBridge, &shaderWatcher](float deltaSeconds) {
         if (!options.headless) {
+            if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();
             if (window.ShouldClose()) {
                 eyelib::api::core::Engine::RequestShutdown();

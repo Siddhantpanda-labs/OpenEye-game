@@ -36,26 +36,35 @@ struct LightParams {
     float intensity = 3.0f;
     math::Vec3 ambient{0.08f};
     float exposure = 1.0f;
+    bool castShadows = true;
 };
 
-/** Point light (for Forward+) */
+/** Point light (for Forward+) — layout matches GLSL std140 for SSBO binding 3 */
+#pragma pack(push, 4)
 struct PointLight {
     math::Vec3 position{0, 0, 0};
+    float _pad0 = 0.0f;
     math::Vec3 color{1, 1, 1};
     float intensity = 1.0f;
     float radius = 10.0f;
+    float _pad1 = 0.0f, _pad2 = 0.0f, _pad3 = 0.0f;
 };
 
-/** Spot light (for Forward+) */
+/** Spot light (for Forward+) — layout matches GLSL std140 for SSBO binding 4 (stride 80) */
 struct SpotLight {
     math::Vec3 position{0, 0, 0};
+    float _pad0 = 0.0f;
     math::Vec3 direction{0, -1, 0};
+    float _pad1 = 0.0f;
     math::Vec3 color{1, 1, 1};
     float intensity = 1.0f;
     float range = 10.0f;
     float innerConeCos = 0.9f;  // cos(inner angle)
     float outerConeCos = 0.7f;  // cos(outer angle)
+    float _pad2 = 0.0f, _pad3 = 0.0f;
+    float _pad4 = 0.0f, _pad5 = 0.0f, _pad6 = 0.0f;  // std140 struct size rounded to 80
 };
+#pragma pack(pop)
 
 /** Minimal scene representation for rendering (no ECS) */
 struct RenderScene {

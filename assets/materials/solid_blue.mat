@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "shader": "../shaders/passes/deferred/gbuffer_skinned",
+  "shader": "../shaders/passes/forward/lit",
   "albedo": [0.2, 0.2, 1.0],
   "metallic": 0.0,
   "roughness": 0.7,
