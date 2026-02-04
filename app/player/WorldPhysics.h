@@ -4,6 +4,7 @@
 #include "api/physics/All.h"
 #include "api/world/All.h"
 
+#include <span>
 #include <vector>
 
 namespace openeye::player {
@@ -31,19 +32,19 @@ private:
     };
 
     const eyelib::world::components::Transform* FindTransform(
-        const std::vector<eyelib::api::world::World::TransformEntry>& transforms,
+        std::span<const eyelib::api::world::World::TransformEntry> transforms,
         ::eyelib::world::EntityId entity) const;
 
     const eyelib::api::world::World::RigidBodyEntry* FindRigidBody(
-        const std::vector<eyelib::api::world::World::RigidBodyEntry>& rigidBodies,
+        std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies,
         ::eyelib::world::EntityId entity) const;
     const BodyBinding* FindBinding(::eyelib::world::EntityId entity) const;
     BodyBinding* FindBinding(::eyelib::world::EntityId entity);
 
     bool BuildBodyForCollider(eyelib::api::world::World& world,
                               const eyelib::api::world::World::ColliderEntry& collider,
-                              const std::vector<eyelib::api::world::World::TransformEntry>& transforms,
-                              const std::vector<eyelib::api::world::World::RigidBodyEntry>& rigidBodies);
+                              std::span<const eyelib::api::world::World::TransformEntry> transforms,
+                              std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies);
 
     eyelib::api::physics::PhysicsWorld m_physics;
     bool m_ready = false;

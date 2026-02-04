@@ -33,7 +33,7 @@ void WorldPhysicsBridge::Shutdown() {
 }
 
 const eyelib::world::components::Transform* WorldPhysicsBridge::FindTransform(
-    const std::vector<eyelib::api::world::World::TransformEntry>& transforms,
+    std::span<const eyelib::api::world::World::TransformEntry> transforms,
     ::eyelib::world::EntityId entity) const {
     for (const auto& entry : transforms) {
         if (entry.entity == entity) {
@@ -44,7 +44,7 @@ const eyelib::world::components::Transform* WorldPhysicsBridge::FindTransform(
 }
 
 const eyelib::api::world::World::RigidBodyEntry* WorldPhysicsBridge::FindRigidBody(
-    const std::vector<eyelib::api::world::World::RigidBodyEntry>& rigidBodies,
+    std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies,
     ::eyelib::world::EntityId entity) const {
     for (const auto& entry : rigidBodies) {
         if (entry.entity == entity) {
@@ -75,8 +75,8 @@ WorldPhysicsBridge::BodyBinding* WorldPhysicsBridge::FindBinding(::eyelib::world
 bool WorldPhysicsBridge::BuildBodyForCollider(
     eyelib::api::world::World& world,
     const eyelib::api::world::World::ColliderEntry& collider,
-    const std::vector<eyelib::api::world::World::TransformEntry>& transforms,
-    const std::vector<eyelib::api::world::World::RigidBodyEntry>& rigidBodies) {
+    std::span<const eyelib::api::world::World::TransformEntry> transforms,
+    std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies) {
     const auto* transform = FindTransform(transforms, collider.entity);
     const auto* rigidBody = FindRigidBody(rigidBodies, collider.entity);
 
@@ -126,9 +126,9 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
     }
     m_bindings.clear();
     const auto obs = world.GetObservation();
-    const auto colliders = obs.GetColliders();
-    const auto transforms = obs.GetTransforms();
-    const auto rigidBodies = obs.GetRigidBodies();
+    const auto colliders = obs.GetCollidersView();
+    const auto transforms = obs.GetTransformsView();
+    const auto rigidBodies = obs.GetRigidBodiesView();
 
     bool ok = true;
     for (const auto& collider : colliders) {
@@ -151,7 +151,7 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         return;
     }
 
-    const auto transforms = world.GetObservation().GetTransforms();
+    const auto transforms = world.GetObservation().GetTransformsView();
     for (const auto& binding : m_bindings) {
         if (!binding.syncTransform || binding.body == 0) {
             continue;

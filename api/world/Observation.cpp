@@ -31,74 +31,74 @@ std::optional<::eyelib::world::EntityId> Observation::GetHighestPriorityRegion(c
     return m_observation.GetHighestPriorityRegion(point);
 }
 
-std::vector<World::TransformEntry> Observation::GetTransforms() const {
-    auto raw = m_observation.GetTransforms();
-    std::vector<World::TransformEntry> out;
-    out.reserve(raw.size());
+std::span<const World::TransformEntry> Observation::GetTransformsView() const {
+    const auto raw = m_observation.GetTransformsView();
+    m_transformBuffer.clear();
+    m_transformBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_transformBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::TransformEntry>(m_transformBuffer);
 }
 
-std::vector<World::RenderableEntry> Observation::GetRenderables() const {
-    auto raw = m_observation.GetRenderables();
-    std::vector<World::RenderableEntry> out;
-    out.reserve(raw.size());
+std::span<const World::RenderableEntry> Observation::GetRenderablesView() const {
+    const auto raw = m_observation.GetRenderablesView();
+    m_renderableBuffer.clear();
+    m_renderableBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_renderableBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::RenderableEntry>(m_renderableBuffer);
 }
 
-std::vector<World::MeshRendererEntry> Observation::GetMeshRenderers() const {
-    auto raw = m_observation.GetMeshRenderers();
-    std::vector<World::MeshRendererEntry> out;
-    out.reserve(raw.size());
+std::span<const World::MeshRendererEntry> Observation::GetMeshRenderersView() const {
+    const auto raw = m_observation.GetMeshRenderersView();
+    m_meshRendererBuffer.clear();
+    m_meshRendererBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_meshRendererBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::MeshRendererEntry>(m_meshRendererBuffer);
 }
 
-std::vector<World::CameraEntry> Observation::GetCameras() const {
-    auto raw = m_observation.GetCameras();
-    std::vector<World::CameraEntry> out;
-    out.reserve(raw.size());
+std::span<const World::CameraEntry> Observation::GetCamerasView() const {
+    const auto raw = m_observation.GetCamerasView();
+    m_cameraBuffer.clear();
+    m_cameraBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_cameraBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::CameraEntry>(m_cameraBuffer);
 }
 
-std::vector<World::LightEntry> Observation::GetLights() const {
-    auto raw = m_observation.GetLights();
-    std::vector<World::LightEntry> out;
-    out.reserve(raw.size());
+std::span<const World::LightEntry> Observation::GetLightsView() const {
+    const auto raw = m_observation.GetLightsView();
+    m_lightBuffer.clear();
+    m_lightBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_lightBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::LightEntry>(m_lightBuffer);
 }
 
-std::vector<World::RigidBodyEntry> Observation::GetRigidBodies() const {
-    auto raw = m_observation.GetRigidBodies();
-    std::vector<World::RigidBodyEntry> out;
-    out.reserve(raw.size());
+std::span<const World::RigidBodyEntry> Observation::GetRigidBodiesView() const {
+    const auto raw = m_observation.GetRigidBodiesView();
+    m_rigidBodyBuffer.clear();
+    m_rigidBodyBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_rigidBodyBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::RigidBodyEntry>(m_rigidBodyBuffer);
 }
 
-std::vector<World::ColliderEntry> Observation::GetColliders() const {
-    auto raw = m_observation.GetColliders();
-    std::vector<World::ColliderEntry> out;
-    out.reserve(raw.size());
+std::span<const World::ColliderEntry> Observation::GetCollidersView() const {
+    const auto raw = m_observation.GetCollidersView();
+    m_colliderBuffer.clear();
+    m_colliderBuffer.reserve(raw.size());
     for (const auto& p : raw) {
-        out.push_back({ p.first, p.second });
+        m_colliderBuffer.push_back({ p.first, p.second });
     }
-    return out;
+    return std::span<const World::ColliderEntry>(m_colliderBuffer);
 }
 
 } // namespace world

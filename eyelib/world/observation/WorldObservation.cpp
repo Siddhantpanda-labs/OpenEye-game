@@ -62,74 +62,74 @@ std::optional<EntityId> WorldObservation::GetHighestPriorityRegion(const math::V
     return world::GetHighestPriorityRegion(m_view.State(), point);
 }
 
-std::vector<std::pair<EntityId, components::Transform>> WorldObservation::GetTransforms() const {
-    std::vector<std::pair<EntityId, components::Transform>> out;
+std::span<const std::pair<EntityId, components::Transform>> WorldObservation::GetTransformsView() const {
+    m_transformBuffer.clear();
     const auto& store = m_view.Components<components::Transform>().All();
-    out.reserve(store.size());
+    m_transformBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_transformBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::Transform>>(m_transformBuffer);
 }
 
-std::vector<std::pair<EntityId, components::Renderable>> WorldObservation::GetRenderables() const {
-    std::vector<std::pair<EntityId, components::Renderable>> out;
+std::span<const std::pair<EntityId, components::Renderable>> WorldObservation::GetRenderablesView() const {
+    m_renderableBuffer.clear();
     const auto& store = m_view.Components<components::Renderable>().All();
-    out.reserve(store.size());
+    m_renderableBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_renderableBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::Renderable>>(m_renderableBuffer);
 }
 
-std::vector<std::pair<EntityId, components::MeshRenderer>> WorldObservation::GetMeshRenderers() const {
-    std::vector<std::pair<EntityId, components::MeshRenderer>> out;
+std::span<const std::pair<EntityId, components::MeshRenderer>> WorldObservation::GetMeshRenderersView() const {
+    m_meshRendererBuffer.clear();
     const auto& store = m_view.Components<components::MeshRenderer>().All();
-    out.reserve(store.size());
+    m_meshRendererBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_meshRendererBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::MeshRenderer>>(m_meshRendererBuffer);
 }
 
-std::vector<std::pair<EntityId, components::Camera>> WorldObservation::GetCameras() const {
-    std::vector<std::pair<EntityId, components::Camera>> out;
+std::span<const std::pair<EntityId, components::Camera>> WorldObservation::GetCamerasView() const {
+    m_cameraBuffer.clear();
     const auto& store = m_view.Components<components::Camera>().All();
-    out.reserve(store.size());
+    m_cameraBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_cameraBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::Camera>>(m_cameraBuffer);
 }
 
-std::vector<std::pair<EntityId, components::Light>> WorldObservation::GetLights() const {
-    std::vector<std::pair<EntityId, components::Light>> out;
+std::span<const std::pair<EntityId, components::Light>> WorldObservation::GetLightsView() const {
+    m_lightBuffer.clear();
     const auto& store = m_view.Components<components::Light>().All();
-    out.reserve(store.size());
+    m_lightBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_lightBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::Light>>(m_lightBuffer);
 }
 
-std::vector<std::pair<EntityId, components::RigidBody>> WorldObservation::GetRigidBodies() const {
-    std::vector<std::pair<EntityId, components::RigidBody>> out;
+std::span<const std::pair<EntityId, components::RigidBody>> WorldObservation::GetRigidBodiesView() const {
+    m_rigidBodyBuffer.clear();
     const auto& store = m_view.Components<components::RigidBody>().All();
-    out.reserve(store.size());
+    m_rigidBodyBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_rigidBodyBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::RigidBody>>(m_rigidBodyBuffer);
 }
 
-std::vector<std::pair<EntityId, components::Collider>> WorldObservation::GetColliders() const {
-    std::vector<std::pair<EntityId, components::Collider>> out;
+std::span<const std::pair<EntityId, components::Collider>> WorldObservation::GetCollidersView() const {
+    m_colliderBuffer.clear();
     const auto& store = m_view.Components<components::Collider>().All();
-    out.reserve(store.size());
+    m_colliderBuffer.reserve(store.size());
     for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
+        m_colliderBuffer.push_back({ entity, component });
     }
-    return out;
+    return std::span<const std::pair<EntityId, components::Collider>>(m_colliderBuffer);
 }
 
 } // namespace world

@@ -5,6 +5,7 @@
 #include "World.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -24,16 +25,24 @@ public:
     std::vector<::eyelib::world::EntityId> GetRegionsContainingPoint(const eyelib::math::Vec3& point) const;
     std::optional<::eyelib::world::EntityId> GetHighestPriorityRegion(const eyelib::math::Vec3& point) const;
 
-    std::vector<World::TransformEntry> GetTransforms() const;
-    std::vector<World::RenderableEntry> GetRenderables() const;
-    std::vector<World::MeshRendererEntry> GetMeshRenderers() const;
-    std::vector<World::CameraEntry> GetCameras() const;
-    std::vector<World::LightEntry> GetLights() const;
-    std::vector<World::RigidBodyEntry> GetRigidBodies() const;
-    std::vector<World::ColliderEntry> GetColliders() const;
+    /** Zero-copy view. Valid until next GetXxxView() or world mutation. */
+    std::span<const World::TransformEntry> GetTransformsView() const;
+    std::span<const World::RenderableEntry> GetRenderablesView() const;
+    std::span<const World::MeshRendererEntry> GetMeshRenderersView() const;
+    std::span<const World::CameraEntry> GetCamerasView() const;
+    std::span<const World::LightEntry> GetLightsView() const;
+    std::span<const World::RigidBodyEntry> GetRigidBodiesView() const;
+    std::span<const World::ColliderEntry> GetCollidersView() const;
 
 private:
     ::eyelib::world::WorldObservation m_observation;
+    mutable std::vector<World::TransformEntry> m_transformBuffer;
+    mutable std::vector<World::RenderableEntry> m_renderableBuffer;
+    mutable std::vector<World::MeshRendererEntry> m_meshRendererBuffer;
+    mutable std::vector<World::CameraEntry> m_cameraBuffer;
+    mutable std::vector<World::LightEntry> m_lightBuffer;
+    mutable std::vector<World::RigidBodyEntry> m_rigidBodyBuffer;
+    mutable std::vector<World::ColliderEntry> m_colliderBuffer;
 };
 
 } // namespace world

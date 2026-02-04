@@ -46,8 +46,8 @@ void WorldAudioBridge::Update(eyelib::api::world::World& world, float /*deltaSec
         return;
     }
     const auto obs = world.GetObservation();
-    const auto cameras = obs.GetCameras();
-    const auto transforms = obs.GetTransforms();
+    const auto cameras = obs.GetCamerasView();
+    const auto transforms = obs.GetTransformsView();
 
     eyelib::world::EntityId primaryCameraEntity = eyelib::world::InvalidEntity;
     for (const auto& entry : cameras) {

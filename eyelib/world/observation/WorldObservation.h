@@ -12,6 +12,7 @@
 #include "eyelib/world/components/RigidBody.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,16 +34,24 @@ public:
     std::vector<EntityId> GetRegionsContainingPoint(const math::Vec3& point) const;
     std::optional<EntityId> GetHighestPriorityRegion(const math::Vec3& point) const;
 
-    std::vector<std::pair<EntityId, components::Transform>> GetTransforms() const;
-    std::vector<std::pair<EntityId, components::Renderable>> GetRenderables() const;
-    std::vector<std::pair<EntityId, components::MeshRenderer>> GetMeshRenderers() const;
-    std::vector<std::pair<EntityId, components::Camera>> GetCameras() const;
-    std::vector<std::pair<EntityId, components::Light>> GetLights() const;
-    std::vector<std::pair<EntityId, components::RigidBody>> GetRigidBodies() const;
-    std::vector<std::pair<EntityId, components::Collider>> GetColliders() const;
+    /** Zero-copy view over transforms. Valid until next GetXxxView() or world mutation. */
+    std::span<const std::pair<EntityId, components::Transform>> GetTransformsView() const;
+    std::span<const std::pair<EntityId, components::Renderable>> GetRenderablesView() const;
+    std::span<const std::pair<EntityId, components::MeshRenderer>> GetMeshRenderersView() const;
+    std::span<const std::pair<EntityId, components::Camera>> GetCamerasView() const;
+    std::span<const std::pair<EntityId, components::Light>> GetLightsView() const;
+    std::span<const std::pair<EntityId, components::RigidBody>> GetRigidBodiesView() const;
+    std::span<const std::pair<EntityId, components::Collider>> GetCollidersView() const;
 
 private:
     WorldView m_view;
+    mutable std::vector<std::pair<EntityId, components::Transform>> m_transformBuffer;
+    mutable std::vector<std::pair<EntityId, components::Renderable>> m_renderableBuffer;
+    mutable std::vector<std::pair<EntityId, components::MeshRenderer>> m_meshRendererBuffer;
+    mutable std::vector<std::pair<EntityId, components::Camera>> m_cameraBuffer;
+    mutable std::vector<std::pair<EntityId, components::Light>> m_lightBuffer;
+    mutable std::vector<std::pair<EntityId, components::RigidBody>> m_rigidBodyBuffer;
+    mutable std::vector<std::pair<EntityId, components::Collider>> m_colliderBuffer;
 };
 
 } // namespace world
