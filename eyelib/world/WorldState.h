@@ -1,6 +1,9 @@
 #pragma once
 
 #include "EntityId.h"
+#include "ComponentStorage/IComponentStore.h"
+#include "ComponentStorage/ComponentStore.h"
+#include "ComponentStorage/TransformStore.h"
 
 #include <memory>
 #include <string>
@@ -13,12 +16,9 @@ namespace eyelib {
 namespace world {
 
 class EntityRegistry;
-class IComponentStore;
 class Hierarchy;
 class Metadata;
 class Tags;
-template<typename T>
-class ComponentStore;
 
 class WorldState {
 public:
@@ -43,10 +43,32 @@ public:
     const Tags& GraphTags() const;
 
     template<typename T>
-    ComponentStore<T>& Components();
+    ComponentStore<T>& Components() {
+        const size_t typeKey = typeid(T).hash_code();
+        auto it = m_componentStores.find(typeKey);
+        if (it == m_componentStores.end()) {
+            auto store = std::make_unique<ComponentStore<T>>();
+            auto* raw = store.get();
+            m_componentStores.emplace(typeKey, std::move(store));
+            return *raw;
+        }
+        return *static_cast<ComponentStore<T>*>(it->second.get());
+    }
 
     template<typename T>
-    const ComponentStore<T>& Components() const;
+    const ComponentStore<T>& Components() const {
+        const size_t typeKey = typeid(T).hash_code();
+        auto it = m_componentStores.find(typeKey);
+        if (it == m_componentStores.end()) {
+            static ComponentStore<T> s_empty;
+            return s_empty;
+        }
+        return *static_cast<const ComponentStore<T>*>(it->second.get());
+    }
+
+    /** SoA transform store. Use instead of Components<Transform> for cache-friendly iteration (Unreal-style). */
+    TransformStore& GetTransformStore();
+    const TransformStore& GetTransformStore() const;
 
     const std::unordered_map<size_t, std::unique_ptr<IComponentStore>>& ComponentStores() const;
     IComponentStore* FindComponentStore(size_t typeKey);
@@ -63,39 +85,6 @@ private:
 
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
 };
-
-} // namespace world
-} // namespace eyelib
-
-#include "ComponentStorage/ComponentStore.h"
-#include "ComponentStorage/IComponentStore.h"
-
-namespace eyelib {
-namespace world {
-
-template<typename T>
-ComponentStore<T>& WorldState::Components() {
-    const size_t typeKey = typeid(T).hash_code();
-    auto it = m_componentStores.find(typeKey);
-    if (it == m_componentStores.end()) {
-        auto store = std::make_unique<ComponentStore<T>>();
-        auto* raw = store.get();
-        m_componentStores.emplace(typeKey, std::move(store));
-        return *raw;
-    }
-    return *static_cast<ComponentStore<T>*>(it->second.get());
-}
-
-template<typename T>
-const ComponentStore<T>& WorldState::Components() const {
-    const size_t typeKey = typeid(T).hash_code();
-    auto it = m_componentStores.find(typeKey);
-    if (it == m_componentStores.end()) {
-        static ComponentStore<T> s_empty;
-        return s_empty;
-    }
-    return *static_cast<const ComponentStore<T>*>(it->second.get());
-}
 
 } // namespace world
 } // namespace eyelib

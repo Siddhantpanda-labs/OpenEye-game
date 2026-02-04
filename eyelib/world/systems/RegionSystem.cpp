@@ -2,7 +2,6 @@
 
 #include "eyelib/world/RegionQueries.h"
 #include "eyelib/world/components/RegionMembership.h"
-#include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/SystemBindings.h"
 #include "eyelib/world/components/ActiveSystems.h"
 
@@ -12,7 +11,7 @@ namespace systems {
 
 void RegionSystem::Update(WorldState& state) const {
     auto& memberships = state.Components<components::RegionMembership>();
-    auto& transforms = state.Components<components::Transform>();
+    auto& transforms = state.GetTransformStore();
     auto& regionSystems = state.Components<components::SystemBindings>();
     auto& activeSystems = state.Components<components::ActiveSystems>();
 
@@ -25,7 +24,7 @@ void RegionSystem::Update(WorldState& state) const {
             }
             continue;
         }
-        auto best = GetHighestPriorityRegion(state, transform->position);
+        auto best = GetHighestPriorityRegion(state, transform->position());  // TransformRef::position()
         membership.region = best.value_or(InvalidEntity);
 
         if (membership.region == InvalidEntity) {

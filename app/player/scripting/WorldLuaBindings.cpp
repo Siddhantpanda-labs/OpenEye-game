@@ -1171,14 +1171,18 @@ int lua_World_GetTransformsBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetObservation().GetTransformsView();
+    const auto soa = world->GetObservation().GetTransformSoAView();
     lua_newtable(L);
     int idx = 1;
-    for (const auto& entry : entries) {
+    for (size_t i = 0; i < soa.entities.size(); ++i) {
         lua_newtable(L);
-        PushEntity(L, entry.entity);
+        PushEntity(L, soa.entities[i]);
         lua_setfield(L, -2, "entity");
-        PushTransform(L, entry.component);
+        ::eyelib::world::components::Transform t;
+        t.position = soa.positions[i];
+        t.rotation = soa.rotations[i];
+        t.scale = soa.scales[i];
+        PushTransform(L, t);
         lua_setfield(L, -2, "transform");
         lua_rawseti(L, -2, idx++);
     }

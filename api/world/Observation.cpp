@@ -41,6 +41,10 @@ std::span<const World::TransformEntry> Observation::GetTransformsView() const {
     return std::span<const World::TransformEntry>(m_transformBuffer);
 }
 
+::eyelib::world::WorldObservation::TransformSoAView Observation::GetTransformSoAView() const {
+    return m_observation.GetTransformSoAView();
+}
+
 std::span<const World::RenderableEntry> Observation::GetRenderablesView() const {
     const auto raw = m_observation.GetRenderablesView();
     m_renderableBuffer.clear();

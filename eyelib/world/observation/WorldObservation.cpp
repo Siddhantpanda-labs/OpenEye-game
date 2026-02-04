@@ -1,5 +1,6 @@
 #include "WorldObservation.h"
 
+#include "eyelib/world/ComponentStorage/TransformStore.h"
 #include "eyelib/world/RegionQueries.h"
 #include "eyelib/world/Serialization/ComponentSerializer.h"
 #include "eyelib/world/EntityRegistry.h"
@@ -31,7 +32,7 @@ std::optional<std::string> WorldObservation::GetEntityName(EntityId entity) cons
 }
 
 std::optional<math::Transform> WorldObservation::GetTransform(EntityId entity) const {
-    const auto& store = m_view.Components<components::Transform>();
+    const auto& store = m_view.GetTransformStore();
     if (const auto* t = store.TryGet(entity)) {
         return *t;
     }
@@ -64,12 +65,23 @@ std::optional<EntityId> WorldObservation::GetHighestPriorityRegion(const math::V
 
 std::span<const std::pair<EntityId, components::Transform>> WorldObservation::GetTransformsView() const {
     m_transformBuffer.clear();
-    const auto& store = m_view.Components<components::Transform>().All();
-    m_transformBuffer.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        m_transformBuffer.push_back({ entity, component });
+    const auto& store = m_view.GetTransformStore();
+    const auto range = store.All();
+    m_transformBuffer.reserve(store.Size());
+    for (const auto& [entity, ref] : range) {
+        m_transformBuffer.push_back({ entity, static_cast<math::Transform>(ref) });
     }
     return std::span<const std::pair<EntityId, components::Transform>>(m_transformBuffer);
+}
+
+WorldObservation::TransformSoAView WorldObservation::GetTransformSoAView() const {
+    const auto& store = m_view.GetTransformStore();
+    return {
+        store.EntitiesSpan(),
+        store.PositionsSpan(),
+        store.RotationsSpan(),
+        store.ScalesSpan(),
+    };
 }
 
 std::span<const std::pair<EntityId, components::Renderable>> WorldObservation::GetRenderablesView() const {

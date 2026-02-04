@@ -31,10 +31,6 @@ private:
         bool syncTransform = true;
     };
 
-    const eyelib::world::components::Transform* FindTransform(
-        std::span<const eyelib::api::world::World::TransformEntry> transforms,
-        ::eyelib::world::EntityId entity) const;
-
     const eyelib::api::world::World::RigidBodyEntry* FindRigidBody(
         std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies,
         ::eyelib::world::EntityId entity) const;
@@ -43,7 +39,6 @@ private:
 
     bool BuildBodyForCollider(eyelib::api::world::World& world,
                               const eyelib::api::world::World::ColliderEntry& collider,
-                              std::span<const eyelib::api::world::World::TransformEntry> transforms,
                               std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies);
 
     eyelib::api::physics::PhysicsWorld m_physics;

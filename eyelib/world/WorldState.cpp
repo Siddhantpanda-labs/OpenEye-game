@@ -1,12 +1,37 @@
 #include "WorldState.h"
 
+#include "ComponentStorage/TransformStore.h"
 #include "EntityRegistry.h"
 #include "WorldGraph/Hierarchy.h"
 #include "WorldGraph/Metadata.h"
 #include "WorldGraph/Tags.h"
 
+#include <typeinfo>
+
 namespace eyelib {
 namespace world {
+
+TransformStore& WorldState::GetTransformStore() {
+    const size_t typeKey = typeid(TransformTag).hash_code();
+    auto it = m_componentStores.find(typeKey);
+    if (it == m_componentStores.end()) {
+        auto store = std::make_unique<TransformStore>();
+        auto* raw = store.get();
+        m_componentStores.emplace(typeKey, std::move(store));
+        return *raw;
+    }
+    return *static_cast<TransformStore*>(it->second.get());
+}
+
+const TransformStore& WorldState::GetTransformStore() const {
+    const size_t typeKey = typeid(TransformTag).hash_code();
+    auto it = m_componentStores.find(typeKey);
+    if (it == m_componentStores.end()) {
+        static TransformStore s_empty;
+        return s_empty;
+    }
+    return *static_cast<const TransformStore*>(it->second.get());
+}
 
 WorldState::WorldState()
     : m_entities(std::make_unique<EntityRegistry>()),

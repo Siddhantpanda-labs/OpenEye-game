@@ -27,6 +27,9 @@ public:
 
     /** Zero-copy view. Valid until next GetXxxView() or world mutation. */
     std::span<const World::TransformEntry> GetTransformsView() const;
+
+    /** Zero-copy SoA view over transform arrays. Valid until world mutation. */
+    ::eyelib::world::WorldObservation::TransformSoAView GetTransformSoAView() const;
     std::span<const World::RenderableEntry> GetRenderablesView() const;
     std::span<const World::MeshRendererEntry> GetMeshRenderersView() const;
     std::span<const World::CameraEntry> GetCamerasView() const;

@@ -36,6 +36,9 @@ public:
     template<typename T>
     void Register(const std::string& name, uint32_t version = 1);
 
+    /** Registers Transform with TransformStore (SoA). Call instead of Register<components::Transform>. */
+    void RegisterTransform();
+
     const Descriptor* GetDescriptor(size_t typeKey) const;
     const Descriptor* GetDescriptorByName(const std::string& name) const;
 

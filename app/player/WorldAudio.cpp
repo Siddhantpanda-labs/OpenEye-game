@@ -47,7 +47,6 @@ void WorldAudioBridge::Update(eyelib::api::world::World& world, float /*deltaSec
     }
     const auto obs = world.GetObservation();
     const auto cameras = obs.GetCamerasView();
-    const auto transforms = obs.GetTransformsView();
 
     eyelib::world::EntityId primaryCameraEntity = eyelib::world::InvalidEntity;
     for (const auto& entry : cameras) {
@@ -61,15 +60,12 @@ void WorldAudioBridge::Update(eyelib::api::world::World& world, float /*deltaSec
     }
 
     if (primaryCameraEntity != eyelib::world::InvalidEntity) {
-        for (const auto& entry : transforms) {
-            if (entry.entity == primaryCameraEntity) {
-                m_listener.SetPosition(entry.component.position);
-                const eyelib::math::Vec3 forward = ForwardFromRotation(entry.component.rotation);
-                const eyelib::math::Vec3 up = UpFromRotation(entry.component.rotation);
-                m_listener.SetOrientation(forward, up);
-                m_listener.SetVelocity(eyelib::math::Vec3(0.0f));
-                break;
-            }
+        if (const auto transform = obs.GetTransform(primaryCameraEntity)) {
+            m_listener.SetPosition(transform->position);
+            const eyelib::math::Vec3 forward = ForwardFromRotation(transform->rotation);
+            const eyelib::math::Vec3 up = UpFromRotation(transform->rotation);
+            m_listener.SetOrientation(forward, up);
+            m_listener.SetVelocity(eyelib::math::Vec3(0.0f));
         }
     }
 }

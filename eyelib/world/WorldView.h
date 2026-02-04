@@ -1,6 +1,10 @@
 #pragma once
 
 #include "WorldState.h"
+#include "ComponentStorage/TransformStore.h"
+#include "eyelib/world/components/Transform.h"
+
+#include <type_traits>
 
 namespace eyelib {
 namespace world {
@@ -18,7 +22,12 @@ public:
     const Tags& GraphTags() const { return m_state->GraphTags(); }
 
     template<typename T>
-    const ComponentStore<T>& Components() const { return m_state->Components<T>(); }
+    const ComponentStore<T>& Components() const {
+        return m_state->Components<T>();
+    }
+
+    /** SoA transform store. Use instead of Components<components::Transform> for cache-friendly access. */
+    const TransformStore& GetTransformStore() const { return m_state->GetTransformStore(); }
 
     const std::unordered_map<size_t, std::unique_ptr<IComponentStore>>& ComponentStores() const {
         return m_state->ComponentStores();

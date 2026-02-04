@@ -36,6 +36,15 @@ public:
 
     /** Zero-copy view over transforms. Valid until next GetXxxView() or world mutation. */
     std::span<const std::pair<EntityId, components::Transform>> GetTransformsView() const;
+
+    /** SoA view over transform data (zero-copy). Valid until world mutation. */
+    struct TransformSoAView {
+        std::span<const EntityId> entities;
+        std::span<const math::Vec3> positions;
+        std::span<const math::Quat> rotations;
+        std::span<const math::Vec3> scales;
+    };
+    TransformSoAView GetTransformSoAView() const;
     std::span<const std::pair<EntityId, components::Renderable>> GetRenderablesView() const;
     std::span<const std::pair<EntityId, components::MeshRenderer>> GetMeshRenderersView() const;
     std::span<const std::pair<EntityId, components::Camera>> GetCamerasView() const;

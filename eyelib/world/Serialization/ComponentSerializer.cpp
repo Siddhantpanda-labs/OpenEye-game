@@ -1,5 +1,7 @@
 #include "ComponentSerializer.h"
 
+#include "eyelib/world/ComponentStorage/TransformStore.h"
+#include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Name.h"
 #include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Renderable.h"
@@ -28,9 +30,68 @@ ComponentSerializer::ComponentSerializer() {
     RegisterBuiltins();
 }
 
+void ComponentSerializer::RegisterTransform() {
+    const size_t typeKey = typeid(TransformTag).hash_code();
+    Descriptor desc;
+    desc.name = "Transform";
+    desc.version = 1;
+    desc.typeKey = typeKey;
+    desc.serializeStore = [](const IComponentStore& store) {
+        const auto& typed = static_cast<const TransformStore&>(store);
+        nlohmann::json out = nlohmann::json::array();
+        for (size_t i = 0; i < typed.Size(); ++i) {
+            nlohmann::json item;
+            item["entity"] = {{"index", typed.m_entityIds[i].index}, {"generation", typed.m_entityIds[i].generation}};
+            eyelib::math::Transform t{typed.m_positions[i], typed.m_rotations[i], typed.m_scales[i]};
+            item["data"] = eyelib::serialize::SerializationTraits<eyelib::math::Transform>::Serialize(t);
+            out.push_back(std::move(item));
+        }
+        return out;
+    };
+    desc.deserializeStore = [](IComponentStore& store, const nlohmann::json& data) {
+        auto& typed = static_cast<TransformStore&>(store);
+        if (!data.is_array()) {
+            return;
+        }
+        for (const auto& item : data) {
+            if (!item.is_object() || !item.contains("entity")) {
+                continue;
+            }
+            const auto& ent = item["entity"];
+            if (!ent.contains("index") || !ent.contains("generation")) {
+                continue;
+            }
+            EntityId id;
+            id.index = ent["index"].get<uint32_t>();
+            id.generation = ent["generation"].get<uint32_t>();
+            const auto& payload = item.contains("data") ? item["data"] : nlohmann::json{};
+            eyelib::math::Transform t =
+                eyelib::serialize::SerializationTraits<eyelib::math::Transform>::Deserialize(payload, eyelib::math::Transform{});
+            typed.Add(id, t);
+        }
+    };
+    desc.serializeOne = [](const IComponentStore& store, EntityId entity) {
+        const auto& typed = static_cast<const TransformStore&>(store);
+        const auto* ref = typed.TryGet(entity);
+        if (!ref) {
+            return nlohmann::json{};
+        }
+        return eyelib::serialize::SerializationTraits<eyelib::math::Transform>::Serialize(static_cast<eyelib::math::Transform>(*ref));
+    };
+    desc.deserializeOne = [](IComponentStore& store, EntityId entity, const nlohmann::json& data) {
+        auto& typed = static_cast<TransformStore&>(store);
+        eyelib::math::Transform t =
+            eyelib::serialize::SerializationTraits<eyelib::math::Transform>::Deserialize(data, eyelib::math::Transform{});
+        typed.Add(entity, t);
+    };
+    desc.createStore = []() { return std::make_unique<TransformStore>(); };
+    m_descriptors[typeKey] = std::move(desc);
+    m_nameToType["Transform"] = typeKey;
+}
+
 void ComponentSerializer::RegisterBuiltins() {
     Register<components::Name>("Name", 1);
-    Register<components::Transform>("Transform", 1);
+    RegisterTransform();
     Register<components::Renderable>("Renderable", 1);
     Register<components::Camera>("Camera", 1);
     Register<components::Light>("Light", 1);

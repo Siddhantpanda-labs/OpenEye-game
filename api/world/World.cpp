@@ -4,6 +4,7 @@
 
 #include "eyelib/world/Commands/CommandTypes.h"
 
+#include "eyelib/world/ComponentStorage/TransformStore.h"
 #include "eyelib/world/EntityRegistry.h"
 #include "eyelib/world/WorldGraph/Hierarchy.h"
 #include "eyelib/world/WorldGraph/Metadata.h"
@@ -732,7 +733,7 @@ bool World::GetTransform(::eyelib::world::EntityId entity,
         return false;
     }
     const auto* transform = m_impl->world.GetState()
-        .Components<::eyelib::world::components::Transform>()
+        .GetTransformStore()
         .TryGet(entity);
     if (!transform) {
         return false;
@@ -956,7 +957,7 @@ bool World::SetTransform(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Transform>();
+    auto& store = m_impl->world.GetState().GetTransformStore();
     auto* entry = store.TryGet(entity);
     if (!entry) {
         return false;

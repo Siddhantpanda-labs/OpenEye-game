@@ -32,17 +32,6 @@ void WorldPhysicsBridge::Shutdown() {
     m_ready = false;
 }
 
-const eyelib::world::components::Transform* WorldPhysicsBridge::FindTransform(
-    std::span<const eyelib::api::world::World::TransformEntry> transforms,
-    ::eyelib::world::EntityId entity) const {
-    for (const auto& entry : transforms) {
-        if (entry.entity == entity) {
-            return &entry.component;
-        }
-    }
-    return nullptr;
-}
-
 const eyelib::api::world::World::RigidBodyEntry* WorldPhysicsBridge::FindRigidBody(
     std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies,
     ::eyelib::world::EntityId entity) const {
@@ -75,9 +64,8 @@ WorldPhysicsBridge::BodyBinding* WorldPhysicsBridge::FindBinding(::eyelib::world
 bool WorldPhysicsBridge::BuildBodyForCollider(
     eyelib::api::world::World& world,
     const eyelib::api::world::World::ColliderEntry& collider,
-    std::span<const eyelib::api::world::World::TransformEntry> transforms,
     std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies) {
-    const auto* transform = FindTransform(transforms, collider.entity);
+    const auto transform = world.GetObservation().GetTransform(collider.entity);
     const auto* rigidBody = FindRigidBody(rigidBodies, collider.entity);
 
     eyelib::api::physics::CollisionShapeHandle shape = 0;
@@ -127,12 +115,11 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
     m_bindings.clear();
     const auto obs = world.GetObservation();
     const auto colliders = obs.GetCollidersView();
-    const auto transforms = obs.GetTransformsView();
     const auto rigidBodies = obs.GetRigidBodiesView();
 
     bool ok = true;
     for (const auto& collider : colliders) {
-        if (!BuildBodyForCollider(world, collider, transforms, rigidBodies)) {
+        if (!BuildBodyForCollider(world, collider, rigidBodies)) {
             ok = false;
         }
     }
@@ -151,7 +138,7 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         return;
     }
 
-    const auto transforms = world.GetObservation().GetTransformsView();
+    const auto obs = world.GetObservation();
     for (const auto& binding : m_bindings) {
         if (!binding.syncTransform || binding.body == 0) {
             continue;
@@ -160,11 +147,7 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         if (!transform.has_value()) {
             continue;
         }
-        const auto* existing = FindTransform(transforms, binding.entity);
-        if (!existing) {
-            continue;
-        }
-        auto updated = *existing;
+        auto updated = obs.GetTransform(binding.entity).value_or(eyelib::math::Transform{});
         updated.position = transform->position;
         updated.rotation = transform->rotation;
         world.SetTransform(binding.entity, updated);

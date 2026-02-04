@@ -252,15 +252,6 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
     scene.spotLights.clear();
 
     const auto obs = world.GetObservation();
-    const auto transforms = obs.GetTransformsView();
-    auto findTransform = [&transforms](eyelib::world::EntityId entity) -> const eyelib::world::components::Transform* {
-        for (const auto& entry : transforms) {
-            if (entry.entity == entity) {
-                return &entry.component;
-            }
-        }
-        return nullptr;
-    };
 
     const auto renderables = obs.GetRenderablesView();
     for (const auto& entry : renderables) {
@@ -294,7 +285,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                 }
             }
         }
-        if (const auto* transform = findTransform(entry.entity)) {
+        if (const auto transform = obs.GetTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
         if (drawable.material) {
@@ -341,7 +332,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                 }
             }
         }
-        if (const auto* transform = findTransform(entry.entity)) {
+        if (const auto transform = obs.GetTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
         if (drawable.material) {
@@ -371,7 +362,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (!cameraFound || entry.component.isPrimary) {
             cameraFound = true;
             cameraComponent = entry.component;
-            if (const auto* transform = findTransform(entry.entity)) {
+            if (const auto transform = obs.GetTransform(entry.entity)) {
                 cameraTransform = *transform;
             }
             if (entry.component.isPrimary) {
@@ -419,7 +410,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
     bool directionalSet = false;
     for (const auto& entry : lights) {
         const auto& light = entry.component;
-        const auto* transform = findTransform(entry.entity);
+        const auto transform = obs.GetTransform(entry.entity);
 
         if (light.type == eyelib::world::components::Light::Type::Directional && !directionalSet) {
             auto direction = eyelib::math::Vec3(0.5f, -1.0f, 0.2f);
