@@ -26,6 +26,8 @@ namespace eyelib {
 namespace api {
 namespace world {
 
+class Observation;
+
 class World {
 public:
     World();
@@ -153,13 +155,6 @@ public:
     };
 
     std::vector<AssetReference> CollectAssetReferences() const;
-    std::vector<TransformEntry> GetTransforms() const;
-    std::vector<RenderableEntry> GetRenderables() const;
-    std::vector<MeshRendererEntry> GetMeshRenderers() const;
-    std::vector<CameraEntry> GetCameras() const;
-    std::vector<LightEntry> GetLights() const;
-    std::vector<RigidBodyEntry> GetRigidBodies() const;
-    std::vector<ColliderEntry> GetColliders() const;
     std::vector<AnimatorEntry> GetAnimators() const;
     std::vector<ScriptEntry> GetScripts() const;
 
@@ -228,6 +223,8 @@ public:
 
     bool LoadScene(const std::string& path);
     size_t GetEntityCount() const;
+
+    Observation GetObservation() const;
 
     ::eyelib::world::World* GetInternal() const;
 

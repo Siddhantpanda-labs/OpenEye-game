@@ -13,6 +13,7 @@
 #include <json.hpp>
 
 #include "eyelib/world/Serialization/ComponentSerializer.h"
+#include "eyelib/world/Serialization/WorldSerializer.h"
 #include "eyelib/serialize/SerializationTraits.h"
 
 #include <optional>
@@ -630,6 +631,28 @@ private:
     std::string m_typeName;
     nlohmann::json m_data;
     std::optional<nlohmann::json> m_prev;
+};
+
+class LoadSceneCommand final : public Command {
+public:
+    explicit LoadSceneCommand(std::string path)
+        : m_path(std::move(path)) {}
+
+    bool Apply(WorldState& state) override {
+        WorldSerializer serializer;
+        return serializer.Load(state, m_path);
+    }
+
+    bool Revert(WorldState& /*state*/) override {
+        return false;
+    }
+
+    std::string GetName() const override { return "LoadScene"; }
+
+    const std::string& GetPath() const { return m_path; }
+
+private:
+    std::string m_path;
 };
 
 } // namespace world

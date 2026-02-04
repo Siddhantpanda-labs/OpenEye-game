@@ -16,6 +16,8 @@ set(PLAYER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/WorldAudio.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/WorldAudio.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldScripting.h
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaBindings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaBindings.h
@@ -45,6 +47,7 @@ target_link_libraries(OpenEyePlayer
         EyelibRenderAPI
         EyelibPhysicsAPI
         EyelibAnimationAPI
+        EyelibAudio
         EyelibScriptingAPI
         OpenEyeImGui
 )

@@ -3,6 +3,7 @@
 #include "AssetBinding.h"
 #include "Overlay.h"
 #include "PlayerConfig.h"
+#include "WorldAudio.h"
 #include "WorldRender.h"
 #include "WorldPhysics.h"
 #include "WorldAnimation.h"
@@ -347,6 +348,15 @@ int RunPlayer(int argc, char** argv) {
     scriptingBridge.SetAnimationBridge(&animationBridge);
     scriptingBridge.BuildFromWorld(world, options.assetRoots);
 
+    WorldAudioBridge audioBridge;
+    if (!options.headless) {
+        if (!audioBridge.Initialize()) {
+            eyelib::api::core::Log::Warn("Audio bridge init failed; continuing without audio.");
+        } else {
+            audioBridge.BuildFromWorld(world);
+        }
+    }
+
     std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher;
     if (!options.headless) {
         shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
@@ -388,7 +398,7 @@ int RunPlayer(int argc, char** argv) {
         int frames = 0;
     } stats;
 
-    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge, &scriptingBridge, &shaderWatcher](float deltaSeconds) {
+    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge, &scriptingBridge, &audioBridge, &shaderWatcher](float deltaSeconds) {
         if (!options.headless) {
             if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();
@@ -400,6 +410,9 @@ int RunPlayer(int argc, char** argv) {
         physicsBridge.Step(world, deltaSeconds, options.maxSubsteps,
                            options.fixedTimestep > 0.0f ? options.fixedTimestep : 0.0f);
         animationBridge.Update(deltaSeconds);
+        if (!options.headless) {
+            audioBridge.Update(world, deltaSeconds);
+        }
         scriptingBridge.Update(world, options.assetRoots, deltaSeconds);
         world.Update(deltaSeconds);
 
@@ -431,6 +444,9 @@ int RunPlayer(int argc, char** argv) {
 
     eyelib::api::core::Engine::Run(update, render);
 
+    if (!options.headless) {
+        audioBridge.Shutdown();
+    }
     renderBridge.Shutdown();
     physicsBridge.Shutdown();
 

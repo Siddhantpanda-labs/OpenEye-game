@@ -1,5 +1,8 @@
 #include "World.h"
+#include "Observation.h"
 #include "Serialization.h"
+
+#include "eyelib/world/Commands/CommandTypes.h"
 
 #include "eyelib/world/EntityRegistry.h"
 #include "eyelib/world/WorldGraph/Hierarchy.h"
@@ -690,97 +693,6 @@ std::vector<World::AssetReference> World::CollectAssetReferences() const {
     return refs;
 }
 
-std::vector<World::TransformEntry> World::GetTransforms() const {
-    std::vector<TransformEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Transform>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::RenderableEntry> World::GetRenderables() const {
-    std::vector<RenderableEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Renderable>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::MeshRendererEntry> World::GetMeshRenderers() const {
-    std::vector<MeshRendererEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::MeshRenderer>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::CameraEntry> World::GetCameras() const {
-    std::vector<CameraEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Camera>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::LightEntry> World::GetLights() const {
-    std::vector<LightEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Light>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::RigidBodyEntry> World::GetRigidBodies() const {
-    std::vector<RigidBodyEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::RigidBody>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
-std::vector<World::ColliderEntry> World::GetColliders() const {
-    std::vector<ColliderEntry> out;
-    if (!m_impl) {
-        return out;
-    }
-    const auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Collider>().All();
-    out.reserve(store.size());
-    for (const auto& [entity, component] : store) {
-        out.push_back({ entity, component });
-    }
-    return out;
-}
-
 std::vector<World::AnimatorEntry> World::GetAnimators() const {
     std::vector<AnimatorEntry> out;
     if (!m_impl) {
@@ -1253,8 +1165,7 @@ bool World::LoadScene(const std::string& path) {
     if (!m_impl) {
         return false;
     }
-    Serializer serializer;
-    return serializer.Load(m_impl->world.GetState(), path);
+    return m_impl->world.ApplyCommandSync(std::make_unique<::eyelib::world::LoadSceneCommand>(path));
 }
 
 size_t World::GetEntityCount() const {
@@ -1262,6 +1173,13 @@ size_t World::GetEntityCount() const {
         return 0;
     }
     return m_impl->world.GetState().Entities().GetAliveEntities().size();
+}
+
+Observation World::GetObservation() const {
+    if (!m_impl) {
+        return Observation(::eyelib::world::World());
+    }
+    return Observation(m_impl->world);
 }
 
 bool World::UndoLastTransaction() {

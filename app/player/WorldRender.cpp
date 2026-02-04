@@ -251,7 +251,8 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
     scene.pointLights.clear();
     scene.spotLights.clear();
 
-    const auto transforms = world.GetTransforms();
+    const auto obs = world.GetObservation();
+    const auto transforms = obs.GetTransforms();
     auto findTransform = [&transforms](eyelib::world::EntityId entity) -> const eyelib::world::components::Transform* {
         for (const auto& entry : transforms) {
             if (entry.entity == entity) {
@@ -261,7 +262,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         return nullptr;
     };
 
-    const auto renderables = world.GetRenderables();
+    const auto renderables = obs.GetRenderables();
     for (const auto& entry : renderables) {
         const auto& renderable = entry.component;
         if (!renderable.visible) {
@@ -315,7 +316,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         scene.opaque.push_back(drawable);
     }
 
-    const auto meshRenderers = world.GetMeshRenderers();
+    const auto meshRenderers = obs.GetMeshRenderers();
     for (const auto& entry : meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty()) {
@@ -362,7 +363,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         scene.opaque.push_back(drawable);
     }
 
-    const auto cameras = world.GetCameras();
+    const auto cameras = obs.GetCameras();
     bool cameraFound = false;
     eyelib::world::components::Camera cameraComponent{};
     eyelib::world::components::Transform cameraTransform{};
@@ -414,7 +415,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         scene.camera.viewPos = {0.0f, 2.0f, 5.0f};
     }
 
-    const auto lights = world.GetLights();
+    const auto lights = obs.GetLights();
     bool directionalSet = false;
     for (const auto& entry : lights) {
         const auto& light = entry.component;

@@ -1171,7 +1171,7 @@ int lua_World_GetTransformsBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetTransforms();
+    const auto entries = world->GetObservation().GetTransforms();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : entries) {
@@ -1235,7 +1235,7 @@ int lua_World_GetCamerasBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetCameras();
+    const auto entries = world->GetObservation().GetCameras();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : entries) {
@@ -1299,7 +1299,7 @@ int lua_World_GetLightsBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetLights();
+    const auto entries = world->GetObservation().GetLights();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : entries) {
@@ -1363,7 +1363,7 @@ int lua_World_GetRenderablesBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetRenderables();
+    const auto entries = world->GetObservation().GetRenderables();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : entries) {
@@ -1427,7 +1427,7 @@ int lua_World_GetMeshRenderersBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto entries = world->GetMeshRenderers();
+    const auto entries = world->GetObservation().GetMeshRenderers();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : entries) {
@@ -1492,7 +1492,7 @@ int lua_World_GetVelocitiesBatch(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    const auto bodies = world->GetRigidBodies();
+    const auto bodies = world->GetObservation().GetRigidBodies();
     lua_newtable(L);
     int idx = 1;
     for (const auto& entry : bodies) {

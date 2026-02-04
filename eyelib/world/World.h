@@ -26,7 +26,9 @@ public:
     const WorldState& GetState() const;
 
     void SubmitCommand(std::unique_ptr<Command> command);
-    void ApplyPendingCommands();
+    /** Enqueues the command and immediately applies all pending commands. Returns true if all applied commands succeeded. */
+    bool ApplyCommandSync(std::unique_ptr<Command> command);
+    bool ApplyPendingCommands();
     void ApplyTransaction(Transaction&& transaction);
     void Update();
     void Update(float deltaSeconds);

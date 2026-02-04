@@ -25,13 +25,22 @@ void World::SubmitCommand(std::unique_ptr<Command> command) {
     m_buffer.Enqueue(std::move(command));
 }
 
-void World::ApplyPendingCommands() {
+bool World::ApplyCommandSync(std::unique_ptr<Command> command) {
+    if (command) {
+        m_buffer.Enqueue(std::move(command));
+    }
+    return ApplyPendingCommands();
+}
+
+bool World::ApplyPendingCommands() {
     auto commands = m_buffer.TakeAll();
+    bool allOk = true;
     for (auto& command : commands) {
         if (!command) {
             continue;
         }
         if (!m_validator.Validate(m_state, *command)) {
+            allOk = false;
             continue;
         }
         if (command->Apply(m_state)) {
@@ -59,8 +68,11 @@ void World::ApplyPendingCommands() {
             } else if (const auto* comp = dynamic_cast<const ComponentCommandBase*>(command.get())) {
                 m_events.Emit(WorldEvent{ comp->GetComponentEventType(), comp->GetEntity() });
             }
+        } else {
+            allOk = false;
         }
     }
+    return allOk;
 }
 
 void World::ApplyTransaction(Transaction&& transaction) {

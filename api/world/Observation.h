@@ -2,6 +2,7 @@
 
 #include "eyelib/world/World.h"
 #include "eyelib/world/observation/WorldObservation.h"
+#include "World.h"
 
 #include <optional>
 #include <string>
@@ -22,6 +23,14 @@ public:
 
     std::vector<::eyelib::world::EntityId> GetRegionsContainingPoint(const eyelib::math::Vec3& point) const;
     std::optional<::eyelib::world::EntityId> GetHighestPriorityRegion(const eyelib::math::Vec3& point) const;
+
+    std::vector<World::TransformEntry> GetTransforms() const;
+    std::vector<World::RenderableEntry> GetRenderables() const;
+    std::vector<World::MeshRendererEntry> GetMeshRenderers() const;
+    std::vector<World::CameraEntry> GetCameras() const;
+    std::vector<World::LightEntry> GetLights() const;
+    std::vector<World::RigidBodyEntry> GetRigidBodies() const;
+    std::vector<World::ColliderEntry> GetColliders() const;
 
 private:
     ::eyelib::world::WorldObservation m_observation;

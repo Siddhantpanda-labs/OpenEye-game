@@ -125,9 +125,10 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
         return false;
     }
     m_bindings.clear();
-    const auto colliders = world.GetColliders();
-    const auto transforms = world.GetTransforms();
-    const auto rigidBodies = world.GetRigidBodies();
+    const auto obs = world.GetObservation();
+    const auto colliders = obs.GetColliders();
+    const auto transforms = obs.GetTransforms();
+    const auto rigidBodies = obs.GetRigidBodies();
 
     bool ok = true;
     for (const auto& collider : colliders) {
@@ -150,7 +151,7 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         return;
     }
 
-    const auto transforms = world.GetTransforms();
+    const auto transforms = world.GetObservation().GetTransforms();
     for (const auto& binding : m_bindings) {
         if (!binding.syncTransform || binding.body == 0) {
             continue;

@@ -8,6 +8,9 @@ namespace eyelib {
 namespace world {
 
 bool CommandValidator::Validate(const WorldState& state, const Command& command) const {
+    if (const auto* loadScene = dynamic_cast<const LoadSceneCommand*>(&command)) {
+        return !loadScene->GetPath().empty();
+    }
     if (const auto* destroy = dynamic_cast<const DestroyEntityCommand*>(&command)) {
         return state.Entities().IsAlive(destroy->GetEntity());
     }
