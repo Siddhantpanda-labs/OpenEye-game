@@ -398,7 +398,11 @@ int RunPlayer(int argc, char** argv) {
         int frames = 0;
     } stats;
 
-    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge, &scriptingBridge, &audioBridge, &shaderWatcher](float deltaSeconds) {
+    // Job pool for parallelizable work (physics step, animation update). 0 = use hardware concurrency.
+    eyelib::api::core::ThreadPool jobPool(0);
+
+    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge,
+                   &scriptingBridge, &audioBridge, &shaderWatcher, &jobPool](float deltaSeconds) {
         if (!options.headless) {
             if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();
@@ -407,9 +411,20 @@ int RunPlayer(int argc, char** argv) {
                 return;
             }
         }
-        physicsBridge.Step(world, deltaSeconds, options.maxSubsteps,
-                           options.fixedTimestep > 0.0f ? options.fixedTimestep : 0.0f);
-        animationBridge.Update(deltaSeconds);
+
+        // Read phase: no world mutation yet (observation is built on demand in sync).
+        // Jobs phase: run physics and animation in parallel (read from cached/observation, write to job-local state).
+        const float fixedStep = options.fixedTimestep > 0.0f ? options.fixedTimestep : 0.0f;
+        jobPool.Submit([&physicsBridge, deltaSeconds, maxSub = options.maxSubsteps, fixedStep]() {
+            physicsBridge.StepPhysicsOnly(deltaSeconds, maxSub, fixedStep);
+        });
+        jobPool.Submit([&animationBridge, deltaSeconds]() {
+            animationBridge.Update(deltaSeconds);
+        });
+        jobPool.Wait();
+
+        // Write phase: sync job results to world, then main-thread-only systems.
+        physicsBridge.SyncTransformsToWorld(world);
         if (!options.headless) {
             audioBridge.Update(world, deltaSeconds);
         }

@@ -15,6 +15,14 @@ public:
     void Shutdown();
 
     bool BuildFromWorld(eyelib::api::world::World& world);
+
+    /** Run physics simulation only; does not read from or write to World. Safe to call from a job. */
+    void StepPhysicsOnly(float deltaSeconds, int maxSubSteps, float fixedTimeStep);
+
+    /** Sync physics body transforms back into World. Must run on main thread after jobs complete. */
+    void SyncTransformsToWorld(eyelib::api::world::World& world);
+
+    /** Convenience: StepPhysicsOnly + SyncTransformsToWorld (single-threaded path). */
     void Step(eyelib::api::world::World& world, float deltaSeconds,
               int maxSubSteps, float fixedTimeStep);
 

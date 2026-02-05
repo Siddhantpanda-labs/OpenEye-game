@@ -126,18 +126,18 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
     return ok;
 }
 
-void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSeconds,
-                              int maxSubSteps, float fixedTimeStep) {
+void WorldPhysicsBridge::StepPhysicsOnly(float deltaSeconds, int maxSubSteps, float fixedTimeStep) {
     if (!m_ready) {
         return;
     }
     const float step = fixedTimeStep > 0.0f ? fixedTimeStep : (1.0f / 60.0f);
     m_physics.Step(deltaSeconds, maxSubSteps, step);
+}
 
-    if (m_bindings.empty()) {
+void WorldPhysicsBridge::SyncTransformsToWorld(eyelib::api::world::World& world) {
+    if (!m_ready || m_bindings.empty()) {
         return;
     }
-
     const auto obs = world.GetObservation();
     for (const auto& binding : m_bindings) {
         if (!binding.syncTransform || binding.body == 0) {
@@ -152,6 +152,12 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
         updated.rotation = transform->rotation;
         world.SetTransform(binding.entity, updated);
     }
+}
+
+void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSeconds,
+                              int maxSubSteps, float fixedTimeStep) {
+    StepPhysicsOnly(deltaSeconds, maxSubSteps, fixedTimeStep);
+    SyncTransformsToWorld(world);
 }
 
 bool WorldPhysicsBridge::GetVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out) {
