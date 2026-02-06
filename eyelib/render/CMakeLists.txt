@@ -1,6 +1,17 @@
 # Eyelib Render Component (minimal bring-up)
 
 set(RENDER_SOURCES
+    # RHI (graphics backend abstraction)
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/GLEnums.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BufferGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/TextureGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/ShaderGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/PipelineGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/RenderTargetGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/QueryPoolGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/CommandListGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeviceGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.cpp
