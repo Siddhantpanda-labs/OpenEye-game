@@ -50,7 +50,18 @@ struct IDevice {
     virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;
     virtual void DestroyQueryPool(IQueryPool* pool) = 0;
 
+    /** Wrap an existing backend texture (e.g. GL id as void*) for use with BindTexture. Caller owns the GL texture; wrapper is not destroyed with glDelete. */
+    virtual ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) = 0;
+
     virtual void Present() = 0;
+    /** Blit color from given render target to the default framebuffer (e.g. for present). */
+    virtual void BlitToDefaultFramebuffer(IRenderTarget* src) = 0;
+    /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to default framebuffer. */
+    virtual void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) = 0;
+    /** Blit from src to dst (full size). colorOnly: true = color bit, false = color + depth. */
+    virtual void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) = 0;
+    /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to RHI render target. */
+    virtual void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) = 0;
 };
 
 // ---- Command list ----
@@ -64,6 +75,11 @@ struct ICommandList {
     virtual void SetRenderTarget(IRenderTarget* rt) = 0;
     virtual void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) = 0;
     virtual void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) = 0;
+    virtual void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
+    virtual void SetDepthTest(bool enable) = 0;
+    virtual void SetDepthWrite(bool enable) = 0;
+    virtual void SetDepthFuncLess(bool less) = 0;  // true = GL_LESS, false = GL_LEQUAL etc.
+    virtual void SetCullFace(bool enable) = 0;
 
     virtual void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) = 0;
     virtual void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) = 0;
@@ -72,7 +88,17 @@ struct ICommandList {
     virtual void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0) = 0;
     virtual void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset = 0) = 0;
     virtual void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
+    virtual void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     virtual void BindTexture(ITexture* texture, uint32_t binding) = 0;
+    virtual void UnbindTexture(uint32_t binding) = 0;
+
+    virtual void SetUniformInt(const char* name, int value) = 0;
+    virtual void SetUniformFloat(const char* name, float value) = 0;
+    virtual void SetUniformVec2(const char* name, const float* data) = 0;
+    virtual void SetUniformVec3(const char* name, const float* data) = 0;
+    virtual void SetUniformVec4(const char* name, const float* data) = 0;
+    virtual void SetUniformMat4(const char* name, const float* data) = 0;
+    virtual void SetUniformMat4Array(const char* name, const float* data, size_t count) = 0;
 
     virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) = 0;
     virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
@@ -103,6 +129,8 @@ struct ITexture {
     virtual uint32_t GetHeight() const = 0;
     virtual TextureType GetType() const = 0;
     virtual RHITextureFormat GetFormat() const = 0;
+    /** Backend-native texture handle (e.g. GL texture id as void*). For interop only. */
+    virtual void* GetNativeTexture() = 0;
 };
 
 // ---- Shader ----
@@ -127,6 +155,8 @@ struct IRenderTarget {
     virtual uint32_t GetHeight() const = 0;
     virtual ITexture* GetColorTexture(uint32_t index) = 0;
     virtual ITexture* GetDepthTexture() = 0;
+    /** Backend-native framebuffer handle (e.g. GL FBO id as void*). For interop only. */
+    virtual void* GetNativeFramebuffer() = 0;
 };
 
 // ---- Query pool ----

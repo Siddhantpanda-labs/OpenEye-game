@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/resources/TextureTypes.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/assets/AssetId.h"
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,8 @@ public:
 
     /** Create empty texture. */
     bool Create(int width, int height, TextureFormat format, const void* data = nullptr);
+    /** RHI path: create texture via device. */
+    bool Create(rhi::IDevice* device, int width, int height, TextureFormat format, const void* data = nullptr);
 
     /** Load from file (uses platform::filesystem::ReadFile + stb_image). */
     bool LoadFromFile(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
@@ -44,24 +47,34 @@ public:
 
     void SetFilter(TextureFilter minFilter, TextureFilter magFilter);
     void SetWrap(TextureWrap s, TextureWrap t);
+    void Destroy(rhi::IDevice* device);
 
     int GetWidth() const { return m_width; }
     int GetHeight() const { return m_height; }
     TextureFormat GetFormat() const { return m_format; }
-    bool IsValid() const { return m_id != 0; }
+    bool IsValid() const { return m_id != 0 || m_textureRHI != nullptr; }
 
     /** Raw GL texture id for internal use (e.g. framebuffer attach). */
     unsigned int Id() const { return m_id; }
+    /** RHI path: return texture when created via Create(device, ...). */
+    rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
+
+    /** Map render-layer TextureFormat to RHI format (for use by RenderTarget etc.). */
+    static rhi::RHITextureFormat TextureFormatToRHI(TextureFormat f);
 
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
     const assets::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
 private:
+    static rhi::RHITextureFormat ToRHIFormat(TextureFormat f);
+
     unsigned int m_id = 0;
     int m_width = 0;
     int m_height = 0;
     TextureFormat m_format = TextureFormat::RGBA8;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::ITexture* m_textureRHI = nullptr;
 
     assets::AssetId m_assetId = assets::AssetId::Invalid();
 };

@@ -19,9 +19,12 @@ Shader::Shader(Shader&& other) noexcept {
     m_program = other.m_program;
     m_bonesUBO = other.m_bonesUBO;
     m_bonesUBOSize = other.m_bonesUBOSize;
+    m_deviceRHI = other.m_deviceRHI;
+    m_pipelineRHI = other.m_pipelineRHI;
     other.m_program = 0;
     other.m_bonesUBO = 0;
-    other.m_bonesUBOSize = 0;
+    other.m_deviceRHI = nullptr;
+    other.m_pipelineRHI = nullptr;
 }
 
 Shader& Shader::operator=(Shader&& other) noexcept {
@@ -30,9 +33,12 @@ Shader& Shader::operator=(Shader&& other) noexcept {
     m_program = other.m_program;
     m_bonesUBO = other.m_bonesUBO;
     m_bonesUBOSize = other.m_bonesUBOSize;
+    m_deviceRHI = other.m_deviceRHI;
+    m_pipelineRHI = other.m_pipelineRHI;
     other.m_program = 0;
     other.m_bonesUBO = 0;
-    other.m_bonesUBOSize = 0;
+    other.m_deviceRHI = nullptr;
+    other.m_pipelineRHI = nullptr;
     return *this;
 }
 
@@ -165,7 +171,43 @@ bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& frag
     return BuildFromSource(vertexSrc, fragmentSrc);
 }
 
+bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout) {
+    if (!device) return false;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    rhi::IShader* vs = device->CreateShader(rhi::ShaderStage::Vertex, vertexSrc.c_str(), vertexSrc.size());
+    rhi::IShader* fs = device->CreateShader(rhi::ShaderStage::Fragment, fragmentSrc.c_str(), fragmentSrc.size());
+    if (!vs || !fs) {
+        if (vs) device->DestroyShader(vs);
+        if (fs) device->DestroyShader(fs);
+        return false;
+    }
+    rhi::PipelineDesc desc;
+    desc.vertexShader = vs;
+    desc.fragmentShader = fs;
+    desc.vertexLayout = layout;
+    desc.topology = rhi::PrimitiveTopology::TriangleList;
+    desc.depthStencil.depthTest = true;
+    desc.depthStencil.depthWrite = true;
+    rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
+    device->DestroyShader(vs);
+    device->DestroyShader(fs);
+    if (!pipe) return false;
+    m_pipelineRHI = pipe;
+    m_deviceRHI = device;
+    return true;
+}
+
+bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout) {
+    if (!device) return false;
+    std::string vertexSrc;
+    if (!LoadShaderSource(vertexPath, vertexSrc)) return false;
+    std::string fragmentSrc;
+    if (!LoadShaderSource(fragmentPath, fragmentSrc)) return false;
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout);
+}
+
 void Shader::Destroy() {
+    if (m_deviceRHI) Destroy(m_deviceRHI);
     if (m_program) {
         glDeleteProgram(m_program);
         m_program = 0;
@@ -175,6 +217,15 @@ void Shader::Destroy() {
         m_bonesUBO = 0;
         m_bonesUBOSize = 0;
     }
+}
+
+void Shader::Destroy(rhi::IDevice* device) {
+    if (!device || device != m_deviceRHI) return;
+    if (m_pipelineRHI) {
+        device->DestroyPipeline(m_pipelineRHI);
+        m_pipelineRHI = nullptr;
+    }
+    m_deviceRHI = nullptr;
 }
 
 void Shader::Bind() const {

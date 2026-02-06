@@ -1,9 +1,11 @@
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstddef>
 
 namespace eyelib {
 namespace render {
@@ -82,9 +84,15 @@ Mesh::Mesh(Mesh&& other) noexcept
       m_vao(other.m_vao),
       m_vbo(other.m_vbo),
       m_ebo(other.m_ebo),
-      m_uploaded(other.m_uploaded) {
+      m_uploaded(other.m_uploaded),
+      m_deviceRHI(other.m_deviceRHI),
+      m_vertexBufferRHI(other.m_vertexBufferRHI),
+      m_indexBufferRHI(other.m_indexBufferRHI) {
     other.m_vao = other.m_vbo = other.m_ebo = 0;
     other.m_uploaded = false;
+    other.m_deviceRHI = nullptr;
+    other.m_vertexBufferRHI = nullptr;
+    other.m_indexBufferRHI = nullptr;
 }
 
 Mesh& Mesh::operator=(Mesh&& other) noexcept {
@@ -101,8 +109,14 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
     m_vbo = other.m_vbo;
     m_ebo = other.m_ebo;
     m_uploaded = other.m_uploaded;
+    m_deviceRHI = other.m_deviceRHI;
+    m_vertexBufferRHI = other.m_vertexBufferRHI;
+    m_indexBufferRHI = other.m_indexBufferRHI;
     other.m_vao = other.m_vbo = other.m_ebo = 0;
     other.m_uploaded = false;
+    other.m_deviceRHI = nullptr;
+    other.m_vertexBufferRHI = nullptr;
+    other.m_indexBufferRHI = nullptr;
     return *this;
 }
 
@@ -265,11 +279,72 @@ void Mesh::UploadToGPU() {
     m_uploaded = true;
 }
 
+void Mesh::UploadToGPU(rhi::IDevice* device) {
+    if (!device || m_vertices.empty()) return;
+    if (m_indexFormat == IndexFormat::UInt32 && m_indices32.empty()) return;
+    if (m_indexFormat == IndexFormat::UInt16 && m_indices16.empty()) return;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+
+    rhi::BufferDesc vdesc;
+    vdesc.sizeInBytes = m_vertices.size() * sizeof(Vertex);
+    vdesc.usage = rhi::BufferUsage::Vertex;
+    vdesc.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    m_vertexBufferRHI = device->CreateBuffer(vdesc, m_vertices.data());
+    if (!m_vertexBufferRHI) return;
+
+    rhi::BufferDesc idesc;
+    idesc.usage = rhi::BufferUsage::Index;
+    idesc.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    if (m_indexFormat == IndexFormat::UInt32) {
+        idesc.sizeInBytes = m_indices32.size() * sizeof(uint32_t);
+        m_indexBufferRHI = device->CreateBuffer(idesc, m_indices32.data());
+    } else {
+        idesc.sizeInBytes = m_indices16.size() * sizeof(uint16_t);
+        m_indexBufferRHI = device->CreateBuffer(idesc, m_indices16.data());
+    }
+    if (!m_indexBufferRHI) {
+        device->DestroyBuffer(m_vertexBufferRHI);
+        m_vertexBufferRHI = nullptr;
+        return;
+    }
+    m_deviceRHI = device;
+    if (m_aabbDirty) ComputeAABB();
+}
+
 void Mesh::Destroy() {
+    if (m_deviceRHI) Destroy(m_deviceRHI);
     if (m_ebo) { glDeleteBuffers(1, &m_ebo); m_ebo = 0; }
     if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
     if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
     m_uploaded = false;
+}
+
+void Mesh::Destroy(rhi::IDevice* device) {
+    if (!device || device != m_deviceRHI) return;
+    if (m_vertexBufferRHI) { device->DestroyBuffer(m_vertexBufferRHI); m_vertexBufferRHI = nullptr; }
+    if (m_indexBufferRHI) { device->DestroyBuffer(m_indexBufferRHI); m_indexBufferRHI = nullptr; }
+    m_deviceRHI = nullptr;
+}
+
+rhi::IndexType Mesh::GetRHIIndexType() const {
+    return m_indexFormat == IndexFormat::UInt16 ? rhi::IndexType::UInt16 : rhi::IndexType::UInt32;
+}
+
+rhi::VertexLayout Mesh::GetVertexLayoutRHI() {
+    using namespace rhi;
+    VertexLayout layout;
+    layout.strideInBytes = sizeof(Vertex);
+    layout.attributes = {
+        {0, VertexAttributeType::Float3, static_cast<uint32_t>(offsetof(Vertex, position))},
+        {1, VertexAttributeType::Float3, static_cast<uint32_t>(offsetof(Vertex, normal))},
+        {2, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, uv))},
+        {7, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, uv1))},
+        {3, VertexAttributeType::Float3, static_cast<uint32_t>(offsetof(Vertex, tangent))},
+        {4, VertexAttributeType::Float4, static_cast<uint32_t>(offsetof(Vertex, color))},
+        {5, VertexAttributeType::Int4,   static_cast<uint32_t>(offsetof(Vertex, boneIndices))},
+        {6, VertexAttributeType::Float4, static_cast<uint32_t>(offsetof(Vertex, boneWeights))},
+    };
+    return layout;
 }
 
 void Mesh::Bind() const { glBindVertexArray(m_vao); }

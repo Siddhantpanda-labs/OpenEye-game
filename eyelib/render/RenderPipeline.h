@@ -2,6 +2,7 @@
 
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -33,14 +34,15 @@ enum class PipelineMode { Forward, Deferred, ForwardPlus };
  */
 class RenderPipeline {
 public:
-    using PrePostCallback = std::function<void(unsigned int hdrFbo, unsigned int width, unsigned int height, const RenderScene& scene)>;
+    using PrePostCallback = std::function<void(rhi::IRenderTarget* hdrRT, unsigned int width, unsigned int height, const RenderScene& scene)>;
     RenderPipeline();
     ~RenderPipeline();
 
     RenderPipeline(const RenderPipeline&) = delete;
     RenderPipeline& operator=(const RenderPipeline&) = delete;
 
-    bool Initialize(uint32_t width, uint32_t height);
+    /** Initialize with injected RHI device (no backend include in this module). */
+    bool Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
 
@@ -55,6 +57,9 @@ public:
     /** Returns true when the pipeline has a valid render target to present. */
     bool HasValidOutput() const;
 
+    rhi::IDevice* GetRHIDevice() { return m_device.get(); }
+    rhi::ICommandList* GetRHICommandList() { return m_device ? m_device->GetImmediateCommandList() : nullptr; }
+
     GBuffer* GetGBuffer();
     ShadowMap* GetShadowMap();
     PostProcessor* GetPostProcessor();
@@ -64,8 +69,8 @@ public:
     void SetFrameSize(unsigned w, unsigned h);
     void SetPrePostProcessCallback(PrePostCallback cb) { m_prePostCallback = std::move(cb); }
     
-    // Get HDR color texture (for post-processing input)
-    unsigned int GetHDRColorTexture() const { return m_hdrColor; }
+    /** HDR color texture for post-processing (RHI path only; no GL id in this module). */
+    rhi::ITexture* GetHDRColorTextureRHI() const;
 
 private:
     void EnsureResources(uint32_t width, uint32_t height);
@@ -82,6 +87,7 @@ private:
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
     void EnsureSkyboxShader();
 
+    std::unique_ptr<rhi::IDevice> m_device;
     std::unique_ptr<GBuffer> m_gbuffer;
     std::unique_ptr<ShadowMap> m_shadowMap;
     std::unique_ptr<GBufferPass> m_gbufferPass;
@@ -94,14 +100,12 @@ private:
     std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
     std::shared_ptr<Shader> m_skyboxShader;
 
-    unsigned int m_hdrFBO = 0;
-    unsigned int m_hdrColor = 0;
-    unsigned int m_hdrDepth = 0;
+    rhi::IRenderTarget* m_hdrRenderTarget = nullptr;
 
-    // Forward+ SSBOs
-    unsigned int m_pointLightSSBO = 0;
-    unsigned int m_spotLightSSBO = 0;
-    unsigned int m_lightIndexSSBO = 0;
+    // Forward+ SSBOs (RHI)
+    rhi::IBuffer* m_pointLightBuffer = nullptr;
+    rhi::IBuffer* m_spotLightBuffer = nullptr;
+    rhi::IBuffer* m_lightIndexBuffer = nullptr;
 
     uint32_t m_width = 0, m_height = 0;
     PipelineMode m_mode = PipelineMode::Deferred;

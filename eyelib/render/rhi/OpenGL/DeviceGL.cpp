@@ -101,11 +101,23 @@ ITexture* DeviceGL::CreateTexture(const TextureDesc& desc, const void* initialDa
 
 void DeviceGL::DestroyTexture(ITexture* texture) {
     auto* t = static_cast<TextureGL*>(texture);
-    if (t && t->m_handle) {
+    if (t && t->m_handle && t->m_owned) {
         glDeleteTextures(1, &t->m_handle);
         t->m_handle = 0;
     }
     delete t;
+}
+
+ITexture* DeviceGL::CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) {
+    if (!nativeTextureId) return nullptr;
+    auto* tex = new TextureGL();
+    tex->m_handle = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(nativeTextureId));
+    tex->m_width = width;
+    tex->m_height = height;
+    tex->m_type = TextureType::Texture2D;
+    tex->m_format = format;
+    tex->m_owned = false;
+    return tex;
 }
 
 namespace {
@@ -288,6 +300,56 @@ void DeviceGL::DestroyQueryPool(IQueryPool* pool) {
 
 void DeviceGL::Present() {
     // Swap buffers is typically called by platform/window; no-op here or call glFinish.
+}
+
+void DeviceGL::BlitToDefaultFramebuffer(IRenderTarget* src) {
+    if (!src) return;
+    auto* r = static_cast<RenderTargetGL*>(src);
+    BlitToDefaultFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(r->m_fbo)), src->GetWidth(), src->GetHeight());
+}
+
+void DeviceGL::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) return;
+    GLuint fbo = (nativeFbo != nullptr) ? static_cast<GLuint>(reinterpret_cast<uintptr_t>(nativeFbo)) : 0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, static_cast<GLint>(width), static_cast<GLint>(height),
+                      0, 0, static_cast<GLint>(width), static_cast<GLint>(height),
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void DeviceGL::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
+    if (!src || !dst) return;
+    auto* s = static_cast<RenderTargetGL*>(src);
+    auto* d = static_cast<RenderTargetGL*>(dst);
+    const uint32_t w = src->GetWidth();
+    const uint32_t h = src->GetHeight();
+    if (w == 0 || h == 0) return;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s->m_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d->m_fbo);
+    GLbitfield mask = colorOnly ? GL_COLOR_BUFFER_BIT : (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glBlitFramebuffer(0, 0, static_cast<GLint>(w), static_cast<GLint>(h),
+                      0, 0, static_cast<GLint>(w), static_cast<GLint>(h), mask, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void DeviceGL::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) {
+    if (!dst) return;
+    auto* d = static_cast<RenderTargetGL*>(dst);
+    const uint32_t w = dst->GetWidth();
+    const uint32_t h = dst->GetHeight();
+    if (w == 0 || h == 0) return;
+    GLuint srcFbo = (nativeFbo != nullptr) ? static_cast<GLuint>(reinterpret_cast<uintptr_t>(nativeFbo)) : 0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d->m_fbo);
+    GLbitfield mask = colorOnly ? GL_COLOR_BUFFER_BIT : (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glBlitFramebuffer(0, 0, static_cast<GLint>(w), static_cast<GLint>(h),
+                      0, 0, static_cast<GLint>(w), static_cast<GLint>(h), mask, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
 } // namespace rhi

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/RenderTypes.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
 #include <cstdint>
 #include <vector>
@@ -47,6 +48,8 @@ public:
 
     /** Upload to GPU as SSBO. */
     void UploadToGPU(unsigned int& lightIndexSSBO, unsigned int& lightGridSSBO);
+    /** RHI path: upload light indices to the given buffer (Map/copy/Unmap). Buffer must be at least GetLightIndexDataSize() bytes. */
+    void UploadToGPU(rhi::IBuffer* lightIndexBuffer);
 
     uint32_t GetTileCountX() const { return m_tileCountX; }
     uint32_t GetTileCountY() const { return m_tileCountY; }

@@ -1,14 +1,14 @@
 #pragma once
 
 #include "eyelib/render/resources/TextureTypes.h"
+#include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/resources/Texture2D.h"
 #include <cstdint>
 #include <vector>
 #include <memory>
 
 namespace eyelib {
 namespace render {
-
-class Texture2D;
 
 /**
  * @brief Generic render target (framebuffer wrapper).
@@ -36,9 +36,15 @@ public:
                 const std::vector<TextureFormat>& colorFormats,
                 TextureFormat depthFormat = TextureFormat::Depth24,
                 int samples = 0);
+    /** RHI path: create render target via device. */
+    bool Create(rhi::IDevice* device, uint32_t width, uint32_t height,
+                const std::vector<TextureFormat>& colorFormats,
+                TextureFormat depthFormat = TextureFormat::Depth24,
+                uint32_t samples = 1);
 
     void Resize(uint32_t width, uint32_t height);
     void Destroy();
+    void Destroy(rhi::IDevice* device);
 
     void Bind() const;
     void Unbind() const;
@@ -54,6 +60,8 @@ public:
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
     unsigned int GetFBO() const { return m_fbo; }
+    /** RHI path: return render target when created via Create(device, ...). */
+    rhi::IRenderTarget* GetRenderTargetRHI() const { return m_renderTargetRHI; }
     int GetSamples() const { return m_samples; }
 
     /**
@@ -92,7 +100,9 @@ private:
     unsigned int m_resolveFBO = 0;  // Resolve FBO (non-MSAA, for reading)
     std::vector<TextureFormat> m_colorFormats;
     TextureFormat m_depthFormat = TextureFormat::Depth24;
-    
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::IRenderTarget* m_renderTargetRHI = nullptr;
+
     // For non-MSAA: textures attached directly to m_fbo
     // For MSAA: renderbuffers attached to m_fbo, textures attached to m_resolveFBO
     std::vector<std::shared_ptr<Texture2D>> m_colorTextures;  // Resolved textures (always available)

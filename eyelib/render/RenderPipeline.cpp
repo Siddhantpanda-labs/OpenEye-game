@@ -19,8 +19,9 @@
 #include "eyelib/render/resources/TextureCube.h"
 #include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/core/Time.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <algorithm>
-#include <glad/glad.h>
+#include <cstdint>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <span>
 #include <string>
@@ -36,9 +37,12 @@ RenderPipeline::~RenderPipeline() {
 
 void RenderPipeline::Shutdown() {
     DestroyHDRFramebuffer();
-    if (m_pointLightSSBO) { glDeleteBuffers(1, &m_pointLightSSBO); m_pointLightSSBO = 0; }
-    if (m_spotLightSSBO) { glDeleteBuffers(1, &m_spotLightSSBO); m_spotLightSSBO = 0; }
-    if (m_lightIndexSSBO) { glDeleteBuffers(1, &m_lightIndexSSBO); m_lightIndexSSBO = 0; }
+    if (m_device) {
+        if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
+        if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
+        if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
+    }
+    m_device.reset();
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
     m_forwardPlusSkinnedShader.reset();
@@ -52,13 +56,15 @@ void RenderPipeline::Shutdown() {
     m_width = m_height = 0;
 }
 
-bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
+bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height) {
+    if (!device) return false;
     m_width = width;
     m_height = height;
+    m_device = std::move(device);
     m_gbuffer = std::make_unique<GBuffer>();
     if (!m_gbuffer->Initialize(width, height)) return false;
     m_shadowMap = std::make_unique<ShadowMap>();
-    if (!m_shadowMap->Initialize(2048)) return false;
+    if (!m_shadowMap->Initialize(m_device.get(), 2048)) return false;
     m_gbufferPass = std::make_unique<GBufferPass>();
     m_shadowPass = std::make_unique<ShadowPass>();
     m_lightingPass = std::make_unique<LightingPass>();
@@ -69,12 +75,12 @@ bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
     m_postProcessor = std::make_unique<PostProcessor>();
     if (!m_postProcessor->Initialize(width, height)) return false;
     CreateHDRFramebuffer();
-    
+
     // Initialize previous matrices (identity for first frame)
     m_prevView = math::Mat4(1.0f);
     m_prevProjection = math::Mat4(1.0f);
-    
-    return m_hdrFBO != 0;
+
+    return m_hdrRenderTarget != nullptr;
 }
 
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
@@ -92,7 +98,8 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     if (m_postProcessor) {
         m_postProcessor->Resize(width, height);
     }
-    glViewport(0, 0, width, height);
+    rhi::ICommandList* cmd = m_device ? m_device->GetImmediateCommandList() : nullptr;
+    if (cmd) cmd->SetViewport(0, 0, width, height);
 }
 
 void RenderPipeline::SetFrameSize(unsigned w, unsigned h) {
@@ -100,43 +107,28 @@ void RenderPipeline::SetFrameSize(unsigned w, unsigned h) {
 }
 
 void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
-    if (!m_gbuffer) Initialize(width, height);
-    else Resize(width, height);
+    if (!m_gbuffer || !m_device) return;
+    Resize(width, height);
 }
 
 void RenderPipeline::CreateHDRFramebuffer() {
-    if (m_width == 0 || m_height == 0) return;
+    if (m_width == 0 || m_height == 0 || !m_device) return;
     DestroyHDRFramebuffer();
-
-    glGenFramebuffers(1, &m_hdrFBO);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-
-    glGenTextures(1, &m_hdrColor);
-    glBindTexture(GL_TEXTURE_2D, m_hdrColor);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, m_width, m_height, 0, GL_RGBA, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hdrColor, 0);
-
-    glGenTextures(1, &m_hdrDepth);
-    glBindTexture(GL_TEXTURE_2D, m_hdrDepth);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_hdrDepth, 0);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    std::vector<rhi::RHITextureFormat> colorFormats = { rhi::RHITextureFormat::RGBA16F };
+    m_hdrRenderTarget = m_device->CreateRenderTarget(
+        static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height),
+        colorFormats, rhi::RHITextureFormat::Depth24, 1);
 }
 
 void RenderPipeline::DestroyHDRFramebuffer() {
-    if (m_hdrFBO) { glDeleteFramebuffers(1, &m_hdrFBO); m_hdrFBO = 0; }
-    if (m_hdrColor) { glDeleteTextures(1, &m_hdrColor); m_hdrColor = 0; }
-    if (m_hdrDepth) { glDeleteTextures(1, &m_hdrDepth); m_hdrDepth = 0; }
+    if (m_device && m_hdrRenderTarget) {
+        m_device->DestroyRenderTarget(m_hdrRenderTarget);
+        m_hdrRenderTarget = nullptr;
+    }
+}
+
+rhi::ITexture* RenderPipeline::GetHDRColorTextureRHI() const {
+    return m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
 }
 
 void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
@@ -147,8 +139,10 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
     const auto& cam = scene.camera;
     const auto& light = scene.light;
 
-    auto hdrColor = m_frameGraph->ImportTexture("HDR", m_hdrColor, m_width, m_height);
-    auto hdrDepth = m_frameGraph->ImportTexture("HDRDepth", m_hdrDepth, m_width, m_height);
+    rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
+    rhi::ITexture* hdrDepthTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetDepthTexture() : nullptr;
+    auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    auto hdrDepth = m_frameGraph->ImportTextureRHI("HDRDepth", hdrDepthTex, m_width, m_height);
     auto gbPos = m_frameGraph->ImportTexture("GBufferPos", m_gbuffer->GetPositionTexture(), m_width, m_height);
     auto gbNorm = m_frameGraph->ImportTexture("GBufferNorm", m_gbuffer->GetNormalTexture(), m_width, m_height);
     auto gbAlb = m_frameGraph->ImportTexture("GBufferAlb", m_gbuffer->GetAlbedoTexture(), m_width, m_height);
@@ -174,31 +168,30 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
 
     std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
     if (light.castShadows) lightingReads.push_back(shadowTex);
+    rhi::ICommandList* cmd = GetRHICommandList();
+    rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
-        [this, &scene, &cam](const FGPassResources&) {
-            glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-            glViewport(0, 0, m_width, m_height);
-            glClearColor(0, 0, 0, 1);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        [this, &scene, &cam, cmd, clearBlack](const FGPassResources&) {
+            if (cmd && m_hdrRenderTarget) {
+                cmd->SetRenderTarget(m_hdrRenderTarget);
+                cmd->SetViewport(0, 0, m_width, m_height);
+                cmd->ClearRenderTarget(m_hdrRenderTarget, clearBlack);
+            }
             ShadowMap* shadowMapForLighting = scene.light.castShadows ? m_shadowMap.get() : nullptr;
             m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
                 &scene.pointLights, &scene.spotLights);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
         lightingReads, { hdrColor }, true);
 
     m_frameGraph->AddPass("Transparency",
-        [this, &scene, &cam](const FGPassResources&) {
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
-            glBlitFramebuffer(0, 0, static_cast<GLint>(m_gbuffer->GetWidth()), static_cast<GLint>(m_gbuffer->GetHeight()),
-                              0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-            glViewport(0, 0, m_width, m_height);
+        [this, &scene, &cam, cmd](const FGPassResources&) {
+            if (m_device && m_hdrRenderTarget)
+                m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+            if (cmd && m_hdrRenderTarget) {
+                cmd->SetRenderTarget(m_hdrRenderTarget);
+                cmd->SetViewport(0, 0, m_width, m_height);
+            }
             TransparencyPass::Render(scene.transparent, cam.view, cam.projection, cam.viewPos);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
         {}, { hdrColor }, true);
 
@@ -214,8 +207,10 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
     const auto& cam = scene.camera;
     const auto& light = scene.light;
 
-    auto hdrColor = m_frameGraph->ImportTexture("HDR", m_hdrColor, m_width, m_height);
-    auto hdrDepth = m_frameGraph->ImportTexture("HDRDepth", m_hdrDepth, m_width, m_height);
+    rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
+    rhi::ITexture* hdrDepthTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetDepthTexture() : nullptr;
+    auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    auto hdrDepth = m_frameGraph->ImportTextureRHI("HDRDepth", hdrDepthTex, m_width, m_height);
     auto gbPos = m_frameGraph->ImportTexture("GBufferPos", m_gbuffer->GetPositionTexture(), m_width, m_height);
     auto gbNorm = m_frameGraph->ImportTexture("GBufferNorm", m_gbuffer->GetNormalTexture(), m_width, m_height);
     auto gbAlb = m_frameGraph->ImportTexture("GBufferAlb", m_gbuffer->GetAlbedoTexture(), m_width, m_height);
@@ -241,32 +236,31 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
 
     std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
     if (light.castShadows) lightingReads.push_back(shadowTex);
+    rhi::ICommandList* cmd = GetRHICommandList();
+    rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
-        [this, &scene, &cam](const FGPassResources&) {
-            glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-            glViewport(0, 0, m_width, m_height);
-            glClearColor(0, 0, 0, 1);
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        [this, &scene, &cam, cmd, clearBlack](const FGPassResources&) {
+            if (cmd && m_hdrRenderTarget) {
+                cmd->SetRenderTarget(m_hdrRenderTarget);
+                cmd->SetViewport(0, 0, m_width, m_height);
+                cmd->ClearRenderTarget(m_hdrRenderTarget, clearBlack);
+            }
             ShadowMap* shadowMapForLighting = scene.light.castShadows ? m_shadowMap.get() : nullptr;
             m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
                 std::span<const api::render::PointLight>(scene.pointLights.data(), scene.pointLights.size()),
                 std::span<const api::render::SpotLight>(scene.spotLights.data(), scene.spotLights.size()));
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
         lightingReads, { hdrColor }, true);
 
     m_frameGraph->AddPass("Transparency",
-        [this, &scene, &cam](const FGPassResources&) {
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
-            glBlitFramebuffer(0, 0, static_cast<GLint>(m_gbuffer->GetWidth()), static_cast<GLint>(m_gbuffer->GetHeight()),
-                              0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-            glViewport(0, 0, m_width, m_height);
+        [this, &scene, &cam, cmd](const FGPassResources&) {
+            if (m_device && m_hdrRenderTarget)
+                m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+            if (cmd && m_hdrRenderTarget) {
+                cmd->SetRenderTarget(m_hdrRenderTarget);
+                cmd->SetViewport(0, 0, m_width, m_height);
+            }
             TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), cam.view, cam.projection, cam.viewPos);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         },
         {}, { hdrColor }, true);
 
@@ -277,17 +271,19 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
 void RenderPipeline::RenderForward(const RenderScene& scene) {
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-    glViewport(0, 0, m_width, m_height);
-    glClearColor(0.1f, 0.1f, 0.15f, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE); // Disable culling to render both front and back faces
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (cmd && m_hdrRenderTarget) {
+        rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
+        cmd->SetRenderTarget(m_hdrRenderTarget);
+        cmd->SetViewport(0, 0, m_width, m_height);
+        cmd->ClearRenderTarget(m_hdrRenderTarget, cv);
+    }
+    if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
     const int kShadowMapUnit = 5;
-    if (m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    if (m_shadowMap && cmd) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
     }
 
     const int kMaxPointLights = 8;
@@ -367,30 +363,28 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
         }
     }
 
-    if (m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
+    if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 
     TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
-    glEnable(GL_CULL_FACE); // Re-enable culling for other passes
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::RenderForward(const api::RenderScene& scene) {
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-    glViewport(0, 0, m_width, m_height);
-    glClearColor(0.1f, 0.1f, 0.15f, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (cmd && m_hdrRenderTarget) {
+        rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
+        cmd->SetRenderTarget(m_hdrRenderTarget);
+        cmd->SetViewport(0, 0, m_width, m_height);
+        cmd->ClearRenderTarget(m_hdrRenderTarget, cv);
+    }
+    if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
     const int kShadowMapUnit = 5;
-    if (m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    if (m_shadowMap && cmd) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
     }
 
     const int kMaxPointLights = 8;
@@ -474,14 +468,10 @@ void RenderPipeline::RenderForward(const api::RenderScene& scene) {
         sh->Unbind();
     }
 
-    if (m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
+    if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 
     TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
-    glEnable(GL_CULL_FACE);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
@@ -500,30 +490,48 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
     m_clusteredLightGrid->BuildLightGrid(scene.pointLights, scene.spotLights,
                                          scene.camera.view, scene.camera.projection, scene.camera.viewPos);
 
-    // Upload lights to SSBOs (std140 layout)
-    if (!scene.pointLights.empty()) {
-        if (m_pointLightSSBO == 0) {
-            glGenBuffers(1, &m_pointLightSSBO);
+    // Upload lights to SSBOs (RHI)
+    rhi::ICommandList* cmdFwd = GetRHICommandList();
+    const size_t kMaxPointLights = 256;
+    const size_t kMaxSpotLights = 64;
+    const size_t kMaxLightIndices = 4 * 1024 * 1024;
+    if (!scene.pointLights.empty() && m_device) {
+        if (!m_pointLightBuffer) {
+            rhi::BufferDesc bd;
+            bd.sizeInBytes = kMaxPointLights * sizeof(PointLight);
+            bd.usage = rhi::BufferUsage::Storage;
+            bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_pointLightBuffer = m_device->CreateBuffer(bd, nullptr);
         }
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_pointLightSSBO);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(scene.pointLights.size() * sizeof(PointLight)),
-                     scene.pointLights.data(), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_pointLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-    }
-    if (!scene.spotLights.empty()) {
-        if (m_spotLightSSBO == 0) {
-            glGenBuffers(1, &m_spotLightSSBO);
+        if (m_pointLightBuffer) {
+            const size_t sz = scene.pointLights.size() * sizeof(PointLight);
+            m_pointLightBuffer->Update(scene.pointLights.data(), 0, sz);
+            if (cmdFwd) cmdFwd->BindStorageBuffer(m_pointLightBuffer, 3, 0, static_cast<uint32_t>(sz));
         }
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_spotLightSSBO);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(scene.spotLights.size() * sizeof(SpotLight)),
-                     scene.spotLights.data(), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, m_spotLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     }
-
-    // Upload clustered light grid
-    m_clusteredLightGrid->UploadToGPU(m_lightIndexSSBO, m_lightIndexSSBO);
+    if (!scene.spotLights.empty() && m_device) {
+        if (!m_spotLightBuffer) {
+            rhi::BufferDesc bd;
+            bd.sizeInBytes = kMaxSpotLights * sizeof(SpotLight);
+            bd.usage = rhi::BufferUsage::Storage;
+            bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_spotLightBuffer = m_device->CreateBuffer(bd, nullptr);
+        }
+        if (m_spotLightBuffer) {
+            const size_t sz = scene.spotLights.size() * sizeof(SpotLight);
+            m_spotLightBuffer->Update(scene.spotLights.data(), 0, sz);
+            if (cmdFwd) cmdFwd->BindStorageBuffer(m_spotLightBuffer, 4, 0, static_cast<uint32_t>(sz));
+        }
+    }
+    if (m_device && !m_lightIndexBuffer) {
+        rhi::BufferDesc bd;
+        bd.sizeInBytes = kMaxLightIndices;
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
+    }
+    m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
+    if (cmdFwd && m_lightIndexBuffer) cmdFwd->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (scene.light.castShadows && m_shadowMap && m_shadowPass) {
         m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
@@ -547,17 +555,18 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
         m_forwardPlusSkinnedShader->LoadFromFile("assets/shaders/passes/forward/forwardplus_skinned.vert", "assets/shaders/passes/forward/forwardplus.frag");
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-    glViewport(0, 0, m_width, m_height);
-    glClearColor(0.1f, 0.1f, 0.15f, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE); // Match Forward: render both sides so orientation matches
+    if (cmdFwd && m_hdrRenderTarget) {
+        rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
+        cmdFwd->SetRenderTarget(m_hdrRenderTarget);
+        cmdFwd->SetViewport(0, 0, m_width, m_height);
+        cmdFwd->ClearRenderTarget(m_hdrRenderTarget, cv);
+    }
+    if (cmdFwd) { cmdFwd->SetDepthTest(true); cmdFwd->SetCullFace(false); }
 
     const int kShadowMapUnit = 5;
-    if (scene.light.castShadows && m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    if (scene.light.castShadows && m_shadowMap && cmdFwd) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmdFwd->BindTexture(shadowTex, kShadowMapUnit);
     }
 
     auto setCommonForwardPlusUniforms = [&](Shader* sh) {
@@ -695,13 +704,9 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
 
     m_forwardPlusShader->Unbind();
     if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
-    glEnable(GL_CULL_FACE);
+    if (scene.light.castShadows && m_shadowMap && cmdFwd) cmdFwd->UnbindTexture(kShadowMapUnit);
     TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
-    if (scene.light.castShadows && m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (cmdFwd) { cmdFwd->SetCullFace(true); cmdFwd->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
@@ -742,24 +747,47 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
     m_clusteredLightGrid->BuildLightGrid(m_scratchPointLights, m_scratchSpotLights,
                                          scene.camera.view, scene.camera.projection, scene.camera.viewPos);
 
-    if (!m_scratchPointLights.empty()) {
-        if (m_pointLightSSBO == 0) glGenBuffers(1, &m_pointLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_pointLightSSBO);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(m_scratchPointLights.size() * sizeof(PointLight)),
-                     m_scratchPointLights.data(), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_pointLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    rhi::ICommandList* cmdFwdApi = GetRHICommandList();
+    const size_t kMaxPointLightsApi = 256;
+    const size_t kMaxSpotLightsApi = 64;
+    const size_t kMaxLightIndicesApi = 4 * 1024 * 1024;
+    if (!m_scratchPointLights.empty() && m_device) {
+        if (!m_pointLightBuffer) {
+            rhi::BufferDesc bd;
+            bd.sizeInBytes = kMaxPointLightsApi * sizeof(PointLight);
+            bd.usage = rhi::BufferUsage::Storage;
+            bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_pointLightBuffer = m_device->CreateBuffer(bd, nullptr);
+        }
+        if (m_pointLightBuffer) {
+            const size_t sz = m_scratchPointLights.size() * sizeof(PointLight);
+            m_pointLightBuffer->Update(m_scratchPointLights.data(), 0, sz);
+            if (cmdFwdApi) cmdFwdApi->BindStorageBuffer(m_pointLightBuffer, 3, 0, static_cast<uint32_t>(sz));
+        }
     }
-    if (!m_scratchSpotLights.empty()) {
-        if (m_spotLightSSBO == 0) glGenBuffers(1, &m_spotLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_spotLightSSBO);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(m_scratchSpotLights.size() * sizeof(SpotLight)),
-                     m_scratchSpotLights.data(), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, m_spotLightSSBO);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+    if (!m_scratchSpotLights.empty() && m_device) {
+        if (!m_spotLightBuffer) {
+            rhi::BufferDesc bd;
+            bd.sizeInBytes = kMaxSpotLightsApi * sizeof(SpotLight);
+            bd.usage = rhi::BufferUsage::Storage;
+            bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_spotLightBuffer = m_device->CreateBuffer(bd, nullptr);
+        }
+        if (m_spotLightBuffer) {
+            const size_t sz = m_scratchSpotLights.size() * sizeof(SpotLight);
+            m_spotLightBuffer->Update(m_scratchSpotLights.data(), 0, sz);
+            if (cmdFwdApi) cmdFwdApi->BindStorageBuffer(m_spotLightBuffer, 4, 0, static_cast<uint32_t>(sz));
+        }
     }
-
-    m_clusteredLightGrid->UploadToGPU(m_lightIndexSSBO, m_lightIndexSSBO);
+    if (m_device && !m_lightIndexBuffer) {
+        rhi::BufferDesc bd;
+        bd.sizeInBytes = kMaxLightIndicesApi;
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
+    }
+    m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
+    if (cmdFwdApi && m_lightIndexBuffer) cmdFwdApi->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (scene.light.castShadows && m_shadowMap && m_shadowPass) {
         m_shadowPass->Render(*m_shadowMap, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), scene.light.direction,
@@ -780,17 +808,18 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
         m_forwardPlusSkinnedShader->LoadFromFile("assets/shaders/passes/forward/forwardplus_skinned.vert", "assets/shaders/passes/forward/forwardplus.frag");
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-    glViewport(0, 0, m_width, m_height);
-    glClearColor(0.1f, 0.1f, 0.15f, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_CULL_FACE);
+    if (cmdFwdApi && m_hdrRenderTarget) {
+        rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
+        cmdFwdApi->SetRenderTarget(m_hdrRenderTarget);
+        cmdFwdApi->SetViewport(0, 0, m_width, m_height);
+        cmdFwdApi->ClearRenderTarget(m_hdrRenderTarget, cv);
+    }
+    if (cmdFwdApi) { cmdFwdApi->SetDepthTest(true); cmdFwdApi->SetCullFace(false); }
 
     const int kShadowMapUnit = 5;
-    if (scene.light.castShadows && m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, m_shadowMap->GetDepthTexture());
+    if (scene.light.castShadows && m_shadowMap && cmdFwdApi) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmdFwdApi->BindTexture(shadowTex, kShadowMapUnit);
     }
 
     auto setCommon = [&](Shader* sh) {
@@ -872,19 +901,15 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
 
     m_forwardPlusShader->Unbind();
     if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
-    glEnable(GL_CULL_FACE);
+    if (scene.light.castShadows && m_shadowMap && cmdFwdApi) cmdFwdApi->UnbindTexture(kShadowMapUnit);
     TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
-    if (scene.light.castShadows && m_shadowMap) {
-        glActiveTexture(GL_TEXTURE0 + kShadowMapUnit);
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (cmdFwdApi) { cmdFwdApi->SetCullFace(true); cmdFwdApi->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::Render(const api::RenderScene& scene) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
-    if (m_hdrFBO == 0 || !m_gbuffer || !m_gbuffer->GetFBO()) return;
+    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetFBO()) return;
 
     switch (m_mode) {
     case PipelineMode::Deferred:
@@ -916,7 +941,8 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
         cam.viewPos = scene.camera.viewPos;
         cam.nearPlane = scene.camera.nearPlane;
         cam.farPlane = scene.camera.farPlane;
-        DebugDrawRenderer::Render(cam, m_hdrFBO, m_width, m_height);
+        unsigned int nativeFbo = m_hdrRenderTarget ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(m_hdrRenderTarget->GetNativeFramebuffer())) : 0u;
+        DebugDrawRenderer::Render(cam, nativeFbo, m_width, m_height);
     }
 
     if (m_postProcessor) {
@@ -926,8 +952,10 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
         unsigned int skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->GetInternal()->Id() : 0;
         float time = core::Time::TotalTime();
         unsigned int velocityTex = m_gbuffer->GetVelocityTexture();
+        rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
+        unsigned int hdrColorId = hdrTex ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrTex->GetNativeTexture())) : 0u;
         (void)m_postProcessor->ApplyPostProcessing(
-            m_hdrColor, *m_gbuffer, settings,
+            hdrColorId, *m_gbuffer, settings,
             scene.camera.view, scene.camera.projection,
             invView, invProj, scene.camera.viewPos, skyboxTex, time);
     }
@@ -939,7 +967,7 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
 void RenderPipeline::Render(const RenderScene& scene) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
-    if (m_hdrFBO == 0 || !m_gbuffer || !m_gbuffer->GetFBO()) return;
+    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetFBO()) return;
 
     switch (m_mode) {
     case PipelineMode::Deferred:
@@ -964,11 +992,12 @@ void RenderPipeline::Render(const RenderScene& scene) {
     }
 
     if (m_prePostCallback) {
-        m_prePostCallback(m_hdrFBO, m_width, m_height, scene);
+        m_prePostCallback(m_hdrRenderTarget, m_width, m_height, scene);
     }
 
     if (eyelib::debug::GetPresets().debugDrawEnabled.load()) {
-        DebugDrawRenderer::Render(scene.camera, m_hdrFBO, m_width, m_height);
+        unsigned int nativeFbo = m_hdrRenderTarget ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(m_hdrRenderTarget->GetNativeFramebuffer())) : 0u;
+        DebugDrawRenderer::Render(scene.camera, nativeFbo, m_width, m_height);
     }
     
     // Apply post-processing if enabled
@@ -979,8 +1008,10 @@ void RenderPipeline::Render(const RenderScene& scene) {
         unsigned int skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->Id() : 0;
         float time = core::Time::TotalTime();  // Get time from engine time system
         unsigned int velocityTex = m_gbuffer->GetVelocityTexture();
+        rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
+        unsigned int hdrColorId = hdrTex ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrTex->GetNativeTexture())) : 0u;
         unsigned int finalTexture = m_postProcessor->ApplyPostProcessing(
-            m_hdrColor, *m_gbuffer, settings,
+            hdrColorId, *m_gbuffer, settings,
             scene.camera.view, scene.camera.projection,
             invView, invProj, scene.camera.viewPos, skyboxTex, time);
         // finalTexture is the post-processed output (can be used for final blit to screen)
@@ -993,32 +1024,18 @@ void RenderPipeline::Render(const RenderScene& scene) {
 }
 
 void RenderPipeline::BlitToScreen() {
+    if (!m_device) return;
     if (m_postProcessor && m_postProcessor->GetOutputTexture() != 0 && m_postProcessor->HasValidOutputFrame()) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_postProcessor->GetOutputFBO());
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                          0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, static_cast<GLsizei>(m_width), static_cast<GLsizei>(m_height));
+        void* nativeFbo = reinterpret_cast<void*>(static_cast<uintptr_t>(m_postProcessor->GetOutputFBO()));
+        m_device->BlitToDefaultFramebuffer(nativeFbo, m_width, m_height);
         return;
     }
-    if (m_hdrFBO == 0) return;
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_hdrFBO);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBlitFramebuffer(0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                      0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height),
-                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, static_cast<GLsizei>(m_width), static_cast<GLsizei>(m_height));
+    if (m_hdrRenderTarget)
+        m_device->BlitToDefaultFramebuffer(m_hdrRenderTarget);
 }
 
 bool RenderPipeline::HasValidOutput() const {
-    return m_hdrFBO != 0 && m_gbuffer && m_gbuffer->GetFBO();
+    return m_hdrRenderTarget != nullptr && m_gbuffer && m_gbuffer->GetFBO();
 }
 
 void RenderPipeline::EnsureSkyboxShader() {
@@ -1032,23 +1049,17 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     EnsureSkyboxShader();
     if (!m_skyboxShader || !m_skyboxShader->IsValid()) return;
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
-    glViewport(0, 0, m_width, m_height);
-
-    if (useGbufferDepth && m_gbuffer) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_gbuffer->GetFBO());
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hdrFBO);
-        glBlitFramebuffer(0, 0, static_cast<GLint>(m_gbuffer->GetWidth()), static_cast<GLint>(m_gbuffer->GetHeight()),
-                          0, 0, static_cast<GLint>(m_width), static_cast<GLint>(m_height), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, m_hdrFBO);
+    rhi::ICommandList* cmdSky = GetRHICommandList();
+    if (cmdSky && m_hdrRenderTarget) {
+        cmdSky->SetRenderTarget(m_hdrRenderTarget);
+        cmdSky->SetViewport(0, 0, m_width, m_height);
     }
+    if (useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
+        m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+    if (cmdSky && m_hdrRenderTarget)
+        cmdSky->SetRenderTarget(m_hdrRenderTarget);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glDepthMask(GL_FALSE);
-    glDisable(GL_CULL_FACE);
+    if (cmdSky) { cmdSky->SetDepthTest(true); cmdSky->SetDepthFuncLess(false); cmdSky->SetDepthWrite(false); cmdSky->SetCullFace(false); }
 
     m_skyboxShader->Bind();
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
@@ -1060,10 +1071,7 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     quad.Render();
 
     m_skyboxShader->Unbind();
-    glDepthMask(GL_TRUE);
-    glDepthFunc(GL_LESS);
-    glEnable(GL_CULL_FACE);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (cmdSky) { cmdSky->SetDepthWrite(true); cmdSky->SetDepthFuncLess(true); cmdSky->SetCullFace(true); cmdSky->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::RenderSkybox(const RenderScene& scene, bool useGbufferDepth) {

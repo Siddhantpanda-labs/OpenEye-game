@@ -27,6 +27,7 @@ static GLenum ToGLInternalFormat(TextureFormat f, bool isSRGB) {
 RenderTarget::RenderTarget() = default;
 
 RenderTarget::~RenderTarget() {
+    if (m_deviceRHI) Destroy(m_deviceRHI);
     Destroy();
 }
 
@@ -34,18 +35,23 @@ RenderTarget::RenderTarget(RenderTarget&& other) noexcept
     : m_width(other.m_width), m_height(other.m_height), m_samples(other.m_samples),
       m_fbo(other.m_fbo), m_resolveFBO(other.m_resolveFBO),
       m_colorFormats(std::move(other.m_colorFormats)),
-      m_depthFormat(other.m_depthFormat), m_colorTextures(std::move(other.m_colorTextures)),
+      m_depthFormat(other.m_depthFormat), m_deviceRHI(other.m_deviceRHI),
+      m_renderTargetRHI(other.m_renderTargetRHI),
+      m_colorTextures(std::move(other.m_colorTextures)),
       m_depthTexture(std::move(other.m_depthTexture)),
       m_colorRenderbuffers(std::move(other.m_colorRenderbuffers)),
       m_depthRenderbuffer(other.m_depthRenderbuffer) {
     other.m_fbo = 0;
     other.m_resolveFBO = 0;
     other.m_depthRenderbuffer = 0;
+    other.m_deviceRHI = nullptr;
+    other.m_renderTargetRHI = nullptr;
     other.m_width = other.m_height = 0;
 }
 
 RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept {
     if (this != &other) {
+        if (m_deviceRHI) Destroy(m_deviceRHI);
         Destroy();
         m_width = other.m_width;
         m_height = other.m_height;
@@ -54,6 +60,8 @@ RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept {
         m_resolveFBO = other.m_resolveFBO;
         m_colorFormats = std::move(other.m_colorFormats);
         m_depthFormat = other.m_depthFormat;
+        m_deviceRHI = other.m_deviceRHI;
+        m_renderTargetRHI = other.m_renderTargetRHI;
         m_colorTextures = std::move(other.m_colorTextures);
         m_depthTexture = std::move(other.m_depthTexture);
         m_colorRenderbuffers = std::move(other.m_colorRenderbuffers);
@@ -61,6 +69,8 @@ RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept {
         other.m_fbo = 0;
         other.m_resolveFBO = 0;
         other.m_depthRenderbuffer = 0;
+        other.m_deviceRHI = nullptr;
+        other.m_renderTargetRHI = nullptr;
         other.m_width = other.m_height = 0;
     }
     return *this;
@@ -106,6 +116,34 @@ bool RenderTarget::Create(uint32_t width, uint32_t height,
 void RenderTarget::Resize(uint32_t width, uint32_t height) {
     if (width == m_width && height == m_height) return;
     Create(width, height, m_colorFormats, m_depthFormat, m_samples);
+}
+
+bool RenderTarget::Create(rhi::IDevice* device, uint32_t width, uint32_t height,
+                          const std::vector<TextureFormat>& colorFormats,
+                          TextureFormat depthFormat, uint32_t samples) {
+    if (!device || width == 0 || height == 0) return false;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    std::vector<rhi::RHITextureFormat> rhiColor;
+    for (TextureFormat f : colorFormats)
+        rhiColor.push_back(Texture2D::TextureFormatToRHI(f));
+    rhi::RHITextureFormat rhiDepth = Texture2D::TextureFormatToRHI(depthFormat);
+    if (depthFormat == TextureFormat::None) rhiDepth = rhi::RHITextureFormat::None;
+    m_renderTargetRHI = device->CreateRenderTarget(width, height, rhiColor, rhiDepth, samples);
+    if (!m_renderTargetRHI) return false;
+    m_width = width;
+    m_height = height;
+    m_samples = static_cast<int>(samples);
+    m_deviceRHI = device;
+    m_colorFormats = colorFormats;
+    m_depthFormat = depthFormat;
+    return true;
+}
+
+void RenderTarget::Destroy(rhi::IDevice* device) {
+    if (!device || device != m_deviceRHI) return;
+    if (m_renderTargetRHI) { m_deviceRHI->DestroyRenderTarget(m_renderTargetRHI); m_renderTargetRHI = nullptr; }
+    m_deviceRHI = nullptr;
+    m_width = m_height = 0;
 }
 
 void RenderTarget::Destroy() {

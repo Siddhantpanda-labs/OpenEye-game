@@ -10,6 +10,10 @@ uint32_t TextureGL::GetHeight() const { return m_height; }
 TextureType TextureGL::GetType() const { return m_type; }
 RHITextureFormat TextureGL::GetFormat() const { return m_format; }
 
+void* TextureGL::GetNativeTexture() {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(m_handle));
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

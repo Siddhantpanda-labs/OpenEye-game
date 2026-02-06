@@ -24,6 +24,11 @@ struct CommandListGL : ICommandList {
     void SetRenderTarget(IRenderTarget* rt) override;
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;
     void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) override;
+    void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
+    void SetDepthTest(bool enable) override;
+    void SetDepthWrite(bool enable) override;
+    void SetDepthFuncLess(bool less) override;
+    void SetCullFace(bool enable) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
     void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) override;
@@ -32,7 +37,17 @@ struct CommandListGL : ICommandList {
     void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) override;
     void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) override;
     void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
+    void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindTexture(ITexture* texture, uint32_t binding) override;
+    void UnbindTexture(uint32_t binding) override;
+
+    void SetUniformInt(const char* name, int value) override;
+    void SetUniformFloat(const char* name, float value) override;
+    void SetUniformVec2(const char* name, const float* data) override;
+    void SetUniformVec3(const char* name, const float* data) override;
+    void SetUniformVec4(const char* name, const float* data) override;
+    void SetUniformMat4(const char* name, const float* data) override;
+    void SetUniformMat4Array(const char* name, const float* data, size_t count) override;
 
     void Draw(uint32_t vertexCount, uint32_t firstVertex) override;
     void DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;

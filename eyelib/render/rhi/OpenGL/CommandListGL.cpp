@@ -52,6 +52,27 @@ void CommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     }
 }
 
+void CommandListGL::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    glViewport(static_cast<GLint>(x), static_cast<GLint>(y),
+               static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+}
+
+void CommandListGL::SetDepthTest(bool enable) {
+    if (enable) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+}
+
+void CommandListGL::SetDepthWrite(bool enable) {
+    glDepthMask(enable ? GL_TRUE : GL_FALSE);
+}
+
+void CommandListGL::SetDepthFuncLess(bool less) {
+    glDepthFunc(less ? GL_LESS : GL_LEQUAL);
+}
+
+void CommandListGL::SetCullFace(bool enable) {
+    if (enable) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+}
+
 void CommandListGL::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
     (void)buffer;
     (void)fromState;
@@ -149,10 +170,67 @@ void CommandListGL::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_
                       size > 0 ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->GetSize()));
 }
 
+void CommandListGL::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {
+    if (!buffer) return;
+    auto* b = static_cast<BufferGL*>(buffer);
+    glBindBufferRange(GL_SHADER_STORAGE_BUFFER, binding, b->m_handle,
+                      static_cast<GLintptr>(offset),
+                      size > 0 ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->GetSize()));
+}
+
 void CommandListGL::BindTexture(ITexture* texture, uint32_t binding) {
     if (!texture) return;
     auto* t = static_cast<TextureGL*>(texture);
     glBindTextureUnit(binding, t->m_handle);
+}
+
+void CommandListGL::UnbindTexture(uint32_t binding) {
+    glBindTextureUnit(binding, 0);
+}
+
+static GLint GetUniformLocation(PipelineGL* pipeline, const char* name) {
+    if (!pipeline || !pipeline->m_program || !name) return -1;
+    return glGetUniformLocation(pipeline->m_program, name);
+}
+
+void CommandListGL::SetUniformInt(const char* name, int value) {
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniform1i(m_currentPipeline->m_program, loc, value);
+}
+
+void CommandListGL::SetUniformFloat(const char* name, float value) {
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniform1f(m_currentPipeline->m_program, loc, value);
+}
+
+void CommandListGL::SetUniformVec2(const char* name, const float* data) {
+    if (!data) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniform2fv(m_currentPipeline->m_program, loc, 1, data);
+}
+
+void CommandListGL::SetUniformVec3(const char* name, const float* data) {
+    if (!data) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniform3fv(m_currentPipeline->m_program, loc, 1, data);
+}
+
+void CommandListGL::SetUniformVec4(const char* name, const float* data) {
+    if (!data) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniform4fv(m_currentPipeline->m_program, loc, 1, data);
+}
+
+void CommandListGL::SetUniformMat4(const char* name, const float* data) {
+    if (!data) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, 1, GL_FALSE, data);
+}
+
+void CommandListGL::SetUniformMat4Array(const char* name, const float* data, size_t count) {
+    if (!data) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0) glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, static_cast<GLsizei>(count), GL_FALSE, data);
 }
 
 void CommandListGL::Draw(uint32_t vertexCount, uint32_t firstVertex) {

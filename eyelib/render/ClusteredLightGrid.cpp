@@ -3,6 +3,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace eyelib {
@@ -257,6 +258,22 @@ void ClusteredLightGrid::UploadToGPU(unsigned int& lightIndexSSBO, unsigned int&
                  lightIndicesUint.data(), GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightIndexSSBO);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+}
+
+void ClusteredLightGrid::UploadToGPU(rhi::IBuffer* lightIndexBuffer) {
+    if (!lightIndexBuffer || m_lightGridFlat.empty()) return;
+    std::vector<unsigned int> lightIndicesUint;
+    lightIndicesUint.reserve(m_lightGridFlat.size());
+    for (uint8_t idx : m_lightGridFlat) {
+        lightIndicesUint.push_back(static_cast<unsigned int>(idx));
+    }
+    const size_t size = lightIndicesUint.size() * sizeof(unsigned int);
+    if (size > lightIndexBuffer->GetSize()) return;
+    void* ptr = lightIndexBuffer->Map(0, size);
+    if (ptr) {
+        std::memcpy(ptr, lightIndicesUint.data(), size);
+        lightIndexBuffer->Unmap();
+    }
 }
 
 } // namespace render

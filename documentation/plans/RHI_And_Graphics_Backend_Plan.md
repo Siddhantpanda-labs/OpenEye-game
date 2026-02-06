@@ -317,3 +317,24 @@ No change to **data flow** (unified RenderScene, frame allocator, immutable snap
 ## 12. Document History
 
 - **Created:** RHI and graphics backend abstraction plan; three-layer design (RHI, RHIUtils, render module); folder structure; phased implementation (0–5); platform, fluids, debug scope.
+
+---
+
+## 13. How far done (current status)
+
+**Last updated:** After device injection, pipeline/passes using RHI only (no glad), and RenderBindings removed in favour of RHI texture bind/unbind and ShadowMap RHI wrapper.
+
+| Phase | Name | Status | Notes |
+|-------|------|--------|--------|
+| **0** | RHI Design and OpenGL Backend | **Done** | `rhi/RHI.h`, `RHITypes.h`, `rhi/OpenGL/*` (DeviceGL, CommandListGL, BufferGL, TextureGL, ShaderGL, PipelineGL, RenderTargetGL, QueryPoolGL). Pipeline and passes use RHI; build uses RHI + OpenGL only. |
+| **1** | Refactor Render Module to Use RHI | **Mostly done** | Pipeline: `IDevice` injected, no glad; uses command list for RT, clear, viewport, depth/cull, BindTexture/UnbindTexture, Blit/BlitToDefaultFramebuffer. Passes (GBuffer, Shadow, Lighting, Transparency) use RHI for RT, clear, blit; frame graph uses RHI resources. **Exception:** `ShadowMap.cpp` still uses glad for FBO/depth texture creation (wrapper exposed via `GetDepthTextureRHI()`). Resources (Mesh, Material, Shader, etc.) still use internal/GL handles in places; full RHI handle migration is partial. |
+| **2** | RHI Utils and Cleanup | **Partial** | RHIUtils exists; pipeline and passes use a mix of direct `ICommandList` and helpers. More helpers and pass cleanup possible. |
+| **3** | Platform Device Abstraction | **Partial** | Device injection done: app (`api/render`) creates `DeviceGL` and calls `pipeline->Initialize(std::move(device), w, h)`. Render module never includes `DeviceGL.h` or creates GL context. **Not done:** platform layer does not yet expose `CreateGraphicsDevice(Window*, Backend)`; device is created at app level. |
+| **4** | Vulkan Backend | **Not started** | — |
+| **5** | Fluids and Debug on RHI | **Not started** | FluidVolumeRenderer and Profiler still use GL directly. |
+
+**Summary**
+
+- **Done:** RHI + OpenGL backend in place; pipeline and main passes go through RHI only (no glad in `RenderPipeline.cpp` or pass code). Shadow map binding is fully RHI (CreateTextureWrapper, `cmd->BindTexture` / `UnbindTexture`). RenderBindings removed. Device is injected; render module does not create the GL context.
+- **In progress:** Full migration of all resources (Mesh, Texture2D, Shader, etc.) to RHI handles; ShadowMap FBO creation via RHI; platform-level device factory.
+- **Next:** Finish Phase 1 (ShadowMap and any remaining GL in render), expand RHIUtils (Phase 2), then platform device factory (Phase 3), or Phase 6 from Render_Thread plan (asset/shader loading).

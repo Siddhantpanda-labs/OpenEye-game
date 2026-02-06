@@ -17,6 +17,10 @@ ITexture* RenderTargetGL::GetDepthTexture() {
     return m_depthTexture.get();
 }
 
+void* RenderTargetGL::GetNativeFramebuffer() {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(m_fbo));
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

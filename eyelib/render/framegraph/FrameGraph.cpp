@@ -56,6 +56,17 @@ FGTextureHandle FrameGraph::ImportTexture(const std::string& name, GLuint glId, 
     return static_cast<FGTextureHandle>(m_textures.size() - 1);
 }
 
+FGTextureHandle FrameGraph::ImportTextureRHI(const std::string& name, rhi::ITexture* texture, unsigned width, unsigned height) {
+    TextureNode n;
+    n.desc.name = name;
+    n.rhiTexture = texture;
+    n.imported = true;
+    n.width = width;
+    n.height = height;
+    m_textures.push_back(n);
+    return static_cast<FGTextureHandle>(m_textures.size() - 1);
+}
+
 int FrameGraph::AddPass(const std::string& name, const ExecuteFunc& execute,
                         const std::vector<FGTextureHandle>& reads,
                         const std::vector<FGTextureHandle>& writes,
@@ -110,6 +121,7 @@ void FrameGraph::Compile() {
 void FrameGraph::Execute() {
     FGPassResources res{
         [this](FGTextureHandle h) { return Resolve(h); },
+        [this](FGTextureHandle h) { return ResolveRHI(h); },
         m_width,
         m_height
     };
@@ -128,6 +140,11 @@ void FrameGraph::Execute() {
 GLuint FrameGraph::Resolve(FGTextureHandle h) const {
     if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) return 0;
     return m_textures[h].glId;
+}
+
+rhi::ITexture* FrameGraph::ResolveRHI(FGTextureHandle h) const {
+    if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) return nullptr;
+    return m_textures[h].rhiTexture;
 }
 
 } // namespace render

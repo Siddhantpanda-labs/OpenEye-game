@@ -88,25 +88,53 @@ static GLint ToGL(TextureWrap w) {
 Texture2D::Texture2D() = default;
 
 Texture2D::~Texture2D() {
+    if (m_deviceRHI) Destroy(m_deviceRHI);
     if (m_id) {
         glDeleteTextures(1, &m_id);
         m_id = 0;
     }
 }
 
+rhi::RHITextureFormat Texture2D::ToRHIFormat(TextureFormat f) {
+    return TextureFormatToRHI(f);
+}
+
+rhi::RHITextureFormat Texture2D::TextureFormatToRHI(TextureFormat f) {
+    switch (f) {
+        case TextureFormat::R8: return rhi::RHITextureFormat::R8;
+        case TextureFormat::RG8: return rhi::RHITextureFormat::RG8;
+        case TextureFormat::RGB8: return rhi::RHITextureFormat::RGB8;
+        case TextureFormat::RGBA8: return rhi::RHITextureFormat::RGBA8;
+        case TextureFormat::RGB16F: return rhi::RHITextureFormat::RGB16F;
+        case TextureFormat::RGBA16F: return rhi::RHITextureFormat::RGBA16F;
+        case TextureFormat::Depth24: return rhi::RHITextureFormat::Depth24;
+        case TextureFormat::Depth24Stencil8: return rhi::RHITextureFormat::Depth24Stencil8;
+        case TextureFormat::None: return rhi::RHITextureFormat::None;
+        default: return rhi::RHITextureFormat::RGBA8;
+    }
+}
+
 Texture2D::Texture2D(Texture2D&& other) noexcept
-    : m_id(other.m_id), m_width(other.m_width), m_height(other.m_height), m_format(other.m_format) {
+    : m_id(other.m_id), m_width(other.m_width), m_height(other.m_height), m_format(other.m_format),
+      m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI) {
     other.m_id = 0;
+    other.m_deviceRHI = nullptr;
+    other.m_textureRHI = nullptr;
 }
 
 Texture2D& Texture2D::operator=(Texture2D&& other) noexcept {
     if (this != &other) {
+        if (m_deviceRHI) Destroy(m_deviceRHI);
         if (m_id) glDeleteTextures(1, &m_id);
         m_id = other.m_id;
         m_width = other.m_width;
         m_height = other.m_height;
         m_format = other.m_format;
+        m_deviceRHI = other.m_deviceRHI;
+        m_textureRHI = other.m_textureRHI;
         other.m_id = 0;
+        other.m_deviceRHI = nullptr;
+        other.m_textureRHI = nullptr;
     }
     return *this;
 }
@@ -129,6 +157,30 @@ bool Texture2D::Create(int width, int height, TextureFormat format, const void* 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
     return true;
+}
+
+bool Texture2D::Create(rhi::IDevice* device, int width, int height, TextureFormat format, const void* data) {
+    if (!device || width <= 0 || height <= 0) return false;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    rhi::TextureDesc desc;
+    desc.type = rhi::TextureType::Texture2D;
+    desc.width = static_cast<uint32_t>(width);
+    desc.height = static_cast<uint32_t>(height);
+    desc.format = ToRHIFormat(format);
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    m_textureRHI = device->CreateTexture(desc, data);
+    if (!m_textureRHI) return false;
+    m_width = width;
+    m_height = height;
+    m_format = format;
+    m_deviceRHI = device;
+    return true;
+}
+
+void Texture2D::Destroy(rhi::IDevice* device) {
+    if (!device || device != m_deviceRHI) return;
+    if (m_textureRHI) { device->DestroyTexture(m_textureRHI); m_textureRHI = nullptr; }
+    m_deviceRHI = nullptr;
 }
 
 bool Texture2D::LoadFromFile(const std::string& path, bool isSRGB, bool generateMipmaps) {

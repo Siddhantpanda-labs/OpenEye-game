@@ -15,6 +15,7 @@ struct RenderTargetGL : IRenderTarget {
     uint32_t GetHeight() const override;
     ITexture* GetColorTexture(uint32_t index) override;
     ITexture* GetDepthTexture() override;
+    void* GetNativeFramebuffer() override;
 
     unsigned int m_fbo = 0;
     uint32_t m_width = 0;

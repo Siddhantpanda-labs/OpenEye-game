@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/rhi/RHI.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ using FGTextureHandle = int;  // -1 invalid
 
 struct FGPassResources {
     std::function<GLuint(FGTextureHandle)> getTexture;
+    std::function<rhi::ITexture*(FGTextureHandle)> getTextureRHI;
     unsigned width = 0;
     unsigned height = 0;
 };
@@ -31,6 +33,7 @@ public:
 
     FGTextureHandle CreateTexture(const FGTextureDesc& desc);
     FGTextureHandle ImportTexture(const std::string& name, GLuint glId, unsigned width, unsigned height);
+    FGTextureHandle ImportTextureRHI(const std::string& name, rhi::ITexture* texture, unsigned width, unsigned height);
 
     using ExecuteFunc = std::function<void(const FGPassResources&)>;
 
@@ -47,6 +50,7 @@ public:
     const std::vector<PassInfo>& GetPasses() const { return m_passInfos; }
 
     GLuint Resolve(FGTextureHandle h) const;
+    rhi::ITexture* ResolveRHI(FGTextureHandle h) const;
     unsigned GetWidth() const { return m_width; }
     unsigned GetHeight() const { return m_height; }
     void SetFrameSize(unsigned w, unsigned h) { m_width = w; m_height = h; }
@@ -55,6 +59,7 @@ private:
     struct TextureNode {
         FGTextureDesc desc;
         GLuint glId = 0;
+        rhi::ITexture* rhiTexture = nullptr;
         bool imported = false;
         unsigned width = 0;
         unsigned height = 0;

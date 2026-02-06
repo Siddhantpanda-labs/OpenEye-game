@@ -3,6 +3,7 @@
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
 #include "eyelib/assets/AssetId.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <vector>
 
@@ -50,7 +51,11 @@ public:
     void ClearSubmeshes();
 
     void UploadToGPU();
+    /** Upload to RHI buffers (for backend-agnostic path). Call with non-null device from pipeline. */
+    void UploadToGPU(rhi::IDevice* device);
     void Destroy();
+    /** Release RHI buffers if they were created via UploadToGPU(device). Call with same device. */
+    void Destroy(rhi::IDevice* device);
 
     void Bind() const;
     void Unbind() const;
@@ -75,8 +80,14 @@ public:
     const std::vector<uint16_t>& GetIndices16() const { return m_indices16; }
     IndexFormat GetIndexFormat() const { return m_indexFormat; }
 
-    bool IsValid() const { return m_vao != 0; }
+    bool IsValid() const { return m_vao != 0 || m_vertexBufferRHI != nullptr; }
     unsigned int GetVAO() const { return m_vao; }
+
+    /** RHI path: return vertex/index buffers and layout when UploadToGPU(device) was used. */
+    rhi::IBuffer* GetVertexBufferRHI() const { return m_vertexBufferRHI; }
+    rhi::IBuffer* GetIndexBufferRHI() const { return m_indexBufferRHI; }
+    rhi::IndexType GetRHIIndexType() const;
+    static rhi::VertexLayout GetVertexLayoutRHI();
 
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
     const assets::AssetId& GetAssetId() const { return m_assetId; }
@@ -98,6 +109,10 @@ private:
     unsigned int m_vbo = 0;
     unsigned int m_ebo = 0;
     bool m_uploaded = false;
+
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::IBuffer* m_vertexBufferRHI = nullptr;
+    rhi::IBuffer* m_indexBufferRHI = nullptr;
 
     assets::AssetId m_assetId = assets::AssetId::Invalid();
 };

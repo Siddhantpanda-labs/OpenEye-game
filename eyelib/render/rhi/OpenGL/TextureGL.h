@@ -11,6 +11,7 @@ struct TextureGL : ITexture {
     uint32_t GetHeight() const override;
     TextureType GetType() const override;
     RHITextureFormat GetFormat() const override;
+    void* GetNativeTexture() override;
 
     unsigned int m_handle = 0;
     uint32_t m_width = 0;
@@ -18,6 +19,7 @@ struct TextureGL : ITexture {
     uint32_t m_depthOrArray = 1;
     TextureType m_type = TextureType::Texture2D;
     RHITextureFormat m_format = RHITextureFormat::RGBA8;
+    bool m_owned = true;  // false when created via CreateTextureWrapper
 };
 
 } // namespace rhi
