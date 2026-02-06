@@ -21,7 +21,7 @@ bool RuntimeOverlay::Initialize(eyelib::api::Window& window) {
     return true;
 }
 
-void RuntimeOverlay::Render(const RuntimeOptions& options, const eyelib::api::world::World& world) {
+void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {
     if (!m_ready) {
         return;
     }
@@ -38,10 +38,10 @@ void RuntimeOverlay::Render(const RuntimeOptions& options, const eyelib::api::wo
     ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.35f);
     if (ImGui::Begin("Runtime Overlay", nullptr, flags)) {
-        ImGui::Text("Scene: %s", options.scenePath.c_str());
-        ImGui::Text("FPS: %.1f", eyelib::api::core::Time::FPS());
-        ImGui::Text("Frame: %.3f ms", eyelib::api::core::Time::DeltaTime() * 1000.0f);
-        ImGui::Text("Entities: %zu", world.GetEntityCount());
+        ImGui::Text("Scene: %s", snapshot.scenePath.c_str());
+        ImGui::Text("FPS: %.1f", snapshot.fps);
+        ImGui::Text("Frame: %.3f ms", snapshot.frameTimeMs);
+        ImGui::Text("Entities: %zu", snapshot.entityCount);
     }
     ImGui::End();
 

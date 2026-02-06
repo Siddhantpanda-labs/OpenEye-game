@@ -18,6 +18,8 @@ struct Drawable {
     std::shared_ptr<Material> material;
     std::shared_ptr<MaterialInstance> materialInstance;
     math::Mat4 transform{1.0f};
+    const math::Mat4* bones = nullptr;
+    size_t boneCount = 0;
 };
 
 /** Camera view: view/projection matrices and view position */

@@ -333,6 +333,7 @@ MyScript = {
 - World Kernel design & implementation
 - AI integration layer planning
 - VR integration planning
+- **Render thread unified scene** ([Render_Thread_Unified_Scene_Plan.md](plans/Render_Thread_Unified_Scene_Plan.md)): Phases 0–5 complete; robust presentation (single framebuffer size, zero-size skip, valid-output guard, vsync) in place. Next: Phase 6 (asset/shaders on render thread).
 
 ### 📋 **Planned**
 
@@ -381,6 +382,7 @@ MyScript = {
 - **`World_kernel_Ai.md`** - World Kernel specification
 - **`steps.md`** - Development roadmap
 - **`advise.md`** - Architecture guidance & best practices
+- **`plans/Render_Thread_Unified_Scene_Plan.md`** - Render thread + unified scene (Phases 0–5 done; next Phase 6)
 
 ---
 
@@ -431,5 +433,5 @@ MyScript = {
 
 ---
 
-**Last Updated**: 2026-01-26  
-**Status**: Engine library complete, World Kernel in design phase
+**Last Updated**: 2026-02-05  
+**Status**: Engine library complete; Render Thread plan Phases 0–5 + robust presentation done (Render_Thread_Unified_Scene_Plan.md). World Kernel in design phase.

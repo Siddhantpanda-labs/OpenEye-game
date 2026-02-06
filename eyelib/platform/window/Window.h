@@ -48,7 +48,14 @@ public:
 
     void PollEvents();
     void SwapBuffers();
+    /** Make the GL context current on the calling thread. Safe to call from any thread. */
+    void MakeContextCurrent();
     void Clear(float r = 0.0f, float g = 0.0f, float b = 0.0f, float a = 1.0f);
+
+    /** Query current framebuffer size from the system (thread-safe). Call from render thread before using size. Updates Width()/Height(). */
+    void RefreshFramebufferSize();
+    /** Re-apply vsync (swap interval). Call from render thread with context current; use every frame so driver cannot drop it. */
+    void ApplyVsync();
 
     bool ShouldClose() const;
     void SetShouldClose(bool value);
@@ -61,6 +68,7 @@ public:
     ::GLFWwindow* NativeHandle() const { return m_window; }
 
     // Callbacks
+    /** Set resize callback. Contract: must not call GL or touch render resources; may run on main thread while GL context is on render thread. Prefer storing (width,height) and applying resize on render thread. */
     void SetResizeCallback(ResizeCallback callback) { m_resizeCallback = std::move(callback); }
     void SetKeyCallback(KeyCallback callback) { m_keyCallback = std::move(callback); }
     void SetMouseButtonCallback(MouseButtonCallback callback) { m_mouseButtonCallback = std::move(callback); }

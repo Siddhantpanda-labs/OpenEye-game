@@ -119,6 +119,7 @@ public:
      */
     unsigned int GetOutputFBO() const { return m_outputFBO; }
     unsigned int GetOutputTexture() const { return m_outputTexture; }
+    bool HasValidOutputFrame() const { return m_lastOutputValid; }
 
 private:
     void CreateFramebuffers();
@@ -143,6 +144,7 @@ private:
 
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    bool m_lastOutputValid = false;
 
     // Shaders
     std::shared_ptr<Shader> m_toneMappingShader;

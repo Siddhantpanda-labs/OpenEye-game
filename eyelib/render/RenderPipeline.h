@@ -8,6 +8,9 @@
 #include <vector>
 
 namespace eyelib {
+namespace api {
+struct RenderScene;
+}
 namespace render {
 
 class GBuffer;
@@ -44,8 +47,13 @@ public:
     void SetMode(PipelineMode mode) { m_mode = mode; }
     PipelineMode GetMode() const { return m_mode; }
 
+    /** Render from API scene (unified type). Zero-copy: uses scene data directly, no scratch copy. */
+    void Render(const api::RenderScene& scene);
+    /** Render from internal scene (e.g. ECS RenderSystem path). */
     void Render(const RenderScene& scene);
     void BlitToScreen();
+    /** Returns true when the pipeline has a valid render target to present. */
+    bool HasValidOutput() const;
 
     GBuffer* GetGBuffer();
     ShadowMap* GetShadowMap();
@@ -64,9 +72,14 @@ private:
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
     void BuildAndExecuteFrameGraph(const RenderScene& scene);
+    void BuildAndExecuteFrameGraph(const api::RenderScene& scene);
     void RenderForward(const RenderScene& scene);
+    void RenderForward(const api::RenderScene& scene);
     void RenderForwardPlus(const RenderScene& scene);
+    void RenderForwardPlus(const api::RenderScene& scene);
     void RenderSkybox(const RenderScene& scene, bool useGbufferDepth);
+    void RenderSkybox(const api::RenderScene& scene, bool useGbufferDepth);
+    void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
     void EnsureSkyboxShader();
 
     std::unique_ptr<GBuffer> m_gbuffer;
@@ -97,6 +110,10 @@ private:
     // Previous frame matrices for velocity calculation
     math::Mat4 m_prevView{1.0f};
     math::Mat4 m_prevProjection{1.0f};
+
+    // Forward+ only: scratch for api lights -> internal layout (SSBO std140); drawables are zero-copy
+    std::vector<PointLight> m_scratchPointLights;
+    std::vector<SpotLight> m_scratchSpotLights;
 };
 
 } // namespace render

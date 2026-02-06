@@ -8,6 +8,7 @@
 #include "WorldPhysics.h"
 #include "WorldAnimation.h"
 #include "WorldScripting.h"
+#include "RenderFrameSync.h"
 
 #include "api/assets/All.h"
 #include "api/core/All.h"
@@ -19,6 +20,7 @@
 #include <iostream>
 #include <utility>
 #include <cstdio>
+#include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -401,8 +403,53 @@ int RunPlayer(int argc, char** argv) {
     // Job pool for parallelizable work (physics step, animation update). 0 = use hardware concurrency.
     eyelib::api::core::ThreadPool jobPool(0);
 
+    RenderFrameSync frameSync;
+    std::thread renderThread;
+
+    if (!options.headless) {
+        // Warmup: run one BuildScene + RenderSceneOnly on the main thread (which still has the GL
+        // context) so all materials/shaders used by the scene are loaded and compiled here. After
+        // we start the render thread, the context moves there and the game thread must not touch GL.
+        renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
+            frameSync.GetSceneBuffer(0), frameSync.GetFrameAllocator(0));
+        renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(0),
+            static_cast<uint32_t>(window.Width()),
+            static_cast<uint32_t>(window.Height()));
+
+        renderThread = std::thread([&window, &frameSync, &renderBridge, &overlay, &options]() {
+            window.MakeContextCurrent();
+            for (;;) {
+                std::optional<RenderFrameSync::AcquiredFrame> frame = frameSync.AcquireFrame();
+                if (!frame) {
+                    break;
+                }
+                // Robust: use current framebuffer size from the system (single source of truth).
+                window.RefreshFramebufferSize();
+                const int fbWidth = window.Width();
+                const int fbHeight = window.Height();
+                if (fbWidth <= 0 || fbHeight <= 0) {
+                    frameSync.ReleaseFrame(frame->slot);
+                    continue;
+                }
+                window.ApplyVsync();
+                const uint32_t w = static_cast<uint32_t>(fbWidth);
+                const uint32_t h = static_cast<uint32_t>(fbHeight);
+                renderBridge.ApplyResize(w, h);
+                const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
+                if (rendered) {
+                    if (options.overlay && overlay.IsReady()) {
+                        overlay.Render(frame->overlay);
+                    }
+                    window.SwapBuffers();
+                }
+                frameSync.ReleaseFrame(frame->slot);
+            }
+        });
+    }
+
     auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge,
-                   &scriptingBridge, &audioBridge, &shaderWatcher, &jobPool](float deltaSeconds) {
+                   &scriptingBridge, &audioBridge, &shaderWatcher, &jobPool,
+                   &frameSync, &renderBridge, &overlay, &assetRegistry](float deltaSeconds) {
         if (!options.headless) {
             if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();
@@ -442,22 +489,35 @@ int RunPlayer(int argc, char** argv) {
                 stats.frames = 0;
             }
         }
+
+        // Submit frame to render thread (game thread never touches GL after this).
+        if (!options.headless) {
+            OverlaySnapshot snap;
+            snap.fps = eyelib::api::core::Time::FPS();
+            snap.frameTimeMs = eyelib::api::core::Time::DeltaTime() * 1000.0f;
+            snap.entityCount = world.GetEntityCount();
+            snap.scenePath = options.scenePath;
+            const int slot = frameSync.GetFillSlot();
+            if (slot < 0) {
+                return;
+            }
+            renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
+                frameSync.GetSceneBuffer(slot), frameSync.GetFrameAllocator(slot));
+            const int w = window.Width();
+            const int h = window.Height();
+            frameSync.SubmitFrame(slot,
+                static_cast<uint32_t>(w > 0 ? w : 1),
+                static_cast<uint32_t>(h > 0 ? h : 1),
+                snap);
+        }
     };
 
-    std::function<void()> render;
-    if (!options.headless) {
-        render = [&window, &world, &options, &overlay, &renderBridge, &animationBridge, &assetRegistry]() {
-            renderBridge.Render(options, world, &animationBridge, &assetRegistry,
-                                static_cast<uint32_t>(window.Width()),
-                                static_cast<uint32_t>(window.Height()));
-            if (options.overlay && overlay.IsReady()) {
-                overlay.Render(options, world);
-            }
-            window.SwapBuffers();
-        };
-    }
+    eyelib::api::core::Engine::Run(update, nullptr);
 
-    eyelib::api::core::Engine::Run(update, render);
+    if (!options.headless && renderThread.joinable()) {
+        frameSync.SignalShutdown();
+        renderThread.join();
+    }
 
     if (!options.headless) {
         audioBridge.Shutdown();

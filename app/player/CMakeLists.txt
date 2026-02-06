@@ -10,6 +10,8 @@ set(PLAYER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetBinding.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.cpp

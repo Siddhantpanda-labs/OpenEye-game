@@ -3,9 +3,13 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/GBuffer.h"
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace eyelib {
+namespace api {
+struct Drawable;
+}
 namespace render {
 
 class Shader;
@@ -22,6 +26,14 @@ public:
     /** Render drawables into the G-buffer. Uses default embedded shader if none set. */
     void Render(GBuffer& gbuffer,
                 const std::vector<Drawable>& drawables,
+                const math::Mat4& view,
+                const math::Mat4& projection,
+                const math::Mat4& prevView,
+                const math::Mat4& prevProjection);
+
+    /** Zero-copy: render from API drawables (resolves GetInternal() at use). Accepts any contiguous container via span. */
+    void Render(GBuffer& gbuffer,
+                std::span<const api::Drawable> drawables,
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Mat4& prevView,

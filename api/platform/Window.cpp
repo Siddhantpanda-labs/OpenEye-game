@@ -52,6 +52,21 @@ void Window::SwapBuffers() {
     m_impl->window.SwapBuffers();
 }
 
+void Window::MakeContextCurrent() {
+    if (!m_impl) return;
+    m_impl->window.MakeContextCurrent();
+}
+
+void Window::RefreshFramebufferSize() {
+    if (!m_impl) return;
+    m_impl->window.RefreshFramebufferSize();
+}
+
+void Window::ApplyVsync() {
+    if (!m_impl) return;
+    m_impl->window.ApplyVsync();
+}
+
 void Window::Clear(float r, float g, float b, float a) {
     if (!m_impl) return;
     m_impl->window.Clear(r, g, b, a);

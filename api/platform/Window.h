@@ -31,7 +31,14 @@ public:
 
     void PollEvents();
     void SwapBuffers();
+    /** Make the GL context current on the calling thread. Use from render thread after startup. */
+    void MakeContextCurrent();
     void Clear(float r = 0.0f, float g = 0.0f, float b = 0.0f, float a = 1.0f);
+
+    /** Query current framebuffer size (thread-safe). Call from render thread before render. */
+    void RefreshFramebufferSize();
+    /** Re-apply vsync. Call from render thread each frame with context current. */
+    void ApplyVsync();
 
     bool ShouldClose() const;
     void SetShouldClose(bool value);

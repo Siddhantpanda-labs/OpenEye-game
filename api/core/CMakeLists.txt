@@ -8,6 +8,9 @@ set(API_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Time.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Log.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/FrameAllocator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FrameAllocator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/FrameAllocatorAdaptor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Job.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Plugin.cpp

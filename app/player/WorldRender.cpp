@@ -9,6 +9,7 @@
 #include "WorldAnimation.h"
 
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <glm/glm.hpp>
 
@@ -244,7 +245,8 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                                    const RuntimeOptions& options,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
-                                   eyelib::api::RenderScene& scene) {
+                                   eyelib::api::RenderScene& scene,
+                                   api::FrameAllocator* frameAlloc) {
     (void)options;
     scene.opaque.clear();
     scene.transparent.clear();
@@ -299,10 +301,23 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
             if (!bones && !modelEntry.bindPoseMatrices.empty()) {
                 bones = &modelEntry.bindPoseMatrices;
             }
-            if (bones) {
+            if (bones && frameAlloc) {
+                const size_t count = bones->size();
+                if (count > 0) {
+                    auto* copy = frameAlloc->AllocateArray<eyelib::math::Mat4>(count);
+                    if (copy) {
+                        std::memcpy(copy, bones->data(), sizeof(eyelib::math::Mat4) * count);
+                        drawable.bones = copy;
+                        drawable.boneCount = count;
+                    }
+                }
+            } else if (bones) {
                 drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
                 drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
             }
+        }
+        if (drawable.material) {
+            eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
         scene.opaque.push_back(drawable);
     }
@@ -346,10 +361,23 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
             if (!bones && !modelEntry.bindPoseMatrices.empty()) {
                 bones = &modelEntry.bindPoseMatrices;
             }
-            if (bones) {
+            if (bones && frameAlloc) {
+                const size_t count = bones->size();
+                if (count > 0) {
+                    auto* copy = frameAlloc->AllocateArray<eyelib::math::Mat4>(count);
+                    if (copy) {
+                        std::memcpy(copy, bones->data(), sizeof(eyelib::math::Mat4) * count);
+                        drawable.bones = copy;
+                        drawable.boneCount = count;
+                    }
+                }
+            } else if (bones) {
                 drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
                 drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
             }
+        }
+        if (drawable.material) {
+            eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
         scene.opaque.push_back(drawable);
     }
@@ -454,17 +482,34 @@ void WorldRenderBridge::Render(const RuntimeOptions& options, const eyelib::api:
     if (!m_ready) {
         return;
     }
-
-    if (width != m_width || height != m_height) {
-        m_width = width;
-        m_height = height;
-        m_pipeline.Resize(width, height);
-    }
-
     eyelib::api::RenderScene scene;
-    BuildScene(world, options, animationBridge, assetRegistry, scene);
+    BuildScene(world, options, animationBridge, assetRegistry, scene, nullptr);
+    RenderSceneOnly(scene, width, height);
+}
+
+void WorldRenderBridge::ApplyResize(uint32_t width, uint32_t height) {
+    if (!m_ready || width == 0 || height == 0) return;
+    m_width = width;
+    m_height = height;
+    m_pipeline.Resize(width, height);
+}
+
+bool WorldRenderBridge::RenderSceneOnly(const eyelib::api::RenderScene& scene, uint32_t width, uint32_t height) {
+    if (!m_ready) {
+        return false;
+    }
+    if (width == 0 || height == 0) {
+        return false;
+    }
+    if (width != m_width || height != m_height) {
+        ApplyResize(width, height);
+    }
+    if (!m_pipeline.HasValidOutput()) {
+        return false;
+    }
     m_pipeline.Render(scene);
     m_pipeline.BlitToScreen();
+    return true;
 }
 
 } // namespace openeye::player

@@ -23,6 +23,7 @@ set(API_RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderScene.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/DrawableSnapshot.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
     ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.cpp

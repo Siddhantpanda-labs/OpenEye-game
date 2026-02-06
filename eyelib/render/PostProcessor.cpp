@@ -34,6 +34,7 @@ void PostProcessor::DestroyFramebuffers() {
 bool PostProcessor::Initialize(uint32_t width, uint32_t height) {
     m_width = width;
     m_height = height;
+    m_lastOutputValid = false;
     LoadShaders();
     CreateFramebuffers();
     return m_outputTexture != 0;
@@ -41,13 +42,23 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height) {
 
 void PostProcessor::Resize(uint32_t width, uint32_t height) {
     if (width == m_width && height == m_height) return;
+    if (width == 0 || height == 0) {
+        m_width = width;
+        m_height = height;
+        m_lastOutputValid = false;
+        return;
+    }
     m_width = width;
     m_height = height;
+    m_lastOutputValid = false;
     DestroyFramebuffers();
     CreateFramebuffers();
 }
 
 void PostProcessor::CreateFramebuffers() {
+    if (m_width == 0 || m_height == 0) {
+        return;
+    }
     // Ping-pong FBOs (for blur passes)
     glGenFramebuffers(2, m_pingPongFBO);
     glGenTextures(2, m_pingPongTexture);
@@ -199,6 +210,7 @@ unsigned int PostProcessor::ApplyPostProcessing(unsigned int hdrInputTexture, co
                                                  const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                                                  const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
                                                  const math::Vec3& viewPos, unsigned int skyboxTexture, float time) {
+    m_lastOutputValid = false;
     if (!hdrInputTexture || m_outputTexture == 0) {
         return hdrInputTexture;  // Fallback to input if not initialized
     }
@@ -325,6 +337,7 @@ unsigned int PostProcessor::ApplyToneMapping(unsigned int hdrTexture, const Sett
 
     static FullscreenQuad quad;
     quad.Render();
+    m_lastOutputValid = true;
 
     m_toneMappingShader->Unbind();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

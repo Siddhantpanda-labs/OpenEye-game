@@ -129,7 +129,28 @@ void Window::PollEvents() {
 
 void Window::SwapBuffers() {
     if (m_window) {
+        // Ensure all GL work is complete before present to reduce flicker/tearing.
+        glFinish();
         glfwSwapBuffers(m_window);
+    }
+}
+
+void Window::MakeContextCurrent() {
+    if (m_window) {
+        glfwMakeContextCurrent(m_window);
+        glfwSwapInterval(m_config.vsync ? 1 : 0);
+    }
+}
+
+void Window::RefreshFramebufferSize() {
+    if (m_window) {
+        glfwGetFramebufferSize(m_window, &m_width, &m_height);
+    }
+}
+
+void Window::ApplyVsync() {
+    if (m_window) {
+        glfwSwapInterval(m_config.vsync ? 1 : 0);
     }
 }
 
@@ -153,12 +174,12 @@ float Window::AspectRatio() const {
 }
 
 void Window::FramebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    // Only update dimensions and invoke client callback. Callback must NOT use GL or render resources.
     auto* win = static_cast<Window*>(glfwGetWindowUserPointer(window));
     if (!win) return;
 
     win->m_width = width;
     win->m_height = height;
-    glViewport(0, 0, width, height);
 
     if (win->m_resizeCallback) {
         win->m_resizeCallback(width, height);

@@ -14,6 +14,8 @@
 #include "Time.h"
 #include "Log.h"
 #include "Memory.h"
+#include "FrameAllocator.h"
+#include "FrameAllocatorAdaptor.h"
 #include "Job.h"
 #include "Plugin.h"
 
@@ -28,6 +30,7 @@ using ::api::ThreadPool;
 using ::api::TaskGraph;
 using ::api::ParallelFor;
 using ::api::ParallelForEach;
+using ::api::FrameAllocator;
 namespace memory = ::api::memory;
 namespace plugin = ::api::plugin;
 } // namespace core
