@@ -1,5 +1,4 @@
 #include "eyelib/render/framegraph/FrameGraph.h"
-#include <glad/glad.h>
 #include <algorithm>
 
 namespace eyelib {
@@ -15,23 +14,20 @@ FGTextureHandle FrameGraph::AllocHandle() {
     return static_cast<FGTextureHandle>(m_textures.size());
 }
 
-void FrameGraph::CreateTextureGL(TextureNode& n) {
+void FrameGraph::CreateTextureRHI(TextureNode& n) {
+    if (!m_device) return;
     unsigned w = n.width ? n.width : m_width;
     unsigned h = n.height ? n.height : m_height;
     if (!w || !h) return;
-    glGenTextures(1, &n.glId);
-    glBindTexture(GL_TEXTURE_2D, n.glId);
-    if (n.desc.internalFormat == GL_SRGB8_ALPHA8)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    else if (n.desc.internalFormat == GL_RGBA16F)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
-    else
-        glTexImage2D(GL_TEXTURE_2D, 0, n.desc.internalFormat, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    rhi::TextureDesc td;
+    td.type = rhi::TextureType::Texture2D;
+    td.width = w;
+    td.height = h;
+    td.format = n.desc.format;
+    td.usage = rhi::TextureUsage::ShaderResource | rhi::TextureUsage::RenderTarget;
+    td.mipLevels = 1;
+    td.samples = 1;
+    n.rhiTexture = m_device->CreateTexture(td, nullptr);
     n.width = w;
     n.height = h;
 }
@@ -45,10 +41,10 @@ FGTextureHandle FrameGraph::CreateTexture(const FGTextureDesc& desc) {
     return static_cast<FGTextureHandle>(m_textures.size() - 1);
 }
 
-FGTextureHandle FrameGraph::ImportTexture(const std::string& name, GLuint glId, unsigned width, unsigned height) {
+FGTextureHandle FrameGraph::ImportTexture(const std::string& name, uint32_t nativeTextureId, unsigned width, unsigned height) {
     TextureNode n;
     n.desc.name = name;
-    n.glId = glId;
+    n.nativeId = nativeTextureId;
     n.imported = true;
     n.width = width;
     n.height = height;
@@ -77,22 +73,25 @@ int FrameGraph::AddPass(const std::string& name, const ExecuteFunc& execute,
     p.reads = reads;
     p.writes = writes;
     p.sideEffect = sideEffect;
-    glGenQueries(2, p.timeQuery);
     m_passes.push_back(p);
     return static_cast<int>(m_passes.size() - 1);
 }
 
 void FrameGraph::Clear() {
     for (auto& t : m_textures) {
-        if (!t.imported && t.glId) {
-            glDeleteTextures(1, &t.glId);
-            t.glId = 0;
+        if (!t.imported && t.rhiTexture && m_device) {
+            m_device->DestroyTexture(t.rhiTexture);
+            t.rhiTexture = nullptr;
         }
     }
     m_textures.clear();
-    for (auto& p : m_passes) {
-        if (p.timeQuery[0]) glDeleteQueries(2, p.timeQuery);
-        p.timeQuery[0] = p.timeQuery[1] = 0;
+    if (m_device) {
+        for (auto& p : m_passes) {
+            if (p.queryPool) {
+                m_device->DestroyQueryPool(p.queryPool);
+                p.queryPool = nullptr;
+            }
+        }
     }
     m_passes.clear();
     m_passInfos.clear();
@@ -106,8 +105,15 @@ void FrameGraph::Compile() {
 
     for (size_t i = 0; i < m_textures.size(); ++i) {
         auto& t = m_textures[i];
-        if (t.imported || t.glId) continue;
-        CreateTextureGL(t);
+        if (t.imported || t.rhiTexture) continue;
+        CreateTextureRHI(t);
+    }
+
+    if (m_device) {
+        for (auto& p : m_passes) {
+            if (!p.queryPool)
+                p.queryPool = m_device->CreateQueryPool(rhi::QueryType::Timestamp, 1);
+        }
     }
 
     for (const auto& p : m_passes) {
@@ -118,7 +124,7 @@ void FrameGraph::Compile() {
     }
 }
 
-void FrameGraph::Execute() {
+void FrameGraph::Execute(rhi::ICommandList* cmd) {
     FGPassResources res{
         [this](FGTextureHandle h) { return Resolve(h); },
         [this](FGTextureHandle h) { return ResolveRHI(h); },
@@ -128,18 +134,25 @@ void FrameGraph::Execute() {
     for (size_t i = 0; i < m_passes.size(); ++i) {
         auto& p = m_passes[i];
         if (p.culled) continue;
-        glBeginQuery(GL_TIME_ELAPSED, p.timeQuery[0]);
+        if (cmd && p.queryPool)
+            cmd->BeginQuery(p.queryPool, 0);
         p.execute(res);
-        glEndQuery(GL_TIME_ELAPSED);
-        GLuint64 elapsed = 0;
-        glGetQueryObjectui64v(p.timeQuery[0], GL_QUERY_RESULT, &elapsed);
-        m_passInfos[i].gpuMs = static_cast<double>(elapsed) / 1e6;
+        if (cmd && p.queryPool) {
+            cmd->EndQuery(p.queryPool, 0);
+            uint64_t elapsedNs = p.queryPool->GetResult(0);
+            m_passInfos[i].gpuMs = static_cast<double>(elapsedNs) / 1e6;
+        }
     }
 }
 
-GLuint FrameGraph::Resolve(FGTextureHandle h) const {
+uint32_t FrameGraph::Resolve(FGTextureHandle h) const {
     if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) return 0;
-    return m_textures[h].glId;
+    const auto& t = m_textures[h];
+    if (t.rhiTexture) {
+        void* native = t.rhiTexture->GetNativeTexture();
+        return native ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(native)) : 0;
+    }
+    return t.nativeId;
 }
 
 rhi::ITexture* FrameGraph::ResolveRHI(FGTextureHandle h) const {

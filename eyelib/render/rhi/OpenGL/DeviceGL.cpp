@@ -6,7 +6,9 @@
 #include "eyelib/render/rhi/OpenGL/RenderTargetGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
+#include "eyelib/core/Log.h"
 #include <glad/glad.h>
+#include <algorithm>
 #include <cstring>
 
 namespace eyelib {
@@ -83,17 +85,44 @@ ITexture* DeviceGL::CreateTexture(const TextureDesc& desc, const void* initialDa
                           static_cast<GLsizei>(desc.width),
                           static_cast<GLsizei>(desc.height),
                           static_cast<GLsizei>(desc.depthOrArrayLayers));
+        if (initialData) {
+            glTextureSubImage3D(tex->m_handle, 0, 0, 0, 0,
+                               static_cast<GLsizei>(desc.width),
+                               static_cast<GLsizei>(desc.height),
+                               static_cast<GLsizei>(desc.depthOrArrayLayers),
+                               GLEnums::TextureFormatToGLFormat(desc.format),
+                               GLEnums::TextureFormatToGLDataType(desc.format),
+                               initialData);
+        }
     } else if (desc.type == TextureType::TextureCube) {
         glTextureStorage2D(tex->m_handle, desc.mipLevels,
                           GLEnums::TextureFormatToGLInternal(desc.format),
                           static_cast<GLsizei>(desc.width),
                           static_cast<GLsizei>(desc.height));
+        if (initialData) {
+            glTextureSubImage3D(tex->m_handle, 0, 0, 0, 0,
+                               static_cast<GLsizei>(desc.width),
+                               static_cast<GLsizei>(desc.height),
+                               6,
+                               GLEnums::TextureFormatToGLFormat(desc.format),
+                               GLEnums::TextureFormatToGLDataType(desc.format),
+                               initialData);
+        }
     } else if (desc.type == TextureType::Texture3D) {
         glTextureStorage3D(tex->m_handle, desc.mipLevels,
                           GLEnums::TextureFormatToGLInternal(desc.format),
                           static_cast<GLsizei>(desc.width),
                           static_cast<GLsizei>(desc.height),
                           static_cast<GLsizei>(desc.depthOrArrayLayers));
+        if (initialData) {
+            glTextureSubImage3D(tex->m_handle, 0, 0, 0, 0,
+                               static_cast<GLsizei>(desc.width),
+                               static_cast<GLsizei>(desc.height),
+                               static_cast<GLsizei>(desc.depthOrArrayLayers),
+                               GLEnums::TextureFormatToGLFormat(desc.format),
+                               GLEnums::TextureFormatToGLDataType(desc.format),
+                               initialData);
+        }
     }
 
     return tex;
@@ -132,7 +161,8 @@ unsigned int CompileShaderStage(ShaderStage stage, const char* source, size_t so
     if (!ok) {
         char log[1024];
         glGetShaderInfoLog(sh, sizeof(log), nullptr, log);
-        (void)log;  // TODO: report
+        const char* stageName = (stage == ShaderStage::Vertex) ? "vertex" : (stage == ShaderStage::Fragment) ? "fragment" : "compute";
+        core::Log::ErrorF("RHI OpenGL: shader compile failed (%s): %s", stageName, log);
         glDeleteShader(sh);
         return 0;
     }
@@ -175,7 +205,7 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     if (!ok) {
         char log[1024];
         glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-        (void)log;
+        core::Log::ErrorF("RHI OpenGL: graphics pipeline link failed: %s", log);
         glDeleteProgram(program);
         return nullptr;
     }
@@ -191,8 +221,25 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
 }
 
 IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
-    (void)computeShader;
-    return nullptr;  // TODO
+    ShaderGL* cs = static_cast<ShaderGL*>(computeShader);
+    if (!cs || !cs->m_handle || cs->GetStage() != ShaderStage::Compute) return nullptr;
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, cs->m_handle);
+    glLinkProgram(program);
+    GLint ok = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        char log[1024];
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        core::Log::ErrorF("RHI OpenGL: compute pipeline link failed: %s", log);
+        glDeleteProgram(program);
+        return nullptr;
+    }
+
+    auto* p = new PipelineGL();
+    p->m_program = program;
+    return p;
 }
 
 void DeviceGL::DestroyPipeline(IPipeline* pipeline) {
@@ -211,6 +258,7 @@ IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,
     auto* rt = new RenderTargetGL();
     rt->m_width = width;
     rt->m_height = height;
+    rt->m_ownsTextures = true;
 
     glCreateFramebuffers(1, &rt->m_fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, rt->m_fbo);
@@ -251,7 +299,50 @@ IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,
         for (size_t i = 0; i < colorFormats.size(); ++i)
             drawBufs[i] = GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i);
         glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
+    } else if (depthFormat != RHITextureFormat::None) {
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
     }
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        DestroyRenderTarget(rt);
+        return nullptr;
+    }
+    return rt;
+}
+
+IRenderTarget* DeviceGL::CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) {
+    auto* tex = static_cast<TextureGL*>(colorTexture);
+    if (!tex || tex->m_handle == 0) return nullptr;
+
+    auto* rt = new RenderTargetGL();
+    rt->m_ownsTextures = false;
+    rt->m_externalColorTextures.push_back(tex);
+
+    uint32_t mipWidth = std::max<uint32_t>(1u, tex->m_width >> mipLevel);
+    uint32_t mipHeight = std::max<uint32_t>(1u, tex->m_height >> mipLevel);
+    rt->m_width = mipWidth;
+    rt->m_height = mipHeight;
+
+    glCreateFramebuffers(1, &rt->m_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, rt->m_fbo);
+
+    GLenum target = GL_TEXTURE_2D;
+    if (tex->m_type == TextureType::TextureCube) {
+        uint32_t faceIndex = std::min<uint32_t>(face, 5u);
+        target = static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, tex->m_handle, static_cast<GLint>(mipLevel));
+    } else if (tex->m_type == TextureType::Texture2D) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, tex->m_handle, static_cast<GLint>(mipLevel));
+    } else {
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, tex->m_handle, static_cast<GLint>(mipLevel),
+                                  static_cast<GLint>(face));
+    }
+
+    GLenum drawBufs[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, drawBufs);
 
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -269,13 +360,17 @@ void DeviceGL::DestroyRenderTarget(IRenderTarget* rt) {
         glDeleteFramebuffers(1, &r->m_fbo);
         r->m_fbo = 0;
     }
-    for (auto& t : r->m_colorTextures) {
-        if (t && t->m_handle) glDeleteTextures(1, &t->m_handle);
+    if (r->m_ownsTextures) {
+        for (auto& t : r->m_colorTextures) {
+            if (t && t->m_handle) glDeleteTextures(1, &t->m_handle);
+        }
     }
     r->m_colorTextures.clear();
-    if (r->m_depthTexture && r->m_depthTexture->m_handle)
+    if (r->m_ownsTextures && r->m_depthTexture && r->m_depthTexture->m_handle)
         glDeleteTextures(1, &r->m_depthTexture->m_handle);
     r->m_depthTexture.reset();
+    r->m_externalColorTextures.clear();
+    r->m_externalDepthTexture = nullptr;
     delete r;
 }
 
@@ -296,6 +391,13 @@ void DeviceGL::DestroyQueryPool(IQueryPool* pool) {
         p->m_queryIds.clear();
     }
     delete p;
+}
+
+int DeviceGL::GetMaxSamples(int requestedSamples) {
+    if (requestedSamples <= 0) return 0;
+    GLint maxSamples = 0;
+    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+    return static_cast<int>(std::min(static_cast<GLint>(requestedSamples), maxSamples));
 }
 
 void DeviceGL::Present() {
@@ -348,6 +450,21 @@ void DeviceGL::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bo
     GLbitfield mask = colorOnly ? GL_COLOR_BUFFER_BIT : (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glBlitFramebuffer(0, 0, static_cast<GLint>(w), static_cast<GLint>(h),
                       0, 0, static_cast<GLint>(w), static_cast<GLint>(h), mask, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void DeviceGL::BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) {
+    if (!dst) return;
+    auto* d = static_cast<RenderTargetGL*>(dst);
+    const uint32_t w = dst->GetWidth();
+    const uint32_t h = dst->GetHeight();
+    if (w == 0 || h == 0) return;
+    GLuint srcFbo = (nativeFbo != nullptr) ? static_cast<GLuint>(reinterpret_cast<uintptr_t>(nativeFbo)) : 0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d->m_fbo);
+    glBlitFramebuffer(0, 0, static_cast<GLint>(w), static_cast<GLint>(h),
+                      0, 0, static_cast<GLint>(w), static_cast<GLint>(h), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }

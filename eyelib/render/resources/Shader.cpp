@@ -1,8 +1,8 @@
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/resources/Mesh.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
-#include <glad/glad.h>
-#include <fstream>
 #include <sstream>
 #include <unordered_set>
 
@@ -16,13 +16,8 @@ Shader::~Shader() {
 }
 
 Shader::Shader(Shader&& other) noexcept {
-    m_program = other.m_program;
-    m_bonesUBO = other.m_bonesUBO;
-    m_bonesUBOSize = other.m_bonesUBOSize;
     m_deviceRHI = other.m_deviceRHI;
     m_pipelineRHI = other.m_pipelineRHI;
-    other.m_program = 0;
-    other.m_bonesUBO = 0;
     other.m_deviceRHI = nullptr;
     other.m_pipelineRHI = nullptr;
 }
@@ -30,13 +25,8 @@ Shader::Shader(Shader&& other) noexcept {
 Shader& Shader::operator=(Shader&& other) noexcept {
     if (this == &other) return *this;
     Destroy();
-    m_program = other.m_program;
-    m_bonesUBO = other.m_bonesUBO;
-    m_bonesUBOSize = other.m_bonesUBOSize;
     m_deviceRHI = other.m_deviceRHI;
     m_pipelineRHI = other.m_pipelineRHI;
-    other.m_program = 0;
-    other.m_bonesUBO = 0;
     other.m_deviceRHI = nullptr;
     other.m_pipelineRHI = nullptr;
     return *this;
@@ -102,57 +92,10 @@ bool LoadShaderSource(const std::string& path, std::string& out) {
 }
 } // namespace
 
-GLuint Shader::CompileStage(unsigned int stageType, const std::string& src) {
-    const char* csrc = src.c_str();
-    GLuint stage = glCreateShader(stageType);
-    glShaderSource(stage, 1, &csrc, nullptr);
-    glCompileShader(stage);
-
-    GLint ok = 0;
-    glGetShaderiv(stage, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        GLint logLen = 0;
-        glGetShaderiv(stage, GL_INFO_LOG_LENGTH, &logLen);
-        std::string log;
-        log.resize(static_cast<size_t>(logLen > 0 ? logLen : 1));
-        glGetShaderInfoLog(stage, logLen, nullptr, log.data());
-        core::Log::ErrorF("Shader compile failed: %s", log.c_str());
-        glDeleteShader(stage);
-        return 0;
-    }
-    return stage;
-}
-
 bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
-    Destroy();
-
-    GLuint vs = CompileStage(GL_VERTEX_SHADER, vertexSrc);
-    if (!vs) return false;
-    GLuint fs = CompileStage(GL_FRAGMENT_SHADER, fragmentSrc);
-    if (!fs) { glDeleteShader(vs); return false; }
-
-    m_program = glCreateProgram();
-    glAttachShader(m_program, vs);
-    glAttachShader(m_program, fs);
-    glLinkProgram(m_program);
-
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-
-    GLint ok = 0;
-    glGetProgramiv(m_program, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        GLint logLen = 0;
-        glGetProgramiv(m_program, GL_INFO_LOG_LENGTH, &logLen);
-        std::string log;
-        log.resize(static_cast<size_t>(logLen > 0 ? logLen : 1));
-        glGetProgramInfoLog(m_program, logLen, nullptr, log.data());
-        core::Log::ErrorF("Shader link failed: %s", log.c_str());
-        Destroy();
-        return false;
-    }
-
-    return true;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return false;
+    return BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList);
 }
 
 bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
@@ -172,6 +115,11 @@ bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& frag
 }
 
 bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout) {
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, rhi::PrimitiveTopology::TriangleList);
+}
+
+bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
+                             const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
     if (!device) return false;
     if (m_deviceRHI) Destroy(m_deviceRHI);
     rhi::IShader* vs = device->CreateShader(rhi::ShaderStage::Vertex, vertexSrc.c_str(), vertexSrc.size());
@@ -185,7 +133,7 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
     desc.vertexShader = vs;
     desc.fragmentShader = fs;
     desc.vertexLayout = layout;
-    desc.topology = rhi::PrimitiveTopology::TriangleList;
+    desc.topology = topology;
     desc.depthStencil.depthTest = true;
     desc.depthStencil.depthWrite = true;
     rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
@@ -198,25 +146,21 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
 }
 
 bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout) {
+    return LoadFromFile(device, vertexPath, fragmentPath, layout, rhi::PrimitiveTopology::TriangleList);
+}
+
+bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
+                          const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
     if (!device) return false;
     std::string vertexSrc;
     if (!LoadShaderSource(vertexPath, vertexSrc)) return false;
     std::string fragmentSrc;
     if (!LoadShaderSource(fragmentPath, fragmentSrc)) return false;
-    return BuildFromSource(device, vertexSrc, fragmentSrc, layout);
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology);
 }
 
 void Shader::Destroy() {
     if (m_deviceRHI) Destroy(m_deviceRHI);
-    if (m_program) {
-        glDeleteProgram(m_program);
-        m_program = 0;
-    }
-    if (m_bonesUBO) {
-        glDeleteBuffers(1, &m_bonesUBO);
-        m_bonesUBO = 0;
-        m_bonesUBOSize = 0;
-    }
 }
 
 void Shader::Destroy(rhi::IDevice* device) {
@@ -229,87 +173,68 @@ void Shader::Destroy(rhi::IDevice* device) {
 }
 
 void Shader::Bind() const {
-    if (m_program) glUseProgram(m_program);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->BindPipeline(m_pipelineRHI);
 }
 
 void Shader::Unbind() const {
-    glUseProgram(0);
+    (void)this;
 }
 
 void Shader::SetBool(const std::string& name, bool value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform1i(loc, value ? 1 : 0);
+    SetInt(name, value ? 1 : 0);
 }
 
 void Shader::SetInt(const std::string& name, int value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform1i(loc, value);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformInt(name.c_str(), value);
 }
 
 void Shader::SetFloat(const std::string& name, float value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform1f(loc, value);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformFloat(name.c_str(), value);
 }
 
 void Shader::SetVec2(const std::string& name, const math::Vec2& value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform2fv(loc, 1, &value.x);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformVec2(name.c_str(), &value.x);
 }
 
 void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform3fv(loc, 1, &value.x);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformVec3(name.c_str(), &value.x);
 }
 
 void Shader::SetVec4(const std::string& name, const math::Vec4& value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniform4fv(loc, 1, &value.x);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformVec4(name.c_str(), &value.x);
 }
 
 void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
-    if (!m_program) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, &value[0][0]);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformMat4(name.c_str(), &value[0][0]);
 }
 
 void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const {
-    if (!m_program || !values || count == 0) return;
-    GLint loc = glGetUniformLocation(m_program, name.c_str());
-    if (loc >= 0) {
-        glUniformMatrix4fv(loc, static_cast<GLsizei>(count), GL_FALSE, &values[0][0][0]);
-        return;
-    }
-
-    if (name != "u_Bones" && name != "u_BoneMatrices") return;
-
-    const GLuint blockIndex = glGetUniformBlockIndex(m_program, "Bones");
-    if (blockIndex == GL_INVALID_INDEX) return;
-
-    glUniformBlockBinding(m_program, blockIndex, 3);
-
-    if (!m_bonesUBO) {
-        glGenBuffers(1, &m_bonesUBO);
-    }
-
-    const size_t maxBones = 512;
-    const size_t clampedCount = (count > maxBones) ? maxBones : count;
-    const size_t byteSize = clampedCount * sizeof(math::Mat4);
-
-    glBindBuffer(GL_UNIFORM_BUFFER, m_bonesUBO);
-    if (m_bonesUBOSize < byteSize) {
-        glBufferData(GL_UNIFORM_BUFFER, static_cast<GLsizeiptr>(byteSize), values, GL_DYNAMIC_DRAW);
-        m_bonesUBOSize = byteSize;
-    } else {
-        glBufferSubData(GL_UNIFORM_BUFFER, 0, static_cast<GLsizeiptr>(byteSize), values);
-    }
-    glBindBufferBase(GL_UNIFORM_BUFFER, 3, m_bonesUBO);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    if (!values || count == 0) return;
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformMat4Array(name.c_str(), &values[0][0][0], count);
 }
 
 } // namespace render

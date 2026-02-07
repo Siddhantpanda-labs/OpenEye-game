@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <vector>
 
 namespace eyelib {
@@ -34,6 +35,9 @@ public:
 private:
     void FlushLines();
     void FlushTriangles();
+    rhi::VertexLayout GetVertexLayout() const;
+    void EnsureLineBuffers(size_t vertexBytes, size_t indexBytes);
+    void EnsureTriBuffers(size_t vertexBytes, size_t indexBytes);
 
     struct LineVert { math::Vec2 pos; math::Vec4 color; };
     struct TriVert { math::Vec2 pos; math::Vec4 color; };
@@ -43,11 +47,15 @@ private:
     std::vector<unsigned int> m_triIndices;
     math::Mat4 m_view{1.0f};
     math::Mat4 m_projection{1.0f};
-    unsigned int m_vao = 0;
-    unsigned int m_lineVbo = 0;
-    unsigned int m_lineEbo = 0;
-    unsigned int m_triVbo = 0;
-    unsigned int m_triEbo = 0;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::IBuffer* m_lineVbo = nullptr;
+    rhi::IBuffer* m_lineEbo = nullptr;
+    rhi::IBuffer* m_triVbo = nullptr;
+    rhi::IBuffer* m_triEbo = nullptr;
+    size_t m_lineVboCapacity = 0;
+    size_t m_lineEboCapacity = 0;
+    size_t m_triVboCapacity = 0;
+    size_t m_triEboCapacity = 0;
     bool m_initialized = false;
 };
 

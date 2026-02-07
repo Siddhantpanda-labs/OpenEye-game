@@ -48,7 +48,7 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));
     }
-    m_impl->pass->Render(*shadowMap.GetInternal(), internal, lightDir, view, projection, cameraPos, nearPlane, farPlane);
+    m_impl->pass->Render(*shadowMap.GetInternal(), nullptr, internal, lightDir, view, projection, cameraPos, nearPlane, farPlane);
 }
 
 } // namespace api

@@ -1,8 +1,7 @@
 #include "eyelib/render/Renderer.h"
 
 #include "eyelib/core/Log.h"
-
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHIContext.h"
 
 namespace eyelib {
 namespace render {
@@ -22,8 +21,16 @@ void Renderer::Shutdown() {
 }
 
 void Renderer::Clear(float r, float g, float b, float a) {
-    glClearColor(r, g, b, a);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    rhi::ClearValue clear{};
+    clear.color[0] = r;
+    clear.color[1] = g;
+    clear.color[2] = b;
+    clear.color[3] = a;
+    cmd->ClearDefaultFramebuffer(clear);
 }
 
 void Renderer::Draw(const Mesh& mesh, const Shader& shader) {

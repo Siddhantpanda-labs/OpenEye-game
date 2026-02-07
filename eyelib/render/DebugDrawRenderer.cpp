@@ -7,11 +7,11 @@
 #include "eyelib/render/2d/TextRenderer.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/debug/Validation.h"
-
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHIContext.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace eyelib {
 namespace render {
@@ -22,8 +22,6 @@ struct LineVertex {
     math::Vec4 color;
 };
 
-static GLuint s_vao = 0;
-static GLuint s_vbo = 0;
 static std::shared_ptr<Shader> s_shader;
 static TextRenderer s_textRenderer;
 static Font s_font;
@@ -33,23 +31,28 @@ static float s_textSize = 16.0f;
 static std::string s_fontPath;
 static bool s_initialized = false;
 static bool s_shaderLoadLogged = false;
+static rhi::IDevice* s_deviceRHI = nullptr;
+static rhi::IBuffer* s_vertexBufferRHI = nullptr;
+static size_t s_vertexCapacity = 0;
+
+static rhi::VertexLayout GetLineLayout() {
+    rhi::VertexLayout layout;
+    layout.strideInBytes = sizeof(LineVertex);
+    layout.attributes = {
+        {0, rhi::VertexAttributeType::Float3, static_cast<uint32_t>(offsetof(LineVertex, position))},
+        {1, rhi::VertexAttributeType::Float4, static_cast<uint32_t>(offsetof(LineVertex, color))},
+    };
+    return layout;
+}
 
 static void EnsureResources() {
     if (s_initialized) return;
     s_initialized = true;
-    glGenVertexArrays(1, &s_vao);
-    glGenBuffers(1, &s_vbo);
-    glBindVertexArray(s_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(LineVertex), reinterpret_cast<void*>(0));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(LineVertex), reinterpret_cast<void*>(sizeof(math::Vec3)));
-    glBindVertexArray(0);
+    s_deviceRHI = rhi::GetDefaultDevice();
 
     s_shader = std::make_shared<Shader>();
-    if (!s_shader->LoadFromFile("assets/shaders/debug/lines.vert", "assets/shaders/debug/lines.frag")) {
+    if (!s_deviceRHI || !s_shader->LoadFromFile(s_deviceRHI, "assets/shaders/debug/lines.vert", "assets/shaders/debug/lines.frag",
+                                                GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
         if (!s_shaderLoadLogged) {
             core::Log::Warn("DebugDraw: failed to load debug line shader (assets/shaders/debug/lines.*). Run from project root or set working directory. Skeleton/debug lines will not be visible.");
             s_shaderLoadLogged = true;
@@ -88,7 +91,7 @@ static void TryLoadFont() {
 }
 } // namespace
 
-void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo, unsigned int width, unsigned int height) {
+void DebugDrawRenderer::Render(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
     const auto lines = debug::DebugDraw::GetLines();
     const auto texts = debug::DebugDraw::GetTexts();
     if (lines.empty() && texts.empty()) return;
@@ -96,6 +99,12 @@ void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo,
 
     EnsureResources();
     if (!s_shader || !s_shader->IsValid()) return;
+    if (!s_deviceRHI) return;
+    rhi::ICommandList* cmd = s_deviceRHI->GetImmediateCommandList();
+    if (!cmd) return;
+
+    cmd->SetRenderTarget(target);
+    cmd->SetViewport(0, 0, width, height);
 
     if (!lines.empty()) {
         std::vector<LineVertex> vertices;
@@ -104,31 +113,28 @@ void DebugDrawRenderer::Render(const CameraView& camera, unsigned int targetFbo,
             vertices.push_back({ l.a, l.color });
             vertices.push_back({ l.b, l.color });
         }
+        if (!s_vertexBufferRHI || vertices.size() * sizeof(LineVertex) > s_vertexCapacity) {
+            if (s_vertexBufferRHI) s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
+            rhi::BufferDesc desc;
+            desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
+            desc.usage = rhi::BufferUsage::Vertex;
+            desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            s_vertexBufferRHI = s_deviceRHI->CreateBuffer(desc);
+            s_vertexCapacity = desc.sizeInBytes;
+        }
+        if (!s_vertexBufferRHI) return;
+        s_vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
 
-        glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
-        glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-
-        glDisable(GL_DEPTH_TEST);
-        glDepthMask(GL_FALSE);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDisable(GL_CULL_FACE);
-
+        cmd->SetDepthTest(false);
+        cmd->SetDepthWrite(false);
+        cmd->SetBlend(true);
+        cmd->SetCullFace(false);
         s_shader->Bind();
         s_shader->SetMat4("u_View", camera.view);
         s_shader->SetMat4("u_Projection", camera.projection);
-
-        glBindVertexArray(s_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(LineVertex)), vertices.data(), GL_DYNAMIC_DRAW);
-        glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
-        glBindVertexArray(0);
-
+        cmd->BindVertexBuffer(s_vertexBufferRHI, 0);
+        cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
         s_shader->Unbind();
-
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
     }
 
     if (!texts.empty()) {

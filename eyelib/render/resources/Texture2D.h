@@ -25,7 +25,7 @@ public:
     Texture2D(Texture2D&& other) noexcept;
     Texture2D& operator=(Texture2D&& other) noexcept;
 
-    /** Create empty texture. */
+    /** Create empty texture via default device (if set). */
     bool Create(int width, int height, TextureFormat format, const void* data = nullptr);
     /** RHI path: create texture via device. */
     bool Create(rhi::IDevice* device, int width, int height, TextureFormat format, const void* data = nullptr);
@@ -52,12 +52,15 @@ public:
     int GetWidth() const { return m_width; }
     int GetHeight() const { return m_height; }
     TextureFormat GetFormat() const { return m_format; }
-    bool IsValid() const { return m_id != 0 || m_textureRHI != nullptr; }
+    bool IsValid() const { return m_textureRHI != nullptr; }
 
-    /** Raw GL texture id for internal use (e.g. framebuffer attach). */
-    unsigned int Id() const { return m_id; }
+    /** Backend-native texture id for interop (e.g. framebuffer attach). */
+    unsigned int Id() const;
     /** RHI path: return texture when created via Create(device, ...). */
     rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
+
+    /** Wrap an existing RHI texture (e.g. from IRenderTarget). Non-owning; do not destroy. */
+    void WrapRHI(rhi::ITexture* texture);
 
     /** Map render-layer TextureFormat to RHI format (for use by RenderTarget etc.). */
     static rhi::RHITextureFormat TextureFormatToRHI(TextureFormat f);
@@ -69,12 +72,13 @@ public:
 private:
     static rhi::RHITextureFormat ToRHIFormat(TextureFormat f);
 
-    unsigned int m_id = 0;
     int m_width = 0;
     int m_height = 0;
     TextureFormat m_format = TextureFormat::RGBA8;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_textureRHI = nullptr;
+    bool m_wrappedRHI = false;  // true = WrapRHI, do not destroy
+    std::vector<uint8_t> m_cpuData;
 
     assets::AssetId m_assetId = assets::AssetId::Invalid();
 };

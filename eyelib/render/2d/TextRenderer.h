@@ -2,6 +2,7 @@
 
 #include "eyelib/render/2d/Font.h"
 #include "eyelib/math/Types.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,13 +43,17 @@ private:
     };
 
     void EnsureShader();
+    rhi::VertexLayout GetVertexLayout() const;
+    void EnsureBuffers(size_t vertexBytes, size_t indexBytes);
 
     std::shared_ptr<Shader> m_shader;
     std::vector<Vertex> m_vertices;
     std::vector<unsigned int> m_indices;
-    unsigned int m_vao = 0;
-    unsigned int m_vbo = 0;
-    unsigned int m_ebo = 0;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::IBuffer* m_vertexBufferRHI = nullptr;
+    rhi::IBuffer* m_indexBufferRHI = nullptr;
+    size_t m_vertexCapacity = 0;
+    size_t m_indexCapacity = 0;
     bool m_initialized = false;
 };
 

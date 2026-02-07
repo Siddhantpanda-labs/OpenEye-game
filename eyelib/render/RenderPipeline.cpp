@@ -18,8 +18,11 @@
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/TextureCube.h"
 #include "eyelib/render/FullscreenQuad.h"
+#include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHIUtils.h"
 #include <algorithm>
 #include <cstdint>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -29,6 +32,10 @@
 namespace eyelib {
 namespace render {
 
+namespace {
+constexpr size_t kMaxBones = 128;
+}
+
 RenderPipeline::RenderPipeline() = default;
 
 RenderPipeline::~RenderPipeline() {
@@ -37,12 +44,8 @@ RenderPipeline::~RenderPipeline() {
 
 void RenderPipeline::Shutdown() {
     DestroyHDRFramebuffer();
-    if (m_device) {
-        if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
-        if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
-        if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
-    }
-    m_device.reset();
+    // Destroy all objects that hold a raw pointer to m_device before destroying the device.
+    // Their destructors call back into the device (DestroyRenderTarget, DestroyPipeline, etc.).
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
     m_forwardPlusSkinnedShader.reset();
@@ -53,6 +56,13 @@ void RenderPipeline::Shutdown() {
     m_gbufferPass.reset();
     m_shadowMap.reset();
     m_gbuffer.reset();
+    if (m_device) {
+        if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
+        if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
+        if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
+    }
+    rhi::SetDefaultDevice(nullptr);
+    m_device.reset();
     m_width = m_height = 0;
 }
 
@@ -61,6 +71,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_width = width;
     m_height = height;
     m_device = std::move(device);
+    rhi::SetDefaultDevice(m_device.get());
     m_gbuffer = std::make_unique<GBuffer>();
     if (!m_gbuffer->Initialize(width, height)) return false;
     m_shadowMap = std::make_unique<ShadowMap>();
@@ -69,6 +80,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_shadowPass = std::make_unique<ShadowPass>();
     m_lightingPass = std::make_unique<LightingPass>();
     m_frameGraph = std::make_unique<FrameGraph>();
+    m_frameGraph->SetDevice(m_device.get());
     m_frameGraph->SetFrameSize(width, height);
     m_clusteredLightGrid = std::make_unique<ClusteredLightGrid>();
     m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Default, will be updated per-frame
@@ -149,36 +161,33 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
     auto gbPBR = m_frameGraph->ImportTexture("GBufferPBR", m_gbuffer->GetPBRParamsTexture(), m_width, m_height);
     auto gbVelocity = m_frameGraph->ImportTexture("GBufferVelocity", m_gbuffer->GetVelocityTexture(), m_width, m_height);
     auto gbDepth = m_frameGraph->ImportTexture("GBufferDepth", m_gbuffer->GetDepthTexture(), m_width, m_height);
-    auto shadowTex = m_frameGraph->ImportTexture("Shadow", m_shadowMap->GetDepthTexture(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+    auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+    rhi::ICommandList* cmd = GetRHICommandList();
 
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
-            [this, &scene, &light, &cam](const FGPassResources&) {
-                m_shadowPass->Render(*m_shadowMap, scene.opaque, light.direction,
+            [this, &scene, &light, &cam, cmd](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, cmd, scene.opaque, light.direction,
                     cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
             },
             {}, { shadowTex }, true);
     }
 
     m_frameGraph->AddPass("GBuffer",
-        [this, &scene, &cam](const FGPassResources&) {
-            m_gbufferPass->Render(*m_gbuffer, scene.opaque, cam.view, cam.projection, m_prevView, m_prevProjection);
+        [this, &scene, &cam, cmd](const FGPassResources&) {
+            m_gbufferPass->Render(*m_gbuffer, cmd, scene.opaque, cam.view, cam.projection, m_prevView, m_prevProjection);
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
 
     std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
     if (light.castShadows) lightingReads.push_back(shadowTex);
-    rhi::ICommandList* cmd = GetRHICommandList();
     rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
         [this, &scene, &cam, cmd, clearBlack](const FGPassResources&) {
-            if (cmd && m_hdrRenderTarget) {
-                cmd->SetRenderTarget(m_hdrRenderTarget);
-                cmd->SetViewport(0, 0, m_width, m_height);
-                cmd->ClearRenderTarget(m_hdrRenderTarget, clearBlack);
-            }
+            if (cmd && m_hdrRenderTarget)
+                rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
             ShadowMap* shadowMapForLighting = scene.light.castShadows ? m_shadowMap.get() : nullptr;
-            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
+            m_lightingPass->Render(*m_gbuffer, cmd, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
                 &scene.pointLights, &scene.spotLights);
         },
         lightingReads, { hdrColor }, true);
@@ -186,17 +195,17 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const RenderScene& scene) {
     m_frameGraph->AddPass("Transparency",
         [this, &scene, &cam, cmd](const FGPassResources&) {
             if (m_device && m_hdrRenderTarget)
-                m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+                m_device->BlitDepthOnlyFromNativeFramebuffer(m_gbuffer->GetNativeFramebuffer(), m_hdrRenderTarget);
             if (cmd && m_hdrRenderTarget) {
                 cmd->SetRenderTarget(m_hdrRenderTarget);
                 cmd->SetViewport(0, 0, m_width, m_height);
             }
-            TransparencyPass::Render(scene.transparent, cam.view, cam.projection, cam.viewPos);
+            TransparencyPass::Render(cmd, scene.transparent, cam.view, cam.projection, cam.viewPos);
         },
         {}, { hdrColor }, true);
 
     m_frameGraph->Compile();
-    m_frameGraph->Execute();
+    m_frameGraph->Execute(GetRHICommandList());
 }
 
 void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
@@ -217,36 +226,33 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
     auto gbPBR = m_frameGraph->ImportTexture("GBufferPBR", m_gbuffer->GetPBRParamsTexture(), m_width, m_height);
     auto gbVelocity = m_frameGraph->ImportTexture("GBufferVelocity", m_gbuffer->GetVelocityTexture(), m_width, m_height);
     auto gbDepth = m_frameGraph->ImportTexture("GBufferDepth", m_gbuffer->GetDepthTexture(), m_width, m_height);
-    auto shadowTex = m_frameGraph->ImportTexture("Shadow", m_shadowMap->GetDepthTexture(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+    auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+    rhi::ICommandList* cmd = GetRHICommandList();
 
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
-            [this, &scene, &light, &cam](const FGPassResources&) {
-                m_shadowPass->Render(*m_shadowMap, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), light.direction,
+            [this, &scene, &light, &cam, cmd](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, cmd, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), light.direction,
                     cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
             },
             {}, { shadowTex }, true);
     }
 
     m_frameGraph->AddPass("GBuffer",
-        [this, &scene, &cam](const FGPassResources&) {
-            m_gbufferPass->Render(*m_gbuffer, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), cam.view, cam.projection, m_prevView, m_prevProjection);
+        [this, &scene, &cam, cmd](const FGPassResources&) {
+            m_gbufferPass->Render(*m_gbuffer, cmd, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), cam.view, cam.projection, m_prevView, m_prevProjection);
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
 
     std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
     if (light.castShadows) lightingReads.push_back(shadowTex);
-    rhi::ICommandList* cmd = GetRHICommandList();
     rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
         [this, &scene, &cam, cmd, clearBlack](const FGPassResources&) {
-            if (cmd && m_hdrRenderTarget) {
-                cmd->SetRenderTarget(m_hdrRenderTarget);
-                cmd->SetViewport(0, 0, m_width, m_height);
-                cmd->ClearRenderTarget(m_hdrRenderTarget, clearBlack);
-            }
+            if (cmd && m_hdrRenderTarget)
+                rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
             ShadowMap* shadowMapForLighting = scene.light.castShadows ? m_shadowMap.get() : nullptr;
-            m_lightingPass->Render(*m_gbuffer, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
+            m_lightingPass->Render(*m_gbuffer, cmd, scene.light, cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
                 std::span<const api::render::PointLight>(scene.pointLights.data(), scene.pointLights.size()),
                 std::span<const api::render::SpotLight>(scene.spotLights.data(), scene.spotLights.size()));
         },
@@ -255,17 +261,17 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
     m_frameGraph->AddPass("Transparency",
         [this, &scene, &cam, cmd](const FGPassResources&) {
             if (m_device && m_hdrRenderTarget)
-                m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+                m_device->BlitDepthOnlyFromNativeFramebuffer(m_gbuffer->GetNativeFramebuffer(), m_hdrRenderTarget);
             if (cmd && m_hdrRenderTarget) {
                 cmd->SetRenderTarget(m_hdrRenderTarget);
                 cmd->SetViewport(0, 0, m_width, m_height);
             }
-            TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), cam.view, cam.projection, cam.viewPos);
+            TransparencyPass::Render(cmd, std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), cam.view, cam.projection, cam.viewPos);
         },
         {}, { hdrColor }, true);
 
     m_frameGraph->Compile();
-    m_frameGraph->Execute();
+    m_frameGraph->Execute(GetRHICommandList());
 }
 
 void RenderPipeline::RenderForward(const RenderScene& scene) {
@@ -274,9 +280,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        cmd->SetRenderTarget(m_hdrRenderTarget);
-        cmd->SetViewport(0, 0, m_width, m_height);
-        cmd->ClearRenderTarget(m_hdrRenderTarget, cv);
+        rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
@@ -335,6 +339,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
                 });
             }
             if (bonePtr && boneCount > 0) {
+                boneCount = std::min(boneCount, kMaxBones);
                 sh->SetMat4Array("u_Bones", bonePtr, boneCount);
             }
             sh->SetInt("u_PointLightCount", numPoint);
@@ -365,7 +370,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
 
     if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 
-    TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    TransparencyPass::Render(cmd, scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
     if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
@@ -375,9 +380,7 @@ void RenderPipeline::RenderForward(const api::RenderScene& scene) {
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        cmd->SetRenderTarget(m_hdrRenderTarget);
-        cmd->SetViewport(0, 0, m_width, m_height);
-        cmd->ClearRenderTarget(m_hdrRenderTarget, cv);
+        rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
@@ -418,7 +421,8 @@ void RenderPipeline::RenderForward(const api::RenderScene& scene) {
             sh->SetInt("u_UseShadows", 0);
         }
         if (apiD.bones && apiD.boneCount > 0) {
-            sh->SetMat4Array("u_Bones", apiD.bones, apiD.boneCount);
+            const size_t boneCount = std::min(apiD.boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", apiD.bones, boneCount);
         }
         sh->SetInt("u_PointLightCount", numPoint);
         for (int i = 0; i < numPoint; ++i) {
@@ -470,7 +474,7 @@ void RenderPipeline::RenderForward(const api::RenderScene& scene) {
 
     if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 
-    TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    TransparencyPass::Render(cmd, std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
     if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
@@ -534,7 +538,7 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
     if (cmdFwd && m_lightIndexBuffer) cmdFwd->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (scene.light.castShadows && m_shadowMap && m_shadowPass) {
-        m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
+        m_shadowPass->Render(*m_shadowMap, GetRHICommandList(), scene.opaque, scene.light.direction,
             scene.camera.view, scene.camera.projection, scene.camera.viewPos,
             scene.camera.nearPlane, scene.camera.farPlane);
     }
@@ -557,9 +561,7 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
 
     if (cmdFwd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        cmdFwd->SetRenderTarget(m_hdrRenderTarget);
-        cmdFwd->SetViewport(0, 0, m_width, m_height);
-        cmdFwd->ClearRenderTarget(m_hdrRenderTarget, cv);
+        rhi::ClearAndSetRenderTargetWithViewport(cmdFwd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
     if (cmdFwd) { cmdFwd->SetDepthTest(true); cmdFwd->SetCullFace(false); }
 
@@ -632,7 +634,10 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
         }
 
         sh->SetMat4("u_Model", d.transform);
-        if (useSkinned) sh->SetMat4Array("u_Bones", bonePtr, boneCount);
+        if (useSkinned) {
+            boneCount = std::min(boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", bonePtr, boneCount);
+        }
 
         const math::Vec4 uvTransform = d.materialInstance ? d.materialInstance->GetVec4("u_UVTransform", kDefaultUVTransform) : material->GetVec4("u_UVTransform", kDefaultUVTransform);
         const float uvRotation = d.materialInstance ? d.materialInstance->GetFloat("u_UVRotation", 0.0f) : material->GetFloat("u_UVRotation", 0.0f);
@@ -705,7 +710,7 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
     m_forwardPlusShader->Unbind();
     if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
     if (scene.light.castShadows && m_shadowMap && cmdFwd) cmdFwd->UnbindTexture(kShadowMapUnit);
-    TransparencyPass::Render(scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    TransparencyPass::Render(cmdFwd, scene.transparent, scene.camera.view, scene.camera.projection, scene.camera.viewPos);
     if (cmdFwd) { cmdFwd->SetCullFace(true); cmdFwd->SetRenderTarget(nullptr); }
 }
 
@@ -790,7 +795,7 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
     if (cmdFwdApi && m_lightIndexBuffer) cmdFwdApi->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (scene.light.castShadows && m_shadowMap && m_shadowPass) {
-        m_shadowPass->Render(*m_shadowMap, std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), scene.light.direction,
+        m_shadowPass->Render(*m_shadowMap, GetRHICommandList(), std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), scene.light.direction,
             scene.camera.view, scene.camera.projection, scene.camera.viewPos,
             scene.camera.nearPlane, scene.camera.farPlane);
     }
@@ -810,9 +815,7 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
 
     if (cmdFwdApi && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        cmdFwdApi->SetRenderTarget(m_hdrRenderTarget);
-        cmdFwdApi->SetViewport(0, 0, m_width, m_height);
-        cmdFwdApi->ClearRenderTarget(m_hdrRenderTarget, cv);
+        rhi::ClearAndSetRenderTargetWithViewport(cmdFwdApi, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
     if (cmdFwdApi) { cmdFwdApi->SetDepthTest(true); cmdFwdApi->SetCullFace(false); }
 
@@ -867,7 +870,10 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
         else { if (!commonSetNonSkinned) { setCommon(sh); commonSetNonSkinned = true; } }
 
         sh->SetMat4("u_Model", apiD.transform);
-        if (useSkinned) sh->SetMat4Array("u_Bones", apiD.bones, apiD.boneCount);
+        if (useSkinned) {
+            const size_t boneCount = std::min(apiD.boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", apiD.bones, boneCount);
+        }
 
         const auto& p = apiD.params;
         sh->SetVec4("u_UVTransform", p.uvTransform);
@@ -902,14 +908,26 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
     m_forwardPlusShader->Unbind();
     if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
     if (scene.light.castShadows && m_shadowMap && cmdFwdApi) cmdFwdApi->UnbindTexture(kShadowMapUnit);
-    TransparencyPass::Render(std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
+    TransparencyPass::Render(cmdFwdApi, std::span<const api::Drawable>(scene.transparent.data(), scene.transparent.size()), scene.camera.view, scene.camera.projection, scene.camera.viewPos);
     if (cmdFwdApi) { cmdFwdApi->SetCullFace(true); cmdFwdApi->SetRenderTarget(nullptr); }
 }
 
 void RenderPipeline::Render(const api::RenderScene& scene) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
-    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetFBO()) return;
+    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetNativeFramebuffer()) return;
+
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;  // No command list available
+    cmd->Begin();
+
+    // Debug: log api scene contents (only first frame to avoid spam)
+    static bool s_loggedApiScene = false;
+    if (!s_loggedApiScene) {
+        core::Log::InfoF("RenderPipeline::Render(api): scene.opaque=%zu scene.transparent=%zu",
+                         scene.opaque.size(), scene.transparent.size());
+        s_loggedApiScene = true;
+    }
 
     switch (m_mode) {
     case PipelineMode::Deferred:
@@ -917,7 +935,7 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
         break;
     case PipelineMode::Forward:
         if (m_shadowMap && m_shadowPass) {
-            m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
+            m_shadowPass->Render(*m_shadowMap, GetRHICommandList(), std::span<const api::Drawable>(scene.opaque.data(), scene.opaque.size()), scene.light.direction,
                 scene.camera.view, scene.camera.projection, scene.camera.viewPos,
                 scene.camera.nearPlane, scene.camera.farPlane);
         }
@@ -941,33 +959,45 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
         cam.viewPos = scene.camera.viewPos;
         cam.nearPlane = scene.camera.nearPlane;
         cam.farPlane = scene.camera.farPlane;
-        unsigned int nativeFbo = m_hdrRenderTarget ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(m_hdrRenderTarget->GetNativeFramebuffer())) : 0u;
-        DebugDrawRenderer::Render(cam, nativeFbo, m_width, m_height);
+        rhi::IRenderTarget* target = m_hdrRenderTarget;
+        DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
 
     if (m_postProcessor) {
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(scene.camera.view);
         math::Mat4 invProj = glm::inverse(scene.camera.projection);
-        unsigned int skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->GetInternal()->Id() : 0;
+        rhi::ITexture* skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->GetInternal()->GetTextureRHI() : nullptr;
         float time = core::Time::TotalTime();
-        unsigned int velocityTex = m_gbuffer->GetVelocityTexture();
         rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
-        unsigned int hdrColorId = hdrTex ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrTex->GetNativeTexture())) : 0u;
         (void)m_postProcessor->ApplyPostProcessing(
-            hdrColorId, *m_gbuffer, settings,
+            hdrTex, *m_gbuffer, settings,
             scene.camera.view, scene.camera.projection,
             invView, invProj, scene.camera.viewPos, skyboxTex, time);
     }
 
     m_prevView = scene.camera.view;
     m_prevProjection = scene.camera.projection;
+
+    cmd->End();
 }
 
 void RenderPipeline::Render(const RenderScene& scene) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
-    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetFBO()) return;
+    if (!m_hdrRenderTarget || !m_gbuffer || !m_gbuffer->GetNativeFramebuffer()) return;
+
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;  // No command list available
+    cmd->Begin();
+
+    // Debug: log scene contents (only first frame to avoid spam)
+    static bool s_loggedScene = false;
+    if (!s_loggedScene) {
+        core::Log::InfoF("RenderPipeline::Render: scene.opaque=%zu scene.transparent=%zu camera valid=%d",
+                         scene.opaque.size(), scene.transparent.size(), (scene.camera.viewPos.x != 0 || scene.camera.viewPos.y != 0 || scene.camera.viewPos.z != 0));
+        s_loggedScene = true;
+    }
 
     switch (m_mode) {
     case PipelineMode::Deferred:
@@ -975,7 +1005,7 @@ void RenderPipeline::Render(const RenderScene& scene) {
         break;
     case PipelineMode::Forward:
         if (m_shadowMap && m_shadowPass) {
-            m_shadowPass->Render(*m_shadowMap, scene.opaque, scene.light.direction,
+            m_shadowPass->Render(*m_shadowMap, GetRHICommandList(), scene.opaque, scene.light.direction,
                 scene.camera.view, scene.camera.projection, scene.camera.viewPos,
                 scene.camera.nearPlane, scene.camera.farPlane);
         }
@@ -996,8 +1026,8 @@ void RenderPipeline::Render(const RenderScene& scene) {
     }
 
     if (eyelib::debug::GetPresets().debugDrawEnabled.load()) {
-        unsigned int nativeFbo = m_hdrRenderTarget ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(m_hdrRenderTarget->GetNativeFramebuffer())) : 0u;
-        DebugDrawRenderer::Render(scene.camera, nativeFbo, m_width, m_height);
+        rhi::IRenderTarget* target = m_hdrRenderTarget;
+        DebugDrawRenderer::Render(scene.camera, target, m_width, m_height);
     }
     
     // Apply post-processing if enabled
@@ -1005,13 +1035,11 @@ void RenderPipeline::Render(const RenderScene& scene) {
         PostProcessor::Settings settings;  // Default settings - can be customized via GetPostProcessor()
         math::Mat4 invView = glm::inverse(scene.camera.view);
         math::Mat4 invProj = glm::inverse(scene.camera.projection);
-        unsigned int skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->Id() : 0;
+        rhi::ITexture* skyboxTex = scene.skybox && scene.skybox->IsValid() ? scene.skybox->GetTextureRHI() : nullptr;
         float time = core::Time::TotalTime();  // Get time from engine time system
-        unsigned int velocityTex = m_gbuffer->GetVelocityTexture();
         rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
-        unsigned int hdrColorId = hdrTex ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrTex->GetNativeTexture())) : 0u;
-        unsigned int finalTexture = m_postProcessor->ApplyPostProcessing(
-            hdrColorId, *m_gbuffer, settings,
+        rhi::ITexture* finalTexture = m_postProcessor->ApplyPostProcessing(
+            hdrTex, *m_gbuffer, settings,
             scene.camera.view, scene.camera.projection,
             invView, invProj, scene.camera.viewPos, skyboxTex, time);
         // finalTexture is the post-processed output (can be used for final blit to screen)
@@ -1021,13 +1049,14 @@ void RenderPipeline::Render(const RenderScene& scene) {
     // Store current frame matrices for next frame's velocity calculation
     m_prevView = scene.camera.view;
     m_prevProjection = scene.camera.projection;
+
+    if (cmd) cmd->End();
 }
 
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
-    if (m_postProcessor && m_postProcessor->GetOutputTexture() != 0 && m_postProcessor->HasValidOutputFrame()) {
-        void* nativeFbo = reinterpret_cast<void*>(static_cast<uintptr_t>(m_postProcessor->GetOutputFBO()));
-        m_device->BlitToDefaultFramebuffer(nativeFbo, m_width, m_height);
+    if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
+        m_device->BlitToDefaultFramebuffer(m_postProcessor->GetOutputRenderTargetRHI());
         return;
     }
     if (m_hdrRenderTarget)
@@ -1035,7 +1064,7 @@ void RenderPipeline::BlitToScreen() {
 }
 
 bool RenderPipeline::HasValidOutput() const {
-    return m_hdrRenderTarget != nullptr && m_gbuffer && m_gbuffer->GetFBO();
+    return m_hdrRenderTarget != nullptr && m_gbuffer && m_gbuffer->GetNativeFramebuffer();
 }
 
 void RenderPipeline::EnsureSkyboxShader() {
@@ -1055,7 +1084,7 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
         cmdSky->SetViewport(0, 0, m_width, m_height);
     }
     if (useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
-        m_device->BlitFromNativeFramebuffer(reinterpret_cast<void*>(static_cast<uintptr_t>(m_gbuffer->GetFBO())), m_hdrRenderTarget, false);
+        m_device->BlitDepthOnlyFromNativeFramebuffer(m_gbuffer->GetNativeFramebuffer(), m_hdrRenderTarget);
     if (cmdSky && m_hdrRenderTarget)
         cmdSky->SetRenderTarget(m_hdrRenderTarget);
 

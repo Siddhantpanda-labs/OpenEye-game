@@ -1,7 +1,8 @@
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderTarget.h"
+#include "api/platform/Window.h"
 #include "eyelib/render/RenderPipeline.h"
-#include "eyelib/render/rhi/OpenGL/DeviceGL.h"
+#include "eyelib/render/rhi/CreateDevice.h"
 
 namespace eyelib {
 namespace api {
@@ -20,7 +21,12 @@ RenderPipeline::RenderPipeline(RenderPipeline&& other) noexcept = default;
 RenderPipeline& RenderPipeline::operator=(RenderPipeline&& other) noexcept = default;
 
 bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
-    auto device = std::make_unique<::eyelib::render::rhi::DeviceGL>();
+    auto device = ::eyelib::render::rhi::CreateOpenGLDevice();
+    return m_impl->pipeline->Initialize(std::move(device), width, height);
+}
+
+bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height) {
+    auto device = ::eyelib::render::rhi::CreateGraphicsDevice([&window] { window.MakeContextCurrent(); });
     return m_impl->pipeline->Initialize(std::move(device), width, height);
 }
 
@@ -34,6 +40,10 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
 
 void RenderPipeline::Resize(const RenderTarget& target) {
     Resize(target.GetWidth(), target.GetHeight());
+}
+
+void* RenderPipeline::GetDevice() const {
+    return m_impl->pipeline ? m_impl->pipeline->GetRHIDevice() : nullptr;
 }
 
 void RenderPipeline::Shutdown() {

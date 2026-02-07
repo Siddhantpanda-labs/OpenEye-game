@@ -16,7 +16,7 @@ uniform float u_UVRotation;
 uniform float u_TexCoordIndex;
 uniform float u_FlipV;
 
-#define MAX_BONES 512
+#define MAX_BONES 128
 layout(std140, binding = 3) uniform Bones {
     mat4 u_Bones[MAX_BONES];
 };

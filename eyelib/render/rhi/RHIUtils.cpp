@@ -10,6 +10,15 @@ void ClearAndSetRenderTarget(ICommandList* cmd, IRenderTarget* rt, const ClearVa
     cmd->ClearRenderTarget(rt, clear);
 }
 
+void ClearAndSetRenderTargetWithViewport(ICommandList* cmd, IRenderTarget* rt,
+                                         uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                                         const ClearValue& clear) {
+    if (!cmd || !rt) return;
+    cmd->SetRenderTarget(rt);
+    cmd->SetViewport(x, y, width, height);
+    cmd->ClearRenderTarget(rt, clear);
+}
+
 void DrawFullscreenQuad(ICommandList* cmd, IPipeline* pipeline) {
     if (!cmd || !pipeline) return;
     cmd->BindPipeline(pipeline);

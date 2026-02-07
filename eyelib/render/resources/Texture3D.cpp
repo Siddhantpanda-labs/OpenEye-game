@@ -1,68 +1,25 @@
 #include "eyelib/render/resources/Texture3D.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
-#include <glad/glad.h>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 
 namespace eyelib {
 namespace render {
 
 namespace {
-static GLenum ToGL(TextureFormat f, bool isSRGB) {
+static size_t BytesPerPixel(TextureFormat f) {
     switch (f) {
-        case TextureFormat::R8: return GL_R8;
-        case TextureFormat::RG8: return GL_RG8;
-        case TextureFormat::RGB8: return isSRGB ? GL_SRGB8 : GL_RGB8;
-        case TextureFormat::RGBA8: return isSRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8;
-        case TextureFormat::RGB16F: return GL_RGB16F;
-        case TextureFormat::RGBA16F: return GL_RGBA16F;
-        case TextureFormat::None: return GL_RGBA8;
-        default: return GL_RGBA8;
-    }
-}
-static GLenum ToGLDataFormat(TextureFormat f) {
-    switch (f) {
-        case TextureFormat::R8: return GL_RED;
-        case TextureFormat::RG8: return GL_RG;
-        case TextureFormat::RGB8: return GL_RGB;
-        case TextureFormat::RGBA8: return GL_RGBA;
-        case TextureFormat::RGB16F: return GL_RGB;
-        case TextureFormat::RGBA16F: return GL_RGBA;
-        case TextureFormat::None: return GL_RGBA;
-        default: return GL_RGBA;
-    }
-}
-static GLenum ToGLDataType(TextureFormat f) {
-    switch (f) {
-        case TextureFormat::RGB8:
-        case TextureFormat::RGBA8:
-        case TextureFormat::R8:
-        case TextureFormat::RG8:
-            return GL_UNSIGNED_BYTE;
-        case TextureFormat::RGB16F:
-        case TextureFormat::RGBA16F:
-            return GL_FLOAT;
-        case TextureFormat::None: return GL_UNSIGNED_BYTE;
-        default: return GL_UNSIGNED_BYTE;
-    }
-}
-static GLint ToGL(TextureFilter f) {
-    switch (f) {
-        case TextureFilter::Nearest: return GL_NEAREST;
-        case TextureFilter::Linear: return GL_LINEAR;
-        case TextureFilter::NearestMipmapNearest: return GL_NEAREST_MIPMAP_NEAREST;
-        case TextureFilter::LinearMipmapNearest: return GL_LINEAR_MIPMAP_NEAREST;
-        case TextureFilter::NearestMipmapLinear: return GL_NEAREST_MIPMAP_LINEAR;
-        case TextureFilter::LinearMipmapLinear: return GL_LINEAR_MIPMAP_LINEAR;
-        default: return GL_LINEAR;
-    }
-}
-static GLint ToGL(TextureWrap w) {
-    switch (w) {
-        case TextureWrap::Repeat: return GL_REPEAT;
-        case TextureWrap::MirroredRepeat: return GL_MIRRORED_REPEAT;
-        case TextureWrap::ClampToEdge: return GL_CLAMP_TO_EDGE;
-        case TextureWrap::ClampToBorder: return GL_CLAMP_TO_BORDER;
-        default: return GL_REPEAT;
+        case TextureFormat::R8: return 1;
+        case TextureFormat::RG8: return 2;
+        case TextureFormat::RGB8: return 3;
+        case TextureFormat::RGBA8: return 4;
+        case TextureFormat::RGB16F: return 6;
+        case TextureFormat::RGBA16F: return 8;
+        case TextureFormat::None: return 4;
+        default: return 4;
     }
 }
 } // namespace
@@ -70,88 +27,125 @@ static GLint ToGL(TextureWrap w) {
 Texture3D::Texture3D() = default;
 
 Texture3D::~Texture3D() {
-    if (m_id) { glDeleteTextures(1, &m_id); m_id = 0; }
+    if (m_deviceRHI && m_textureRHI) {
+        m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_textureRHI = nullptr;
+    }
 }
 
 Texture3D::Texture3D(Texture3D&& other) noexcept
-    : m_id(other.m_id), m_width(other.m_width), m_height(other.m_height), m_depth(other.m_depth), m_format(other.m_format) {
-    other.m_id = 0;
+    : m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
+      m_width(other.m_width), m_height(other.m_height), m_depth(other.m_depth), m_format(other.m_format),
+      m_cpuData(std::move(other.m_cpuData)) {
+    other.m_deviceRHI = nullptr;
+    other.m_textureRHI = nullptr;
 }
 
 Texture3D& Texture3D::operator=(Texture3D&& other) noexcept {
     if (this != &other) {
-        if (m_id) glDeleteTextures(1, &m_id);
-        m_id = other.m_id; m_width = other.m_width; m_height = other.m_height; m_depth = other.m_depth; m_format = other.m_format;
-        other.m_id = 0;
+        if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_deviceRHI = other.m_deviceRHI;
+        m_textureRHI = other.m_textureRHI;
+        m_width = other.m_width;
+        m_height = other.m_height;
+        m_depth = other.m_depth;
+        m_format = other.m_format;
+        m_cpuData = std::move(other.m_cpuData);
+        other.m_deviceRHI = nullptr;
+        other.m_textureRHI = nullptr;
     }
     return *this;
 }
 
 bool Texture3D::Create(int width, int height, int depth, TextureFormat format, const void* data) {
-    if (m_id) { glDeleteTextures(1, &m_id); m_id = 0; }
-    if (width <= 0 || height <= 0 || depth <= 0) return false;
-    m_width = width; m_height = height; m_depth = depth; m_format = format;
-    bool srgb = (format == TextureFormat::RGB8 || format == TextureFormat::RGBA8);
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return false;
+    return Create(device, width, height, depth, format, data);
+}
 
-    glGenTextures(1, &m_id);
-    glBindTexture(GL_TEXTURE_3D, m_id);
-    glTexImage3D(GL_TEXTURE_3D, 0, ToGL(format, srgb), width, height, depth, 0,
-                 ToGLDataFormat(format), ToGLDataType(format), data);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_3D, 0);
+bool Texture3D::Create(rhi::IDevice* device, int width, int height, int depth, TextureFormat format, const void* data) {
+    if (!device || width <= 0 || height <= 0 || depth <= 0) return false;
+    if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+    const size_t bpp = BytesPerPixel(format);
+    const size_t total = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(depth) * bpp;
+    m_cpuData.resize(total);
+    if (data) {
+        std::memcpy(m_cpuData.data(), data, total);
+    } else if (total > 0) {
+        std::memset(m_cpuData.data(), 0, total);
+    }
+    rhi::TextureDesc desc;
+    desc.type = rhi::TextureType::Texture3D;
+    desc.width = static_cast<uint32_t>(width);
+    desc.height = static_cast<uint32_t>(height);
+    desc.depthOrArrayLayers = static_cast<uint32_t>(depth);
+    desc.format = Texture2D::TextureFormatToRHI(format);
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    m_textureRHI = device->CreateTexture(desc, data ? data : (m_cpuData.empty() ? nullptr : m_cpuData.data()));
+    if (!m_textureRHI) return false;
+    m_deviceRHI = device;
+    m_width = width;
+    m_height = height;
+    m_depth = depth;
+    m_format = format;
     return true;
 }
 
 void Texture3D::SetData(const void* data, int x, int y, int z, int width, int height, int depth) {
-    if (!m_id || !data) return;
+    if (!data || m_width <= 0 || m_height <= 0 || m_depth <= 0) return;
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
     if (width <= 0) width = m_width;
     if (height <= 0) height = m_height;
     if (depth <= 0) depth = m_depth;
-    glBindTexture(GL_TEXTURE_3D, m_id);
-    glTexSubImage3D(GL_TEXTURE_3D, 0, x, y, z, width, height, depth, ToGLDataFormat(m_format), ToGLDataType(m_format), data);
-    glBindTexture(GL_TEXTURE_3D, 0);
+    const size_t bpp = BytesPerPixel(m_format);
+    if (m_cpuData.empty()) {
+        m_cpuData.resize(static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * static_cast<size_t>(m_depth) * bpp);
+    }
+    for (int dz = 0; dz < depth; ++dz) {
+        for (int dy = 0; dy < height; ++dy) {
+            const size_t dst = (static_cast<size_t>(z + dz) * static_cast<size_t>(m_width) * static_cast<size_t>(m_height) +
+                               static_cast<size_t>(y + dy) * static_cast<size_t>(m_width) +
+                               static_cast<size_t>(x)) * bpp;
+            const size_t src = (static_cast<size_t>(dz) * static_cast<size_t>(height) * static_cast<size_t>(width) +
+                               static_cast<size_t>(dy) * static_cast<size_t>(width)) * bpp;
+            std::memcpy(m_cpuData.data() + dst, static_cast<const uint8_t*>(data) + src, static_cast<size_t>(width) * bpp);
+        }
+    }
+    Create(device, m_width, m_height, m_depth, m_format, m_cpuData.data());
 }
 
 std::vector<uint8_t> Texture3D::GetData() const {
-    if (!m_id) return {};
-    size_t bpp = 4;
-    if (m_format == TextureFormat::R8) bpp = 1;
-    else if (m_format == TextureFormat::RG8) bpp = 2;
-    else if (m_format == TextureFormat::RGB8) bpp = 3;
-    std::vector<uint8_t> out(static_cast<size_t>(m_width * m_height * m_depth) * bpp);
-    glBindTexture(GL_TEXTURE_3D, m_id);
-    glGetTexImage(GL_TEXTURE_3D, 0, ToGLDataFormat(m_format), ToGLDataType(m_format), out.data());
-    glBindTexture(GL_TEXTURE_3D, 0);
-    return out;
+    return m_cpuData;
 }
 
 void Texture3D::Bind(int slot) const {
-    if (m_id) { glActiveTexture(GL_TEXTURE0 + slot); glBindTexture(GL_TEXTURE_3D, m_id); }
+    if (!m_textureRHI) return;
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));
 }
 
 void Texture3D::GenerateMipmaps() {
-    if (m_id) { glBindTexture(GL_TEXTURE_3D, m_id); glGenerateMipmap(GL_TEXTURE_3D); glBindTexture(GL_TEXTURE_3D, 0); }
+    (void)this;
 }
 
 void Texture3D::SetFilter(TextureFilter minFilter, TextureFilter magFilter) {
-    if (!m_id) return;
-    glBindTexture(GL_TEXTURE_3D, m_id);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, ToGL(minFilter));
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, ToGL(magFilter));
-    glBindTexture(GL_TEXTURE_3D, 0);
+    (void)minFilter;
+    (void)magFilter;
 }
 
 void Texture3D::SetWrap(TextureWrap s, TextureWrap t, TextureWrap r) {
-    if (!m_id) return;
-    glBindTexture(GL_TEXTURE_3D, m_id);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, ToGL(s));
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, ToGL(t));
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, ToGL(r));
-    glBindTexture(GL_TEXTURE_3D, 0);
+    (void)s;
+    (void)t;
+    (void)r;
+}
+
+unsigned int Texture3D::Id() const {
+    if (!m_textureRHI) return 0;
+    void* native = m_textureRHI->GetNativeTexture();
+    return native ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(native)) : 0u;
 }
 
 } // namespace render

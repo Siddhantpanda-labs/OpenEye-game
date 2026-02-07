@@ -1,5 +1,6 @@
 #include "api/render/GBuffer.h"
 #include "eyelib/render/GBuffer.h"
+#include "eyelib/render/rhi/RHIContext.h"
 
 namespace eyelib {
 namespace api {
@@ -26,11 +27,15 @@ void GBuffer::Resize(uint32_t width, uint32_t height) {
 }
 
 void GBuffer::BindForGeometryPass() {
-    m_impl->gbuffer->BindForGeometryPass();
+    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
+    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    m_impl->gbuffer->BindForGeometryPass(cmd);
 }
 
 void GBuffer::BindForLightingPass() {
-    m_impl->gbuffer->BindForLightingPass();
+    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
+    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    m_impl->gbuffer->BindForLightingPass(cmd);
 }
 
 void GBuffer::BindDepthTexture(uint32_t textureUnit) {
@@ -38,7 +43,9 @@ void GBuffer::BindDepthTexture(uint32_t textureUnit) {
 }
 
 void GBuffer::Unbind() {
-    m_impl->gbuffer->Unbind();
+    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
+    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    m_impl->gbuffer->Unbind(cmd);
 }
 
 uint32_t GBuffer::GetWidth() const {

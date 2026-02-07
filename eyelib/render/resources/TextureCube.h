@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/resources/TextureTypes.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -36,12 +37,15 @@ public:
     void SetWrap(TextureWrap s, TextureWrap t, TextureWrap r);
 
     int GetSize() const { return m_size; }
-    bool IsValid() const { return m_id != 0; }
-    unsigned int Id() const { return m_id; }
+    bool IsValid() const { return m_textureRHI != nullptr; }
+    unsigned int Id() const;
+    rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
 
 private:
-    unsigned int m_id = 0;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::ITexture* m_textureRHI = nullptr;
     int m_size = 0;
+    std::vector<uint8_t> m_cpuData;
 };
 
 } // namespace render

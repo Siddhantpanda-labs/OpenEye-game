@@ -312,7 +312,8 @@ int RunPlayer(int argc, char** argv) {
 
     WorldRenderBridge renderBridge;
     if (!options.headless) {
-        if (!renderBridge.Initialize(static_cast<uint32_t>(window.Width()),
+        if (!renderBridge.Initialize(window,
+                                     static_cast<uint32_t>(window.Width()),
                                      static_cast<uint32_t>(window.Height()))) {
             eyelib::api::core::Log::Error("Failed to initialize renderer or pipeline.");
             return static_cast<int>(ExitCode::RenderInitFailed);
@@ -521,9 +522,22 @@ int RunPlayer(int argc, char** argv) {
 
     if (!options.headless) {
         audioBridge.Shutdown();
+        // GL context was on the render thread; make it current here so pipeline/renderer shutdown can destroy GL resources
+        window.MakeContextCurrent();
     }
     renderBridge.Shutdown();
-    physicsBridge.Shutdown();
+    try {
+        physicsBridge.Shutdown();
+    } catch (const std::exception& e) {
+        eyelib::api::core::Log::ErrorF("Physics shutdown exception: %s", e.what());
+    } catch (...) {
+        eyelib::api::core::Log::Error("Physics shutdown unknown exception");
+    }
+
+    eyelib::api::core::Log::Info("Shutdown sequence completed");
+    // Explicit engine shutdown so "Shutting down Eyelib Engine..." and "Log system shutting down" appear in order.
+    // ScopedEngine destructor will no-op because Shutdown() sets s_initialized = false.
+    eyelib::api::core::Engine::Shutdown();
 
     return static_cast<int>(ExitCode::Ok);
 }

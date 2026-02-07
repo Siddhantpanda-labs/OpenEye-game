@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <memory>
 
@@ -22,20 +23,15 @@ public:
     IBL(const IBL&) = delete;
     IBL& operator=(const IBL&) = delete;
 
-    /**
-     * @brief Initialize IBL from environment cubemap texture ID (typically skybox).
-     * @param environmentCubemapID OpenGL cubemap texture ID
-     * @param irradianceRes Resolution of irradiance map (default 32)
-     * @param prefilterRes Resolution of prefiltered map (default 512)
-     */
-    bool Initialize(unsigned int environmentCubemapID, uint32_t irradianceRes = 32, uint32_t prefilterRes = 512);
+    /** Initialize IBL from an environment cubemap texture. */
+    bool Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes = 32, uint32_t prefilterRes = 512);
 
     /**
      * @brief Get generated textures.
      */
-    unsigned int GetIrradianceMap() const { return m_irradianceMap; }
-    unsigned int GetPrefilterMap() const { return m_prefilterMap; }
-    unsigned int GetBRDFLUT() const { return m_brdfLUT; }
+    unsigned int GetIrradianceMap() const;
+    unsigned int GetPrefilterMap() const;
+    unsigned int GetBRDFLUT() const;
 
     /**
      * @brief Bind textures for lighting pass.
@@ -45,24 +41,14 @@ public:
      */
     void BindForLighting(unsigned int irradianceUnit = 11, unsigned int prefilterUnit = 12, unsigned int brdfLUTUnit = 13) const;
 
-    bool IsValid() const { return m_irradianceMap != 0 && m_prefilterMap != 0 && m_brdfLUT != 0; }
+    bool IsValid() const { return m_irradianceRHI && m_prefilterRHI && m_brdfLUTRHI; }
 
 private:
-    void GenerateIrradianceMap(unsigned int environmentCubemapID, uint32_t resolution);
-    void GeneratePrefilterMap(unsigned int environmentCubemapID, uint32_t resolution);
-    void GenerateBRDFLUT(uint32_t resolution = 512);
-
-    std::shared_ptr<Shader> CreateIrradianceShader();
-    std::shared_ptr<Shader> CreatePrefilterShader();
-    std::shared_ptr<Shader> CreateBRDFShader();
-    std::shared_ptr<Mesh> CreateCubeMesh();
-
-    unsigned int m_irradianceMap = 0;
-    unsigned int m_prefilterMap = 0;
-    unsigned int m_brdfLUT = 0;
-    unsigned int m_captureFBO = 0;
-    unsigned int m_captureRBO = 0;
-    std::shared_ptr<Mesh> m_cubeMesh;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::ITexture* m_environmentRHI = nullptr;
+    rhi::ITexture* m_irradianceRHI = nullptr;
+    rhi::ITexture* m_prefilterRHI = nullptr;
+    rhi::ITexture* m_brdfLUTRHI = nullptr;
 };
 
 } // namespace render

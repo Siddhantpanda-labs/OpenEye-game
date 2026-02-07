@@ -1,35 +1,26 @@
 #include "eyelib/render/resources/TextureCube.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
-
 #include <stb_image.h>
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include <stb_image_resize2.h>
-#include <glad/glad.h>
-#include <cstdlib>
+#include <cstdint>
+#include <cstring>
 
 namespace eyelib {
 namespace render {
 
 namespace {
-static GLint ToGL(TextureFilter f) {
+static size_t BytesPerPixel(TextureFormat f) {
     switch (f) {
-        case TextureFilter::Nearest: return GL_NEAREST;
-        case TextureFilter::Linear: return GL_LINEAR;
-        case TextureFilter::NearestMipmapNearest: return GL_NEAREST_MIPMAP_NEAREST;
-        case TextureFilter::LinearMipmapNearest: return GL_LINEAR_MIPMAP_NEAREST;
-        case TextureFilter::NearestMipmapLinear: return GL_NEAREST_MIPMAP_LINEAR;
-        case TextureFilter::LinearMipmapLinear: return GL_LINEAR_MIPMAP_LINEAR;
-        default: return GL_LINEAR;
-    }
-}
-static GLint ToGL(TextureWrap w) {
-    switch (w) {
-        case TextureWrap::Repeat: return GL_REPEAT;
-        case TextureWrap::MirroredRepeat: return GL_MIRRORED_REPEAT;
-        case TextureWrap::ClampToEdge: return GL_CLAMP_TO_EDGE;
-        case TextureWrap::ClampToBorder: return GL_CLAMP_TO_BORDER;
-        default: return GL_REPEAT;
+        case TextureFormat::R8: return 1;
+        case TextureFormat::RG8: return 2;
+        case TextureFormat::RGB8: return 3;
+        case TextureFormat::RGBA8: return 4;
+        case TextureFormat::RGB16F: return 6;
+        case TextureFormat::RGBA16F: return 8;
+        case TextureFormat::None: return 4;
+        default: return 4;
     }
 }
 } // namespace
@@ -37,124 +28,133 @@ static GLint ToGL(TextureWrap w) {
 TextureCube::TextureCube() = default;
 
 TextureCube::~TextureCube() {
-    if (m_id) { glDeleteTextures(1, &m_id); m_id = 0; }
+    if (m_deviceRHI && m_textureRHI) {
+        m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_textureRHI = nullptr;
+    }
 }
 
-TextureCube::TextureCube(TextureCube&& other) noexcept : m_id(other.m_id), m_size(other.m_size) {
-    other.m_id = 0;
+TextureCube::TextureCube(TextureCube&& other) noexcept
+    : m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
+      m_size(other.m_size), m_cpuData(std::move(other.m_cpuData)) {
+    other.m_deviceRHI = nullptr;
+    other.m_textureRHI = nullptr;
+    other.m_size = 0;
 }
 
 TextureCube& TextureCube::operator=(TextureCube&& other) noexcept {
     if (this != &other) {
-        if (m_id) glDeleteTextures(1, &m_id);
-        m_id = other.m_id; m_size = other.m_size;
-        other.m_id = 0;
+        if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_deviceRHI = other.m_deviceRHI;
+        m_textureRHI = other.m_textureRHI;
+        m_size = other.m_size;
+        m_cpuData = std::move(other.m_cpuData);
+        other.m_deviceRHI = nullptr;
+        other.m_textureRHI = nullptr;
+        other.m_size = 0;
     }
     return *this;
 }
 
-bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
-                                const std::string& py, const std::string& ny,
-                                const std::string& pz, const std::string& nz,
-                                bool isSRGB, bool generateMipmaps) {
-    std::vector<std::string> paths = { px, nx, py, ny, pz, nz };
-    return LoadFromFiles(paths, isSRGB, generateMipmaps);
-}
-
 bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool isSRGB, bool generateMipmaps) {
     if (facePaths.size() != 6) {
-        core::Log::Error("TextureCube: exactly 6 face paths required");
+        core::Log::ErrorF("TextureCube: expected 6 face paths");
         return false;
     }
-    if (m_id) { glDeleteTextures(1, &m_id); m_id = 0; }
-
-    stbi_set_flip_vertically_on_load(0);
-    int width = 0, height = 0, channels = 0;
-    unsigned char* datas[6] = {};
-    constexpr int desiredChannels = 4;
-
-    for (int i = 0; i < 6; ++i) {
-        std::vector<uint8_t> bytes = eyelib::platform::filesystem::ReadFile(facePaths[static_cast<size_t>(i)]);
+    std::vector<std::vector<uint8_t>> decodedFaces;
+    decodedFaces.resize(6);
+    int w = 0, h = 0, ch = 0;
+    TextureFormat fmt = TextureFormat::RGBA8;
+    for (size_t i = 0; i < facePaths.size(); ++i) {
+        std::vector<uint8_t> bytes = platform::filesystem::ReadFile(facePaths[i]);
         if (bytes.empty()) {
-            core::Log::ErrorF("TextureCube: failed to read %s", facePaths[static_cast<size_t>(i)].c_str());
-            for (int j = 0; j < i; ++j) stbi_image_free(datas[j]);
+            core::Log::ErrorF("TextureCube: failed to read file: %s", facePaths[i].c_str());
             return false;
         }
-        int w, h, c;
-        datas[i] = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &c, desiredChannels);
-        if (!datas[i]) {
-            core::Log::ErrorF("TextureCube: stb_image failed for face %d", i);
-            for (int j = 0; j < i; ++j) stbi_image_free(datas[j]);
+        int fw = 0, fh = 0, fch = 0;
+        unsigned char* decoded = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &fw, &fh, &fch, 0);
+        if (!decoded) {
+            core::Log::ErrorF("TextureCube: stb_image failed: %s", stbi_failure_reason());
             return false;
         }
-        if (i == 0) { width = w; height = h; channels = desiredChannels; }
-        if (w != width || h != height) {
-            core::Log::WarnF("TextureCube: resizing face %d from %dx%d to %dx%d", i, w, h, width, height);
-            unsigned char* resized = stbir_resize_uint8_linear(
-                datas[i], w, h, 0,
-                nullptr, width, height, 0,
-                STBIR_RGBA
-            );
-            if (!resized) {
-                core::Log::ErrorF("TextureCube: resize failed for face %d", i);
-                for (int j = 0; j <= i; ++j) stbi_image_free(datas[j]);
-                return false;
-            }
-            stbi_image_free(datas[i]);
-            datas[i] = resized;
+        if (i == 0) {
+            w = fw; h = fh; ch = fch;
+            if (ch == 1) fmt = TextureFormat::R8;
+            else if (ch == 2) fmt = TextureFormat::RG8;
+            else if (ch == 3) fmt = TextureFormat::RGB8;
+            else fmt = TextureFormat::RGBA8;
+        } else if (fw != w || fh != h || fch != ch) {
+            stbi_image_free(decoded);
+            core::Log::ErrorF("TextureCube: face size or format mismatch");
+            return false;
         }
+        size_t faceSize = static_cast<size_t>(fw) * static_cast<size_t>(fh) * static_cast<size_t>(ch);
+        decodedFaces[i].assign(decoded, decoded + faceSize);
+        stbi_image_free(decoded);
     }
 
-    m_size = width;
-    GLenum df = (channels == 1) ? GL_RED : (channels == 3) ? GL_RGB : GL_RGBA;
-    GLenum internal = df;
-    if (isSRGB && (channels == 3 || channels == 4))
-        internal = (channels == 3) ? GL_SRGB8 : GL_SRGB8_ALPHA8;
+    (void)isSRGB;
+    (void)generateMipmaps;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return false;
 
-    glGenTextures(1, &m_id);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_id);
-    for (int i = 0; i < 6; ++i) {
-        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, internal, width, height, 0, df, GL_UNSIGNED_BYTE, datas[i]);
-        stbi_image_free(datas[i]);
+    const size_t bpp = BytesPerPixel(fmt);
+    const size_t faceBytes = static_cast<size_t>(w) * static_cast<size_t>(h) * bpp;
+    m_cpuData.resize(faceBytes * 6);
+    for (size_t i = 0; i < 6; ++i) {
+        std::memcpy(m_cpuData.data() + i * faceBytes, decodedFaces[i].data(), faceBytes);
     }
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    GLint minF = generateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, minF);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    if (generateMipmaps) glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+
+    if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+    rhi::TextureDesc desc;
+    desc.type = rhi::TextureType::TextureCube;
+    desc.width = static_cast<uint32_t>(w);
+    desc.height = static_cast<uint32_t>(h);
+    desc.depthOrArrayLayers = 6;
+    desc.format = Texture2D::TextureFormatToRHI(fmt);
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    m_textureRHI = device->CreateTexture(desc, m_cpuData.data());
+    if (!m_textureRHI) return false;
+    m_deviceRHI = device;
+    m_size = w;
     return true;
 }
 
+bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
+                               const std::string& py, const std::string& ny,
+                               const std::string& pz, const std::string& nz,
+                               bool isSRGB, bool generateMipmaps) {
+    std::vector<std::string> faces = {px, nx, py, ny, pz, nz};
+    return LoadFromFiles(faces, isSRGB, generateMipmaps);
+}
+
 void TextureCube::Bind(int slot) const {
-    if (m_id) { glActiveTexture(GL_TEXTURE0 + slot); glBindTexture(GL_TEXTURE_CUBE_MAP, m_id); }
+    if (!m_textureRHI) return;
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));
 }
 
 void TextureCube::GenerateMipmaps() {
-    if (m_id) {
-        glBindTexture(GL_TEXTURE_CUBE_MAP, m_id);
-        glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-    }
+    (void)this;
 }
 
 void TextureCube::SetFilter(TextureFilter minFilter, TextureFilter magFilter) {
-    if (!m_id) return;
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_id);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, ToGL(minFilter));
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, ToGL(magFilter));
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    (void)minFilter;
+    (void)magFilter;
 }
 
 void TextureCube::SetWrap(TextureWrap s, TextureWrap t, TextureWrap r) {
-    if (!m_id) return;
-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_id);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, ToGL(s));
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, ToGL(t));
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, ToGL(r));
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    (void)s;
+    (void)t;
+    (void)r;
+}
+
+unsigned int TextureCube::Id() const {
+    if (!m_textureRHI) return 0;
+    void* native = m_textureRHI->GetNativeTexture();
+    return native ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(native)) : 0u;
 }
 
 } // namespace render

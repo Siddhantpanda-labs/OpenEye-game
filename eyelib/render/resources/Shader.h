@@ -5,8 +5,6 @@
 #include "eyelib/math/Types.h"
 #include "eyelib/render/rhi/RHI.h"
 
-using GLuint = unsigned int;
-
 namespace eyelib {
 namespace render {
 
@@ -26,6 +24,11 @@ public:
     /** RHI path: build pipeline from source with given vertex layout. */
     bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout);
     bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout);
+    /** RHI path: build pipeline with layout + topology. */
+    bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
+                         const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology);
+    bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
+                      const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology);
     void Destroy();
     void Destroy(rhi::IDevice* device);
 
@@ -41,18 +44,12 @@ public:
     void SetMat4(const std::string& name, const math::Mat4& value) const;
     void SetMat4Array(const std::string& name, const math::Mat4* values, size_t count) const;
 
-    bool IsValid() const { return m_program != 0 || m_pipelineRHI != nullptr; }
-    GLuint Program() const { return m_program; }
+    bool IsValid() const { return m_pipelineRHI != nullptr; }
     rhi::IPipeline* GetPipelineRHI() const { return m_pipelineRHI; }
 
 private:
-    GLuint m_program = 0;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IPipeline* m_pipelineRHI = nullptr;
-    mutable GLuint m_bonesUBO = 0;
-    mutable size_t m_bonesUBOSize = 0;
-
-    static GLuint CompileStage(unsigned int stageType, const std::string& src);
 };
 
 } // namespace render

@@ -7,23 +7,37 @@
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
 #include <glad/glad.h>
+#include <cstring>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
 
-CommandListGL::CommandListGL(DeviceGL* device) : m_device(device) {}
+CommandListGL::CommandListGL(DeviceGL* device) : m_device(device) {
+    glGenVertexArrays(1, reinterpret_cast<GLuint*>(&m_vao));
+}
 
-CommandListGL::~CommandListGL() = default;
+CommandListGL::~CommandListGL() {
+    if (m_vao)
+        glDeleteVertexArrays(1, reinterpret_cast<GLuint*>(&m_vao));
+    if (m_bonesUBO && m_device) {
+        m_device->DestroyBuffer(m_bonesUBO);
+        m_bonesUBO = nullptr;
+        m_bonesUBOSize = 0;
+    }
+}
 
 void CommandListGL::Begin() {
+    glBindVertexArray(m_vao);
     m_currentPipeline = nullptr;
     m_currentRT = nullptr;
     m_currentVBO = nullptr;
     m_currentIBO = nullptr;
 }
 
-void CommandListGL::End() {}
+void CommandListGL::End() {
+    glBindVertexArray(0);
+}
 
 void CommandListGL::SetRenderTarget(IRenderTarget* rt) {
     m_currentRT = rt;
@@ -52,6 +66,15 @@ void CommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     }
 }
 
+void CommandListGL::ClearDefaultFramebuffer(const ClearValue& clear) {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glClearColor(clear.color[0], clear.color[1], clear.color[2], clear.color[3]);
+    glDepthMask(GL_TRUE);
+    glClearDepth(static_cast<double>(clear.depth));
+    glClearStencil(static_cast<int>(clear.stencil));
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+}
+
 void CommandListGL::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
     glViewport(static_cast<GLint>(x), static_cast<GLint>(y),
                static_cast<GLsizei>(width), static_cast<GLsizei>(height));
@@ -70,7 +93,26 @@ void CommandListGL::SetDepthFuncLess(bool less) {
 }
 
 void CommandListGL::SetCullFace(bool enable) {
-    if (enable) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (enable) {
+        glEnable(GL_CULL_FACE);
+        glCullFace(m_cullFrontFace ? GL_FRONT : GL_BACK);
+    } else {
+        glDisable(GL_CULL_FACE);
+    }
+}
+
+void CommandListGL::SetCullFrontFace(bool cullFront) {
+    m_cullFrontFace = cullFront;
+    glCullFace(cullFront ? GL_FRONT : GL_BACK);
+}
+
+void CommandListGL::SetBlend(bool enable) {
+    if (enable) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
+    }
 }
 
 void CommandListGL::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
@@ -136,6 +178,7 @@ void CommandListGL::BindPipeline(IPipeline* pipeline) {
 void CommandListGL::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
     m_currentVBO = static_cast<BufferGL*>(buffer);
     if (!m_currentVBO || !m_currentPipeline) return;
+    glBindVertexArray(m_vao);  // Re-bind in case legacy GL code (e.g. fluid renderer) changed it
     glBindBuffer(GL_ARRAY_BUFFER, m_currentVBO->m_handle);
     const VertexLayout& layout = m_currentPipeline->m_vertexLayout;
     for (const auto& att : layout.attributes) {
@@ -157,8 +200,10 @@ void CommandListGL::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t
 void CommandListGL::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) {
     m_currentIBO = static_cast<BufferGL*>(buffer);
     m_currentIndexType = indexType;
-    if (m_currentIBO)
+    if (m_currentIBO) {
+        glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_currentIBO->m_handle);
+    }
     (void)offset;
 }
 
@@ -230,15 +275,47 @@ void CommandListGL::SetUniformMat4(const char* name, const float* data) {
 void CommandListGL::SetUniformMat4Array(const char* name, const float* data, size_t count) {
     if (!data) return;
     GLint loc = GetUniformLocation(m_currentPipeline, name);
-    if (loc >= 0) glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, static_cast<GLsizei>(count), GL_FALSE, data);
+    if (loc >= 0) {
+        glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, static_cast<GLsizei>(count), GL_FALSE, data);
+        return;
+    }
+
+    // Fallback: support u_Bones in std140 UBO (binding = 3)
+    if (!m_currentPipeline || !m_currentPipeline->m_program || !m_device || !name) return;
+    if (std::strcmp(name, "u_Bones") != 0) return;
+    if (count == 0) return;
+
+    const size_t required = count * sizeof(float) * 16;
+    if (!m_bonesUBO || m_bonesUBOSize < required) {
+        if (m_bonesUBO) {
+            m_device->DestroyBuffer(m_bonesUBO);
+            m_bonesUBO = nullptr;
+            m_bonesUBOSize = 0;
+        }
+        BufferDesc bd;
+        bd.sizeInBytes = required;
+        bd.usage = BufferUsage::Uniform;
+        bd.memoryHint = BufferMemoryHint::HostVisible;
+        m_bonesUBO = m_device->CreateBuffer(bd, nullptr);
+        m_bonesUBOSize = m_bonesUBO ? required : 0;
+    }
+    if (!m_bonesUBO) return;
+    m_bonesUBO->Update(data, 0, required);
+
+    const GLuint blockIndex = glGetUniformBlockIndex(m_currentPipeline->m_program, "Bones");
+    if (blockIndex == GL_INVALID_INDEX) return;
+    glUniformBlockBinding(m_currentPipeline->m_program, blockIndex, 3);
+    BindUniformBuffer(m_bonesUBO, 3, 0, static_cast<uint32_t>(required));
 }
 
 void CommandListGL::Draw(uint32_t vertexCount, uint32_t firstVertex) {
+    glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
     glDrawArrays(GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList),
                  static_cast<GLint>(firstVertex), static_cast<GLsizei>(vertexCount));
 }
 
 void CommandListGL::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
+    glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
     GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
     size_t indexSize = (m_currentIndexType == IndexType::UInt16) ? 2 : 4;
     const void* offsetPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(firstIndex * indexSize));

@@ -2,6 +2,7 @@
 
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/GBuffer.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <memory>
 #include <span>
 
@@ -23,13 +24,14 @@ class ShadowMap;
 class LightingPass {
 public:
     LightingPass();
-    ~LightingPass() = default;
+    ~LightingPass();
 
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
 
-    /** Render to currently bound FBO. Binds GBuffer to units 0–4. If shadowMap non-null, binds shadow to unit 5 and applies shadows. */
+    /** Render to currently bound FBO. cmd used for shadow bind and depth state (GL-free). */
     void Render(GBuffer& gbuffer,
+                rhi::ICommandList* cmd,
                 const LightParams& light,
                 const math::Mat4& view,
                 const math::Mat4& projection,
@@ -38,8 +40,9 @@ public:
                 const std::vector<PointLight>* pointLights = nullptr,
                 const std::vector<SpotLight>* spotLights = nullptr);
 
-    /** Zero-copy: same but with API light types (same field layout). Accepts any contiguous container via span. */
+    /** Zero-copy: same but with API light types. */
     void Render(GBuffer& gbuffer,
+                rhi::ICommandList* cmd,
                 const api::render::DirectionalLight& light,
                 const math::Mat4& view,
                 const math::Mat4& projection,
@@ -50,8 +53,12 @@ public:
 
 private:
     void EnsureDefaultShader();
+    void EnsureFullscreenQuad();
+    void DrawFullscreenQuad(rhi::ICommandList* cmd);
 
     std::shared_ptr<Shader> m_lightingShader;
+    rhi::IBuffer* m_fullscreenVBO = nullptr;
+    rhi::IBuffer* m_fullscreenIBO = nullptr;
 };
 
 } // namespace render

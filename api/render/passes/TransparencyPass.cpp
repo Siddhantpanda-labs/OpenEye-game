@@ -14,7 +14,8 @@ namespace {
 }
 } // namespace
 
-void TransparencyPass::Render(const std::vector<Drawable>& transparent,
+void TransparencyPass::Render(::eyelib::render::rhi::ICommandList* cmd,
+                              const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
                               const math::Vec3& viewPos) {
@@ -23,7 +24,7 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
     for (const auto& d : transparent) {
         internal.push_back(ToInternal(d));
     }
-    ::eyelib::render::TransparencyPass::Render(internal, view, projection, viewPos);
+    ::eyelib::render::TransparencyPass::Render(cmd, internal, view, projection, viewPos);
 }
 
 } // namespace api

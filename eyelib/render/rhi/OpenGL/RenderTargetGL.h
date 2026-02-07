@@ -20,8 +20,11 @@ struct RenderTargetGL : IRenderTarget {
     unsigned int m_fbo = 0;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    bool m_ownsTextures = true;
     std::vector<std::unique_ptr<TextureGL>> m_colorTextures;
     std::unique_ptr<TextureGL> m_depthTexture;
+    std::vector<TextureGL*> m_externalColorTextures;
+    TextureGL* m_externalDepthTexture = nullptr;
 };
 
 } // namespace rhi

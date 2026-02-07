@@ -27,11 +27,11 @@ void ShadowMap::UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& vie
 }
 
 void ShadowMap::BindForShadowPass() {
-    m_impl->shadow->BindForShadowPass();
+    m_impl->shadow->BindForShadowPass(nullptr);  // no-op without command list; pipeline uses ShadowPass with cmd
 }
 
 void ShadowMap::Unbind() {
-    m_impl->shadow->Unbind();
+    m_impl->shadow->Unbind(nullptr);
 }
 
 uint32_t ShadowMap::GetDepthTexture() const {

@@ -1,7 +1,10 @@
 # Eyelib Render Component (minimal bring-up)
 
+option(EYELIB_USE_VULKAN "Build Vulkan RHI backend" OFF)
+
 set(RENDER_SOURCES
     # RHI (graphics backend abstraction)
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIContext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/GLEnums.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BufferGL.cpp
@@ -12,6 +15,28 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/QueryPoolGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/CommandListGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeviceGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
+)
+
+if(EYELIB_USE_VULKAN)
+    find_package(Vulkan REQUIRED)
+    list(APPEND RENDER_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VkEnums.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BufferVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/TextureVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VkShaderCompiler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/ShaderVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/PipelineVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/RenderTargetVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/QueryPoolVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CommandListVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CreateDeviceVk.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/vma/vk_mem_alloc.cpp
+    )
+endif()
+
+list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.cpp
@@ -95,6 +120,11 @@ target_link_libraries(EyelibRender
     PRIVATE
         glad
 )
+
+if(EYELIB_USE_VULKAN)
+    target_include_directories(EyelibRender PRIVATE ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(EyelibRender PRIVATE Vulkan::Vulkan)
+endif()
 
 if(WIN32)
     target_link_libraries(EyelibRender PRIVATE opengl32 ${CMAKE_SOURCE_DIR}/thirdparty/assimp/lib/assimp-vc143-mt.lib)

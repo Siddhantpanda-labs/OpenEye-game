@@ -51,7 +51,7 @@ public:
     void ClearSubmeshes();
 
     void UploadToGPU();
-    /** Upload to RHI buffers (for backend-agnostic path). Call with non-null device from pipeline. */
+    /** Upload to RHI buffers (explicit device). */
     void UploadToGPU(rhi::IDevice* device);
     void Destroy();
     /** Release RHI buffers if they were created via UploadToGPU(device). Call with same device. */
@@ -80,8 +80,9 @@ public:
     const std::vector<uint16_t>& GetIndices16() const { return m_indices16; }
     IndexFormat GetIndexFormat() const { return m_indexFormat; }
 
-    bool IsValid() const { return m_vao != 0 || m_vertexBufferRHI != nullptr; }
-    unsigned int GetVAO() const { return m_vao; }
+    bool IsValid() const { return m_vertexBufferRHI != nullptr; }
+    /** Legacy: returns 0 (no VAO in RHI path). */
+    unsigned int GetVAO() const { return 0; }
 
     /** RHI path: return vertex/index buffers and layout when UploadToGPU(device) was used. */
     rhi::IBuffer* GetVertexBufferRHI() const { return m_vertexBufferRHI; }
@@ -94,7 +95,6 @@ public:
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
 private:
-    void CreateVAO();
     void Invalidate();
 
     std::vector<Vertex> m_vertices;
@@ -104,11 +104,6 @@ private:
     std::vector<Submesh> m_submeshes;
     mutable math::AABB m_aabb;
     mutable bool m_aabbDirty = true;
-
-    unsigned int m_vao = 0;
-    unsigned int m_vbo = 0;
-    unsigned int m_ebo = 0;
-    bool m_uploaded = false;
 
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IBuffer* m_vertexBufferRHI = nullptr;

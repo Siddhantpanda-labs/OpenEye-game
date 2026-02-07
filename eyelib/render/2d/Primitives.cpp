@@ -1,8 +1,9 @@
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/core/Log.h"
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHIContext.h"
 #include <cmath>
+#include <algorithm>
 
 namespace eyelib {
 namespace render {
@@ -18,21 +19,21 @@ Primitives::~Primitives() {
 }
 
 void Primitives::Shutdown() {
-    if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
-    if (m_lineVbo) { glDeleteBuffers(1, &m_lineVbo); m_lineVbo = 0; }
-    if (m_lineEbo) { glDeleteBuffers(1, &m_lineEbo); m_lineEbo = 0; }
-    if (m_triVbo) { glDeleteBuffers(1, &m_triVbo); m_triVbo = 0; }
-    if (m_triEbo) { glDeleteBuffers(1, &m_triEbo); m_triEbo = 0; }
+    if (m_deviceRHI && m_lineVbo) { m_deviceRHI->DestroyBuffer(m_lineVbo); m_lineVbo = nullptr; }
+    if (m_deviceRHI && m_lineEbo) { m_deviceRHI->DestroyBuffer(m_lineEbo); m_lineEbo = nullptr; }
+    if (m_deviceRHI && m_triVbo) { m_deviceRHI->DestroyBuffer(m_triVbo); m_triVbo = nullptr; }
+    if (m_deviceRHI && m_triEbo) { m_deviceRHI->DestroyBuffer(m_triEbo); m_triEbo = nullptr; }
+    m_lineVboCapacity = 0;
+    m_lineEboCapacity = 0;
+    m_triVboCapacity = 0;
+    m_triEboCapacity = 0;
     m_initialized = false;
 }
 
 bool Primitives::Initialize() {
     if (m_initialized) return true;
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_lineVbo);
-    glGenBuffers(1, &m_lineEbo);
-    glGenBuffers(1, &m_triVbo);
-    glGenBuffers(1, &m_triEbo);
+    m_deviceRHI = rhi::GetDefaultDevice();
+    if (!m_deviceRHI) return false;
     m_initialized = true;
     return true;
 }
@@ -122,28 +123,30 @@ void Primitives::FlushLines() {
     static std::shared_ptr<Shader> s_shader;
     if (!s_shader || !s_shader->IsValid()) {
         s_shader = std::make_shared<Shader>();
-        s_shader->LoadFromFile("assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag");
+        rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+        if (!device) return;
+        s_shader->LoadFromFile(device, "assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_lineVbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(m_lineVerts.size() * sizeof(LineVert)), m_lineVerts.data(), GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_lineEbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(m_lineIndices.size() * sizeof(unsigned int)), m_lineIndices.data(), GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(LineVert), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(LineVert), reinterpret_cast<void*>(offsetof(LineVert, color)));
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    EnsureLineBuffers(m_lineVerts.size() * sizeof(LineVert), m_lineIndices.size() * sizeof(unsigned int));
+    if (!m_lineVbo || !m_lineEbo) return;
+    m_lineVbo->Update(m_lineVerts.data(), 0, m_lineVerts.size() * sizeof(LineVert));
+    m_lineEbo->Update(m_lineIndices.data(), 0, m_lineIndices.size() * sizeof(unsigned int));
+    cmd->BindVertexBuffer(m_lineVbo, 0);
+    cmd->BindIndexBuffer(m_lineEbo, rhi::IndexType::UInt32);
+    cmd->SetBlend(true);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
     s_shader->Bind();
     s_shader->SetMat4("u_View", m_view);
     s_shader->SetMat4("u_Projection", m_projection);
-    glDrawElements(GL_TRIANGLES, (GLsizei)m_lineIndices.size(), GL_UNSIGNED_INT, nullptr);
+    cmd->DrawIndexed(static_cast<uint32_t>(m_lineIndices.size()), 0, 0);
     s_shader->Unbind();
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
     m_lineVerts.clear();
     m_lineIndices.clear();
 }
@@ -153,30 +156,86 @@ void Primitives::FlushTriangles() {
     static std::shared_ptr<Shader> s_shader;
     if (!s_shader || !s_shader->IsValid()) {
         s_shader = std::make_shared<Shader>();
-        s_shader->LoadFromFile("assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag");
+        rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+        if (!device) return;
+        s_shader->LoadFromFile(device, "assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_triVbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(m_triVerts.size() * sizeof(TriVert)), m_triVerts.data(), GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_triEbo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(m_triIndices.size() * sizeof(unsigned int)), m_triIndices.data(), GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TriVert), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(TriVert), reinterpret_cast<void*>(offsetof(TriVert, color)));
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    EnsureTriBuffers(m_triVerts.size() * sizeof(TriVert), m_triIndices.size() * sizeof(unsigned int));
+    if (!m_triVbo || !m_triEbo) return;
+    m_triVbo->Update(m_triVerts.data(), 0, m_triVerts.size() * sizeof(TriVert));
+    m_triEbo->Update(m_triIndices.data(), 0, m_triIndices.size() * sizeof(unsigned int));
+    cmd->BindVertexBuffer(m_triVbo, 0);
+    cmd->BindIndexBuffer(m_triEbo, rhi::IndexType::UInt32);
+    cmd->SetBlend(true);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
     s_shader->Bind();
     s_shader->SetMat4("u_View", m_view);
     s_shader->SetMat4("u_Projection", m_projection);
-    glDrawElements(GL_TRIANGLES, (GLsizei)m_triIndices.size(), GL_UNSIGNED_INT, nullptr);
+    cmd->DrawIndexed(static_cast<uint32_t>(m_triIndices.size()), 0, 0);
     s_shader->Unbind();
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
     m_triVerts.clear();
     m_triIndices.clear();
+}
+
+rhi::VertexLayout Primitives::GetVertexLayout() const {
+    rhi::VertexLayout layout;
+    layout.strideInBytes = sizeof(LineVert);
+    layout.attributes = {
+        {0, rhi::VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(LineVert, pos))},
+        {1, rhi::VertexAttributeType::Float4, static_cast<uint32_t>(offsetof(LineVert, color))},
+    };
+    return layout;
+}
+
+void Primitives::EnsureLineBuffers(size_t vertexBytes, size_t indexBytes) {
+    if (!m_deviceRHI) return;
+    if (!m_lineVbo || vertexBytes > m_lineVboCapacity) {
+        if (m_lineVbo) m_deviceRHI->DestroyBuffer(m_lineVbo);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(vertexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Vertex;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_lineVbo = m_deviceRHI->CreateBuffer(desc);
+        m_lineVboCapacity = desc.sizeInBytes;
+    }
+    if (!m_lineEbo || indexBytes > m_lineEboCapacity) {
+        if (m_lineEbo) m_deviceRHI->DestroyBuffer(m_lineEbo);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(indexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Index;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_lineEbo = m_deviceRHI->CreateBuffer(desc);
+        m_lineEboCapacity = desc.sizeInBytes;
+    }
+}
+
+void Primitives::EnsureTriBuffers(size_t vertexBytes, size_t indexBytes) {
+    if (!m_deviceRHI) return;
+    if (!m_triVbo || vertexBytes > m_triVboCapacity) {
+        if (m_triVbo) m_deviceRHI->DestroyBuffer(m_triVbo);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(vertexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Vertex;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_triVbo = m_deviceRHI->CreateBuffer(desc);
+        m_triVboCapacity = desc.sizeInBytes;
+    }
+    if (!m_triEbo || indexBytes > m_triEboCapacity) {
+        if (m_triEbo) m_deviceRHI->DestroyBuffer(m_triEbo);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(indexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Index;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_triEbo = m_deviceRHI->CreateBuffer(desc);
+        m_triEboCapacity = desc.sizeInBytes;
+    }
 }
 
 } // namespace render

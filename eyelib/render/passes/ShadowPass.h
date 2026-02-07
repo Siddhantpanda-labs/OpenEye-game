@@ -2,6 +2,7 @@
 
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/ShadowMap.h"
+#include "eyelib/render/rhi/RHI.h"
 #include <memory>
 #include <span>
 #include <vector>
@@ -23,7 +24,9 @@ public:
     void SetDepthShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetDepthShader() const { return m_depthShader; }
 
+    /** cmd is used for ShadowMap bind/unbind (SetRenderTarget, Clear). May be null if shadow map uses legacy path. */
     void Render(ShadowMap& shadowMap,
+                rhi::ICommandList* cmd,
                 const std::vector<Drawable>& drawables,
                 const math::Vec3& lightDir,
                 const math::Mat4& view,
@@ -32,8 +35,9 @@ public:
                 float nearPlane,
                 float farPlane);
 
-    /** Zero-copy: render from API drawables (resolves GetInternal() at use). Accepts any contiguous container via span. */
+    /** Zero-copy: render from API drawables. cmd used for ShadowMap bind/unbind. */
     void Render(ShadowMap& shadowMap,
+                rhi::ICommandList* cmd,
                 std::span<const api::Drawable> drawables,
                 const math::Vec3& lightDir,
                 const math::Mat4& view,

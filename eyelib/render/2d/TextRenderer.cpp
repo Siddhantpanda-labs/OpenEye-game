@@ -3,7 +3,8 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHIContext.h"
+#include <algorithm>
 
 namespace eyelib {
 namespace render {
@@ -15,9 +16,10 @@ TextRenderer::~TextRenderer() {
 }
 
 void TextRenderer::Shutdown() {
-    if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
-    if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
-    if (m_ebo) { glDeleteBuffers(1, &m_ebo); m_ebo = 0; }
+    if (m_deviceRHI && m_vertexBufferRHI) { m_deviceRHI->DestroyBuffer(m_vertexBufferRHI); m_vertexBufferRHI = nullptr; }
+    if (m_deviceRHI && m_indexBufferRHI) { m_deviceRHI->DestroyBuffer(m_indexBufferRHI); m_indexBufferRHI = nullptr; }
+    m_vertexCapacity = 0;
+    m_indexCapacity = 0;
     m_vertices.clear();
     m_indices.clear();
     m_initialized = false;
@@ -25,14 +27,13 @@ void TextRenderer::Shutdown() {
 
 bool TextRenderer::Initialize() {
     if (m_initialized) return true;
+    m_deviceRHI = rhi::GetDefaultDevice();
+    if (!m_deviceRHI) return false;
     EnsureShader();
     if (!m_shader || !m_shader->IsValid()) {
         core::Log::ErrorF("TextRenderer: failed to load sprite shader");
         return false;
     }
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    glGenBuffers(1, &m_ebo);
     m_initialized = true;
     return true;
 }
@@ -40,7 +41,9 @@ bool TextRenderer::Initialize() {
 void TextRenderer::EnsureShader() {
     if (m_shader && m_shader->IsValid()) return;
     m_shader = std::make_shared<Shader>();
-    m_shader->LoadFromFile("assets/shaders/passes/2d/sprite.vert", "assets/shaders/passes/2d/sprite.frag");
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    m_shader->LoadFromFile(device, "assets/shaders/passes/2d/sprite.vert", "assets/shaders/passes/2d/sprite.frag", GetVertexLayout());
 }
 
 void TextRenderer::SetShader(std::shared_ptr<Shader> shader) {
@@ -80,32 +83,60 @@ void TextRenderer::RenderText(const std::string& text, Font& font, const math::V
             m_indices.push_back(static_cast<unsigned int>(base) + i);
     }
     if (m_vertices.empty()) return;
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)), m_vertices.data(), GL_DYNAMIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_indices.size() * sizeof(unsigned int)), m_indices.data(), GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, uv)));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, color)));
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_DEPTH_TEST);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    EnsureBuffers(m_vertices.size() * sizeof(Vertex), m_indices.size() * sizeof(unsigned int));
+    if (!m_vertexBufferRHI || !m_indexBufferRHI) return;
+    m_vertexBufferRHI->Update(m_vertices.data(), 0, m_vertices.size() * sizeof(Vertex));
+    m_indexBufferRHI->Update(m_indices.data(), 0, m_indices.size() * sizeof(unsigned int));
     m_shader->Bind();
     m_shader->SetMat4("u_View", view);
     m_shader->SetMat4("u_Projection", projection);
     m_shader->SetInt("u_Texture", 0);
     font.GetAtlasTexture()->Bind(0);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_indices.size()), GL_UNSIGNED_INT, nullptr);
+    cmd->BindVertexBuffer(m_vertexBufferRHI, 0);
+    cmd->BindIndexBuffer(m_indexBufferRHI, rhi::IndexType::UInt32);
+    cmd->SetBlend(true);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->DrawIndexed(static_cast<uint32_t>(m_indices.size()), 0, 0);
     m_shader->Unbind();
-    glBindVertexArray(0);
-    glEnable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
+}
+
+rhi::VertexLayout TextRenderer::GetVertexLayout() const {
+    rhi::VertexLayout layout;
+    layout.strideInBytes = sizeof(Vertex);
+    layout.attributes = {
+        {0, rhi::VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, position))},
+        {1, rhi::VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, uv))},
+        {2, rhi::VertexAttributeType::Float4, static_cast<uint32_t>(offsetof(Vertex, color))},
+    };
+    return layout;
+}
+
+void TextRenderer::EnsureBuffers(size_t vertexBytes, size_t indexBytes) {
+    if (!m_deviceRHI) return;
+    if (!m_vertexBufferRHI || vertexBytes > m_vertexCapacity) {
+        if (m_vertexBufferRHI) m_deviceRHI->DestroyBuffer(m_vertexBufferRHI);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(vertexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Vertex;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_vertexBufferRHI = m_deviceRHI->CreateBuffer(desc);
+        m_vertexCapacity = desc.sizeInBytes;
+    }
+    if (!m_indexBufferRHI || indexBytes > m_indexCapacity) {
+        if (m_indexBufferRHI) m_deviceRHI->DestroyBuffer(m_indexBufferRHI);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(indexBytes, 1024);
+        desc.usage = rhi::BufferUsage::Index;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_indexBufferRHI = m_deviceRHI->CreateBuffer(desc);
+        m_indexCapacity = desc.sizeInBytes;
+    }
 }
 
 } // namespace render

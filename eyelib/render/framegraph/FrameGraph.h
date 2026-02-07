@@ -1,10 +1,11 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHITypes.h"
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
-#include <glad/glad.h>
 
 namespace eyelib {
 namespace render {
@@ -12,7 +13,7 @@ namespace render {
 struct FGTextureDesc {
     unsigned width = 0;
     unsigned height = 0;
-    GLenum internalFormat = GL_SRGB8_ALPHA8;
+    rhi::RHITextureFormat format = rhi::RHITextureFormat::RGBA8;
     bool srgb = true;
     std::string name;
 };
@@ -20,7 +21,7 @@ struct FGTextureDesc {
 using FGTextureHandle = int;  // -1 invalid
 
 struct FGPassResources {
-    std::function<GLuint(FGTextureHandle)> getTexture;
+    std::function<uint32_t(FGTextureHandle)> getTexture;
     std::function<rhi::ITexture*(FGTextureHandle)> getTextureRHI;
     unsigned width = 0;
     unsigned height = 0;
@@ -31,9 +32,13 @@ public:
     FrameGraph();
     ~FrameGraph();
 
+    /** Requires SetDevice() before Compile(). */
     FGTextureHandle CreateTexture(const FGTextureDesc& desc);
-    FGTextureHandle ImportTexture(const std::string& name, GLuint glId, unsigned width, unsigned height);
+    /** Legacy: import backend-native texture (e.g. GL texture id). */
+    FGTextureHandle ImportTexture(const std::string& name, uint32_t nativeTextureId, unsigned width, unsigned height);
     FGTextureHandle ImportTextureRHI(const std::string& name, rhi::ITexture* texture, unsigned width, unsigned height);
+
+    void SetDevice(rhi::IDevice* device) { m_device = device; }
 
     using ExecuteFunc = std::function<void(const FGPassResources&)>;
 
@@ -44,12 +49,14 @@ public:
 
     void Clear();
     void Compile();
-    void Execute();
+    /** Pass command list for pass timing (BeginQuery/EndQuery). If null, passes run without timing. */
+    void Execute(rhi::ICommandList* cmd = nullptr);
 
     struct PassInfo { std::string name; double gpuMs = 0.0; bool culled = false; };
     const std::vector<PassInfo>& GetPasses() const { return m_passInfos; }
 
-    GLuint Resolve(FGTextureHandle h) const;
+    /** Backend-native texture id (e.g. GL name); 0 if handle invalid or RHI-only. */
+    uint32_t Resolve(FGTextureHandle h) const;
     rhi::ITexture* ResolveRHI(FGTextureHandle h) const;
     unsigned GetWidth() const { return m_width; }
     unsigned GetHeight() const { return m_height; }
@@ -58,7 +65,7 @@ public:
 private:
     struct TextureNode {
         FGTextureDesc desc;
-        GLuint glId = 0;
+        uint32_t nativeId = 0;  // legacy imported (e.g. GL texture id)
         rhi::ITexture* rhiTexture = nullptr;
         bool imported = false;
         unsigned width = 0;
@@ -69,13 +76,14 @@ private:
         ExecuteFunc execute;
         std::vector<FGTextureHandle> reads, writes;
         bool sideEffect = false;
-        GLuint timeQuery[2] = {0, 0};
+        rhi::IQueryPool* queryPool = nullptr;
         bool culled = false;
     };
 
     FGTextureHandle AllocHandle();
-    void CreateTextureGL(TextureNode& n);
+    void CreateTextureRHI(TextureNode& n);
 
+    rhi::IDevice* m_device = nullptr;
     std::vector<TextureNode> m_textures;
     std::vector<PassNode> m_passes;
     std::vector<PassInfo> m_passInfos;

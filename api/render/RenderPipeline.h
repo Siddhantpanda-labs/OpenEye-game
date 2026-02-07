@@ -7,6 +7,7 @@
 namespace eyelib {
 namespace api {
 
+class Window;
 class RenderTarget;
 
 /**
@@ -26,6 +27,8 @@ public:
     RenderPipeline& operator=(RenderPipeline&& other) noexcept;
 
     bool Initialize(uint32_t width, uint32_t height);
+    /** Make the window's context current and create the device. Prefer this when you have a window. */
+    bool Initialize(Window& window, uint32_t width, uint32_t height);
     bool Initialize(const RenderTarget& target);
     void Resize(uint32_t width, uint32_t height);
     void Resize(const RenderTarget& target);
@@ -38,6 +41,9 @@ public:
     void Render(const RenderScene& scene);
     void BlitToScreen();
     bool HasValidOutput() const;
+
+    /** Opaque device handle for creating RHI resources (e.g. RenderTarget). Null if not initialized. */
+    void* GetDevice() const;
 
 private:
     class Impl;

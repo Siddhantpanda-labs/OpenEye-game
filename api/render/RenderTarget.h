@@ -10,6 +10,8 @@ namespace eyelib {
 namespace render { class RenderTarget; }
 namespace api {
 
+class RenderPipeline;
+
 class RenderTarget {
 public:
     RenderTarget();
@@ -20,7 +22,8 @@ public:
     RenderTarget(RenderTarget&& other) noexcept;
     RenderTarget& operator=(RenderTarget&& other) noexcept;
 
-    bool Create(uint32_t width, uint32_t height,
+    /** Create via pipeline's device. Call after pipeline is initialized. */
+    bool Create(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                 const std::vector<TextureFormat>& colorFormats,
                 TextureFormat depthFormat = TextureFormat::Depth24,
                 int samples = 0);
@@ -41,16 +44,16 @@ public:
     std::shared_ptr<Texture> GetDepthTexture() const;
 
     static void Blit(const RenderTarget& source, const RenderTarget& dest, bool colorOnly = true);
-    static int GetMaxSamples(int samples);
+    static int GetMaxSamples(RenderPipeline* pipeline, int samples);
 
-    static RenderTarget CreateColorDepth(uint32_t width, uint32_t height,
+    static RenderTarget CreateColorDepth(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                          TextureFormat colorFormat = TextureFormat::RGBA16F,
                                          TextureFormat depthFormat = TextureFormat::Depth24,
                                          int samples = 0);
-    static RenderTarget CreateColorOnly(uint32_t width, uint32_t height,
+    static RenderTarget CreateColorOnly(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                         TextureFormat colorFormat = TextureFormat::RGBA16F,
                                         int samples = 0);
-    static RenderTarget CreateDepthOnly(uint32_t width, uint32_t height,
+    static RenderTarget CreateDepthOnly(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                         TextureFormat depthFormat = TextureFormat::Depth24,
                                         int samples = 0);
 

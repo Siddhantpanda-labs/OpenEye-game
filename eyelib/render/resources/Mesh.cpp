@@ -1,7 +1,7 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/core/Log.h"
-#include <glad/glad.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -81,15 +81,9 @@ Mesh::Mesh(Mesh&& other) noexcept
       m_submeshes(std::move(other.m_submeshes)),
       m_aabb(other.m_aabb),
       m_aabbDirty(other.m_aabbDirty),
-      m_vao(other.m_vao),
-      m_vbo(other.m_vbo),
-      m_ebo(other.m_ebo),
-      m_uploaded(other.m_uploaded),
       m_deviceRHI(other.m_deviceRHI),
       m_vertexBufferRHI(other.m_vertexBufferRHI),
       m_indexBufferRHI(other.m_indexBufferRHI) {
-    other.m_vao = other.m_vbo = other.m_ebo = 0;
-    other.m_uploaded = false;
     other.m_deviceRHI = nullptr;
     other.m_vertexBufferRHI = nullptr;
     other.m_indexBufferRHI = nullptr;
@@ -105,15 +99,9 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
     m_submeshes = std::move(other.m_submeshes);
     m_aabb = other.m_aabb;
     m_aabbDirty = other.m_aabbDirty;
-    m_vao = other.m_vao;
-    m_vbo = other.m_vbo;
-    m_ebo = other.m_ebo;
-    m_uploaded = other.m_uploaded;
     m_deviceRHI = other.m_deviceRHI;
     m_vertexBufferRHI = other.m_vertexBufferRHI;
     m_indexBufferRHI = other.m_indexBufferRHI;
-    other.m_vao = other.m_vbo = other.m_ebo = 0;
-    other.m_uploaded = false;
     other.m_deviceRHI = nullptr;
     other.m_vertexBufferRHI = nullptr;
     other.m_indexBufferRHI = nullptr;
@@ -156,7 +144,7 @@ void Mesh::SetSubmesh(size_t index, uint32_t indexOffset, uint32_t indexCount) {
 
 void Mesh::ClearSubmeshes() { m_submeshes.clear(); }
 
-void Mesh::Invalidate() { m_uploaded = false; }
+void Mesh::Invalidate() { }
 
 void Mesh::ComputeAABB() {
     m_aabb = math::AABB();
@@ -195,88 +183,10 @@ void Mesh::Optimize() {
     if (!m_indices32.empty()) optimizeVertexCache(m_indices32);
 }
 
-void Mesh::CreateVAO() {
-    if (!m_vao) glGenVertexArrays(1, &m_vao);
-    if (!m_vbo) glGenBuffers(1, &m_vbo);
-    if (!m_ebo) glGenBuffers(1, &m_ebo);
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex)), m_vertices.data(), GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-    if (m_indexFormat == IndexFormat::UInt32)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_indices32.size() * sizeof(uint32_t)), m_indices32.data(), GL_STATIC_DRAW);
-    else
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_indices16.size() * sizeof(uint16_t)), m_indices16.data(), GL_STATIC_DRAW);
-
-    size_t off = 0;
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec3);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec3);
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec2);
-    glEnableVertexAttribArray(7);
-    glVertexAttribPointer(7, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec2);
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec3);
-    glEnableVertexAttribArray(4);
-    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::Vec4);
-    glEnableVertexAttribArray(5);
-    glVertexAttribIPointer(5, 4, GL_INT, sizeof(Vertex), reinterpret_cast<void*>(off));
-    off += sizeof(math::IVec4);
-    glEnableVertexAttribArray(6);
-    glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(off));
-
-    glBindVertexArray(0);
-}
-
 void Mesh::UploadToGPU() {
-    if (m_vertices.empty()) return;
-    if (m_indexFormat == IndexFormat::UInt32 && m_indices32.empty()) return;
-    if (m_indexFormat == IndexFormat::UInt16 && m_indices16.empty()) return;
-
-    // If already uploaded, update existing buffers instead of recreating
-    if (m_uploaded && m_vao && m_vbo && m_ebo) {
-        glBindVertexArray(m_vao);
-        
-        // Update vertex buffer
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        GLsizeiptr vertexSize = static_cast<GLsizeiptr>(m_vertices.size() * sizeof(Vertex));
-        glBufferData(GL_ARRAY_BUFFER, vertexSize, m_vertices.data(), GL_STATIC_DRAW);
-        
-        // Update index buffer
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-        if (m_indexFormat == IndexFormat::UInt32) {
-            GLsizeiptr indexSize = static_cast<GLsizeiptr>(m_indices32.size() * sizeof(uint32_t));
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexSize, m_indices32.data(), GL_STATIC_DRAW);
-        } else {
-            GLsizeiptr indexSize = static_cast<GLsizeiptr>(m_indices16.size() * sizeof(uint16_t));
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexSize, m_indices16.data(), GL_STATIC_DRAW);
-        }
-        
-        glBindVertexArray(0);
-        if (m_aabbDirty) ComputeAABB();
-        return;
-    }
-
-    // First-time upload: create buffers
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        glDeleteBuffers(1, &m_vbo);
-        glDeleteBuffers(1, &m_ebo);
-        m_vao = m_vbo = m_ebo = 0;
-    }
-    CreateVAO();
-    if (m_aabbDirty) ComputeAABB();
-    m_uploaded = true;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return;
+    UploadToGPU(device);
 }
 
 void Mesh::UploadToGPU(rhi::IDevice* device) {
@@ -313,10 +223,6 @@ void Mesh::UploadToGPU(rhi::IDevice* device) {
 
 void Mesh::Destroy() {
     if (m_deviceRHI) Destroy(m_deviceRHI);
-    if (m_ebo) { glDeleteBuffers(1, &m_ebo); m_ebo = 0; }
-    if (m_vbo) { glDeleteBuffers(1, &m_vbo); m_vbo = 0; }
-    if (m_vao) { glDeleteVertexArrays(1, &m_vao); m_vao = 0; }
-    m_uploaded = false;
 }
 
 void Mesh::Destroy(rhi::IDevice* device) {
@@ -347,25 +253,32 @@ rhi::VertexLayout Mesh::GetVertexLayoutRHI() {
     return layout;
 }
 
-void Mesh::Bind() const { glBindVertexArray(m_vao); }
-void Mesh::Unbind() const { glBindVertexArray(0); }
+void Mesh::Bind() const {
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    cmd->BindVertexBuffer(m_vertexBufferRHI, 0);
+    cmd->BindIndexBuffer(m_indexBufferRHI, GetRHIIndexType());
+}
+
+void Mesh::Unbind() const {
+    (void)this;
+}
 
 void Mesh::Draw(int submeshIndex) const {
-    if (!m_vao) return;
-    glBindVertexArray(m_vao);
-    GLenum idxType = (m_indexFormat == IndexFormat::UInt32) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
-    const void* offset = nullptr;
-
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    Bind();
     if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < m_submeshes.size()) {
         const Submesh& s = m_submeshes[static_cast<size_t>(submeshIndex)];
-        size_t off = s.indexOffset * (m_indexFormat == IndexFormat::UInt32 ? sizeof(uint32_t) : sizeof(uint16_t));
-        offset = reinterpret_cast<const void*>(off);
-        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(s.indexCount), idxType, offset);
+        cmd->DrawIndexedSubmesh(s.indexCount, s.indexOffset, 0);
     } else {
-        GLsizei cnt = static_cast<GLsizei>(m_indexFormat == IndexFormat::UInt32 ? m_indices32.size() : m_indices16.size());
-        glDrawElements(GL_TRIANGLES, cnt, idxType, nullptr);
+        uint32_t cnt = static_cast<uint32_t>(m_indexFormat == IndexFormat::UInt32 ? m_indices32.size() : m_indices16.size());
+        cmd->DrawIndexed(cnt, 0, 0);
     }
-    glBindVertexArray(0);
 }
 
 } // namespace render

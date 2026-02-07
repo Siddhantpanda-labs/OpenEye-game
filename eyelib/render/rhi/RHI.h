@@ -45,10 +45,15 @@ struct IDevice {
                                               const std::vector<RHITextureFormat>& colorFormats,
                                               RHITextureFormat depthFormat,
                                               uint32_t samples = 1) = 0;
+    /** Create render target from existing texture (face for cubemap, mip level). */
+    virtual IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) = 0;
     virtual void DestroyRenderTarget(IRenderTarget* rt) = 0;
 
     virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;
     virtual void DestroyQueryPool(IQueryPool* pool) = 0;
+
+    /** Maximum supported MSAA samples; clamp requested samples to this. Returns 0 if no MSAA support. */
+    virtual int GetMaxSamples(int requestedSamples) = 0;
 
     /** Wrap an existing backend texture (e.g. GL id as void*) for use with BindTexture. Caller owns the GL texture; wrapper is not destroyed with glDelete. */
     virtual ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) = 0;
@@ -62,6 +67,8 @@ struct IDevice {
     virtual void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) = 0;
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to RHI render target. */
     virtual void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) = 0;
+    /** Blit only depth from native FBO to dst (for deferred: copy GBuffer depth to HDR for transparency). */
+    virtual void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) = 0;
 };
 
 // ---- Command list ----
@@ -75,11 +82,16 @@ struct ICommandList {
     virtual void SetRenderTarget(IRenderTarget* rt) = 0;
     virtual void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) = 0;
     virtual void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) = 0;
+    virtual void ClearDefaultFramebuffer(const ClearValue& clear) = 0;
     virtual void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
     virtual void SetDepthTest(bool enable) = 0;
     virtual void SetDepthWrite(bool enable) = 0;
     virtual void SetDepthFuncLess(bool less) = 0;  // true = GL_LESS, false = GL_LEQUAL etc.
     virtual void SetCullFace(bool enable) = 0;
+    /** When cull face is enabled: true = cull front faces (e.g. shadow map), false = cull back. */
+    virtual void SetCullFrontFace(bool cullFront) = 0;
+    /** Enable/disable alpha blending (src_alpha, one_minus_src_alpha). For transparency pass. */
+    virtual void SetBlend(bool enable) = 0;
 
     virtual void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) = 0;
     virtual void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) = 0;

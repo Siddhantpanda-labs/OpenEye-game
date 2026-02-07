@@ -24,11 +24,14 @@ struct CommandListGL : ICommandList {
     void SetRenderTarget(IRenderTarget* rt) override;
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;
     void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) override;
+    void ClearDefaultFramebuffer(const ClearValue& clear) override;
     void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
     void SetDepthTest(bool enable) override;
     void SetDepthWrite(bool enable) override;
     void SetDepthFuncLess(bool less) override;
     void SetCullFace(bool enable) override;
+    void SetCullFrontFace(bool cullFront) override;
+    void SetBlend(bool enable) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
     void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) override;
@@ -61,11 +64,15 @@ struct CommandListGL : ICommandList {
 
 private:
     DeviceGL* m_device = nullptr;
+    unsigned int m_vao = 0;  // VAO required in core profile for vertex attribs and draw
+    IBuffer* m_bonesUBO = nullptr;
+    size_t m_bonesUBOSize = 0;
     PipelineGL* m_currentPipeline = nullptr;
     IRenderTarget* m_currentRT = nullptr;
     BufferGL* m_currentVBO = nullptr;
     BufferGL* m_currentIBO = nullptr;
     IndexType m_currentIndexType = IndexType::UInt32;
+    bool m_cullFrontFace = false;
 };
 
 } // namespace rhi

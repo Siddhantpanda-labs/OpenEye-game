@@ -4,10 +4,14 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
-#include <glad/glad.h>
+#include <algorithm>
 
 namespace eyelib {
 namespace render {
+
+namespace {
+constexpr size_t kMaxBones = 128;
+}
 
 ShadowPass::ShadowPass() = default;
 
@@ -28,6 +32,7 @@ void ShadowPass::SetDepthShader(std::shared_ptr<Shader> shader) {
 }
 
 void ShadowPass::Render(ShadowMap& shadowMap,
+                        rhi::ICommandList* cmd,
                         const std::vector<Drawable>& drawables,
                         const math::Vec3& lightDir,
                         const math::Mat4& view,
@@ -41,12 +46,15 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     if (!m_depthShader->IsValid()) return;
 
     shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
-    shadowMap.BindForShadowPass();
+    shadowMap.BindForShadowPass(cmd);
     m_currentShadowMap = &shadowMap;
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    glCullFace(GL_FRONT);
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthFuncLess(true);
+        cmd->SetCullFace(true);
+        cmd->SetCullFrontFace(true);
+    }
 
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
@@ -76,6 +84,7 @@ void ShadowPass::Render(ShadowMap& shadowMap,
         }
 
         if (bonePtr && boneCount > 0 && m_depthSkinnedShader->IsValid()) {
+            boneCount = std::min(boneCount, kMaxBones);
             m_depthSkinnedShader->Bind();
             m_depthSkinnedShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             m_depthSkinnedShader->SetMat4("u_Model", d.transform);
@@ -90,15 +99,18 @@ void ShadowPass::Render(ShadowMap& shadowMap,
         d.mesh->Unbind();
     }
 
-    glCullFace(GL_BACK);
+    if (cmd) {
+        cmd->SetCullFrontFace(false);
+    }
     m_depthShader->Unbind();
     if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid())
         m_depthSkinnedShader->Unbind();
-    shadowMap.Unbind();
+    shadowMap.Unbind(cmd);
     m_currentShadowMap = nullptr;
 }
 
 void ShadowPass::Render(ShadowMap& shadowMap,
+                        rhi::ICommandList* cmd,
                         std::span<const api::Drawable> drawables,
                         const math::Vec3& lightDir,
                         const math::Mat4& view,
@@ -112,12 +124,15 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     if (!m_depthShader->IsValid()) return;
 
     shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
-    shadowMap.BindForShadowPass();
+    shadowMap.BindForShadowPass(cmd);
     m_currentShadowMap = &shadowMap;
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-    glCullFace(GL_FRONT);
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthFuncLess(true);
+        cmd->SetCullFace(true);
+        cmd->SetCullFrontFace(true);
+    }
 
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
@@ -129,6 +144,7 @@ void ShadowPass::Render(ShadowMap& shadowMap,
         size_t boneCount = apiD.boneCount;
 
         if (bonePtr && boneCount > 0 && m_depthSkinnedShader->IsValid()) {
+            boneCount = std::min(boneCount, kMaxBones);
             m_depthSkinnedShader->Bind();
             m_depthSkinnedShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             m_depthSkinnedShader->SetMat4("u_Model", apiD.transform);
@@ -143,11 +159,13 @@ void ShadowPass::Render(ShadowMap& shadowMap,
         mesh->Unbind();
     }
 
-    glCullFace(GL_BACK);
+    if (cmd) {
+        cmd->SetCullFrontFace(false);
+    }
     m_depthShader->Unbind();
     if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid())
         m_depthSkinnedShader->Unbind();
-    shadowMap.Unbind();
+    shadowMap.Unbind(cmd);
     m_currentShadowMap = nullptr;
 }
 

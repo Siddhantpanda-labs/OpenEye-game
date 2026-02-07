@@ -9,7 +9,6 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <stb_truetype.h>
 
-#include <glad/glad.h>
 #include <algorithm>
 #include <cstring>
 #include <vector>

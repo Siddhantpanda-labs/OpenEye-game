@@ -1,5 +1,6 @@
 #include "eyelib/render/GBuffer.h"
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHIUtils.h"
 
 namespace eyelib {
 namespace render {
@@ -10,53 +11,46 @@ GBuffer::~GBuffer() { Destroy(); }
 
 GBuffer::GBuffer(GBuffer&& other) noexcept
     : m_width(other.m_width), m_height(other.m_height),
-      m_fbo(other.m_fbo),
-      m_positionTexture(other.m_positionTexture),
-      m_normalTexture(other.m_normalTexture),
-      m_albedoTexture(other.m_albedoTexture),
-      m_pbrParamsTexture(other.m_pbrParamsTexture),
-      m_velocityTexture(other.m_velocityTexture),
-      m_depthTexture(other.m_depthTexture) {
-    other.m_fbo = other.m_positionTexture = other.m_normalTexture = 0;
-    other.m_albedoTexture = other.m_pbrParamsTexture = other.m_velocityTexture = 0;
-    other.m_depthTexture = 0;
+      m_deviceRHI(other.m_deviceRHI),
+      m_renderTargetRHI(other.m_renderTargetRHI) {
+    other.m_deviceRHI = nullptr;
+    other.m_renderTargetRHI = nullptr;
 }
 
 GBuffer& GBuffer::operator=(GBuffer&& other) noexcept {
     if (this != &other) {
         Destroy();
         m_width = other.m_width; m_height = other.m_height;
-        m_fbo = other.m_fbo;
-        m_positionTexture = other.m_positionTexture;
-        m_normalTexture = other.m_normalTexture;
-        m_albedoTexture = other.m_albedoTexture;
-        m_pbrParamsTexture = other.m_pbrParamsTexture;
-        m_velocityTexture = other.m_velocityTexture;
-        m_depthTexture = other.m_depthTexture;
-        other.m_fbo = other.m_positionTexture = other.m_normalTexture = 0;
-        other.m_albedoTexture = other.m_pbrParamsTexture = other.m_velocityTexture = 0;
-        other.m_depthTexture = 0;
+        m_deviceRHI = other.m_deviceRHI;
+        m_renderTargetRHI = other.m_renderTargetRHI;
+        other.m_deviceRHI = nullptr;
+        other.m_renderTargetRHI = nullptr;
     }
     return *this;
 }
 
 bool GBuffer::Initialize(uint32_t width, uint32_t height) {
-    if (!width || !height) return false;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return false;
+    return Initialize(device, width, height);
+}
+
+bool GBuffer::Initialize(rhi::IDevice* device, uint32_t width, uint32_t height) {
+    if (!device || !width || !height) return false;
     Destroy();
     m_width = width;
     m_height = height;
+    m_deviceRHI = device;
 
-    glGenFramebuffers(1, &m_fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-    CreateTextures();
-    AttachTextures();
-
-    GLenum drawBufs[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
-    glDrawBuffers(5, drawBufs);
-
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
+    std::vector<rhi::RHITextureFormat> colors = {
+        rhi::RHITextureFormat::RGB16F,   // position
+        rhi::RHITextureFormat::RGB16F,   // normal
+        rhi::RHITextureFormat::RGB8,     // albedo
+        rhi::RHITextureFormat::RG8,      // PBR params
+        rhi::RHITextureFormat::RGBA16F   // velocity (RG16F not in RHI)
+    };
+    m_renderTargetRHI = device->CreateRenderTarget(width, height, colors, rhi::RHITextureFormat::Depth24, 1);
+    if (!m_renderTargetRHI) {
         Destroy();
         return false;
     }
@@ -65,85 +59,76 @@ bool GBuffer::Initialize(uint32_t width, uint32_t height) {
 
 void GBuffer::Resize(uint32_t width, uint32_t height) {
     if (width == m_width && height == m_height) return;
-    Initialize(width, height);
+    if (m_deviceRHI) Initialize(m_deviceRHI, width, height);
 }
 
-void GBuffer::CreateTextures() {
-    auto makeTex = [](unsigned int& id, GLenum ifmt, GLenum fmt, GLenum type, int w, int h) {
-        glGenTextures(1, &id);
-        glBindTexture(GL_TEXTURE_2D, id);
-        glTexImage2D(GL_TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    };
-
-    makeTex(m_positionTexture, GL_RGB16F, GL_RGB, GL_FLOAT, m_width, m_height);
-    makeTex(m_normalTexture, GL_RGB16F, GL_RGB, GL_FLOAT, m_width, m_height);
-    makeTex(m_albedoTexture, GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE, m_width, m_height);
-    makeTex(m_pbrParamsTexture, GL_RG8, GL_RG, GL_UNSIGNED_BYTE, m_width, m_height);
-    makeTex(m_velocityTexture, GL_RG16F, GL_RG, GL_FLOAT, m_width, m_height);
-
-    glGenTextures(1, &m_depthTexture);
-    glBindTexture(GL_TEXTURE_2D, m_depthTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, m_width, m_height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
-    float bc[] = {1,1,1,1};
-    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, bc);
-    glBindTexture(GL_TEXTURE_2D, 0);
+void GBuffer::BindForGeometryPass(rhi::ICommandList* cmd) {
+    if (!cmd || !m_renderTargetRHI) return;
+    rhi::ClearValue clear = {0.f, 0.f, 0.f, 1.f};
+    rhi::ClearAndSetRenderTargetWithViewport(cmd, m_renderTargetRHI, 0, 0, m_width, m_height, clear);
 }
 
-void GBuffer::AttachTextures() {
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_positionTexture, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_normalTexture, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, m_albedoTexture, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, m_pbrParamsTexture, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, m_velocityTexture, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTexture, 0);
-}
-
-void GBuffer::BindForGeometryPass() {
-    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
-    glViewport(0, 0, m_width, m_height);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-}
-
-void GBuffer::BindForLightingPass() {
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_positionTexture);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_normalTexture);
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, m_albedoTexture);
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, m_pbrParamsTexture);
-    glActiveTexture(GL_TEXTURE4);
-    glBindTexture(GL_TEXTURE_2D, m_depthTexture);
+void GBuffer::BindForLightingPass(rhi::ICommandList* cmd) {
+    if (!cmd) return;
+    rhi::ITexture* pos = GetPositionTextureRHI();
+    rhi::ITexture* norm = GetNormalTextureRHI();
+    rhi::ITexture* alb = GetAlbedoTextureRHI();
+    rhi::ITexture* pbr = GetPBRParamsTextureRHI();
+    if (pos) cmd->BindTexture(pos, 0);
+    if (norm) cmd->BindTexture(norm, 1);
+    if (alb) cmd->BindTexture(alb, 2);
+    if (pbr) cmd->BindTexture(pbr, 3);
 }
 
 void GBuffer::BindDepthTexture(unsigned int textureUnit) {
-    glActiveTexture(GL_TEXTURE0 + textureUnit);
-    glBindTexture(GL_TEXTURE_2D, m_depthTexture);
+    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    if (!device) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ITexture* depth = GetDepthTextureRHI();
+    if (cmd && depth) cmd->BindTexture(depth, textureUnit);
 }
 
-void GBuffer::Unbind() {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+void GBuffer::Unbind(rhi::ICommandList* cmd) {
+    if (cmd) cmd->SetRenderTarget(nullptr);
 }
 
 void GBuffer::Destroy() {
-    if (m_fbo) { glDeleteFramebuffers(1, &m_fbo); m_fbo = 0; }
-    if (m_positionTexture) { glDeleteTextures(1, &m_positionTexture); m_positionTexture = 0; }
-    if (m_normalTexture) { glDeleteTextures(1, &m_normalTexture); m_normalTexture = 0; }
-    if (m_albedoTexture) { glDeleteTextures(1, &m_albedoTexture); m_albedoTexture = 0; }
-    if (m_pbrParamsTexture) { glDeleteTextures(1, &m_pbrParamsTexture); m_pbrParamsTexture = 0; }
-    if (m_velocityTexture) { glDeleteTextures(1, &m_velocityTexture); m_velocityTexture = 0; }
-    if (m_depthTexture) { glDeleteTextures(1, &m_depthTexture); m_depthTexture = 0; }
+    if (m_deviceRHI && m_renderTargetRHI) {
+        m_deviceRHI->DestroyRenderTarget(m_renderTargetRHI);
+        m_renderTargetRHI = nullptr;
+    }
+    m_deviceRHI = nullptr;
 }
+
+unsigned int GBuffer::GetFBO() const {
+    if (!m_renderTargetRHI) return 0;
+    void* native = m_renderTargetRHI->GetNativeFramebuffer();
+    return native ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(native)) : 0u;
+}
+
+rhi::ITexture* GBuffer::GetColorTextureRHI(uint32_t index) const {
+    return m_renderTargetRHI ? m_renderTargetRHI->GetColorTexture(index) : nullptr;
+}
+
+rhi::ITexture* GBuffer::GetPositionTextureRHI() const { return GetColorTextureRHI(0); }
+rhi::ITexture* GBuffer::GetNormalTextureRHI() const { return GetColorTextureRHI(1); }
+rhi::ITexture* GBuffer::GetAlbedoTextureRHI() const { return GetColorTextureRHI(2); }
+rhi::ITexture* GBuffer::GetPBRParamsTextureRHI() const { return GetColorTextureRHI(3); }
+rhi::ITexture* GBuffer::GetVelocityTextureRHI() const { return GetColorTextureRHI(4); }
+rhi::ITexture* GBuffer::GetDepthTextureRHI() const { return m_renderTargetRHI ? m_renderTargetRHI->GetDepthTexture() : nullptr; }
+
+static unsigned int NativeIdFromTexture(rhi::ITexture* tex) {
+    if (!tex) return 0;
+    void* native = tex->GetNativeTexture();
+    return native ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(native)) : 0u;
+}
+
+unsigned int GBuffer::GetPositionTexture() const { return NativeIdFromTexture(GetPositionTextureRHI()); }
+unsigned int GBuffer::GetNormalTexture() const { return NativeIdFromTexture(GetNormalTextureRHI()); }
+unsigned int GBuffer::GetAlbedoTexture() const { return NativeIdFromTexture(GetAlbedoTextureRHI()); }
+unsigned int GBuffer::GetPBRParamsTexture() const { return NativeIdFromTexture(GetPBRParamsTextureRHI()); }
+unsigned int GBuffer::GetVelocityTexture() const { return NativeIdFromTexture(GetVelocityTextureRHI()); }
+unsigned int GBuffer::GetDepthTexture() const { return NativeIdFromTexture(GetDepthTextureRHI()); }
 
 } // namespace render
 } // namespace eyelib

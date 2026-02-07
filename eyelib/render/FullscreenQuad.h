@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eyelib/render/resources/Mesh.h"
+
 namespace eyelib {
 namespace render {
 
@@ -7,19 +9,18 @@ namespace render {
 class FullscreenQuad {
 public:
     FullscreenQuad();
-    ~FullscreenQuad();
+    ~FullscreenQuad() = default;
 
     FullscreenQuad(const FullscreenQuad&) = delete;
     FullscreenQuad& operator=(const FullscreenQuad&) = delete;
 
     void Render() const;
-    bool IsValid() const { return m_vao != 0; }
+    bool IsValid() const { return m_mesh.IsValid(); }
 
 private:
     void CreateQuad();
 
-    unsigned int m_vao = 0;
-    unsigned int m_vbo = 0;
+    Mesh m_mesh;
 };
 
 } // namespace render

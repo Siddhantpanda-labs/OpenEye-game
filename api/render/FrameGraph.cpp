@@ -1,25 +1,26 @@
 #include "api/render/FrameGraph.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
-#include <glad/glad.h>
+#include "eyelib/render/rhi/RHITypes.h"
 #include <memory>
 
 namespace eyelib {
 namespace api {
 
 namespace {
-GLenum ToInternalFormat(TextureFormat format, bool srgb) {
+using namespace eyelib::render::rhi;
+RHITextureFormat ToRHIFormat(TextureFormat format, bool /*srgb*/) {
     switch (format) {
-        case TextureFormat::R8: return GL_R8;
-        case TextureFormat::RG8: return GL_RG8;
-        case TextureFormat::RGB8: return srgb ? GL_SRGB8 : GL_RGB8;
-        case TextureFormat::RGBA8: return srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
-        case TextureFormat::RGB16F: return GL_RGB16F;
-        case TextureFormat::RGBA16F: return GL_RGBA16F;
-        case TextureFormat::Depth24: return GL_DEPTH_COMPONENT24;
-        case TextureFormat::Depth24Stencil8: return GL_DEPTH24_STENCIL8;
-        case TextureFormat::None: return GL_RGBA8;
+        case TextureFormat::R8: return RHITextureFormat::R8;
+        case TextureFormat::RG8: return RHITextureFormat::RG8;
+        case TextureFormat::RGB8: return RHITextureFormat::RGB8;
+        case TextureFormat::RGBA8: return RHITextureFormat::RGBA8;
+        case TextureFormat::RGB16F: return RHITextureFormat::RGB16F;
+        case TextureFormat::RGBA16F: return RHITextureFormat::RGBA16F;
+        case TextureFormat::Depth24: return RHITextureFormat::Depth24;
+        case TextureFormat::Depth24Stencil8: return RHITextureFormat::Depth24Stencil8;
+        case TextureFormat::None: return RHITextureFormat::RGBA8;
     }
-    return GL_SRGB8_ALPHA8;
+    return RHITextureFormat::RGBA8;
 }
 } // namespace
 
@@ -53,14 +54,14 @@ FGTextureHandle FrameGraph::CreateTexture(const FGTextureDesc& desc) {
     ::eyelib::render::FGTextureDesc internal;
     internal.width = desc.width;
     internal.height = desc.height;
-    internal.internalFormat = ToInternalFormat(desc.format, desc.srgb);
+    internal.format = ToRHIFormat(desc.format, desc.srgb);
     internal.srgb = desc.srgb;
     internal.name = desc.name;
     return m_impl->fg->CreateTexture(internal);
 }
 
 FGTextureHandle FrameGraph::ImportTexture(const std::string& name, uint32_t textureId, unsigned width, unsigned height) {
-    return m_impl->fg->ImportTexture(name, static_cast<GLuint>(textureId), width, height);
+    return m_impl->fg->ImportTexture(name, textureId, width, height);
 }
 
 int FrameGraph::AddPass(const std::string& name, const ExecuteFunc& execute,

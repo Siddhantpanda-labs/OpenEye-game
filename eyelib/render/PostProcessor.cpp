@@ -1,12 +1,24 @@
 #include "eyelib/render/PostProcessor.h"
 #include "eyelib/render/GBuffer.h"
-#include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
-#include <glad/glad.h>
 
 namespace eyelib {
 namespace render {
+
+namespace {
+rhi::VertexLayout GetFullscreenVertexLayout() {
+    rhi::VertexLayout layout;
+    layout.strideInBytes = 4 * sizeof(float);  // vec2 pos + vec2 uv
+    layout.attributes = {
+        {0, rhi::VertexAttributeType::Float2, 0},
+        {1, rhi::VertexAttributeType::Float2, 2 * sizeof(float)},
+    };
+    return layout;
+}
+} // namespace
 
 PostProcessor::PostProcessor() = default;
 
@@ -15,29 +27,68 @@ PostProcessor::~PostProcessor() {
 }
 
 void PostProcessor::Shutdown() {
+    DestroyFullscreenQuad();
     DestroyFramebuffers();
 }
 
-void PostProcessor::DestroyFramebuffers() {
-    if (m_pingPongFBO[0]) { glDeleteFramebuffers(1, &m_pingPongFBO[0]); m_pingPongFBO[0] = 0; }
-    if (m_pingPongFBO[1]) { glDeleteFramebuffers(1, &m_pingPongFBO[1]); m_pingPongFBO[1] = 0; }
-    if (m_pingPongTexture[0]) { glDeleteTextures(1, &m_pingPongTexture[0]); m_pingPongTexture[0] = 0; }
-    if (m_pingPongTexture[1]) { glDeleteTextures(1, &m_pingPongTexture[1]); m_pingPongTexture[1] = 0; }
-    if (m_outputFBO) { glDeleteFramebuffers(1, &m_outputFBO); m_outputFBO = 0; }
-    if (m_outputTexture) { glDeleteTextures(1, &m_outputTexture); m_outputTexture = 0; }
-    if (m_bloomExtractFBO) { glDeleteFramebuffers(1, &m_bloomExtractFBO); m_bloomExtractFBO = 0; }
-    if (m_bloomExtractTexture) { glDeleteTextures(1, &m_bloomExtractTexture); m_bloomExtractTexture = 0; }
-    if (m_ssaoFBO) { glDeleteFramebuffers(1, &m_ssaoFBO); m_ssaoFBO = 0; }
-    if (m_ssaoTexture) { glDeleteTextures(1, &m_ssaoTexture); m_ssaoTexture = 0; }
+void PostProcessor::DestroyFullscreenQuad() {
+    if (!m_deviceRHI) return;
+    if (m_fullscreenVBO) { m_deviceRHI->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
+    if (m_fullscreenIBO) { m_deviceRHI->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
 }
 
-bool PostProcessor::Initialize(uint32_t width, uint32_t height) {
+void PostProcessor::CreateFullscreenQuad() {
+    if (!m_deviceRHI) return;
+    DestroyFullscreenQuad();
+    // Fullscreen quad: vec2 pos (location 0) + vec2 uv (location 1), matches post shaders
+    const float vertices[] = {
+        -1.f, -1.f, 0.f, 0.f,
+         1.f, -1.f, 1.f, 0.f,
+         1.f,  1.f, 1.f, 1.f,
+        -1.f,  1.f, 0.f, 1.f,
+    };
+    const uint16_t indices[] = { 0, 1, 2, 2, 3, 0 };
+    rhi::BufferDesc vboDesc;
+    vboDesc.sizeInBytes = sizeof(vertices);
+    vboDesc.usage = rhi::BufferUsage::Vertex;
+    m_fullscreenVBO = m_deviceRHI->CreateBuffer(vboDesc, vertices);
+    rhi::BufferDesc iboDesc;
+    iboDesc.sizeInBytes = sizeof(indices);
+    iboDesc.usage = rhi::BufferUsage::Index;
+    m_fullscreenIBO = m_deviceRHI->CreateBuffer(iboDesc, indices);
+}
+
+void PostProcessor::DrawFullscreenQuad(rhi::ICommandList* cmd) {
+    if (!cmd || !m_fullscreenVBO || !m_fullscreenIBO) return;
+    cmd->BindVertexBuffer(m_fullscreenVBO, 0);
+    cmd->BindIndexBuffer(m_fullscreenIBO, rhi::IndexType::UInt16);
+    cmd->DrawIndexed(6, 0, 0);
+}
+
+void PostProcessor::DestroyFramebuffers() {
+    if (!m_deviceRHI) return;
+    for (auto& rt : m_pingPongRT) {
+        if (rt) {
+            m_deviceRHI->DestroyRenderTarget(rt);
+            rt = nullptr;
+        }
+    }
+    if (m_outputRT) { m_deviceRHI->DestroyRenderTarget(m_outputRT); m_outputRT = nullptr; }
+    if (m_bloomExtractRT) { m_deviceRHI->DestroyRenderTarget(m_bloomExtractRT); m_bloomExtractRT = nullptr; }
+    if (m_ssaoRT) { m_deviceRHI->DestroyRenderTarget(m_ssaoRT); m_ssaoRT = nullptr; }
+}
+
+bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* device) {
     m_width = width;
     m_height = height;
     m_lastOutputValid = false;
+    if (device) m_deviceRHI = device;
+    if (!m_deviceRHI) m_deviceRHI = rhi::GetDefaultDevice();
+    if (!m_deviceRHI) return false;
     LoadShaders();
+    CreateFullscreenQuad();
     CreateFramebuffers();
-    return m_outputTexture != 0;
+    return GetOutputTextureRHI() != nullptr;
 }
 
 void PostProcessor::Resize(uint32_t width, uint32_t height) {
@@ -59,127 +110,83 @@ void PostProcessor::CreateFramebuffers() {
     if (m_width == 0 || m_height == 0) {
         return;
     }
-    // Ping-pong FBOs (for blur passes)
-    glGenFramebuffers(2, m_pingPongFBO);
-    glGenTextures(2, m_pingPongTexture);
+    if (!m_deviceRHI) return;
+    std::vector<rhi::RHITextureFormat> rgb16f = { rhi::RHITextureFormat::RGB16F };
+    std::vector<rhi::RHITextureFormat> rgba8 = { rhi::RHITextureFormat::RGBA8 };
+    std::vector<rhi::RHITextureFormat> r8 = { rhi::RHITextureFormat::R8 };
 
-    for (int i = 0; i < 2; ++i) {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_pingPongFBO[i]);
-        glBindTexture(GL_TEXTURE_2D, m_pingPongTexture[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, m_width, m_height, 0, GL_RGB, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_pingPongTexture[i], 0);
-
-        GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-        if (status != GL_FRAMEBUFFER_COMPLETE) {
-            core::Log::ErrorF("PostProcessor: Ping-pong FBO %d incomplete: 0x%x", i, status);
-        }
-    }
-
-    // Bloom extract FBO
-    glGenFramebuffers(1, &m_bloomExtractFBO);
-    glGenTextures(1, &m_bloomExtractTexture);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_bloomExtractFBO);
-    glBindTexture(GL_TEXTURE_2D, m_bloomExtractTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, m_width, m_height, 0, GL_RGB, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_bloomExtractTexture, 0);
-
-    // Output FBO (LDR final result)
-    glGenFramebuffers(1, &m_outputFBO);
-    glGenTextures(1, &m_outputTexture);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glBindTexture(GL_TEXTURE_2D, m_outputTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, m_width, m_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_outputTexture, 0);
-
-    // SSAO FBO
-    glGenFramebuffers(1, &m_ssaoFBO);
-    glGenTextures(1, &m_ssaoTexture);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
-    glBindTexture(GL_TEXTURE_2D, m_ssaoTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, m_width, m_height, 0, GL_RED, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ssaoTexture, 0);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_pingPongRT[0] = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    m_pingPongRT[1] = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    m_bloomExtractRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    m_outputRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgba8, rhi::RHITextureFormat::None, 1);
+    m_ssaoRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, r8, rhi::RHITextureFormat::None, 1);
 }
 
 void PostProcessor::LoadShaders() {
+    if (!m_deviceRHI) return;
+    const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
+
     m_toneMappingShader = std::make_shared<Shader>();
-    if (!m_toneMappingShader->LoadFromFile("assets/shaders/passes/post/tonemap.vert", "assets/shaders/passes/post/tonemap.frag")) {
+    if (!m_toneMappingShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/tonemap.vert", "assets/shaders/passes/post/tonemap.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load tone mapping shader");
     }
 
     m_bloomExtractShader = std::make_shared<Shader>();
-    if (!m_bloomExtractShader->LoadFromFile("assets/shaders/passes/post/bloom_extract.vert", "assets/shaders/passes/post/bloom_extract.frag")) {
+    if (!m_bloomExtractShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_extract.vert", "assets/shaders/passes/post/bloom_extract.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom extract shader");
     }
 
     m_bloomBlurShader = std::make_shared<Shader>();
-    if (!m_bloomBlurShader->LoadFromFile("assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag")) {
+    if (!m_bloomBlurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom blur shader");
     }
 
     m_bloomCompositeShader = std::make_shared<Shader>();
-    if (!m_bloomCompositeShader->LoadFromFile("assets/shaders/passes/post/bloom_composite.vert", "assets/shaders/passes/post/bloom_composite.frag")) {
+    if (!m_bloomCompositeShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_composite.vert", "assets/shaders/passes/post/bloom_composite.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom composite shader");
     }
 
     m_blurShader = std::make_shared<Shader>();
-    if (!m_blurShader->LoadFromFile("assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag")) {
+    if (!m_blurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load blur shader");
     }
 
     m_chromaticAberrationShader = std::make_shared<Shader>();
-    if (!m_chromaticAberrationShader->LoadFromFile("assets/shaders/passes/post/chromatic_aberration.vert", "assets/shaders/passes/post/chromatic_aberration.frag")) {
+    if (!m_chromaticAberrationShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/chromatic_aberration.vert", "assets/shaders/passes/post/chromatic_aberration.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load chromatic aberration shader");
     }
 
     m_fxaaShader = std::make_shared<Shader>();
-    if (!m_fxaaShader->LoadFromFile("assets/shaders/passes/post/fxaa.vert", "assets/shaders/passes/post/fxaa.frag")) {
+    if (!m_fxaaShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/fxaa.vert", "assets/shaders/passes/post/fxaa.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load FXAA shader");
     }
 
     m_ssaoShader = std::make_shared<Shader>();
-    if (!m_ssaoShader->LoadFromFile("assets/shaders/passes/post/ssao.vert", "assets/shaders/passes/post/ssao.frag")) {
+    if (!m_ssaoShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/ssao.vert", "assets/shaders/passes/post/ssao.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load SSAO shader");
     }
 
     m_ssrShader = std::make_shared<Shader>();
-    if (!m_ssrShader->LoadFromFile("assets/shaders/passes/post/ssr.vert", "assets/shaders/passes/post/ssr.frag")) {
+    if (!m_ssrShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/ssr.vert", "assets/shaders/passes/post/ssr.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load SSR shader");
     }
 
     m_motionBlurShader = std::make_shared<Shader>();
-    if (!m_motionBlurShader->LoadFromFile("assets/shaders/passes/post/motion_blur.vert", "assets/shaders/passes/post/motion_blur.frag")) {
+    if (!m_motionBlurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/motion_blur.vert", "assets/shaders/passes/post/motion_blur.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load motion blur shader");
     }
 
     m_vignetteShader = std::make_shared<Shader>();
-    if (!m_vignetteShader->LoadFromFile("assets/shaders/passes/post/vignette.vert", "assets/shaders/passes/post/vignette.frag")) {
+    if (!m_vignetteShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/vignette.vert", "assets/shaders/passes/post/vignette.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load vignette shader");
     }
 
     m_filmGrainShader = std::make_shared<Shader>();
-    if (!m_filmGrainShader->LoadFromFile("assets/shaders/passes/post/film_grain.vert", "assets/shaders/passes/post/film_grain.frag")) {
+    if (!m_filmGrainShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/film_grain.vert", "assets/shaders/passes/post/film_grain.frag", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load film grain shader");
     }
 
-    // SSAO blend shader (simple multiply)
+    // SSAO blend shader (simple multiply) - same fullscreen layout
     m_ssaoBlendShader = std::make_shared<Shader>();
     const char* ssaoBlendVert = R"(
 #version 430 core
@@ -203,79 +210,75 @@ void main() {
     o_Color = vec4(scene * occlusion, 1.0);
 }
 )";
-    m_ssaoBlendShader->BuildFromSource(ssaoBlendVert, ssaoBlendFrag);
+    m_ssaoBlendShader->BuildFromSource(m_deviceRHI, ssaoBlendVert, ssaoBlendFrag, fullscreenLayout);
 }
 
-unsigned int PostProcessor::ApplyPostProcessing(unsigned int hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
-                                                 const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
-                                                 const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                                 const math::Vec3& viewPos, unsigned int skyboxTexture, float time) {
+rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
+                                                  const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                                  const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                                                  const math::Vec3& viewPos, rhi::ITexture* skyboxTexture, float time) {
     m_lastOutputValid = false;
-    if (!hdrInputTexture || m_outputTexture == 0) {
-        return hdrInputTexture;  // Fallback to input if not initialized
+    if (!hdrInputTexture || !GetOutputTextureRHI()) {
+        return hdrInputTexture;
     }
 
     // SSAO (applied before tone mapping, in linear space)
-    unsigned int ssaoTexture = 0;
+    rhi::ITexture* ssaoTexture = nullptr;
     if (settings.enableSSAO) {
         ssaoTexture = ApplySSAO(gbuffer, settings);
     }
 
     // Bloom extraction and blur (if enabled)
-    unsigned int bloomTexture = 0;
+    rhi::ITexture* bloomTexture = nullptr;
     if (settings.enableBloom) {
         bloomTexture = ExtractBloom(hdrInputTexture, settings.bloomThreshold);
         bloomTexture = BlurTexture(bloomTexture, settings.bloomIterations);
     }
 
     // Tone mapping
-    unsigned int toneMappedTexture = ApplyToneMapping(hdrInputTexture, settings);
+    rhi::ITexture* toneMappedTexture = ApplyToneMapping(hdrInputTexture, settings);
 
     // Apply SSAO to tone-mapped result (multiply occlusion)
-    if (settings.enableSSAO && ssaoTexture != 0 && m_ssaoBlendShader && m_ssaoBlendShader->IsValid()) {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-        glViewport(0, 0, m_width, m_height);
-        glDisable(GL_DEPTH_TEST);
-
-        m_ssaoBlendShader->Bind();
-        m_ssaoBlendShader->SetInt("u_Scene", 0);
-        m_ssaoBlendShader->SetInt("u_SSAO", 1);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, toneMappedTexture);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, ssaoTexture);
-
-        static FullscreenQuad quad;
-        quad.Render();
-
-        m_ssaoBlendShader->Unbind();
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        toneMappedTexture = m_outputTexture;
+    if (settings.enableSSAO && ssaoTexture && m_ssaoBlendShader && m_ssaoBlendShader->IsValid()) {
+        rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+        if (cmd && m_outputRT) {
+            cmd->SetRenderTarget(m_outputRT);
+            cmd->SetViewport(0, 0, m_width, m_height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            cmd->SetBlend(false);
+            m_ssaoBlendShader->Bind();
+            m_ssaoBlendShader->SetInt("u_Scene", 0);
+            m_ssaoBlendShader->SetInt("u_SSAO", 1);
+            cmd->BindTexture(toneMappedTexture, 0);
+            cmd->BindTexture(ssaoTexture, 1);
+            DrawFullscreenQuad(cmd);
+            m_ssaoBlendShader->Unbind();
+            toneMappedTexture = GetOutputTextureRHI();
+        }
     }
 
     // Bloom composite (if enabled)
-    if (settings.enableBloom && bloomTexture != 0 && m_bloomCompositeShader && m_bloomCompositeShader->IsValid()) {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-        glViewport(0, 0, m_width, m_height);
-        glDisable(GL_DEPTH_TEST);
-
-        m_bloomCompositeShader->Bind();
-        m_bloomCompositeShader->SetInt("u_SceneTexture", 0);
-        m_bloomCompositeShader->SetInt("u_BloomTexture", 1);
-        m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, toneMappedTexture);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, bloomTexture);
-
-        static FullscreenQuad quad;
-        quad.Render();
-
-        m_bloomCompositeShader->Unbind();
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        toneMappedTexture = m_outputTexture;
+    if (settings.enableBloom && bloomTexture && m_bloomCompositeShader && m_bloomCompositeShader->IsValid()) {
+        rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+        if (cmd && m_outputRT) {
+            cmd->SetRenderTarget(m_outputRT);
+            cmd->SetViewport(0, 0, m_width, m_height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            cmd->SetBlend(false);
+            m_bloomCompositeShader->Bind();
+            m_bloomCompositeShader->SetInt("u_SceneTexture", 0);
+            m_bloomCompositeShader->SetInt("u_BloomTexture", 1);
+            m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
+            cmd->BindTexture(toneMappedTexture, 0);
+            cmd->BindTexture(bloomTexture, 1);
+            DrawFullscreenQuad(cmd);
+            m_bloomCompositeShader->Unbind();
+            toneMappedTexture = GetOutputTextureRHI();
+        }
     }
 
     // General Blur (if enabled, applied after bloom)
@@ -291,7 +294,7 @@ unsigned int PostProcessor::ApplyPostProcessing(unsigned int hdrInputTexture, co
 
     // Motion Blur (requires velocity buffer texture)
     if (settings.enableMotionBlur) {
-        unsigned int velocityTex = gbuffer.GetVelocityTexture();
+        rhi::ITexture* velocityTex = gbuffer.GetVelocityTextureRHI();
         toneMappedTexture = ApplyMotionBlur(toneMappedTexture, velocityTex, settings);
     }
 
@@ -315,194 +318,182 @@ unsigned int PostProcessor::ApplyPostProcessing(unsigned int hdrInputTexture, co
         toneMappedTexture = ApplyFXAA(toneMappedTexture);
     }
 
-    return m_outputTexture;  // Final output
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplyToneMapping(unsigned int hdrTexture, const Settings& settings) {
+ rhi::ITexture* PostProcessor::ApplyToneMapping(rhi::ITexture* hdrTexture, const Settings& settings) {
     if (!m_toneMappingShader || !m_toneMappingShader->IsValid()) {
         return hdrTexture;
     }
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return hdrTexture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
+    rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
+    cmd->ClearRenderTarget(m_outputRT, clearBlack);
 
     m_toneMappingShader->Bind();
     m_toneMappingShader->SetInt("u_HDRTexture", 0);
     m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
     m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, hdrTexture);
-
-    static FullscreenQuad quad;
-    quad.Render();
+    cmd->BindTexture(hdrTexture, 0);
+    DrawFullscreenQuad(cmd);
     m_lastOutputValid = true;
-
     m_toneMappingShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ExtractBloom(unsigned int hdrTexture, float threshold) {
+ rhi::ITexture* PostProcessor::ExtractBloom(rhi::ITexture* hdrTexture, float threshold) {
     if (!m_bloomExtractShader || !m_bloomExtractShader->IsValid()) {
-        return 0;
+        return nullptr;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_bloomExtractFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_bloomExtractRT) return nullptr;
+    cmd->SetRenderTarget(m_bloomExtractRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
 
     m_bloomExtractShader->Bind();
     m_bloomExtractShader->SetInt("u_HDRTexture", 0);
     m_bloomExtractShader->SetFloat("u_Threshold", threshold);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, hdrTexture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(hdrTexture, 0);
+    DrawFullscreenQuad(cmd);
     m_bloomExtractShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_bloomExtractTexture;
+    return GetColorTexture(m_bloomExtractRT);
 }
 
-unsigned int PostProcessor::BlurTexture(unsigned int texture, int iterations) {
+ rhi::ITexture* PostProcessor::BlurTexture(rhi::ITexture* texture, int iterations) {
     if (!m_bloomBlurShader || !m_bloomBlurShader->IsValid()) {
         return texture;
     }
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd) return texture;
     bool horizontal = true;
-    unsigned int currentTexture = texture;
+    rhi::ITexture* currentTexture = texture;
 
     m_bloomBlurShader->Bind();
     m_bloomBlurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-    m_bloomBlurShader->SetFloat("u_Intensity", 1.0f);  // Bloom blur uses fixed intensity
+    m_bloomBlurShader->SetFloat("u_Intensity", 1.0f);
 
     for (int i = 0; i < iterations; ++i) {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_pingPongFBO[horizontal ? 0 : 1]);
-        glViewport(0, 0, m_width, m_height);
-        glDisable(GL_DEPTH_TEST);
-
+        rhi::IRenderTarget* rt = m_pingPongRT[horizontal ? 0 : 1];
+        if (!rt) break;
+        cmd->SetRenderTarget(rt);
+        cmd->SetViewport(0, 0, m_width, m_height);
+        cmd->SetDepthTest(false);
+        cmd->SetDepthWrite(false);
+        cmd->SetCullFace(false);
+        cmd->SetBlend(false);
         m_bloomBlurShader->SetBool("u_Horizontal", horizontal);
         m_bloomBlurShader->SetInt("u_Texture", 0);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, currentTexture);
-
-        static FullscreenQuad quad;
-        quad.Render();
-
-        currentTexture = m_pingPongTexture[horizontal ? 0 : 1];
+        cmd->BindTexture(currentTexture, 0);
+        DrawFullscreenQuad(cmd);
+        currentTexture = GetColorTexture(rt);
         horizontal = !horizontal;
     }
 
     m_bloomBlurShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
     return currentTexture;
 }
 
-unsigned int PostProcessor::ApplyGeneralBlur(unsigned int texture, float intensity, int iterations) {
+ rhi::ITexture* PostProcessor::ApplyGeneralBlur(rhi::ITexture* texture, float intensity, int iterations) {
     if (!m_blurShader || !m_blurShader->IsValid()) {
         return texture;
     }
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd) return texture;
     bool horizontal = true;
-    unsigned int currentTexture = texture;
+    rhi::ITexture* currentTexture = texture;
 
     m_blurShader->Bind();
     m_blurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_blurShader->SetFloat("u_Intensity", intensity);
 
     for (int i = 0; i < iterations; ++i) {
-        glBindFramebuffer(GL_FRAMEBUFFER, m_pingPongFBO[horizontal ? 0 : 1]);
-        glViewport(0, 0, m_width, m_height);
-        glDisable(GL_DEPTH_TEST);
-
+        rhi::IRenderTarget* rt = m_pingPongRT[horizontal ? 0 : 1];
+        if (!rt) break;
+        cmd->SetRenderTarget(rt);
+        cmd->SetViewport(0, 0, m_width, m_height);
+        cmd->SetDepthTest(false);
+        cmd->SetDepthWrite(false);
+        cmd->SetCullFace(false);
+        cmd->SetBlend(false);
         m_blurShader->SetBool("u_Horizontal", horizontal);
         m_blurShader->SetInt("u_Texture", 0);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, currentTexture);
-
-        static FullscreenQuad quad;
-        quad.Render();
-
-        currentTexture = m_pingPongTexture[horizontal ? 0 : 1];
+        cmd->BindTexture(currentTexture, 0);
+        DrawFullscreenQuad(cmd);
+        currentTexture = GetColorTexture(rt);
         horizontal = !horizontal;
     }
 
     m_blurShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
     return currentTexture;
 }
 
-unsigned int PostProcessor::ApplyChromaticAberration(unsigned int texture, float intensity) {
+ rhi::ITexture* PostProcessor::ApplyChromaticAberration(rhi::ITexture* texture, float intensity) {
     if (!m_chromaticAberrationShader || !m_chromaticAberrationShader->IsValid()) {
         return texture;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return texture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
     m_chromaticAberrationShader->Bind();
     m_chromaticAberrationShader->SetInt("u_Texture", 0);
     m_chromaticAberrationShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_chromaticAberrationShader->SetFloat("u_Intensity", intensity);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(texture, 0);
+    DrawFullscreenQuad(cmd);
     m_chromaticAberrationShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplyFXAA(unsigned int texture) {
+ rhi::ITexture* PostProcessor::ApplyFXAA(rhi::ITexture* texture) {
     if (!m_fxaaShader || !m_fxaaShader->IsValid()) {
         return texture;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return texture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
     m_fxaaShader->Bind();
     m_fxaaShader->SetInt("u_Texture", 0);
     m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(texture, 0);
+    DrawFullscreenQuad(cmd);
     m_fxaaShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplySSAO(const GBuffer& gbuffer, const Settings& settings) {
+ rhi::ITexture* PostProcessor::ApplySSAO(const GBuffer& gbuffer, const Settings& settings) {
     if (!m_ssaoShader || !m_ssaoShader->IsValid()) {
-        return 0;
+        return nullptr;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_ssaoFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_ssaoRT) return nullptr;
+    rhi::ClearValue cv = {1.f, 1.f, 1.f, 1.f};
+    rhi::ClearAndSetRenderTargetWithViewport(cmd, m_ssaoRT, 0, 0, m_width, m_height, cv);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
 
     m_ssaoShader->Bind();
     m_ssaoShader->SetInt("g_Position", 0);
@@ -512,34 +503,29 @@ unsigned int PostProcessor::ApplySSAO(const GBuffer& gbuffer, const Settings& se
     m_ssaoShader->SetFloat("u_Radius", settings.ssaoRadius);
     m_ssaoShader->SetFloat("u_Bias", settings.ssaoBias);
     m_ssaoShader->SetInt("u_SampleCount", settings.ssaoSamples);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetPositionTexture());
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetNormalTexture());
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetDepthTexture());
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
+    cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
+    cmd->BindTexture(gbuffer.GetDepthTextureRHI(), 2);
+    DrawFullscreenQuad(cmd);
     m_ssaoShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_ssaoTexture;
+    return GetColorTexture(m_ssaoRT);
 }
 
-unsigned int PostProcessor::ApplySSR(unsigned int sceneTexture, const GBuffer& gbuffer, unsigned int skyboxTexture, const Settings& settings,
-                                      const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
-                                      const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                      const math::Vec3& viewPos) {
+ rhi::ITexture* PostProcessor::ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,
+                                       const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                       const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                                       const math::Vec3& viewPos) {
     if (!m_ssrShader || !m_ssrShader->IsValid()) {
         return sceneTexture;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return sceneTexture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
 
     m_ssrShader->Bind();
     m_ssrShader->SetInt("g_Position", 0);
@@ -556,37 +542,28 @@ unsigned int PostProcessor::ApplySSR(unsigned int sceneTexture, const GBuffer& g
     m_ssrShader->SetMat4("u_InverseViewMatrix", invViewMatrix);
     m_ssrShader->SetMat4("u_InverseProjectionMatrix", invProjectionMatrix);
     m_ssrShader->SetVec3("u_ViewPos", viewPos);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetPositionTexture());
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetNormalTexture());
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, gbuffer.GetAlbedoTexture());
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_2D, sceneTexture);
-    if (skyboxTexture != 0) {
-        glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
-    }
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
+    cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
+    cmd->BindTexture(gbuffer.GetAlbedoTextureRHI(), 2);
+    cmd->BindTexture(sceneTexture, 3);
+    if (skyboxTexture) cmd->BindTexture(skyboxTexture, 4);
+    DrawFullscreenQuad(cmd);
     m_ssrShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplyMotionBlur(unsigned int texture, unsigned int velocityTexture, const Settings& settings) {
-    if (!m_motionBlurShader || !m_motionBlurShader->IsValid() || velocityTexture == 0) {
+ rhi::ITexture* PostProcessor::ApplyMotionBlur(rhi::ITexture* texture, rhi::ITexture* velocityTexture, const Settings& settings) {
+    if (!m_motionBlurShader || !m_motionBlurShader->IsValid() || !velocityTexture) {
         return texture;  // Skip if no shader or no velocity buffer
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return texture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
 
     m_motionBlurShader->Bind();
     m_motionBlurShader->SetInt("u_Texture", 0);
@@ -594,72 +571,64 @@ unsigned int PostProcessor::ApplyMotionBlur(unsigned int texture, unsigned int v
     m_motionBlurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_motionBlurShader->SetFloat("u_Intensity", settings.motionBlurIntensity);
     m_motionBlurShader->SetInt("u_Samples", settings.motionBlurSamples);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, velocityTexture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(texture, 0);
+    cmd->BindTexture(velocityTexture, 1);
+    DrawFullscreenQuad(cmd);
     m_motionBlurShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplyVignette(unsigned int texture, const Settings& settings) {
+ rhi::ITexture* PostProcessor::ApplyVignette(rhi::ITexture* texture, const Settings& settings) {
     if (!m_vignetteShader || !m_vignetteShader->IsValid()) {
         return texture;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return texture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
     m_vignetteShader->Bind();
     m_vignetteShader->SetInt("u_Texture", 0);
     m_vignetteShader->SetFloat("u_Intensity", settings.vignetteIntensity);
     m_vignetteShader->SetFloat("u_Radius", settings.vignetteRadius);
     m_vignetteShader->SetFloat("u_Softness", settings.vignetteSoftness);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(texture, 0);
+    DrawFullscreenQuad(cmd);
     m_vignetteShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-    return m_outputTexture;
+    return GetOutputTextureRHI();
 }
 
-unsigned int PostProcessor::ApplyFilmGrain(unsigned int texture, const Settings& settings, float time) {
+ rhi::ITexture* PostProcessor::ApplyFilmGrain(rhi::ITexture* texture, const Settings& settings, float time) {
     if (!m_filmGrainShader || !m_filmGrainShader->IsValid()) {
         return texture;
     }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, m_outputFBO);
-    glViewport(0, 0, m_width, m_height);
-    glDisable(GL_DEPTH_TEST);
-
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (!cmd || !m_outputRT) return texture;
+    cmd->SetRenderTarget(m_outputRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
     m_filmGrainShader->Bind();
     m_filmGrainShader->SetInt("u_Texture", 0);
     m_filmGrainShader->SetFloat("u_Intensity", settings.filmGrainIntensity);
     m_filmGrainShader->SetFloat("u_Time", time);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, texture);
-
-    static FullscreenQuad quad;
-    quad.Render();
-
+    cmd->BindTexture(texture, 0);
+    DrawFullscreenQuad(cmd);
     m_filmGrainShader->Unbind();
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return GetOutputTextureRHI();
+}
 
-    return m_outputTexture;
+rhi::ITexture* PostProcessor::GetColorTexture(rhi::IRenderTarget* rt) const {
+    return rt ? rt->GetColorTexture(0) : nullptr;
+}
+
+rhi::ITexture* PostProcessor::GetOutputTextureRHI() const {
+    return GetColorTexture(m_outputRT);
 }
 
 } // namespace render

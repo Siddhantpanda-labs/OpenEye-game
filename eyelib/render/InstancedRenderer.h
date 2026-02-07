@@ -56,15 +56,11 @@ private:
         std::shared_ptr<Mesh> mesh;
         std::shared_ptr<Material> material;
         std::vector<InstanceData> instances;
-        unsigned int instanceVBO = 0;
-        bool bufferDirty = true;
     };
 
     std::unordered_map<BatchKey, InstanceBatch, BatchKeyHash> m_batches;
     size_t m_totalInstances = 0;
 
-    void UploadInstanceData(InstanceBatch& batch);
-    void SetupInstanceAttributes(unsigned int vao, unsigned int instanceVBO);
 };
 
 } // namespace render

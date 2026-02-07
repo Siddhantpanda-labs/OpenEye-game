@@ -1,20 +1,72 @@
 #include "eyelib/render/passes/LightingPass.h"
 #include "api/render/Light.h"
-#include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include <algorithm>
-#include <glad/glad.h>
 
 namespace eyelib {
 namespace render {
 
+namespace {
+rhi::VertexLayout GetFullscreenVertexLayout() {
+    rhi::VertexLayout layout;
+    layout.strideInBytes = 4 * sizeof(float);
+    layout.attributes = {
+        {0, rhi::VertexAttributeType::Float2, 0},
+        {1, rhi::VertexAttributeType::Float2, 2 * sizeof(float)},
+    };
+    return layout;
+}
+} // namespace
+
 LightingPass::LightingPass() = default;
+
+LightingPass::~LightingPass() {
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (device) {
+        if (m_fullscreenVBO) { device->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
+        if (m_fullscreenIBO) { device->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
+    }
+}
+
+void LightingPass::EnsureFullscreenQuad() {
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device || m_fullscreenVBO) return;
+    const float vertices[] = {
+        -1.f, -1.f, 0.f, 0.f,
+         1.f, -1.f, 1.f, 0.f,
+         1.f,  1.f, 1.f, 1.f,
+        -1.f,  1.f, 0.f, 1.f,
+    };
+    const uint16_t indices[] = { 0, 1, 2, 2, 3, 0 };
+    rhi::BufferDesc vboDesc;
+    vboDesc.sizeInBytes = sizeof(vertices);
+    vboDesc.usage = rhi::BufferUsage::Vertex;
+    m_fullscreenVBO = device->CreateBuffer(vboDesc, vertices);
+    rhi::BufferDesc iboDesc;
+    iboDesc.sizeInBytes = sizeof(indices);
+    iboDesc.usage = rhi::BufferUsage::Index;
+    m_fullscreenIBO = device->CreateBuffer(iboDesc, indices);
+}
+
+void LightingPass::DrawFullscreenQuad(rhi::ICommandList* cmd) {
+    if (!cmd || !m_fullscreenVBO || !m_fullscreenIBO) return;
+    cmd->BindVertexBuffer(m_fullscreenVBO, 0);
+    cmd->BindIndexBuffer(m_fullscreenIBO, rhi::IndexType::UInt16);
+    cmd->DrawIndexed(6, 0, 0);
+}
 
 void LightingPass::EnsureDefaultShader() {
     if (m_lightingShader && m_lightingShader->IsValid()) return;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return;
     m_lightingShader = std::make_shared<Shader>();
-    m_lightingShader->LoadFromFile("assets/shaders/passes/deferred/lighting.vert", "assets/shaders/passes/deferred/lighting.frag");
+    const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
+    if (!m_lightingShader->LoadFromFile(device, "assets/shaders/passes/deferred/lighting.vert", "assets/shaders/passes/deferred/lighting.frag", fullscreenLayout))
+        return;
+    EnsureFullscreenQuad();
 }
 
 void LightingPass::SetLightingShader(std::shared_ptr<Shader> shader) {
@@ -25,6 +77,7 @@ static const int kMaxPointLights = 8;
 static const int kMaxSpotLights = 4;
 
 void LightingPass::Render(GBuffer& gbuffer,
+                          rhi::ICommandList* cmd,
                           const LightParams& light,
                           const math::Mat4& view,
                           const math::Mat4& projection,
@@ -37,11 +90,17 @@ void LightingPass::Render(GBuffer& gbuffer,
     EnsureDefaultShader();
     if (!m_lightingShader->IsValid()) return;
 
-    gbuffer.BindForLightingPass();
+    gbuffer.BindForLightingPass(cmd);
     m_lightingShader->Bind();
+    m_lightingShader->SetInt("u_Position", 0);
+    m_lightingShader->SetInt("u_Normal", 1);
+    m_lightingShader->SetInt("u_Albedo", 2);
+    m_lightingShader->SetInt("u_PBR", 3);
     if (shadowMap) {
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, shadowMap->GetDepthTexture());
+        if (cmd) {
+            rhi::ITexture* shadowTex = shadowMap->GetDepthTextureRHI();
+            if (shadowTex) cmd->BindTexture(shadowTex, 5);
+        }
         m_lightingShader->SetMat4("u_LightSpaceMatrix", shadowMap->GetShadowMatrix());
         m_lightingShader->SetFloat("u_ShadowBias", 0.005f);
     }
@@ -77,19 +136,19 @@ void LightingPass::Render(GBuffer& gbuffer,
         m_lightingShader->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
     }
 
-    glDisable(GL_DEPTH_TEST);
-    static FullscreenQuad quad;
-    quad.Render();
-    glEnable(GL_DEPTH_TEST);
-
-    if (shadowMap) {
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, 0);
+    if (cmd) {
+        cmd->SetDepthTest(false);
+        cmd->SetBlend(false);
     }
+    DrawFullscreenQuad(cmd);
+    if (cmd) cmd->SetDepthTest(true);
+
+    if (shadowMap && cmd) cmd->UnbindTexture(5);
     m_lightingShader->Unbind();
 }
 
 void LightingPass::Render(GBuffer& gbuffer,
+                          rhi::ICommandList* cmd,
                           const api::render::DirectionalLight& light,
                           const math::Mat4& view,
                           const math::Mat4& projection,
@@ -102,11 +161,17 @@ void LightingPass::Render(GBuffer& gbuffer,
     EnsureDefaultShader();
     if (!m_lightingShader->IsValid()) return;
 
-    gbuffer.BindForLightingPass();
+    gbuffer.BindForLightingPass(cmd);
     m_lightingShader->Bind();
+    m_lightingShader->SetInt("u_Position", 0);
+    m_lightingShader->SetInt("u_Normal", 1);
+    m_lightingShader->SetInt("u_Albedo", 2);
+    m_lightingShader->SetInt("u_PBR", 3);
     if (shadowMap) {
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, shadowMap->GetDepthTexture());
+        if (cmd) {
+            rhi::ITexture* shadowTex = shadowMap->GetDepthTextureRHI();
+            if (shadowTex) cmd->BindTexture(shadowTex, 5);
+        }
         m_lightingShader->SetMat4("u_LightSpaceMatrix", shadowMap->GetShadowMatrix());
         m_lightingShader->SetFloat("u_ShadowBias", 0.005f);
     }
@@ -142,15 +207,14 @@ void LightingPass::Render(GBuffer& gbuffer,
         m_lightingShader->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
     }
 
-    glDisable(GL_DEPTH_TEST);
-    static FullscreenQuad quad;
-    quad.Render();
-    glEnable(GL_DEPTH_TEST);
-
-    if (shadowMap) {
-        glActiveTexture(GL_TEXTURE5);
-        glBindTexture(GL_TEXTURE_2D, 0);
+    if (cmd) {
+        cmd->SetDepthTest(false);
+        cmd->SetBlend(false);
     }
+    DrawFullscreenQuad(cmd);
+    if (cmd) cmd->SetDepthTest(true);
+
+    if (shadowMap && cmd) cmd->UnbindTexture(5);
     m_lightingShader->Unbind();
 }
 

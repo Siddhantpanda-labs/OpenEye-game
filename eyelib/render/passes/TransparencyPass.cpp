@@ -4,7 +4,6 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
-#include <glad/glad.h>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -14,6 +13,8 @@ namespace render {
 
 namespace {
 
+constexpr size_t kMaxBones = 128;
+
 float distanceToCamera(const math::Mat4& transform, const math::Vec3& viewPos) {
     math::Vec3 p(transform[3][0], transform[3][1], transform[3][2]);
     math::Vec3 d(p.x - viewPos.x, p.y - viewPos.y, p.z - viewPos.z);
@@ -22,7 +23,8 @@ float distanceToCamera(const math::Mat4& transform, const math::Vec3& viewPos) {
 
 } // namespace
 
-void TransparencyPass::Render(const std::vector<Drawable>& transparent,
+void TransparencyPass::Render(rhi::ICommandList* cmd,
+                              const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
                               const math::Vec3& viewPos) {
@@ -43,10 +45,11 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
         return a.dist > b.dist;
     });
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_DEPTH_TEST);
+    if (cmd) {
+        cmd->SetBlend(true);
+        cmd->SetDepthWrite(false);
+        cmd->SetDepthTest(true);
+    }
 
     for (const auto& e : sorted) {
         const auto& d = transparent[e.idx];
@@ -63,7 +66,8 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
         sh->SetMat4("u_Projection", projection);
         sh->SetVec3("u_ViewPos", viewPos);
         if (d.bones && d.boneCount > 0) {
-            sh->SetMat4Array("u_Bones", d.bones, d.boneCount);
+            const size_t boneCount = std::min(d.boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", d.bones, boneCount);
         }
         const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
         sh->SetFloat("u_Alpha", alpha);
@@ -73,11 +77,14 @@ void TransparencyPass::Render(const std::vector<Drawable>& transparent,
         sh->Unbind();
     }
 
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
+    if (cmd) {
+        cmd->SetDepthWrite(true);
+        cmd->SetBlend(false);
+    }
 }
 
-void TransparencyPass::Render(std::span<const api::Drawable> transparent,
+void TransparencyPass::Render(rhi::ICommandList* cmd,
+                              std::span<const api::Drawable> transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
                               const math::Vec3& viewPos) {
@@ -97,10 +104,11 @@ void TransparencyPass::Render(std::span<const api::Drawable> transparent,
         return a.dist > b.dist;
     });
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_DEPTH_TEST);
+    if (cmd) {
+        cmd->SetBlend(true);
+        cmd->SetDepthWrite(false);
+        cmd->SetDepthTest(true);
+    }
 
     for (const auto& e : sorted) {
         const auto& apiD = transparent[e.idx];
@@ -115,7 +123,8 @@ void TransparencyPass::Render(std::span<const api::Drawable> transparent,
         sh->SetMat4("u_Projection", projection);
         sh->SetVec3("u_ViewPos", viewPos);
         if (apiD.bones && apiD.boneCount > 0) {
-            sh->SetMat4Array("u_Bones", apiD.bones, apiD.boneCount);
+            const size_t boneCount = std::min(apiD.boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", apiD.bones, boneCount);
         }
         sh->SetFloat("u_Alpha", apiD.params.alpha);
         mesh->Bind();
@@ -124,8 +133,10 @@ void TransparencyPass::Render(std::span<const api::Drawable> transparent,
         sh->Unbind();
     }
 
-    glDepthMask(GL_TRUE);
-    glDisable(GL_BLEND);
+    if (cmd) {
+        cmd->SetDepthWrite(true);
+        cmd->SetBlend(false);
+    }
 }
 
 } // namespace render

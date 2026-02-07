@@ -46,7 +46,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));
     }
-    m_impl->pass->Render(*gbuffer.GetInternal(), internal, view, projection, prevView, prevProjection);
+    m_impl->pass->Render(*gbuffer.GetInternal(), nullptr, internal, view, projection, prevView, prevProjection);
 }
 
 } // namespace api

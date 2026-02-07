@@ -5,10 +5,14 @@
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
-#include <glad/glad.h>
+#include <algorithm>
 
 namespace eyelib {
 namespace render {
+
+namespace {
+constexpr size_t kMaxBones = 128;
+}
 
 GBufferPass::GBufferPass() = default;
 
@@ -23,6 +27,7 @@ void GBufferPass::SetGeometryShader(std::shared_ptr<Shader> shader) {
 }
 
 void GBufferPass::Render(GBuffer& gbuffer,
+                         rhi::ICommandList* cmd,
                          const std::vector<Drawable>& drawables,
                          const math::Mat4& view,
                          const math::Mat4& projection,
@@ -33,7 +38,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
     if (!m_geometryShader->IsValid()) return;
 
     m_currentGBuffer = &gbuffer;
-    gbuffer.BindForGeometryPass();
+    gbuffer.BindForGeometryPass(cmd);
 
     m_geometryShader->Bind();
     m_geometryShader->SetMat4("u_View", view);
@@ -41,10 +46,11 @@ void GBufferPass::Render(GBuffer& gbuffer,
     m_geometryShader->SetMat4("u_PrevView", prevView);
     m_geometryShader->SetMat4("u_PrevProjection", prevProjection);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-    const GLboolean wasCullEnabled = glIsEnabled(GL_CULL_FACE);
-    glDisable(GL_CULL_FACE);
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthWrite(true);
+        cmd->SetCullFace(false);
+    }
 
     for (const auto& d : drawables) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
@@ -75,19 +81,22 @@ void GBufferPass::Render(GBuffer& gbuffer,
         // Bone matrices for skinning (same as forward: u_Bones UBO). Non-skinned: identity at 0.
         bool hasBones = false;
         if (d.bones && d.boneCount > 0) {
-            m_geometryShader->SetMat4Array("u_Bones", d.bones, d.boneCount);
+            const size_t boneCount = std::min(d.boneCount, kMaxBones);
+            m_geometryShader->SetMat4Array("u_Bones", d.bones, boneCount);
             hasBones = true;
         } else if (d.materialInstance) {
             d.materialInstance->ForEachMat4Array([this, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
                 if (values && count > 0) {
-                    m_geometryShader->SetMat4Array(name, values, count);
+                    const size_t clamped = (name == "u_Bones") ? std::min(count, kMaxBones) : count;
+                    m_geometryShader->SetMat4Array(name, values, clamped);
                     hasBones = true;
                 }
             });
         } else {
             material->ForEachMat4Array([this, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
                 if (values && count > 0) {
-                    m_geometryShader->SetMat4Array(name, values, count);
+                    const size_t clamped = (name == "u_Bones") ? std::min(count, kMaxBones) : count;
+                    m_geometryShader->SetMat4Array(name, values, clamped);
                     hasBones = true;
                 }
             });
@@ -128,14 +137,17 @@ void GBufferPass::Render(GBuffer& gbuffer,
     }
 
     m_geometryShader->Unbind();
-    gbuffer.Unbind();
+    gbuffer.Unbind(cmd);
     m_currentGBuffer = nullptr;
-    if (wasCullEnabled) {
-        glEnable(GL_CULL_FACE);
+    // Unbind material texture units so Lighting pass only sees GBuffer bindings
+    if (cmd) {
+        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+        cmd->SetCullFace(true);
     }
 }
 
 void GBufferPass::Render(GBuffer& gbuffer,
+                         rhi::ICommandList* cmd,
                          std::span<const api::Drawable> drawables,
                          const math::Mat4& view,
                          const math::Mat4& projection,
@@ -146,7 +158,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
     if (!m_geometryShader->IsValid()) return;
 
     m_currentGBuffer = &gbuffer;
-    gbuffer.BindForGeometryPass();
+    gbuffer.BindForGeometryPass(cmd);
 
     m_geometryShader->Bind();
     m_geometryShader->SetMat4("u_View", view);
@@ -154,10 +166,11 @@ void GBufferPass::Render(GBuffer& gbuffer,
     m_geometryShader->SetMat4("u_PrevView", prevView);
     m_geometryShader->SetMat4("u_PrevProjection", prevProjection);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-    const GLboolean wasCullEnabled = glIsEnabled(GL_CULL_FACE);
-    glDisable(GL_CULL_FACE);
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthWrite(true);
+        cmd->SetCullFace(false);
+    }
 
     for (const auto& apiD : drawables) {
         Mesh* mesh = apiD.mesh ? apiD.mesh->GetInternal().get() : nullptr;
@@ -215,10 +228,11 @@ void GBufferPass::Render(GBuffer& gbuffer,
     }
 
     m_geometryShader->Unbind();
-    gbuffer.Unbind();
+    gbuffer.Unbind(cmd);
     m_currentGBuffer = nullptr;
-    if (wasCullEnabled) {
-        glEnable(GL_CULL_FACE);
+    if (cmd) {
+        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+        cmd->SetCullFace(true);
     }
 }
 

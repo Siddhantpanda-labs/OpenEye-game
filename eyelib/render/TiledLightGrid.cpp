@@ -1,5 +1,4 @@
 #include "eyelib/render/TiledLightGrid.h"
-#include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cmath>
@@ -166,23 +165,8 @@ const std::vector<uint32_t>& TiledLightGrid::GetTileLights(uint32_t tileX, uint3
 
 void TiledLightGrid::UploadToGPU(unsigned int& lightIndexSSBO, unsigned int& lightGridSSBO) {
     (void)lightGridSSBO;
+    (void)lightIndexSSBO;
     if (m_lightGridFlat.empty()) return;
-
-    // Convert uint8_t to uint for shader
-    std::vector<unsigned int> lightIndicesUint;
-    lightIndicesUint.reserve(m_lightGridFlat.size());
-    for (uint8_t idx : m_lightGridFlat) {
-        lightIndicesUint.push_back(static_cast<unsigned int>(idx));
-    }
-
-    if (lightIndexSSBO == 0) {
-        glGenBuffers(1, &lightIndexSSBO);
-    }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightIndexSSBO);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(lightIndicesUint.size() * sizeof(unsigned int)),
-                 lightIndicesUint.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightIndexSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
 } // namespace render

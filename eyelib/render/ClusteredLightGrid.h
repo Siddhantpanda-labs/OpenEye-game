@@ -46,8 +46,6 @@ public:
     /** Get light indices for a cluster (tileX, tileY, sliceZ) */
     const std::vector<uint32_t>& GetClusterLights(uint32_t tileX, uint32_t tileY, uint32_t sliceZ) const;
 
-    /** Upload to GPU as SSBO. */
-    void UploadToGPU(unsigned int& lightIndexSSBO, unsigned int& lightGridSSBO);
     /** RHI path: upload light indices to the given buffer (Map/copy/Unmap). Buffer must be at least GetLightIndexDataSize() bytes. */
     void UploadToGPU(rhi::IBuffer* lightIndexBuffer);
 

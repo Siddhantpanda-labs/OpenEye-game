@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <memory>
 #include "eyelib/math/Types.h"
+#include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHITypes.h"
 
 namespace eyelib {
 namespace render {
@@ -24,7 +26,7 @@ public:
     PostProcessor(const PostProcessor&) = delete;
     PostProcessor& operator=(const PostProcessor&) = delete;
 
-    bool Initialize(uint32_t width, uint32_t height);
+    bool Initialize(uint32_t width, uint32_t height, rhi::IDevice* device = nullptr);
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
 
@@ -91,56 +93,62 @@ public:
      * @param skyboxTexture Skybox cubemap for SSR fallback (0 if not available)
      * @return Final LDR output texture
      */
-    unsigned int ApplyPostProcessing(unsigned int hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
-                                      const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
-                                      const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                      const math::Vec3& viewPos, unsigned int skyboxTexture = 0, float time = 0.0f);
+    rhi::ITexture* ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
+                                       const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                       const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                                       const math::Vec3& viewPos, rhi::ITexture* skyboxTexture = nullptr, float time = 0.0f);
 
     /**
      * @brief Individual effect methods (for testing/debugging)
      */
-    unsigned int ApplyToneMapping(unsigned int hdrTexture, const Settings& settings);
-    unsigned int ExtractBloom(unsigned int hdrTexture, float threshold);
-    unsigned int BlurTexture(unsigned int texture, int iterations);
-    unsigned int ApplyGeneralBlur(unsigned int texture, float intensity, int iterations);
-    unsigned int ApplyChromaticAberration(unsigned int texture, float intensity);
-    unsigned int ApplyFXAA(unsigned int texture);
-    unsigned int ApplySSAO(const GBuffer& gbuffer, const Settings& settings);
-    unsigned int ApplySSR(unsigned int sceneTexture, const GBuffer& gbuffer, unsigned int skyboxTexture, const Settings& settings,
-                          const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
-                          const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                          const math::Vec3& viewPos);
-    unsigned int ApplyMotionBlur(unsigned int texture, unsigned int velocityTexture, const Settings& settings);
-    unsigned int ApplyVignette(unsigned int texture, const Settings& settings);
-    unsigned int ApplyFilmGrain(unsigned int texture, const Settings& settings, float time = 0.0f);
+    rhi::ITexture* ApplyToneMapping(rhi::ITexture* hdrTexture, const Settings& settings);
+    rhi::ITexture* ExtractBloom(rhi::ITexture* hdrTexture, float threshold);
+    rhi::ITexture* BlurTexture(rhi::ITexture* texture, int iterations);
+    rhi::ITexture* ApplyGeneralBlur(rhi::ITexture* texture, float intensity, int iterations);
+    rhi::ITexture* ApplyChromaticAberration(rhi::ITexture* texture, float intensity);
+    rhi::ITexture* ApplyFXAA(rhi::ITexture* texture);
+    rhi::ITexture* ApplySSAO(const GBuffer& gbuffer, const Settings& settings);
+    rhi::ITexture* ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,
+                            const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                            const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                            const math::Vec3& viewPos);
+    rhi::ITexture* ApplyMotionBlur(rhi::ITexture* texture, rhi::ITexture* velocityTexture, const Settings& settings);
+    rhi::ITexture* ApplyVignette(rhi::ITexture* texture, const Settings& settings);
+    rhi::ITexture* ApplyFilmGrain(rhi::ITexture* texture, const Settings& settings, float time = 0.0f);
 
     /**
      * @brief Get output texture (after full chain)
      */
-    unsigned int GetOutputFBO() const { return m_outputFBO; }
-    unsigned int GetOutputTexture() const { return m_outputTexture; }
+    rhi::IRenderTarget* GetOutputRenderTargetRHI() const { return m_outputRT; }
+    rhi::ITexture* GetOutputTextureRHI() const;
     bool HasValidOutputFrame() const { return m_lastOutputValid; }
 
 private:
     void CreateFramebuffers();
     void DestroyFramebuffers();
+    void CreateFullscreenQuad();
+    void DestroyFullscreenQuad();
+    void DrawFullscreenQuad(rhi::ICommandList* cmd);
+    rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
     void LoadShaders();
 
-    // Ping-pong FBOs for multi-pass effects
-    unsigned int m_pingPongFBO[2] = {0, 0};
-    unsigned int m_pingPongTexture[2] = {0, 0};
+    rhi::IDevice* m_deviceRHI = nullptr;
 
-    // Output FBO (final result)
-    unsigned int m_outputFBO = 0;
-    unsigned int m_outputTexture = 0;
+    // Fullscreen quad for post passes (vec2 pos + vec2 uv, matches post shaders)
+    rhi::IBuffer* m_fullscreenVBO = nullptr;
+    rhi::IBuffer* m_fullscreenIBO = nullptr;
 
-    // Bloom extraction FBO
-    unsigned int m_bloomExtractFBO = 0;
-    unsigned int m_bloomExtractTexture = 0;
+    // Ping-pong render targets for multi-pass effects
+    rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};
 
-    // SSAO FBO
-    unsigned int m_ssaoFBO = 0;
-    unsigned int m_ssaoTexture = 0;
+    // Output render target (final result)
+    rhi::IRenderTarget* m_outputRT = nullptr;
+
+    // Bloom extraction render target
+    rhi::IRenderTarget* m_bloomExtractRT = nullptr;
+
+    // SSAO render target
+    rhi::IRenderTarget* m_ssaoRT = nullptr;
 
     uint32_t m_width = 0;
     uint32_t m_height = 0;

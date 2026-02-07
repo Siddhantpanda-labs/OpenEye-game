@@ -1,5 +1,4 @@
 #include "eyelib/render/ClusteredLightGrid.h"
-#include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cmath>
@@ -238,26 +237,6 @@ const std::vector<uint32_t>& ClusteredLightGrid::GetClusterLights(uint32_t tileX
     uint32_t idx = (sliceZ * m_tileCountY + tileY) * m_tileCountX + tileX;
     if (idx >= m_clusterLightIndices.size()) return empty;
     return m_clusterLightIndices[idx];
-}
-
-void ClusteredLightGrid::UploadToGPU(unsigned int& lightIndexSSBO, unsigned int& lightGridSSBO) {
-    (void)lightGridSSBO;
-    if (m_lightGridFlat.empty()) return;
-
-    std::vector<unsigned int> lightIndicesUint;
-    lightIndicesUint.reserve(m_lightGridFlat.size());
-    for (uint8_t idx : m_lightGridFlat) {
-        lightIndicesUint.push_back(static_cast<unsigned int>(idx));
-    }
-
-    if (lightIndexSSBO == 0) {
-        glGenBuffers(1, &lightIndexSSBO);
-    }
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, lightIndexSSBO);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<GLsizeiptr>(lightIndicesUint.size() * sizeof(unsigned int)),
-                 lightIndicesUint.data(), GL_DYNAMIC_DRAW);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, lightIndexSSBO);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
 void ClusteredLightGrid::UploadToGPU(rhi::IBuffer* lightIndexBuffer) {

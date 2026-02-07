@@ -26,11 +26,14 @@ public:
     void UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& view, const math::Mat4& proj,
                         const math::Vec3& cameraPos, float nearPlane, float farPlane);
 
-    void BindForShadowPass();
-    void Unbind();
-    unsigned int GetDepthTexture() const { return m_depthTexture; }
-    /** RHI path: use with cmd->BindTexture. Null if initialized without device. */
-    rhi::ITexture* GetDepthTextureRHI() const { return m_depthTextureRHI; }
+    /** RHI path: set RT, viewport, and clear depth. Requires non-null cmd. */
+    void BindForShadowPass(rhi::ICommandList* cmd);
+    void Unbind(rhi::ICommandList* cmd);
+    /** Native texture id for legacy GL bind (e.g. LightingPass). 0 if RHI-only and no texture. */
+    unsigned int GetDepthTexture() const;
+    /** RHI path: use with cmd->BindTexture. Null if not initialized. */
+    rhi::ITexture* GetDepthTextureRHI() const { return m_renderTargetRHI ? m_renderTargetRHI->GetDepthTexture() : nullptr; }
+    rhi::IRenderTarget* GetRenderTargetRHI() const { return m_renderTargetRHI; }
     const math::Mat4& GetShadowMatrix() const { return m_shadowMatrix; }
     uint32_t GetResolution() const { return m_resolution; }
 
@@ -38,10 +41,8 @@ private:
     void Destroy();
 
     uint32_t m_resolution = 2048;
-    unsigned int m_fbo = 0;
-    unsigned int m_depthTexture = 0;
     rhi::IDevice* m_deviceRHI = nullptr;
-    rhi::ITexture* m_depthTextureRHI = nullptr;
+    rhi::IRenderTarget* m_renderTargetRHI = nullptr;
     math::Mat4 m_lightView = math::Mat4(1.0f);
     math::Mat4 m_lightProj = math::Mat4(1.0f);
     math::Mat4 m_shadowMatrix = math::Mat4(1.0f);

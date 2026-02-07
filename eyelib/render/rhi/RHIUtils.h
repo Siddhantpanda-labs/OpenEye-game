@@ -9,6 +9,10 @@ namespace rhi {
 /** Thin helpers built only from RHI calls. Used by pipeline and passes. */
 
 void ClearAndSetRenderTarget(ICommandList* cmd, IRenderTarget* rt, const ClearValue& clear);
+/** Set RT, viewport (x,y,width,height), then clear. Use for full-rt setup. */
+void ClearAndSetRenderTargetWithViewport(ICommandList* cmd, IRenderTarget* rt,
+                                         uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+                                         const ClearValue& clear);
 void DrawFullscreenQuad(ICommandList* cmd, IPipeline* pipeline);
 void BarrierTextureForShaderRead(ICommandList* cmd, ITexture* texture);
 void BarrierTextureForRenderTarget(ICommandList* cmd, ITexture* texture);

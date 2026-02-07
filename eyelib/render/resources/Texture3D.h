@@ -1,6 +1,8 @@
 #pragma once
 
 #include "eyelib/render/resources/TextureTypes.h"
+#include "eyelib/render/rhi/RHI.h"
+#include <vector>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -22,6 +24,7 @@ public:
     Texture3D& operator=(Texture3D&& other) noexcept;
 
     bool Create(int width, int height, int depth, TextureFormat format, const void* data = nullptr);
+    bool Create(rhi::IDevice* device, int width, int height, int depth, TextureFormat format, const void* data = nullptr);
     void SetData(const void* data, int x = 0, int y = 0, int z = 0, int width = 0, int height = 0, int depth = 0);
     std::vector<uint8_t> GetData() const;
 
@@ -34,13 +37,15 @@ public:
     int GetHeight() const { return m_height; }
     int GetDepth() const { return m_depth; }
     TextureFormat GetFormat() const { return m_format; }
-    bool IsValid() const { return m_id != 0; }
-    unsigned int Id() const { return m_id; }
+    bool IsValid() const { return m_textureRHI != nullptr; }
+    unsigned int Id() const;
 
 private:
-    unsigned int m_id = 0;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::ITexture* m_textureRHI = nullptr;
     int m_width = 0, m_height = 0, m_depth = 0;
     TextureFormat m_format = TextureFormat::RGBA8;
+    std::vector<uint8_t> m_cpuData;
 };
 
 } // namespace render

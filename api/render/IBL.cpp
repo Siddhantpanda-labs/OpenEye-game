@@ -21,7 +21,7 @@ IBL& IBL::operator=(IBL&& other) noexcept = default;
 bool IBL::Initialize(const TextureCube& environment, uint32_t irradianceRes, uint32_t prefilterRes) {
     auto internal = environment.GetInternal();
     if (!internal) return false;
-    return m_impl->ibl->Initialize(internal->Id(), irradianceRes, prefilterRes);
+    return m_impl->ibl->Initialize(internal->GetTextureRHI(), irradianceRes, prefilterRes);
 }
 
 void IBL::BindForLighting(uint32_t irradianceUnit, uint32_t prefilterUnit, uint32_t brdfLutUnit) const {

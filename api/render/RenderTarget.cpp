@@ -1,6 +1,8 @@
 #include "api/render/RenderTarget.h"
+#include "api/render/RenderPipeline.h"
 #include "eyelib/render/RenderTarget.h"
 #include "eyelib/render/resources/Texture2D.h"
+#include "eyelib/render/rhi/RHI.h"
 
 namespace eyelib {
 namespace api {
@@ -24,15 +26,19 @@ RenderTarget::RenderTarget(RenderTarget&& other) noexcept = default;
 
 RenderTarget& RenderTarget::operator=(RenderTarget&& other) noexcept = default;
 
-bool RenderTarget::Create(uint32_t width, uint32_t height,
+bool RenderTarget::Create(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                           const std::vector<TextureFormat>& colorFormats,
                           TextureFormat depthFormat, int samples) {
+    if (!pipeline) return false;
+    void* dev = pipeline->GetDevice();
+    if (!dev) return false;
+    auto* device = static_cast<::eyelib::render::rhi::IDevice*>(dev);
     std::vector<::eyelib::render::TextureFormat> internalFormats;
     internalFormats.reserve(colorFormats.size());
     for (auto format : colorFormats) {
         internalFormats.push_back(ToInternal(format));
     }
-    return m_impl->target->Create(width, height, internalFormats, ToInternal(depthFormat), samples);
+    return m_impl->target->Create(device, width, height, internalFormats, ToInternal(depthFormat), static_cast<uint32_t>(samples));
 }
 
 void RenderTarget::Resize(uint32_t width, uint32_t height) {
@@ -85,32 +91,35 @@ void RenderTarget::Blit(const RenderTarget& source, const RenderTarget& dest, bo
     ::eyelib::render::RenderTarget::Blit(*source.m_impl->target, *dest.m_impl->target, colorOnly);
 }
 
-int RenderTarget::GetMaxSamples(int samples) {
-    return ::eyelib::render::RenderTarget::GetMaxSamples(samples);
+int RenderTarget::GetMaxSamples(RenderPipeline* pipeline, int samples) {
+    if (!pipeline) return 0;
+    void* dev = pipeline->GetDevice();
+    if (!dev) return 0;
+    return ::eyelib::render::RenderTarget::GetMaxSamples(static_cast<::eyelib::render::rhi::IDevice*>(dev), samples);
 }
 
-RenderTarget RenderTarget::CreateColorDepth(uint32_t width, uint32_t height,
+RenderTarget RenderTarget::CreateColorDepth(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                             TextureFormat colorFormat,
                                             TextureFormat depthFormat,
                                             int samples) {
     RenderTarget target;
-    target.Create(width, height, std::vector<TextureFormat>{colorFormat}, depthFormat, samples);
+    target.Create(pipeline, width, height, std::vector<TextureFormat>{colorFormat}, depthFormat, samples);
     return target;
 }
 
-RenderTarget RenderTarget::CreateColorOnly(uint32_t width, uint32_t height,
+RenderTarget RenderTarget::CreateColorOnly(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                            TextureFormat colorFormat,
                                            int samples) {
     RenderTarget target;
-    target.Create(width, height, std::vector<TextureFormat>{colorFormat}, TextureFormat::None, samples);
+    target.Create(pipeline, width, height, std::vector<TextureFormat>{colorFormat}, TextureFormat::None, samples);
     return target;
 }
 
-RenderTarget RenderTarget::CreateDepthOnly(uint32_t width, uint32_t height,
+RenderTarget RenderTarget::CreateDepthOnly(RenderPipeline* pipeline, uint32_t width, uint32_t height,
                                            TextureFormat depthFormat,
                                            int samples) {
     RenderTarget target;
-    target.Create(width, height, std::vector<TextureFormat>{}, depthFormat, samples);
+    target.Create(pipeline, width, height, std::vector<TextureFormat>{}, depthFormat, samples);
     return target;
 }
 

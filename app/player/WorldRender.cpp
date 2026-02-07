@@ -101,7 +101,22 @@ bool WorldRenderBridge::Initialize(uint32_t width, uint32_t height) {
         m_renderer.Shutdown();
         return false;
     }
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
+    m_width = width;
+    m_height = height;
+    m_ready = true;
+    return true;
+}
+
+bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height) {
+    if (!m_renderer.Initialize()) {
+        return false;
+    }
+    if (!m_pipeline.Initialize(window, width, height)) {
+        m_renderer.Shutdown();
+        return false;
+    }
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
     m_width = width;
     m_height = height;
     m_ready = true;
@@ -112,13 +127,15 @@ void WorldRenderBridge::Shutdown() {
     if (!m_ready) {
         return;
     }
-    m_pipeline.Shutdown();
-    m_renderer.Shutdown();
+    // Destroy caches and shaders/materials first; their destructors call into the RHI device.
+    // Only then shut down the pipeline (which destroys the device).
     m_modelCache.clear();
     m_skinnedMaterials.clear();
     m_defaultMaterial.reset();
     m_defaultShader.reset();
     m_skinnedShader.reset();
+    m_pipeline.Shutdown();
+    m_renderer.Shutdown();
     m_ready = false;
 }
 

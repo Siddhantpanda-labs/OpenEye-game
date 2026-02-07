@@ -37,7 +37,7 @@ void LightingPass::Render(GBuffer& gbuffer,
     internal.ambient = light.ambient;
     internal.exposure = light.exposure;
 
-    m_impl->pass->Render(*gbuffer.GetInternal(), internal, view, projection, viewPos);
+    m_impl->pass->Render(*gbuffer.GetInternal(), nullptr, internal, view, projection, viewPos);
 }
 
 } // namespace api

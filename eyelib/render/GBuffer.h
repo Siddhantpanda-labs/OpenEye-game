@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 
 namespace eyelib {
@@ -17,36 +18,42 @@ public:
     GBuffer& operator=(GBuffer&& other) noexcept;
 
     bool Initialize(uint32_t width, uint32_t height);
+    bool Initialize(rhi::IDevice* device, uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
 
-    void BindForGeometryPass();
-    void BindForLightingPass();
+    void BindForGeometryPass(rhi::ICommandList* cmd);
+    void BindForLightingPass(rhi::ICommandList* cmd);
     void BindDepthTexture(unsigned int textureUnit);
-    void Unbind();
+    void Unbind(rhi::ICommandList* cmd);
 
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
-    unsigned int GetFBO() const { return m_fbo; }
-    unsigned int GetPositionTexture() const { return m_positionTexture; }
-    unsigned int GetNormalTexture() const { return m_normalTexture; }
-    unsigned int GetAlbedoTexture() const { return m_albedoTexture; }
-    unsigned int GetPBRParamsTexture() const { return m_pbrParamsTexture; }
-    unsigned int GetVelocityTexture() const { return m_velocityTexture; }
-    unsigned int GetDepthTexture() const { return m_depthTexture; }
+    /** Backend-agnostic native framebuffer handle (for BlitFromNativeFramebuffer). */
+    void* GetNativeFramebuffer() const { return m_renderTargetRHI ? m_renderTargetRHI->GetNativeFramebuffer() : nullptr; }
+    /** Legacy: GL FBO id as unsigned int. Prefer GetNativeFramebuffer() for backend-agnostic code. */
+    unsigned int GetFBO() const;
+    unsigned int GetPositionTexture() const;
+    unsigned int GetNormalTexture() const;
+    unsigned int GetAlbedoTexture() const;
+    unsigned int GetPBRParamsTexture() const;
+    unsigned int GetVelocityTexture() const;
+    unsigned int GetDepthTexture() const;
+
+    rhi::IRenderTarget* GetRenderTargetRHI() const { return m_renderTargetRHI; }
+    rhi::ITexture* GetPositionTextureRHI() const;
+    rhi::ITexture* GetNormalTextureRHI() const;
+    rhi::ITexture* GetAlbedoTextureRHI() const;
+    rhi::ITexture* GetPBRParamsTextureRHI() const;
+    rhi::ITexture* GetVelocityTextureRHI() const;
+    rhi::ITexture* GetDepthTextureRHI() const;
 
 private:
     void Destroy();
-    void CreateTextures();
-    void AttachTextures();
+    rhi::ITexture* GetColorTextureRHI(uint32_t index) const;
 
     uint32_t m_width = 0, m_height = 0;
-    unsigned int m_fbo = 0;
-    unsigned int m_positionTexture = 0;
-    unsigned int m_normalTexture = 0;
-    unsigned int m_albedoTexture = 0;
-    unsigned int m_pbrParamsTexture = 0;
-    unsigned int m_velocityTexture = 0;
-    unsigned int m_depthTexture = 0;
+    rhi::IDevice* m_deviceRHI = nullptr;
+    rhi::IRenderTarget* m_renderTargetRHI = nullptr;
 };
 
 } // namespace render

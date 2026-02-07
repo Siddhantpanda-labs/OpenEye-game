@@ -33,6 +33,7 @@ struct DeviceGL : IDevice {
                                       const std::vector<RHITextureFormat>& colorFormats,
                                       RHITextureFormat depthFormat,
                                       uint32_t samples) override;
+    IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) override;
     void DestroyRenderTarget(IRenderTarget* rt) override;
 
     ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) override;
@@ -40,11 +41,14 @@ struct DeviceGL : IDevice {
     IQueryPool* CreateQueryPool(QueryType type, uint32_t count) override;
     void DestroyQueryPool(IQueryPool* pool) override;
 
+    int GetMaxSamples(int requestedSamples) override;
+
     void Present() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
+    void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) override;
 
 private:
     std::unique_ptr<CommandListGL> m_immediateCommandList;

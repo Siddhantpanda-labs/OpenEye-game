@@ -10,6 +10,7 @@
 #include "eyelib/fluids/FluidSurfaceExtractor.h"
 #include "eyelib/fluids/FluidVolumeRenderer.h"
 #include "eyelib/render/RenderPipeline.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Shader.h"
 
@@ -179,9 +180,11 @@ void RenderSystem::Update(World& world, float deltaTime) {
                 s_volumeInit = s_volumeRenderer.Initialize();
             }
             auto* renderer = &s_volumeRenderer;
-            pipeline->SetPrePostProcessCallback([volumes = std::move(volumesToRender), renderer](unsigned int hdrFbo, unsigned int width, unsigned int height, const render::RenderScene& scene) {
+            pipeline->SetPrePostProcessCallback([volumes = std::move(volumesToRender), renderer](render::rhi::IRenderTarget* hdrRT, unsigned int width, unsigned int height, const render::RenderScene& scene) {
                 (void)width;
                 (void)height;
+                if (!hdrRT) return;
+                unsigned int hdrFbo = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrRT->GetNativeFramebuffer()));
                 if (hdrFbo == 0) return;
                 for (const auto& item : volumes) {
                     if (!item.simulation) continue;
