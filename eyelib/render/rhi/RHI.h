@@ -35,6 +35,10 @@ struct IDevice {
     virtual void DestroyTexture(ITexture* texture) = 0;
 
     virtual IShader* CreateShader(ShaderStage stage, const char* source, size_t sourceLen) = 0;
+    /** Load shader from precompiled binary (e.g. BGFX .bin). Backends that don't support it return nullptr. */
+    virtual IShader* CreateShaderFromBinary(ShaderStage stage, const void* data, size_t size) = 0;
+    /** Try to load vertex and fragment shaders from backend-specific paths (e.g. BGFX .bin). Returns true and sets outVs/outFs; caller must DestroyShader. Returns false if unsupported or not found. */
+    virtual bool TryLoadShaderFromPaths(const char* vertexPath, const char* fragmentPath, IShader*& outVs, IShader*& outFs) = 0;
     virtual void DestroyShader(IShader* shader) = 0;
 
     virtual IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;

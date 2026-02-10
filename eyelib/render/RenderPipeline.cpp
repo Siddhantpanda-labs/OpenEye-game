@@ -23,6 +23,7 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cstdint>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -305,6 +306,7 @@ void RenderPipeline::RenderForward(const RenderScene& scene) {
         Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
         if (sh) {
             sh->SetMat4("u_Model", d.transform);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
             sh->SetMat4("u_View", scene.camera.view);
             sh->SetMat4("u_Projection", scene.camera.projection);
             sh->SetVec3("u_ViewPos", scene.camera.viewPos);
@@ -404,6 +406,7 @@ void RenderPipeline::RenderForward(const api::RenderScene& scene) {
         if (!sh) continue;
         sh->Bind();
         sh->SetMat4("u_Model", apiD.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(apiD.transform)));
         sh->SetMat4("u_View", scene.camera.view);
         sh->SetMat4("u_Projection", scene.camera.projection);
         sh->SetVec3("u_ViewPos", scene.camera.viewPos);
@@ -634,6 +637,7 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
         }
 
         sh->SetMat4("u_Model", d.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
         if (useSkinned) {
             boneCount = std::min(boneCount, kMaxBones);
             sh->SetMat4Array("u_Bones", bonePtr, boneCount);
@@ -870,6 +874,7 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
         else { if (!commonSetNonSkinned) { setCommon(sh); commonSetNonSkinned = true; } }
 
         sh->SetMat4("u_Model", apiD.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(apiD.transform)));
         if (useSkinned) {
             const size_t boneCount = std::min(apiD.boneCount, kMaxBones);
             sh->SetMat4Array("u_Bones", apiD.bones, boneCount);

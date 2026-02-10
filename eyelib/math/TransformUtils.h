@@ -48,5 +48,10 @@ inline Mat3 NormalMatrix(const Mat4& m) {
     return glm::mat3(glm::transpose(glm::inverse(m)));
 }
 
+/** Mat4 with upper-left 3x3 from m and (0,0,0,1) as fourth column (for passing Mat3 as uniform). */
+inline Mat4 Mat4FromMat3(const Mat3& m) {
+    return Mat4(Vec4(m[0], 0.0f), Vec4(m[1], 0.0f), Vec4(m[2], 0.0f), Vec4(0.0f, 0.0f, 0.0f, 1.0f));
+}
+
 } // namespace math
 } // namespace eyelib

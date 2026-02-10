@@ -3,6 +3,11 @@
 #include "eyelib/platform/window/GraphicsDevice.h"
 #include "eyelib/platform/window/Window.h"
 
+#if OPENEYE_USE_BGFX
+#include "eyelib/render/rhi/bgfx/CreateDeviceBGFX.h"
+struct GLFWwindow;
+#endif
+
 namespace eyelib {
 namespace render {
 namespace rhi {
@@ -25,8 +30,16 @@ namespace platform {
 
 std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(Window* window) {
     if (!window) return nullptr;
+#if OPENEYE_USE_BGFX
+    return render::rhi::CreateBGFXDevice(
+        static_cast<GLFWwindow*>(window->NativeHandle()),
+        window->Width(),
+        window->Height()
+    );
+#else
     window->MakeContextCurrent();
     return render::rhi::CreateOpenGLDevice();
+#endif
 }
 
 } // namespace platform

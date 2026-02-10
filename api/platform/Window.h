@@ -50,6 +50,9 @@ public:
     /** @brief Native window handle (e.g. GLFWwindow*) for ImGui etc. */
     void* GetNativeHandle() const;
 
+    /** @brief Platform window pointer (for RHI device creation). Cast to platform::Window* when calling CreateGraphicsDevice. */
+    void* GetPlatformWindow();
+
 private:
     class Impl;
     Impl* m_impl = nullptr;

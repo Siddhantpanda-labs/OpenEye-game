@@ -1,7 +1,5 @@
 # Eyelib Render Component (minimal bring-up)
 
-option(EYELIB_USE_VULKAN "Build Vulkan RHI backend" OFF)
-
 set(RENDER_SOURCES
     # RHI (graphics backend abstraction)
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIContext.cpp
@@ -18,21 +16,18 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
 )
 
-if(EYELIB_USE_VULKAN)
-    find_package(Vulkan REQUIRED)
+if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
     list(APPEND RENDER_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VkEnums.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BufferVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/TextureVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VkShaderCompiler.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/ShaderVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/PipelineVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/RenderTargetVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/QueryPoolVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CommandListVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CreateDeviceVk.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/vma/vk_mem_alloc.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/BGFXEnums.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/BufferBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/TextureBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/ShaderBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/PipelineBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/RenderTargetBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/QueryPoolBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/CommandListBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/DeviceBGFX.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/CreateDeviceBGFX.cpp
     )
 endif()
 
@@ -121,9 +116,10 @@ target_link_libraries(EyelibRender
         glad
 )
 
-if(EYELIB_USE_VULKAN)
-    target_include_directories(EyelibRender PRIVATE ${Vulkan_INCLUDE_DIRS})
-    target_link_libraries(EyelibRender PRIVATE Vulkan::Vulkan)
+if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
+    target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_BGFX=1)
+    target_include_directories(EyelibRender PRIVATE ${OPENEYE_BGFX_SOURCE_DIR}/bgfx/include ${OPENEYE_BGFX_SOURCE_DIR}/bx/include)
+    target_link_libraries(EyelibRender PRIVATE bgfx glfw)
 endif()
 
 if(WIN32)

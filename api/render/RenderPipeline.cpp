@@ -2,6 +2,7 @@
 #include "api/render/RenderTarget.h"
 #include "api/platform/Window.h"
 #include "eyelib/render/RenderPipeline.h"
+#include "eyelib/platform/window/GraphicsDevice.h"
 #include "eyelib/render/rhi/CreateDevice.h"
 
 namespace eyelib {
@@ -26,8 +27,11 @@ bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
 }
 
 bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height) {
-    auto device = ::eyelib::render::rhi::CreateGraphicsDevice([&window] { window.MakeContextCurrent(); });
-    return m_impl->pipeline->Initialize(std::move(device), width, height);
+    void* platformWindow = window.GetPlatformWindow();
+    auto device = platformWindow
+        ? ::eyelib::platform::CreateGraphicsDevice(static_cast<::eyelib::platform::Window*>(platformWindow))
+        : nullptr;
+    return device && m_impl->pipeline->Initialize(std::move(device), width, height);
 }
 
 bool RenderPipeline::Initialize(const RenderTarget& target) {

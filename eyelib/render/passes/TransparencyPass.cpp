@@ -4,6 +4,7 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -62,6 +63,7 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         Shader* sh = material ? material->GetShader().get() : nullptr;
         if (!sh) continue;
         sh->SetMat4("u_Model", d.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
         sh->SetMat4("u_View", view);
         sh->SetMat4("u_Projection", projection);
         sh->SetVec3("u_ViewPos", viewPos);
@@ -119,6 +121,7 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         if (!sh) continue;
         sh->Bind();
         sh->SetMat4("u_Model", apiD.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(apiD.transform)));
         sh->SetMat4("u_View", view);
         sh->SetMat4("u_Projection", projection);
         sh->SetVec3("u_ViewPos", viewPos);

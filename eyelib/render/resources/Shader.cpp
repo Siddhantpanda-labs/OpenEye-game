@@ -152,6 +152,25 @@ bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, c
 bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
                           const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
     if (!device) return false;
+    rhi::IShader* vs = nullptr;
+    rhi::IShader* fs = nullptr;
+    if (device->TryLoadShaderFromPaths(vertexPath.c_str(), fragmentPath.c_str(), vs, fs) && vs && fs) {
+        if (m_deviceRHI) Destroy(m_deviceRHI);
+        rhi::PipelineDesc desc;
+        desc.vertexShader = vs;
+        desc.fragmentShader = fs;
+        desc.vertexLayout = layout;
+        desc.topology = topology;
+        desc.depthStencil.depthTest = true;
+        desc.depthStencil.depthWrite = true;
+        rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
+        device->DestroyShader(vs);
+        device->DestroyShader(fs);
+        if (!pipe) return false;
+        m_pipelineRHI = pipe;
+        m_deviceRHI = device;
+        return true;
+    }
     std::string vertexSrc;
     if (!LoadShaderSource(vertexPath, vertexSrc)) return false;
     std::string fragmentSrc;

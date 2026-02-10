@@ -23,6 +23,8 @@ struct DeviceGL : IDevice {
     void DestroyTexture(ITexture* texture) override;
 
     IShader* CreateShader(ShaderStage stage, const char* source, size_t sourceLen) override;
+    IShader* CreateShaderFromBinary(ShaderStage stage, const void* data, size_t size) override;
+    bool TryLoadShaderFromPaths(const char* vertexPath, const char* fragmentPath, IShader*& outVs, IShader*& outFs) override;
     void DestroyShader(IShader* shader) override;
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;

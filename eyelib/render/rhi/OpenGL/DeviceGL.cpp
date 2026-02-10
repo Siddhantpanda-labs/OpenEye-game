@@ -182,6 +182,21 @@ IShader* DeviceGL::CreateShader(ShaderStage stage, const char* source, size_t so
     return s;
 }
 
+IShader* DeviceGL::CreateShaderFromBinary(ShaderStage stage, const void* data, size_t size) {
+    (void)stage;
+    (void)data;
+    (void)size;
+    return nullptr;
+}
+
+bool DeviceGL::TryLoadShaderFromPaths(const char* vertexPath, const char* fragmentPath, IShader*& outVs, IShader*& outFs) {
+    (void)vertexPath;
+    (void)fragmentPath;
+    outVs = nullptr;
+    outFs = nullptr;
+    return false;
+}
+
 void DeviceGL::DestroyShader(IShader* shader) {
     auto* s = static_cast<ShaderGL*>(shader);
     if (s && s->m_handle) {

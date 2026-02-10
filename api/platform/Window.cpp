@@ -102,6 +102,11 @@ void* Window::GetNativeHandle() const {
     return m_impl->window.NativeHandle();
 }
 
+void* Window::GetPlatformWindow() {
+    if (!m_impl) return nullptr;
+    return static_cast<void*>(&m_impl->window);
+}
+
 } // namespace api
 } // namespace eyelib
 

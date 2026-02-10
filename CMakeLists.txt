@@ -36,6 +36,7 @@ option(OPENEYE_BUILD_PLAYER "Build unified runtime player" ON)
 option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
+option(OPENEYE_USE_BGFX "Use bgfx as RHI backend (Phase 0: fetch and build)" OFF)
 
 # Global include directories (components will add their own)
 # These are for legacy compatibility and third-party includes
@@ -45,6 +46,13 @@ option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 # --------------------------------------
 if(OPENEYE_USE_LZ4 OR OPENEYE_USE_ZSTD)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchCompression.cmake)
+endif()
+
+# --------------------------------------
+# BGFX (FetchContent: bx, bimg, bgfx via pr0g/bgfx.cmake)
+# --------------------------------------
+if(OPENEYE_USE_BGFX)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchBGFX.cmake)
 endif()
 
 # --------------------------------------
@@ -299,6 +307,13 @@ endif()
 # --------------------------------------
 if(OPENEYE_BUILD_TESTS)
     add_subdirectory(app/test)
+endif()
+
+# --------------------------------------
+# BGFX Phase 0 test (init + one frame)
+# --------------------------------------
+if(OPENEYE_USE_BGFX)
+    add_subdirectory(app/bgfx_test)
 endif()
 
 
