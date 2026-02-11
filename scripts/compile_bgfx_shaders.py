@@ -152,6 +152,8 @@ def main() -> int:
                     "-i", str(bgfx_include),
                     "--varyingdef", str(varying_rel),
                 ]
+                if profile == "spirv":
+                    cmd.append("--relax-block-layout")
                 print(" ".join(cmd))
                 if not args.dry_run:
                     try:

@@ -199,6 +199,8 @@ void Mesh::UploadToGPU(rhi::IDevice* device) {
     vdesc.sizeInBytes = m_vertices.size() * sizeof(Vertex);
     vdesc.usage = rhi::BufferUsage::Vertex;
     vdesc.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    rhi::VertexLayout meshLayout = GetVertexLayoutRHI();
+    vdesc.vertexLayout = &meshLayout;
     m_vertexBufferRHI = device->CreateBuffer(vdesc, m_vertices.data());
     if (!m_vertexBufferRHI) return;
 

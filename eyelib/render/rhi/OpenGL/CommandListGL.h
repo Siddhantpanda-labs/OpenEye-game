@@ -44,6 +44,8 @@ struct CommandListGL : ICommandList {
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
 
+    void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
+
     void SetUniformInt(const char* name, int value) override;
     void SetUniformFloat(const char* name, float value) override;
     void SetUniformVec2(const char* name, const float* data) override;

@@ -84,11 +84,30 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
     m_lastOutputValid = false;
     if (device) m_deviceRHI = device;
     if (!m_deviceRHI) m_deviceRHI = rhi::GetDefaultDevice();
-    if (!m_deviceRHI) return false;
+    if (!m_deviceRHI) {
+        core::Log::Error("PostProcessor::Initialize: no RHI device");
+        return false;
+    }
+    core::Log::Info("PostProcessor::Initialize: loading shaders");
     LoadShaders();
+    core::Log::Info("PostProcessor::Initialize: creating fullscreen quad");
     CreateFullscreenQuad();
+    if (!m_fullscreenVBO || !m_fullscreenIBO) {
+        core::Log::Error("PostProcessor::Initialize: CreateFullscreenQuad failed (VBO or IBO null)");
+        return false;
+    }
+    core::Log::Info("PostProcessor::Initialize: creating framebuffers");
     CreateFramebuffers();
-    return GetOutputTextureRHI() != nullptr;
+    rhi::ITexture* outTex = GetOutputTextureRHI();
+    if (!m_outputRT) {
+        core::Log::Error("PostProcessor::Initialize: m_outputRT is null after CreateFramebuffers");
+        return false;
+    }
+    if (!outTex) {
+        core::Log::Error("PostProcessor::Initialize: GetOutputTextureRHI() returned null (no color texture on output RT)");
+        return false;
+    }
+    return true;
 }
 
 void PostProcessor::Resize(uint32_t width, uint32_t height) {
@@ -116,10 +135,15 @@ void PostProcessor::CreateFramebuffers() {
     std::vector<rhi::RHITextureFormat> r8 = { rhi::RHITextureFormat::R8 };
 
     m_pingPongRT[0] = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    if (!m_pingPongRT[0]) core::Log::Error("PostProcessor::CreateFramebuffers: pingPongRT[0] failed");
     m_pingPongRT[1] = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    if (!m_pingPongRT[1]) core::Log::Error("PostProcessor::CreateFramebuffers: pingPongRT[1] failed");
     m_bloomExtractRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    if (!m_bloomExtractRT) core::Log::Error("PostProcessor::CreateFramebuffers: bloomExtractRT failed");
     m_outputRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgba8, rhi::RHITextureFormat::None, 1);
+    if (!m_outputRT) core::Log::Error("PostProcessor::CreateFramebuffers: outputRT failed");
     m_ssaoRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, r8, rhi::RHITextureFormat::None, 1);
+    if (!m_ssaoRT) core::Log::Error("PostProcessor::CreateFramebuffers: ssaoRT failed");
 }
 
 void PostProcessor::LoadShaders() {
@@ -127,62 +151,62 @@ void PostProcessor::LoadShaders() {
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
 
     m_toneMappingShader = std::make_shared<Shader>();
-    if (!m_toneMappingShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/tonemap.vert", "assets/shaders/passes/post/tonemap.frag", fullscreenLayout)) {
+    if (!m_toneMappingShader->Load(m_deviceRHI, "passes/post/tonemap", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load tone mapping shader");
     }
 
     m_bloomExtractShader = std::make_shared<Shader>();
-    if (!m_bloomExtractShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_extract.vert", "assets/shaders/passes/post/bloom_extract.frag", fullscreenLayout)) {
+    if (!m_bloomExtractShader->Load(m_deviceRHI, "passes/post/bloom_extract", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom extract shader");
     }
 
     m_bloomBlurShader = std::make_shared<Shader>();
-    if (!m_bloomBlurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag", fullscreenLayout)) {
+    if (!m_bloomBlurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom blur shader");
     }
 
     m_bloomCompositeShader = std::make_shared<Shader>();
-    if (!m_bloomCompositeShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_composite.vert", "assets/shaders/passes/post/bloom_composite.frag", fullscreenLayout)) {
+    if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom composite shader");
     }
 
     m_blurShader = std::make_shared<Shader>();
-    if (!m_blurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/bloom_blur.vert", "assets/shaders/passes/post/bloom_blur.frag", fullscreenLayout)) {
+    if (!m_blurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load blur shader");
     }
 
     m_chromaticAberrationShader = std::make_shared<Shader>();
-    if (!m_chromaticAberrationShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/chromatic_aberration.vert", "assets/shaders/passes/post/chromatic_aberration.frag", fullscreenLayout)) {
+    if (!m_chromaticAberrationShader->Load(m_deviceRHI, "passes/post/chromatic_aberration", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load chromatic aberration shader");
     }
 
     m_fxaaShader = std::make_shared<Shader>();
-    if (!m_fxaaShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/fxaa.vert", "assets/shaders/passes/post/fxaa.frag", fullscreenLayout)) {
+    if (!m_fxaaShader->Load(m_deviceRHI, "passes/post/fxaa", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load FXAA shader");
     }
 
     m_ssaoShader = std::make_shared<Shader>();
-    if (!m_ssaoShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/ssao.vert", "assets/shaders/passes/post/ssao.frag", fullscreenLayout)) {
+    if (!m_ssaoShader->Load(m_deviceRHI, "passes/post/ssao", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load SSAO shader");
     }
 
     m_ssrShader = std::make_shared<Shader>();
-    if (!m_ssrShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/ssr.vert", "assets/shaders/passes/post/ssr.frag", fullscreenLayout)) {
+    if (!m_ssrShader->Load(m_deviceRHI, "passes/post/ssr", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load SSR shader");
     }
 
     m_motionBlurShader = std::make_shared<Shader>();
-    if (!m_motionBlurShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/motion_blur.vert", "assets/shaders/passes/post/motion_blur.frag", fullscreenLayout)) {
+    if (!m_motionBlurShader->Load(m_deviceRHI, "passes/post/motion_blur", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load motion blur shader");
     }
 
     m_vignetteShader = std::make_shared<Shader>();
-    if (!m_vignetteShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/vignette.vert", "assets/shaders/passes/post/vignette.frag", fullscreenLayout)) {
+    if (!m_vignetteShader->Load(m_deviceRHI, "passes/post/vignette", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load vignette shader");
     }
 
     m_filmGrainShader = std::make_shared<Shader>();
-    if (!m_filmGrainShader->LoadFromFile(m_deviceRHI, "assets/shaders/passes/post/film_grain.vert", "assets/shaders/passes/post/film_grain.frag", fullscreenLayout)) {
+    if (!m_filmGrainShader->Load(m_deviceRHI, "passes/post/film_grain", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load film grain shader");
     }
 

@@ -13,7 +13,7 @@ namespace assets {
  * reflected where the running app loads assets from.
  *
  * Uses polling: call Tick() periodically (e.g. every frame or every 1–2 s).
- * Only copies .vert, .frag, .glsl files when source is newer than runtime.
+ * Only copies .vert, .frag, .glsl, .vsh, .psh (and .comp, .geom, .tesc, .tese) when source is newer than runtime.
  */
 class ShaderWatcher {
 public:

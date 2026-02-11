@@ -1,5 +1,6 @@
 #include "eyelib/render/BatchRenderer.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 
 namespace eyelib {
@@ -54,6 +55,7 @@ void BatchRenderer::Flush() {
         Shader* sh = e.material->GetShader().get();
         if (sh) {
             sh->SetMat4("u_Model", e.transform);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
             e.mesh->Draw();
             e.mesh->Unbind();
             sh->Unbind();

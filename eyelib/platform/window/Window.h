@@ -21,6 +21,8 @@ struct WindowConfig {
     bool debugContext = true;
     int glMajorVersion = 4;
     int glMinorVersion = 5;
+    /** When true, create window without OpenGL context (e.g. for Diligent Vulkan). No GLAD/SwapBuffers. */
+    bool useNativeApiOnly = false;
 };
 
 /**
@@ -66,6 +68,9 @@ public:
 
     // Opaque access for internal engine integration (do not expose in api/)
     ::GLFWwindow* NativeHandle() const { return m_window; }
+
+    /** Native window handle for RHI (e.g. HWND on Windows). Use for BGFX/Vulkan surface. */
+    void* GetNativeWindowHandle() const;
 
     // Callbacks
     /** Set resize callback. Contract: must not call GL or touch render resources; may run on main thread while GL context is on render thread. Prefer storing (width,height) and applying resize on render thread. */

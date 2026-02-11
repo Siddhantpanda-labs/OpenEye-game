@@ -8,8 +8,17 @@
 #define GLFW_INCLUDE_NONE
 #endif
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#    define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined(__APPLE__)
+#    define GLFW_EXPOSE_NATIVE_COCOA
+#else
+#    define GLFW_EXPOSE_NATIVE_X11
+#endif
+#include <GLFW/glfw3native.h>
 #include <glad/glad.h>
 
+#include <cstdint>
 #include <stdexcept>
 
 namespace {
@@ -72,6 +81,21 @@ bool Window::Initialize(const WindowConfig& config) {
 
     m_config = config;
 
+    if (config.useNativeApiOnly) {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, config.resizable ? GLFW_TRUE : GLFW_FALSE);
+        GLFWmonitor* monitor = config.fullscreen ? glfwGetPrimaryMonitor() : nullptr;
+        m_window = glfwCreateWindow(config.width, config.height, config.title.c_str(), monitor, nullptr);
+        if (!m_window) {
+            core::Log::Error("Failed to create GLFW window (native API)");
+            return false;
+        }
+        glfwGetFramebufferSize(m_window, &m_width, &m_height);
+        SetupCallbacks();
+        core::Log::InfoF("Window created: %dx%d (native API, no OpenGL)", m_width, m_height);
+        return true;
+    }
+
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, config.glMajorVersion);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, config.glMinorVersion);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -121,6 +145,17 @@ void Window::Shutdown() {
     }
 }
 
+void* Window::GetNativeWindowHandle() const {
+    if (!m_window) return nullptr;
+#if defined(_WIN32)
+    return static_cast<void*>(glfwGetWin32Window(m_window));
+#elif defined(__APPLE__)
+    return glfwGetCocoaWindow(m_window);
+#else
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(glfwGetX11Window(m_window)));
+#endif
+}
+
 void Window::PollEvents() {
     // advance input state once per frame (just-pressed/released)
     Input::Update();
@@ -128,15 +163,14 @@ void Window::PollEvents() {
 }
 
 void Window::SwapBuffers() {
-    if (m_window) {
-        // Ensure all GL work is complete before present to reduce flicker/tearing.
+    if (m_window && !m_config.useNativeApiOnly) {
         glFinish();
         glfwSwapBuffers(m_window);
     }
 }
 
 void Window::MakeContextCurrent() {
-    if (m_window) {
+    if (m_window && !m_config.useNativeApiOnly) {
         glfwMakeContextCurrent(m_window);
         glfwSwapInterval(m_config.vsync ? 1 : 0);
     }
@@ -149,12 +183,13 @@ void Window::RefreshFramebufferSize() {
 }
 
 void Window::ApplyVsync() {
-    if (m_window) {
+    if (m_window && !m_config.useNativeApiOnly) {
         glfwSwapInterval(m_config.vsync ? 1 : 0);
     }
 }
 
 void Window::Clear(float r, float g, float b, float a) {
+    if (m_config.useNativeApiOnly) return;
     glClearColor(r, g, b, a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }

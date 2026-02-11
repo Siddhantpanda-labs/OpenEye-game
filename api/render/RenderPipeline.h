@@ -1,6 +1,7 @@
 #pragma once
 
 #include "api/render/RenderScene.h"
+#include "eyelib/render/RenderBackend.h"
 #include <cstdint>
 #include <memory>
 
@@ -12,7 +13,7 @@ class RenderTarget;
 
 /**
  * @brief Render pipeline API (opaque). Initialize, set mode, render scene.
- * No OpenGL types exposed.
+ * No OpenGL types exposed. Single init path: pass window and backend (e.g. from --renderer).
  */
 class RenderPipeline {
 public:
@@ -26,10 +27,9 @@ public:
     RenderPipeline(RenderPipeline&& other) noexcept;
     RenderPipeline& operator=(RenderPipeline&& other) noexcept;
 
-    bool Initialize(uint32_t width, uint32_t height);
-    /** Make the window's context current and create the device. Prefer this when you have a window. */
-    bool Initialize(Window& window, uint32_t width, uint32_t height);
-    bool Initialize(const RenderTarget& target);
+    /** Create device and pipeline. Requires a window; backend chosen at runtime (e.g. --renderer bgfx|opengl). */
+    bool Initialize(Window& window, uint32_t width, uint32_t height,
+                    ::eyelib::render::RenderBackend backend = ::eyelib::render::RenderBackend::Default);
     void Resize(uint32_t width, uint32_t height);
     void Resize(const RenderTarget& target);
     void Shutdown();

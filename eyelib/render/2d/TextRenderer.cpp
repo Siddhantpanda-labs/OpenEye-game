@@ -43,7 +43,7 @@ void TextRenderer::EnsureShader() {
     m_shader = std::make_shared<Shader>();
     rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
     if (!device) return;
-    m_shader->LoadFromFile(device, "assets/shaders/passes/2d/sprite.vert", "assets/shaders/passes/2d/sprite.frag", GetVertexLayout());
+    m_shader->Load(device, "passes/2d/sprite", GetVertexLayout());
 }
 
 void TextRenderer::SetShader(std::shared_ptr<Shader> shader) {

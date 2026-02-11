@@ -15,6 +15,7 @@
 #include "api/platform/All.h"
 #include "api/world/All.h"
 #include "eyelib/assets/ShaderWatcher.h"
+#include "eyelib/render/RenderBackend.h"
 
 #include <functional>
 #include <iostream>
@@ -298,6 +299,7 @@ int RunPlayer(int argc, char** argv) {
         windowConfig.width = options.width;
         windowConfig.height = options.height;
         windowConfig.vsync = options.vsync;
+        windowConfig.useNativeApiOnly = (options.renderBackend == eyelib::render::RenderBackend::Diligent);
         if (!windowGuard.Initialize(window, windowConfig)) {
             eyelib::api::core::Log::Error("Failed to initialize window.");
             return static_cast<int>(ExitCode::WindowInitFailed);
@@ -314,7 +316,8 @@ int RunPlayer(int argc, char** argv) {
     if (!options.headless) {
         if (!renderBridge.Initialize(window,
                                      static_cast<uint32_t>(window.Width()),
-                                     static_cast<uint32_t>(window.Height()))) {
+                                     static_cast<uint32_t>(window.Height()),
+                                     options.renderBackend)) {
             eyelib::api::core::Log::Error("Failed to initialize renderer or pipeline.");
             return static_cast<int>(ExitCode::RenderInitFailed);
         }

@@ -6,10 +6,13 @@
 #include "eyelib/render/rhi/OpenGL/RenderTargetGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
+#include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace eyelib {
 namespace render {
@@ -233,6 +236,44 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     p->m_depthStencil = desc.depthStencil;
     p->m_raster = desc.raster;
     return p;
+}
+
+IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) {
+    if (!shaderName || !shaderName[0]) return nullptr;
+    // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag (exe dir preferred)
+    std::string baseDir = "assets/shaders/opengl/";
+    std::string vertPath = baseDir + shaderName + ".vert";
+    std::string fragPath = baseDir + shaderName + ".frag";
+    std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
+    if (!exeDir.empty() && eyelib::platform::filesystem::FileExists(exeDir + vertPath)) {
+        vertPath = exeDir + vertPath;
+        fragPath = exeDir + fragPath;
+    }
+
+    std::string vertexSrc;
+    if (!eyelib::render::LoadShaderSource(vertPath, vertexSrc)) return nullptr;
+    std::string fragmentSrc;
+    if (!eyelib::render::LoadShaderSource(fragPath, fragmentSrc)) return nullptr;
+
+    IShader* vs = CreateShader(ShaderStage::Vertex, vertexSrc.c_str(), vertexSrc.size());
+    IShader* fs = CreateShader(ShaderStage::Fragment, fragmentSrc.c_str(), fragmentSrc.size());
+    if (!vs || !fs) {
+        if (vs) DestroyShader(vs);
+        if (fs) DestroyShader(fs);
+        return nullptr;
+    }
+
+    PipelineDesc desc;
+    desc.vertexShader = vs;
+    desc.fragmentShader = fs;
+    desc.vertexLayout = layout;
+    desc.topology = topology;
+    desc.depthStencil.depthTest = true;
+    desc.depthStencil.depthWrite = true;
+    IPipeline* pipe = CreateGraphicsPipeline(desc);
+    DestroyShader(vs);
+    DestroyShader(fs);
+    return pipe;
 }
 
 IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {

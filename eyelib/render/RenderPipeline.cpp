@@ -68,15 +68,29 @@ void RenderPipeline::Shutdown() {
 }
 
 bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height) {
-    if (!device) return false;
+    if (!device) {
+        core::Log::Error("RenderPipeline::Initialize: device is null");
+        return false;
+    }
     m_width = width;
     m_height = height;
     m_device = std::move(device);
     rhi::SetDefaultDevice(m_device.get());
+
+    core::Log::Info("RenderPipeline::Initialize: initializing GBuffer");
     m_gbuffer = std::make_unique<GBuffer>();
-    if (!m_gbuffer->Initialize(width, height)) return false;
+    if (!m_gbuffer->Initialize(width, height)) {
+        core::Log::Error("RenderPipeline::Initialize: GBuffer::Initialize failed");
+        return false;
+    }
+
+    core::Log::Info("RenderPipeline::Initialize: initializing ShadowMap");
     m_shadowMap = std::make_unique<ShadowMap>();
-    if (!m_shadowMap->Initialize(m_device.get(), 2048)) return false;
+    if (!m_shadowMap->Initialize(m_device.get(), 2048)) {
+        core::Log::Error("RenderPipeline::Initialize: ShadowMap::Initialize failed");
+        return false;
+    }
+
     m_gbufferPass = std::make_unique<GBufferPass>();
     m_shadowPass = std::make_unique<ShadowPass>();
     m_lightingPass = std::make_unique<LightingPass>();
@@ -85,15 +99,27 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_frameGraph->SetFrameSize(width, height);
     m_clusteredLightGrid = std::make_unique<ClusteredLightGrid>();
     m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Default, will be updated per-frame
+
+    core::Log::Info("RenderPipeline::Initialize: initializing PostProcessor");
     m_postProcessor = std::make_unique<PostProcessor>();
-    if (!m_postProcessor->Initialize(width, height)) return false;
+    if (!m_postProcessor->Initialize(width, height)) {
+        core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
+        return false;
+    }
+
+    core::Log::Info("RenderPipeline::Initialize: creating HDR framebuffer");
     CreateHDRFramebuffer();
+    if (m_hdrRenderTarget == nullptr) {
+        core::Log::Error("RenderPipeline::Initialize: CreateHDRFramebuffer failed (m_hdrRenderTarget is null)");
+        return false;
+    }
 
     // Initialize previous matrices (identity for first frame)
     m_prevView = math::Mat4(1.0f);
     m_prevProjection = math::Mat4(1.0f);
 
-    return m_hdrRenderTarget != nullptr;
+    core::Log::Info("RenderPipeline::Initialize: pipeline init success");
+    return true;
 }
 
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
@@ -271,8 +297,11 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const api::RenderScene& scene) {
         },
         {}, { hdrColor }, true);
 
+    core::Log::Info("RenderPipeline::BuildAndExecuteFrameGraph(api): Compile");
     m_frameGraph->Compile();
+    core::Log::Info("RenderPipeline::BuildAndExecuteFrameGraph(api): Execute");
     m_frameGraph->Execute(GetRHICommandList());
+    core::Log::Info("RenderPipeline::BuildAndExecuteFrameGraph(api): Execute returned");
 }
 
 void RenderPipeline::RenderForward(const RenderScene& scene) {
@@ -546,10 +575,11 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
             scene.camera.nearPlane, scene.camera.farPlane);
     }
 
-    // Ensure forward+ shader exists
+    // Ensure forward+ shader exists (backend-owned loading by logical name)
     if (!m_forwardPlusShader || !m_forwardPlusShader->IsValid()) {
         m_forwardPlusShader = std::make_shared<Shader>();
-        m_forwardPlusShader->LoadFromFile("assets/shaders/passes/forward/forwardplus.vert", "assets/shaders/passes/forward/forwardplus.frag");
+        if (m_device)
+            m_forwardPlusShader->Load(m_device.get(), "passes/forward/forwardplus", Mesh::GetVertexLayoutRHI());
     }
 
     if (!m_forwardPlusShader->IsValid()) {
@@ -559,7 +589,8 @@ void RenderPipeline::RenderForwardPlus(const RenderScene& scene) {
 
     if (!m_forwardPlusSkinnedShader || !m_forwardPlusSkinnedShader->IsValid()) {
         m_forwardPlusSkinnedShader = std::make_shared<Shader>();
-        m_forwardPlusSkinnedShader->LoadFromFile("assets/shaders/passes/forward/forwardplus_skinned.vert", "assets/shaders/passes/forward/forwardplus.frag");
+        if (m_device)
+            m_forwardPlusSkinnedShader->Load(m_device.get(), "passes/forward/forwardplus_skinned", Mesh::GetVertexLayoutRHI());
     }
 
     if (cmdFwd && m_hdrRenderTarget) {
@@ -806,7 +837,8 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
 
     if (!m_forwardPlusShader || !m_forwardPlusShader->IsValid()) {
         m_forwardPlusShader = std::make_shared<Shader>();
-        m_forwardPlusShader->LoadFromFile("assets/shaders/passes/forward/forwardplus.vert", "assets/shaders/passes/forward/forwardplus.frag");
+        if (m_device)
+            m_forwardPlusShader->Load(m_device.get(), "passes/forward/forwardplus", Mesh::GetVertexLayoutRHI());
     }
     if (!m_forwardPlusShader->IsValid()) {
         RenderForward(scene);
@@ -814,7 +846,8 @@ void RenderPipeline::RenderForwardPlus(const api::RenderScene& scene) {
     }
     if (!m_forwardPlusSkinnedShader || !m_forwardPlusSkinnedShader->IsValid()) {
         m_forwardPlusSkinnedShader = std::make_shared<Shader>();
-        m_forwardPlusSkinnedShader->LoadFromFile("assets/shaders/passes/forward/forwardplus_skinned.vert", "assets/shaders/passes/forward/forwardplus.frag");
+        if (m_device)
+            m_forwardPlusSkinnedShader->Load(m_device.get(), "passes/forward/forwardplus_skinned", Mesh::GetVertexLayoutRHI());
     }
 
     if (cmdFwdApi && m_hdrRenderTarget) {
@@ -936,7 +969,9 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
 
     switch (m_mode) {
     case PipelineMode::Deferred:
+        core::Log::Info("RenderPipeline::Render(api): entering BuildAndExecuteFrameGraph");
         BuildAndExecuteFrameGraph(scene);
+        core::Log::Info("RenderPipeline::Render(api): BuildAndExecuteFrameGraph returned");
         break;
     case PipelineMode::Forward:
         if (m_shadowMap && m_shadowPass) {
@@ -984,7 +1019,9 @@ void RenderPipeline::Render(const api::RenderScene& scene) {
     m_prevView = scene.camera.view;
     m_prevProjection = scene.camera.projection;
 
+    core::Log::Info("RenderPipeline::Render(api): calling cmd->End()");
     cmd->End();
+    core::Log::Info("RenderPipeline::Render(api): Render done");
 }
 
 void RenderPipeline::Render(const RenderScene& scene) {
@@ -1060,12 +1097,19 @@ void RenderPipeline::Render(const RenderScene& scene) {
 
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
+    // Clear swap chain to a known background (Diligent/Vulkan don't clear it elsewhere; avoids white/garbage)
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (cmd) {
+        rhi::ClearValue bg = {};
+        bg.color[0] = 0.12f; bg.color[1] = 0.12f; bg.color[2] = 0.15f; bg.color[3] = 1.f;
+        cmd->ClearDefaultFramebuffer(bg);
+    }
     if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
         m_device->BlitToDefaultFramebuffer(m_postProcessor->GetOutputRenderTargetRHI());
-        return;
-    }
-    if (m_hdrRenderTarget)
+    } else if (m_hdrRenderTarget) {
         m_device->BlitToDefaultFramebuffer(m_hdrRenderTarget);
+    }
+    m_device->Present();
 }
 
 bool RenderPipeline::HasValidOutput() const {
@@ -1074,8 +1118,9 @@ bool RenderPipeline::HasValidOutput() const {
 
 void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
+    if (!m_device) return;
     m_skyboxShader = std::make_shared<Shader>();
-    m_skyboxShader->LoadFromFile("assets/shaders/passes/sky/skybox.vert", "assets/shaders/passes/sky/skybox.frag");
+    m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetVertexLayoutRHI());
 }
 
 void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth) {

@@ -638,8 +638,7 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
 
     const std::string baseDir = platform::filesystem::GetDirectory(path);
     std::shared_ptr<render::Shader> skinnedShader = std::make_shared<render::Shader>();
-    skinnedShader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
-                                "assets/shaders/passes/forward/skinned.frag");
+    skinnedShader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned");
 
     // Default textures for materials without textures
     auto defaultAlbedo = std::make_shared<render::Texture2D>();

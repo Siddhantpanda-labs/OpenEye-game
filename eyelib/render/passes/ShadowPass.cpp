@@ -4,6 +4,8 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/core/Log.h"
 #include <algorithm>
 
 namespace eyelib {
@@ -17,14 +19,18 @@ ShadowPass::ShadowPass() = default;
 
 void ShadowPass::EnsureDefaultShader() {
     if (m_depthShader && m_depthShader->IsValid()) return;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return;
     m_depthShader = std::make_shared<Shader>();
-    m_depthShader->LoadFromFile("assets/shaders/passes/shadow/shadow.vert", "assets/shaders/passes/shadow/shadow.frag");
+    m_depthShader->Load(device, "passes/shadow/shadow", Mesh::GetVertexLayoutRHI());
 }
 
 void ShadowPass::EnsureSkinnedShader() {
     if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid()) return;
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!device) return;
     m_depthSkinnedShader = std::make_shared<Shader>();
-    m_depthSkinnedShader->LoadFromFile("assets/shaders/passes/shadow/shadow_skinned.vert", "assets/shaders/passes/shadow/shadow.frag");
+    m_depthSkinnedShader->Load(device, "passes/shadow/shadow_skinned", Mesh::GetVertexLayoutRHI());
 }
 
 void ShadowPass::SetDepthShader(std::shared_ptr<Shader> shader) {
@@ -43,7 +49,20 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     if (drawables.empty()) return;
     EnsureDefaultShader();
     EnsureSkinnedShader();
-    if (!m_depthShader->IsValid()) return;
+    bool depthValid = m_depthShader && m_depthShader->IsValid();
+    bool skinnedValid = m_depthSkinnedShader && m_depthSkinnedShader->IsValid();
+    rhi::IPipeline* pipe = m_depthShader ? m_depthShader->GetPipelineRHI() : nullptr;
+    bool programValid = (!pipe || pipe->HasValidProgram());
+    core::Log::InfoF("ShadowPass: depth shader valid=%d skinned shader valid=%d pipeline program valid=%d", depthValid ? 1 : 0, skinnedValid ? 1 : 0, programValid ? 1 : 0);
+    if (!depthValid) {
+        core::Log::Info("ShadowPass: skipped (depth shader invalid or missing)");
+        return;
+    }
+    if (pipe && !pipe->HasValidProgram()) {
+        core::Log::Info("ShadowPass: skipped (no valid backend program, e.g. BGFX GLSL-only)");
+        return;
+    }
+    core::Log::Info("ShadowPass: executing");
 
     shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
     shadowMap.BindForShadowPass(cmd);
@@ -121,7 +140,20 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     if (drawables.empty()) return;
     EnsureDefaultShader();
     EnsureSkinnedShader();
-    if (!m_depthShader->IsValid()) return;
+    bool depthValid = m_depthShader && m_depthShader->IsValid();
+    bool skinnedValid = m_depthSkinnedShader && m_depthSkinnedShader->IsValid();
+    rhi::IPipeline* pipe = m_depthShader ? m_depthShader->GetPipelineRHI() : nullptr;
+    bool programValid = (!pipe || pipe->HasValidProgram());
+    core::Log::InfoF("ShadowPass(api): depth shader valid=%d skinned shader valid=%d pipeline program valid=%d", depthValid ? 1 : 0, skinnedValid ? 1 : 0, programValid ? 1 : 0);
+    if (!depthValid) {
+        core::Log::Info("ShadowPass(api): skipped (depth shader invalid or missing)");
+        return;
+    }
+    if (pipe && !pipe->HasValidProgram()) {
+        core::Log::Info("ShadowPass(api): skipped (no valid backend program)");
+        return;
+    }
+    core::Log::Info("ShadowPass(api): executing");
 
     shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
     shadowMap.BindForShadowPass(cmd);

@@ -36,7 +36,8 @@ option(OPENEYE_BUILD_PLAYER "Build unified runtime player" ON)
 option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
-option(OPENEYE_USE_BGFX "Use bgfx as RHI backend (Phase 0: fetch and build)" OFF)
+option(OPENEYE_USE_BGFX "Use bgfx as RHI backend (Phase 0: fetch and build)" ON)
+option(OPENEYE_USE_DILIGENT "Use Diligent Engine as RHI backend (requires thirdparty/DiligentCore)" OFF)
 
 # Global include directories (components will add their own)
 # These are for legacy compatibility and third-party includes
@@ -53,6 +54,13 @@ endif()
 # --------------------------------------
 if(OPENEYE_USE_BGFX)
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchBGFX.cmake)
+endif()
+
+# --------------------------------------
+# Diligent Engine (optional; requires thirdparty/DiligentCore + submodules)
+# --------------------------------------
+if(OPENEYE_USE_DILIGENT)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDiligent.cmake)
 endif()
 
 # --------------------------------------

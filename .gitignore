@@ -6,6 +6,8 @@ out/
 bin/
 lib/
 thirdparty/bullet3/
+thirdparty/bgfx.cmake/
+thirdparty/diligent/
 *.user
 *.suo
 *.sdf

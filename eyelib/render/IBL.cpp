@@ -61,10 +61,7 @@ std::shared_ptr<Mesh> CreateCubeMesh() {
 
 std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->LoadFromFile(device,
-        "assets/shaders/passes/ibl/irradiance_convolution.vert",
-        "assets/shaders/passes/ibl/irradiance_convolution.frag",
-        Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList)) {
+    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI())) {
         return nullptr;
     }
     return shader;
@@ -72,10 +69,7 @@ std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreatePrefilterShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->LoadFromFile(device,
-        "assets/shaders/passes/ibl/prefilter.vert",
-        "assets/shaders/passes/ibl/prefilter.frag",
-        Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList)) {
+    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI())) {
         return nullptr;
     }
     return shader;

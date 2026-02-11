@@ -1,4 +1,5 @@
 #include "eyelib/render/framegraph/FrameGraph.h"
+#include "eyelib/core/Log.h"
 #include <algorithm>
 
 namespace eyelib {
@@ -134,9 +135,11 @@ void FrameGraph::Execute(rhi::ICommandList* cmd) {
     for (size_t i = 0; i < m_passes.size(); ++i) {
         auto& p = m_passes[i];
         if (p.culled) continue;
+        core::Log::InfoF("FrameGraph::Execute: pass %zu/%zu '%s' (running)", i + 1, m_passes.size(), p.name.c_str());
         if (cmd && p.queryPool)
             cmd->BeginQuery(p.queryPool, 0);
         p.execute(res);
+        core::Log::InfoF("FrameGraph::Execute: pass %zu/%zu '%s' (done)", i + 1, m_passes.size(), p.name.c_str());
         if (cmd && p.queryPool) {
             cmd->EndQuery(p.queryPool, 0);
             uint64_t elapsedNs = p.queryPool->GetResult(0);

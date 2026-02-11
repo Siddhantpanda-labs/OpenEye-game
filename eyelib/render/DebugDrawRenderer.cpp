@@ -51,8 +51,7 @@ static void EnsureResources() {
     s_deviceRHI = rhi::GetDefaultDevice();
 
     s_shader = std::make_shared<Shader>();
-    if (!s_deviceRHI || !s_shader->LoadFromFile(s_deviceRHI, "assets/shaders/debug/lines.vert", "assets/shaders/debug/lines.frag",
-                                                GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
+    if (!s_deviceRHI || !s_shader->Load(s_deviceRHI, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
         if (!s_shaderLoadLogged) {
             core::Log::Warn("DebugDraw: failed to load debug line shader (assets/shaders/debug/lines.*). Run from project root or set working directory. Skeleton/debug lines will not be visible.");
             s_shaderLoadLogged = true;

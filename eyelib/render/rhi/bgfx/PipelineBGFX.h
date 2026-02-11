@@ -15,6 +15,8 @@ struct PipelineBGFX : IPipeline {
     BlendState m_blend;
     DepthStencilState m_depthStencil;
     RasterState m_raster;
+
+    bool HasValidProgram() const override { return m_programIdx != kInvalidIdx; }
 };
 
 } // namespace rhi

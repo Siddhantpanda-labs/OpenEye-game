@@ -139,8 +139,7 @@ void RenderSystem::Update(World& world, float deltaTime) {
         if (volume.renderSurface) {
             if (!s_surfaceMaterial) {
                 auto shader = std::make_shared<render::Shader>();
-                shader->LoadFromFile("assets/shaders/passes/forward/basic.vert",
-                                     "assets/shaders/passes/forward/basic.frag");
+                shader->LoadFromFile("passes/forward/basic", "passes/forward/basic");
                 s_surfaceMaterial = std::make_shared<render::Material>(shader);
                 s_surfaceMaterial->SetAlbedo(math::Vec3(0.25f, 0.45f, 0.9f));
                 s_surfaceMaterial->SetAlpha(0.75f);

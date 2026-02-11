@@ -5,7 +5,7 @@ When the app runs from a **runtime folder** (e.g. `build/bin`) but you edit shad
 - **Source**: root repo `assets/shaders` (where you edit).
 - **Runtime**: `assets/shaders` next to the running executable (where the app loads from).
 
-On each poll (~800 ms), any shader file (`.vert`, `.frag`, `.glsl`, etc.) that is newer in the source directory is copied into the runtime directory with the same relative path. No restart needed for file changes to be present at runtime (reload of shaders by the app is separate).
+On each poll (~800 ms), any shader file (`.vert`, `.frag`, `.glsl`, `.vsh`, `.psh`, `.comp`, `.geom`, `.tesc`, `.tese`) that is newer in the source directory is copied into the runtime directory with the same relative path. No restart needed for file changes to be present at runtime (reload of shaders by the app is separate).
 
 The **runtime player** (`OpenEyePlayer`) and the test app (`OpenEyeApiTests`) enable the watcher automatically:
 

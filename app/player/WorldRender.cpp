@@ -93,30 +93,16 @@ eyelib::math::Vec3 ForwardFromRotation(const eyelib::math::Quat& rotation) {
 
 } // namespace
 
-bool WorldRenderBridge::Initialize(uint32_t width, uint32_t height) {
+bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
+                                   eyelib::render::RenderBackend backend) {
     if (!m_renderer.Initialize()) {
         return false;
     }
-    if (!m_pipeline.Initialize(width, height)) {
+    if (!m_pipeline.Initialize(window, width, height, backend)) {
         m_renderer.Shutdown();
         return false;
     }
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
-    m_width = width;
-    m_height = height;
-    m_ready = true;
-    return true;
-}
-
-bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height) {
-    if (!m_renderer.Initialize()) {
-        return false;
-    }
-    if (!m_pipeline.Initialize(window, width, height)) {
-        m_renderer.Shutdown();
-        return false;
-    }
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     m_width = width;
     m_height = height;
     m_ready = true;
@@ -144,8 +130,7 @@ void WorldRenderBridge::EnsureDefaultMaterial() {
         return;
     }
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (shader->LoadFromFile("assets/shaders/passes/forward/basic.vert",
-                             "assets/shaders/passes/forward/basic.frag")) {
+    if (shader->LoadFromFile("passes/forward/basic", "passes/forward/basic")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
         m_defaultShader = shader;
@@ -162,8 +147,7 @@ void WorldRenderBridge::EnsureSkinnedMaterial() {
         return;
     }
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (shader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
-                             "assets/shaders/passes/forward/skinned.frag")) {
+    if (shader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned")) {
         m_skinnedShader = shader;
         return;
     }

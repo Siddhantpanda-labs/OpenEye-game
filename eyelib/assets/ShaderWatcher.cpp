@@ -12,7 +12,7 @@ namespace assets {
 namespace {
 
 const std::set<std::string>& ShaderExtensions() {
-    static const std::set<std::string> s = { ".vert", ".frag", ".glsl", ".comp", ".geom", ".tesc", ".tese" };
+    static const std::set<std::string> s = { ".vert", ".frag", ".glsl", ".comp", ".geom", ".tesc", ".tese", ".vsh", ".psh" };
     return s;
 }
 

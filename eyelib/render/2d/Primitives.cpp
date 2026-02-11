@@ -125,7 +125,7 @@ void Primitives::FlushLines() {
         s_shader = std::make_shared<Shader>();
         rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
         if (!device) return;
-        s_shader->LoadFromFile(device, "assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag", GetVertexLayout());
+        s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
     rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
@@ -158,7 +158,7 @@ void Primitives::FlushTriangles() {
         s_shader = std::make_shared<Shader>();
         rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
         if (!device) return;
-        s_shader->LoadFromFile(device, "assets/shaders/passes/2d/primitive.vert", "assets/shaders/passes/2d/primitive.frag", GetVertexLayout());
+        s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
     rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();

@@ -31,6 +31,20 @@ if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
     )
 endif()
 
+# Diligent Engine RHI backend (stub when engine not linked; see documentation/plans/RHI_Diligent_Integration_Plan.md)
+list(APPEND RENDER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/DiligentEnums.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/BufferDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/TextureDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/ShaderDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/RenderTargetDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/QueryPoolDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/PipelineDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/CommandListDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/DeviceDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/CreateDeviceDiligent.cpp
+)
+
 list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
@@ -48,6 +62,7 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderSourceLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.cpp
@@ -120,6 +135,27 @@ if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
     target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_BGFX=1)
     target_include_directories(EyelibRender PRIVATE ${OPENEYE_BGFX_SOURCE_DIR}/bgfx/include ${OPENEYE_BGFX_SOURCE_DIR}/bx/include)
     target_link_libraries(EyelibRender PRIVATE bgfx glfw)
+endif()
+
+if(OPENEYE_DILIGENT_AVAILABLE)
+    target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_DILIGENT=1)
+    if(WIN32)
+        target_compile_definitions(EyelibRender PRIVATE PLATFORM_WIN32=1)
+    endif()
+    target_include_directories(EyelibRender PRIVATE ${OPENEYE_DILIGENT_SOURCE_DIR})
+    # Link static engine backends. Target names from DiligentCore: OpenGL, D3D11, Vk (not "Vulkan").
+    set(_diligent_libs
+        Diligent-GraphicsEngineOpenGL-static
+    )
+    if(WIN32)
+        list(APPEND _diligent_libs Diligent-GraphicsEngineD3D11-static)
+    endif()
+    if(TARGET Diligent-GraphicsEngineVk-static)
+        list(APPEND _diligent_libs Diligent-GraphicsEngineVk-static)
+    else()
+        message(WARNING "Diligent Vulkan target Diligent-GraphicsEngineVk-static not found; link without Vk. Install Vulkan SDK and reconfigure if you need Vulkan.")
+    endif()
+    target_link_libraries(EyelibRender PRIVATE ${_diligent_libs})
 endif()
 
 if(WIN32)

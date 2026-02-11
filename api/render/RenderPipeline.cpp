@@ -1,9 +1,9 @@
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderTarget.h"
 #include "api/platform/Window.h"
+#include "api/core/All.h"
 #include "eyelib/render/RenderPipeline.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
-#include "eyelib/render/rhi/CreateDevice.h"
 
 namespace eyelib {
 namespace api {
@@ -21,21 +21,32 @@ RenderPipeline::RenderPipeline(RenderPipeline&& other) noexcept = default;
 
 RenderPipeline& RenderPipeline::operator=(RenderPipeline&& other) noexcept = default;
 
-bool RenderPipeline::Initialize(uint32_t width, uint32_t height) {
-    auto device = ::eyelib::render::rhi::CreateOpenGLDevice();
-    return m_impl->pipeline->Initialize(std::move(device), width, height);
-}
+bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height,
+                                ::eyelib::render::RenderBackend backend) {
+    const char* backendName = (backend == ::eyelib::render::RenderBackend::BGFX) ? "BGFX" :
+                              (backend == ::eyelib::render::RenderBackend::Diligent) ? "Diligent" :
+                              (backend == ::eyelib::render::RenderBackend::OpenGL) ? "OpenGL" : "Default";
+    core::Log::InfoF("RenderPipeline::Initialize: backend=%s width=%u height=%u", backendName, width, height);
 
-bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height) {
     void* platformWindow = window.GetPlatformWindow();
-    auto device = platformWindow
-        ? ::eyelib::platform::CreateGraphicsDevice(static_cast<::eyelib::platform::Window*>(platformWindow))
-        : nullptr;
-    return device && m_impl->pipeline->Initialize(std::move(device), width, height);
-}
+    if (!platformWindow) {
+        core::Log::Error("RenderPipeline::Initialize: platform window is null");
+        return false;
+    }
 
-bool RenderPipeline::Initialize(const RenderTarget& target) {
-    return Initialize(target.GetWidth(), target.GetHeight());
+    auto device = ::eyelib::platform::CreateGraphicsDevice(
+        static_cast<::eyelib::platform::Window*>(platformWindow), width, height, backend);
+    if (!device) {
+        core::Log::Error("RenderPipeline::Initialize: CreateGraphicsDevice returned null");
+        return false;
+    }
+
+    if (!m_impl->pipeline->Initialize(std::move(device), width, height)) {
+        core::Log::Error("RenderPipeline::Initialize: pipeline->Initialize(device, width, height) failed");
+        return false;
+    }
+    core::Log::Info("RenderPipeline::Initialize: success");
+    return true;
 }
 
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {

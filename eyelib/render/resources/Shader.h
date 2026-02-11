@@ -21,6 +21,9 @@ public:
 
     bool BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc);
     bool LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath);
+    /** Load by logical name; backend resolves paths/format (Option 2: backend-owned shader loading). */
+    bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+             rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList);
     /** RHI path: build pipeline from source with given vertex layout. */
     bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout);
     bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout);

@@ -68,19 +68,14 @@ AssetId MaterialLoader::LoadMaterial(const std::string& path) {
     std::shared_ptr<render::Material> mat = std::make_shared<render::Material>();
 
     if (j.contains("shader") && j["shader"].is_string()) {
-        const std::string base = j["shader"].get<std::string>();
-        if (!base.empty()) {
-            std::string vertPath = base;
-            std::string fragPath = base;
-            if (vertPath.size() < 5 || vertPath.compare(vertPath.size() - 5, 5, ".vert") != 0) {
-                vertPath += ".vert";
-                fragPath += ".frag";
-            } else {
-                fragPath = base.substr(0, base.size() - 5) + ".frag";
-            }
-            vertPath = ResolvePath(baseDir, vertPath);
-            fragPath = ResolvePath(baseDir, fragPath);
-            const AssetId shaderId = ShaderLoader::LoadShader(vertPath, fragPath);
+        std::string shaderName = j["shader"].get<std::string>();
+        if (!shaderName.empty()) {
+            // Logical name (e.g. pass/forward/lit): backend resolves to opengl/ or diligent/
+            if (shaderName.size() >= 5 && shaderName.compare(shaderName.size() - 5, 5, ".vert") == 0)
+                shaderName.resize(shaderName.size() - 5);
+            else if (shaderName.size() >= 5 && shaderName.compare(shaderName.size() - 5, 5, ".frag") == 0)
+                shaderName.resize(shaderName.size() - 5);
+            const AssetId shaderId = ShaderLoader::LoadShaderByName(shaderName);
             auto shader = manager.Cache().Get<render::Shader>(shaderId);
             if (shader) mat->SetShader(shader);
         }

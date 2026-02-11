@@ -8,11 +8,16 @@
 #include "eyelib/render/rhi/bgfx/BGFXEnums.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
+#include "eyelib/core/Log.h"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
+#if defined(_MSC_VER) && defined(_WIN32)
+#include <excpt.h>
+#endif
 
 namespace eyelib {
 namespace render {
@@ -20,6 +25,8 @@ namespace rhi {
 
 DeviceBGFX::DeviceBGFX(void* nwh, uint32_t width, uint32_t height)
     : m_width(width), m_height(height) {
+    core::Log::InfoF("DeviceBGFX::DeviceBGFX: nwh=%p %ux%u", nwh, width, height);
+
     bgfx::Init init;
     init.type = bgfx::RendererType::Vulkan;  // use Vulkan backend
     init.vendorId = BGFX_PCI_ID_NONE;
@@ -33,18 +40,30 @@ DeviceBGFX::DeviceBGFX(void* nwh, uint32_t width, uint32_t height)
     init.platformData.backBufferDS = nullptr;
 
     if (!bgfx::init(init)) {
+        core::Log::Warn("DeviceBGFX: Vulkan init failed, trying auto (Count)");
         init.type = bgfx::RendererType::Count;
         if (!bgfx::init(init)) {
+            core::Log::Warn("DeviceBGFX: auto init failed, trying OpenGL and D3D11 fallbacks");
             bgfx::RendererType::Enum fallback[] = {
                 bgfx::RendererType::OpenGL,
                 bgfx::RendererType::Direct3D11,
             };
             for (auto t : fallback) {
                 init.type = t;
-                if (bgfx::init(init)) break;
+                if (bgfx::init(init)) {
+                    core::Log::InfoF("DeviceBGFX: bgfx::init succeeded with renderer type %d", static_cast<int>(t));
+                    break;
+                }
             }
+        } else {
+            core::Log::Info("DeviceBGFX: bgfx::init succeeded (auto)");
         }
+    } else {
+        core::Log::Info("DeviceBGFX: bgfx::init succeeded (Vulkan)");
     }
+
+    const bgfx::RendererType::Enum rt = bgfx::getRendererType();
+    core::Log::InfoF("DeviceBGFX: active renderer type = %d", static_cast<int>(rt));
     m_immediateCommandList = std::make_unique<CommandListBGFX>(this);
 }
 
@@ -77,11 +96,68 @@ void DeviceBGFX::SubmitCommandList(ICommandList* list) {
     (void)list;
 }
 
+namespace {
+    // Map our VertexLayout to BGFX for mesh VBs. Attributes must be added in offset order.
+    void buildBGFXVertexLayout(const VertexLayout& src, bgfx::VertexLayout& out) {
+        out.begin();
+        if (src.attributes.empty()) {
+            out.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+            out.end();
+            return;
+        }
+        std::vector<std::pair<uint32_t, const VertexAttribute*>> sorted;
+        for (const auto& a : src.attributes)
+            sorted.push_back({a.offsetInBytes, &a});
+        std::sort(sorted.begin(), sorted.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+        uint32_t prevEnd = 0;
+        for (const auto& p : sorted) {
+            uint32_t off = p.first;
+            const VertexAttribute& a = *p.second;
+            if (off > prevEnd)
+                out.skip(static_cast<uint8_t>(off - prevEnd));
+            bgfx::Attrib::Enum attr = bgfx::Attrib::Position;
+            switch (a.location) {
+                case 0: attr = bgfx::Attrib::Position; break;
+                case 1: attr = bgfx::Attrib::Normal; break;
+                case 2: attr = bgfx::Attrib::TexCoord0; break;
+                case 3: attr = bgfx::Attrib::Tangent; break;
+                case 4: attr = bgfx::Attrib::Color0; break;
+                case 5: attr = bgfx::Attrib::Indices; break;
+                case 6: attr = bgfx::Attrib::Weight; break;
+                case 7: attr = bgfx::Attrib::TexCoord1; break;
+                default: continue;
+            }
+            uint8_t num = 1;
+            bgfx::AttribType::Enum type = bgfx::AttribType::Float;
+            switch (a.type) {
+                case VertexAttributeType::Float:  num = 1; type = bgfx::AttribType::Float; break;
+                case VertexAttributeType::Float2: num = 2; type = bgfx::AttribType::Float; break;
+                case VertexAttributeType::Float3: num = 3; type = bgfx::AttribType::Float; break;
+                case VertexAttributeType::Float4: num = 4; type = bgfx::AttribType::Float; break;
+                case VertexAttributeType::Int4:
+                case VertexAttributeType::UInt4: num = 4; type = bgfx::AttribType::Float; break; // 16 bytes; shader casts to ivec4
+                default: continue;
+            }
+            out.add(attr, num, type);
+            prevEnd = off + static_cast<uint32_t>(num) * (type == bgfx::AttribType::Float ? 4u : 1u);
+        }
+        out.end();
+    }
+}
+
 IBuffer* DeviceBGFX::CreateBuffer(const BufferDesc& desc, const void* initialData) {
     if (desc.sizeInBytes == 0) return nullptr;
     auto* b = new BufferBGFX();
     b->m_size = desc.sizeInBytes;
     b->m_hint = desc.memoryHint;
+
+    if (HasUsage(desc.usage, BufferUsage::Uniform)) {
+        b->m_uniform = true;
+        b->m_cpuData.resize(desc.sizeInBytes);
+        if (initialData)
+            std::memcpy(b->m_cpuData.data(), initialData, desc.sizeInBytes);
+        return b;
+    }
 
     const bgfx::Memory* mem = initialData
         ? bgfx::copy(initialData, static_cast<uint32_t>(desc.sizeInBytes))
@@ -95,13 +171,17 @@ IBuffer* DeviceBGFX::CreateBuffer(const BufferDesc& desc, const void* initialDat
     } else {
         b->m_vertex = true;
         bgfx::VertexLayout layout;
-        layout.begin();
-        if (desc.sizeInBytes == 64u) {
-            layout.add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float).add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float);
+        if (desc.vertexLayout && !desc.vertexLayout->attributes.empty()) {
+            buildBGFXVertexLayout(*desc.vertexLayout, layout);
         } else {
-            layout.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+            layout.begin();
+            if (desc.sizeInBytes == 64u) {
+                layout.add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float).add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float);
+            } else {
+                layout.add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float);
+            }
+            layout.end();
         }
-        layout.end();
         bgfx::VertexBufferHandle vb = bgfx::createVertexBuffer(mem, layout);
         b->m_vbIdx = vb.idx;
     }
@@ -274,6 +354,98 @@ IPipeline* DeviceBGFX::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
+#if defined(_MSC_VER) && defined(_WIN32)
+/** Helper with no C++ object unwinding so __try/__except is allowed. Catches FS create crash and returns nullptr. */
+static IShader* CreateFragmentShaderFromBinaryNoThrow(DeviceBGFX* device, const void* data, size_t size) {
+    IShader* fs = nullptr;
+    __try {
+        fs = device->CreateShaderFromBinary(ShaderStage::Fragment, data, size);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+    return fs;
+}
+#endif
+
+IPipeline* DeviceBGFX::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) {
+    if (!shaderName || !shaderName[0]) return nullptr;
+    core::Log::InfoF("DeviceBGFX::CreateGraphicsPipelineFromName: shaderName='%s'", shaderName);
+    std::string name(shaderName);
+    size_t lastSlash = name.rfind('/');
+    std::string baseName = (lastSlash != std::string::npos) ? name.substr(lastSlash + 1) : name;
+    if (baseName.empty()) return nullptr;
+
+    const char* rendererDir = "gl";
+    switch (bgfx::getRendererType()) {
+        case bgfx::RendererType::OpenGL:
+        case bgfx::RendererType::OpenGLES: rendererDir = "gl"; break;
+        case bgfx::RendererType::Direct3D11: rendererDir = "d3d11"; break;
+        case bgfx::RendererType::Vulkan: rendererDir = "vulkan"; break;
+        default: rendererDir = "gl"; break;
+    }
+    core::Log::InfoF("DeviceBGFX::CreateGraphicsPipelineFromName: baseName='%s' rendererDir='%s'", baseName.c_str(), rendererDir);
+
+    std::string baseDir;
+    std::string exePath = eyelib::platform::filesystem::GetExecutablePath();
+    if (!exePath.empty())
+        baseDir = eyelib::platform::filesystem::GetDirectory(exePath) + "/assets/shaders/bgfx/" + rendererDir;
+    if (baseDir.empty() || !eyelib::platform::filesystem::FileExists(baseDir + "/" + baseName + "_vs.bin"))
+        baseDir = "assets/shaders/bgfx/" + std::string(rendererDir);
+
+    std::string vsPath = baseDir + "/" + baseName + "_vs.bin";
+    std::string fsPath = baseDir + "/" + baseName + "_fs.bin";
+    core::Log::InfoF("DeviceBGFX::CreateGraphicsPipelineFromName: vsPath='%s' fsPath='%s'", vsPath.c_str(), fsPath.c_str());
+    if (!eyelib::platform::filesystem::FileExists(vsPath) || !eyelib::platform::filesystem::FileExists(fsPath)) {
+        core::Log::WarnF("DeviceBGFX::CreateGraphicsPipelineFromName: shader files not found");
+        return nullptr;
+    }
+
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: before ReadFile");
+    std::vector<uint8_t> vsData = eyelib::platform::filesystem::ReadFile(vsPath);
+    std::vector<uint8_t> fsData = eyelib::platform::filesystem::ReadFile(fsPath);
+    if (vsData.empty() || fsData.empty()) {
+        core::Log::WarnF("DeviceBGFX::CreateGraphicsPipelineFromName: ReadFile empty (vs=%zu fs=%zu)", vsData.size(), fsData.size());
+        return nullptr;
+    }
+    core::Log::InfoF("DeviceBGFX::CreateGraphicsPipelineFromName: after ReadFile (vs=%zu fs=%zu bytes)", vsData.size(), fsData.size());
+
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: before CreateShaderFromBinary (VS)");
+    IShader* vs = CreateShaderFromBinary(ShaderStage::Vertex, vsData.data(), vsData.size());
+    if (!vs) return nullptr;
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: after VS, before CreateShaderFromBinary (FS)");
+    IShader* fs = nullptr;
+#if defined(_MSC_VER) && defined(_WIN32)
+    fs = CreateFragmentShaderFromBinaryNoThrow(this, fsData.data(), fsData.size());
+    if (!fs) {
+        core::Log::Warn("DeviceBGFX::CreateGraphicsPipelineFromName: CreateShaderFromBinary(FS) crashed or failed, skipping pipeline");
+        DestroyShader(vs);
+        return nullptr;
+    }
+#else
+    fs = CreateShaderFromBinary(ShaderStage::Fragment, fsData.data(), fsData.size());
+#endif
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: after FS CreateShaderFromBinary");
+    if (!fs) {
+        DestroyShader(vs);
+        return nullptr;
+    }
+
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: before CreateGraphicsPipeline");
+    PipelineDesc desc;
+    desc.vertexShader = vs;
+    desc.fragmentShader = fs;
+    desc.vertexLayout = layout;
+    desc.topology = topology;
+    desc.depthStencil.depthTest = true;
+    desc.depthStencil.depthWrite = true;
+    IPipeline* pipe = CreateGraphicsPipeline(desc);
+    core::Log::Info("DeviceBGFX::CreateGraphicsPipelineFromName: after CreateGraphicsPipeline");
+    DestroyShader(vs);
+    DestroyShader(fs);
+    return pipe;
+}
+
 IPipeline* DeviceBGFX::CreateComputePipeline(void* computeShader) {
     (void)computeShader;
     return new PipelineBGFX();
@@ -290,6 +462,8 @@ void DeviceBGFX::DestroyPipeline(IPipeline* pipeline) {
 
 uint16_t DeviceBGFX::GetOrCreateUniform(const char* name, UniformKind kind) {
     if (!name || !name[0]) return kInvalidIdx;
+    // BGFX can crash when createUniform is called with names containing '[' (e.g. "u_PointLightPos[0]").
+    if (std::strchr(name, '[')) return kInvalidIdx;
     auto it = m_uniformHandles.find(name);
     if (it != m_uniformHandles.end()) return it->second;
     bgfx::UniformType::Enum ut = bgfx::UniformType::Vec4;
@@ -315,9 +489,10 @@ IRenderTarget* DeviceBGFX::CreateRenderTarget(uint32_t width, uint32_t height,
     rt->m_width = width;
     rt->m_height = height;
 
+    RHITextureFormat rhiFmt = colorFormats.empty() ? RHITextureFormat::RGBA8 : colorFormats[0];
     bgfx::TextureFormat::Enum colorFmt = colorFormats.empty()
         ? bgfx::TextureFormat::RGBA8
-        : static_cast<bgfx::TextureFormat::Enum>(BGFXEnums::TextureFormatToBGFX(colorFormats[0]));
+        : static_cast<bgfx::TextureFormat::Enum>(BGFXEnums::TextureFormatToBGFX(rhiFmt));
     bgfx::FrameBufferHandle fb = bgfx::createFrameBuffer(
         static_cast<uint16_t>(width),
         static_cast<uint16_t>(height),
@@ -325,6 +500,17 @@ IRenderTarget* DeviceBGFX::CreateRenderTarget(uint32_t width, uint32_t height,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP
     );
     rt->m_fbIdx = fb.idx;
+
+    bgfx::TextureHandle colorTex = bgfx::getTexture(fb, 0);
+    if (bgfx::isValid(colorTex)) {
+        auto tex = std::make_unique<TextureBGFX>();
+        tex->m_texIdx = colorTex.idx;
+        tex->m_width = width;
+        tex->m_height = height;
+        tex->m_format = rhiFmt;
+        rt->m_colorTextures.push_back(std::move(tex));
+    }
+
     return rt;
 }
 

@@ -2,6 +2,7 @@
 
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
+#include <vector>
 
 namespace eyelib {
 namespace render {
@@ -23,6 +24,9 @@ struct BufferBGFX : IBuffer {
     BufferMemoryHint m_hint = BufferMemoryHint::DeviceOnly;
     bool m_vertex = false;
     bool m_index = false;
+    /** For Uniform buffers: CPU-side storage (BGFX does not expose UBO binding; we hold data for future use). */
+    bool m_uniform = false;
+    std::vector<uint8_t> m_cpuData;
 };
 
 } // namespace rhi

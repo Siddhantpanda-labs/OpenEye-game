@@ -57,9 +57,9 @@ bool CharacterTest::Initialize(int windowWidth, int windowHeight) {
         return false;
     }
 
-    // Initialize render pipeline
+    // Initialize render pipeline (single init path: window + size + backend)
     m_pipeline = std::make_shared<api::RenderPipeline>();
-    if (!m_pipeline->Initialize(windowWidth, windowHeight)) {
+    if (!m_pipeline->Initialize(*m_window, static_cast<uint32_t>(windowWidth), static_cast<uint32_t>(windowHeight))) {
         api::core::Log::Error("Failed to initialize render pipeline");
         m_renderer->Shutdown();
         m_window->Shutdown();
@@ -154,8 +154,7 @@ void CharacterTest::SetupScene() {
     m_groundMesh = api::geometry::Primitives::CreatePlane(50.0f, 50.0f, 1, 1);
     m_groundMaterial = std::make_shared<api::Material>();
     auto groundShader = std::make_shared<api::Shader>();
-    if (groundShader->LoadFromFile("assets/shaders/passes/forward/basic.vert",
-                                    "assets/shaders/passes/forward/basic.frag")) {
+    if (groundShader->LoadFromFile("passes/forward/basic", "passes/forward/basic")) {
         m_groundMaterial->SetShader(groundShader);
         m_groundMaterial->SetVec3("u_Albedo", Vec3(0.35f, 0.4f, 0.35f));
     }
@@ -212,14 +211,12 @@ bool CharacterTest::LoadCharacterModel(const std::string& modelPath) {
         // Create default material
         m_characterMaterial = std::make_shared<api::Material>();
         auto shader = std::make_shared<api::Shader>();
-        if (shader->LoadFromFile("assets/shaders/passes/forward/skinned.vert",
-                                 "assets/shaders/passes/forward/skinned.frag")) {
+        if (shader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned")) {
             m_characterMaterial->SetShader(shader);
         } else {
             api::core::Log::Warn("Failed to load skinned shader, using basic shader");
             shader = std::make_shared<api::Shader>();
-            if (shader->LoadFromFile("assets/shaders/passes/forward/basic.vert",
-                                     "assets/shaders/passes/forward/basic.frag")) {
+            if (shader->LoadFromFile("passes/forward/basic", "passes/forward/basic")) {
                 m_characterMaterial->SetShader(shader);
             }
         }

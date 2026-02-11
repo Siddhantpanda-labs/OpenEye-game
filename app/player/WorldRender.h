@@ -17,9 +17,9 @@ class WorldAnimationBridge;
 
 class WorldRenderBridge {
 public:
-    bool Initialize(uint32_t width, uint32_t height);
-    /** Prefer this when a window exists: makes context current and creates the device. */
-    bool Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height);
+    /** Single init path: window + size + backend (e.g. from --renderer). */
+    bool Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
+                    eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default);
     void Shutdown();
 
     /** Full render path (BuildScene + pipeline). Use only when render runs on same thread as game. */

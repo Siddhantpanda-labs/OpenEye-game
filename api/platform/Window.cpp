@@ -33,6 +33,7 @@ bool Window::Initialize(const WindowConfig& config) {
     cfg.debugContext = config.debugContext;
     cfg.glMajorVersion = config.glMajorVersion;
     cfg.glMinorVersion = config.glMinorVersion;
+    cfg.useNativeApiOnly = config.useNativeApiOnly;
 
     return m_impl->window.Initialize(cfg);
 }

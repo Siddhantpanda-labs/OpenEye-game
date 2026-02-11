@@ -737,6 +737,8 @@ namespace bgfx { namespace spirv
 
 				spvtools::ValidatorOptions validatorOptions;
 				validatorOptions.SetBeforeHlslLegalization(true);
+				validatorOptions.SetRelaxBlockLayout(true);
+				validatorOptions.SetUniformBufferStandardLayout(true);
 
 				if (!opt.Run(
 					  spirv.data()

@@ -1,6 +1,7 @@
 #include "PlayerConfig.h"
 
 #include "api/platform/All.h"
+#include "eyelib/render/RenderBackend.h"
 
 #include <json.hpp>
 
@@ -22,6 +23,7 @@ void PrintUsage(const char* exeName) {
         << "  --height <number>  Window height (default: 720)\n"
         << "  --title <string>   Window title (default: OpenEye Player)\n"
         << "  --novsync          Disable vsync\n"
+        << "  --renderer <name>  Render backend: opengl | bgfx | diligent (default: opengl)\n"
         << "  --headless         Run without creating a window\n"
         << "  --fixed <seconds>  Fixed timestep override\n"
         << "  --time-scale <n>   Time scale multiplier (default: 1.0)\n"
@@ -185,6 +187,14 @@ bool LoadConfig(const std::string& path, RuntimeOptions& options, std::string& e
     ApplyBool(j, "strictAssets", options.strictAssets, &options.strictAssetsSet);
     ApplyBool(j, "overlay", options.overlay, &options.overlaySet);
 
+    if (j.contains("renderer") && j.at("renderer").is_string()) {
+        const std::string r = j.at("renderer").get<std::string>();
+        if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
+        else if (r == "bgfx") options.renderBackend = eyelib::render::RenderBackend::BGFX;
+        else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
+        else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
+    }
+
     if (j.contains("timeMode") && j.at("timeMode").is_string()) {
         const std::string mode = j.at("timeMode").get<std::string>();
         options.timeModeSet = true;
@@ -327,6 +337,18 @@ bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& erro
         if (arg == "--overlay") {
             options.overlay = true;
             options.overlaySet = true;
+            continue;
+        }
+        if (arg == "--renderer" && i + 1 < argc) {
+            const std::string r = argv[++i];
+            if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
+            else if (r == "bgfx") options.renderBackend = eyelib::render::RenderBackend::BGFX;
+            else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
+            else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
+            else {
+                error = "Invalid --renderer value; use opengl, bgfx, or diligent.";
+                return false;
+            }
             continue;
         }
 

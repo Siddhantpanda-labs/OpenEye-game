@@ -2,6 +2,7 @@
 #include "eyelib/render/rhi/bgfx/DeviceBGFX.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include <bgfx/bgfx.h>
+#include <cstring>
 
 namespace eyelib {
 namespace render {
@@ -20,9 +21,10 @@ void* BufferBGFX::Map(size_t offset, size_t size) {
 void BufferBGFX::Unmap() {}
 
 void BufferBGFX::Update(const void* data, size_t offset, size_t size) {
-    (void)data;
-    (void)offset;
-    (void)size;
+    if (!m_uniform || m_cpuData.empty() || !data) return;
+    size_t writeSize = (size == 0) ? (m_size - offset) : size;
+    if (offset + writeSize > m_cpuData.size()) return;
+    std::memcpy(m_cpuData.data() + offset, data, writeSize);
 }
 
 } // namespace rhi

@@ -5,8 +5,7 @@ if(OPENEYE_USE_BGFX)
     if(EXISTS "${BGFX_CMAKE_DIR}/CMakeLists.txt")
         set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
         set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
-        set(BGFX_BUILD_TOOLS_SHADER ON CACHE BOOL "" FORCE)
+        set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
         set(BGFX_INSTALL OFF CACHE BOOL "" FORCE)
         set(BGFX_LIBRARY_TYPE "STATIC" CACHE STRING "" FORCE)
         set(BGFX_CONFIG_MULTITHREADED OFF CACHE BOOL "" FORCE)  # single-threaded: simpler init, avoid render-thread designation issues
@@ -24,8 +23,9 @@ if(OPENEYE_USE_BGFX)
             target_sources(shaderc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/shaderc_wgsl_stub.cpp)
             target_include_directories(shaderc PRIVATE ${BGFX_CMAKE_DIR}/bgfx/tools/shaderc)
         endif()
-        # bx/bimg/bgfx and tools (e.g. shaderc) require C++20; bgfx.cmake defaults to C++17
-        foreach(_t bx bimg bgfx shaderc)
+        # bx/bimg/bgfx and tools (e.g. shaderc) require C++20; bgfx.cmake defaults to C++17.
+        # bimg_decode and bimg_encode use bx headers and must also use C++20.
+        foreach(_t bx bimg bimg_decode bimg_encode bgfx shaderc)
             if(TARGET ${_t})
                 set_target_properties(${_t} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
             endif()

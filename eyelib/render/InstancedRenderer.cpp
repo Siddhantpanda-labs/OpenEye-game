@@ -1,6 +1,7 @@
 #include "eyelib/render/InstancedRenderer.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cstring>
 
@@ -87,7 +88,10 @@ void InstancedRenderer::Render(std::shared_ptr<Mesh> mesh, std::shared_ptr<Mater
     batch.material->Bind();
     Shader* sh = batch.material->GetShader().get();
     for (size_t i = 0; i < instanceCount; ++i) {
-        if (sh) sh->SetMat4("u_Model", batch.instances[i].modelMatrix);
+        if (sh) {
+            sh->SetMat4("u_Model", batch.instances[i].modelMatrix);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(batch.instances[i].modelMatrix)));
+        }
         batch.mesh->Draw();
     }
     if (sh) sh->Unbind();
@@ -99,7 +103,10 @@ void InstancedRenderer::RenderAll() {
         batch.material->Bind();
         Shader* sh = batch.material->GetShader().get();
         for (const auto& inst : batch.instances) {
-            if (sh) sh->SetMat4("u_Model", inst.modelMatrix);
+            if (sh) {
+                sh->SetMat4("u_Model", inst.modelMatrix);
+                sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(inst.modelMatrix)));
+            }
             batch.mesh->Draw();
         }
         if (sh) sh->Unbind();

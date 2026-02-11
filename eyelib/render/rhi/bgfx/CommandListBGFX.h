@@ -43,6 +43,8 @@ struct CommandListBGFX : ICommandList {
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
 
+    void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
+
     void SetUniformInt(const char* name, int value) override;
     void SetUniformFloat(const char* name, float value) override;
     void SetUniformVec2(const char* name, const float* data) override;
@@ -84,6 +86,8 @@ private:
     float m_bloomExtractParams[4] = {1.f, 0.f, 0.f, 0.f}; // x=threshold
     float m_blurParams[4] = {0.f, 0.f, 0.f, 1.f};      // xy=resolution, z=horizontal, w=intensity
     float m_bloomCompositeParams[4] = {0.5f, 0.f, 0.f, 0.f}; // x=bloomIntensity
+    IBuffer* m_bonesUBO = nullptr;
+    size_t m_bonesUBOSize = 0;
 };
 
 } // namespace rhi

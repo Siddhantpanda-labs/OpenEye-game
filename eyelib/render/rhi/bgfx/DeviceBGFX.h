@@ -31,6 +31,7 @@ struct DeviceBGFX : IDevice {
     void DestroyShader(IShader* shader) override;
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;
+    IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
     void DestroyPipeline(IPipeline* pipeline) override;
 

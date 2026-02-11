@@ -42,6 +42,8 @@ struct IDevice {
     virtual void DestroyShader(IShader* shader) = 0;
 
     virtual IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
+    /** Create pipeline from logical shader name. Backend resolves paths/format (e.g. OpenGL: passes/{name}.vert/.frag, BGFX: bgfx/{renderer}/{baseName}_vs/_fs.bin). */
+    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) = 0;
     virtual IPipeline* CreateComputePipeline(void* computeShader) = 0;
     virtual void DestroyPipeline(IPipeline* pipeline) = 0;
 
@@ -108,6 +110,9 @@ struct ICommandList {
     virtual void BindTexture(ITexture* texture, uint32_t binding) = 0;
     virtual void UnbindTexture(uint32_t binding) = 0;
 
+    /** Push constants: small per-draw data. See RHIUniformLayout.h for layout. Size must be <= kPushConstantMaxSize. */
+    virtual void SetPushConstants(uint32_t offset, uint32_t size, const void* data) = 0;
+
     virtual void SetUniformInt(const char* name, int value) = 0;
     virtual void SetUniformFloat(const char* name, float value) = 0;
     virtual void SetUniformVec2(const char* name, const float* data) = 0;
@@ -161,6 +166,8 @@ struct IShader {
 
 struct IPipeline {
     virtual ~IPipeline() = default;
+    /** False when pipeline was created but has no valid backend program (e.g. BGFX with GLSL source). */
+    virtual bool HasValidProgram() const { return true; }
 };
 
 // ---- Render target ----

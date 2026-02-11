@@ -5,6 +5,9 @@
 #include "eyelib/render/rhi/bgfx/TextureBGFX.h"
 #include "eyelib/render/rhi/bgfx/RenderTargetBGFX.h"
 #include "eyelib/render/rhi/bgfx/BGFXEnums.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/core/Log.h"
 #include <bgfx/bgfx.h>
 #include <bgfx/defines.h>
 #include <cstring>
@@ -17,7 +20,13 @@ namespace rhi {
 
 CommandListBGFX::CommandListBGFX(DeviceBGFX* device) : m_device(device) {}
 
-CommandListBGFX::~CommandListBGFX() = default;
+CommandListBGFX::~CommandListBGFX() {
+    if (m_bonesUBO && m_device) {
+        m_device->DestroyBuffer(m_bonesUBO);
+        m_bonesUBO = nullptr;
+        m_bonesUBOSize = 0;
+    }
+}
 
 void CommandListBGFX::Begin() {
     m_encoder = static_cast<void*>(bgfx::begin());
@@ -93,6 +102,7 @@ void CommandListBGFX::BarrierTexture(ITexture* texture, ResourceState fromState,
 void CommandListBGFX::BindPipeline(IPipeline* pipeline) {
     bgfx::Encoder* enc = static_cast<bgfx::Encoder*>(m_encoder);
     if (!enc) return;
+    core::Log::Info("CommandListBGFX::BindPipeline: clearing texture bindings");
     for (int i = 0; i < kMaxTextureBindings; i++) {
         m_boundTextures[i] = nullptr;
         m_samplerNameForUnit[i] = nullptr;
@@ -100,16 +110,20 @@ void CommandListBGFX::BindPipeline(IPipeline* pipeline) {
     PipelineBGFX* p = static_cast<PipelineBGFX*>(pipeline);
     m_currentProgramIdx = kInvalidIdx;
     if (!p) return;
+    core::Log::InfoF("CommandListBGFX::BindPipeline: programIdx=%u", p->m_programIdx);
     bgfx::ProgramHandle prog; prog.idx = p->m_programIdx;
     if (bgfx::isValid(prog)) {
         m_currentProgramIdx = p->m_programIdx;
+        core::Log::Info("CommandListBGFX::BindPipeline: before setState");
         uint64_t state = BGFX_STATE_DEFAULT;
         state |= BGFXEnums::BlendStateToBGFX(p->m_blend);
         state |= BGFXEnums::DepthStencilStateToBGFX(p->m_depthStencil);
         state |= BGFXEnums::RasterStateToBGFX(p->m_raster);
         state |= BGFXEnums::PrimitiveTopologyToBGFX(p->m_topology);
         enc->setState(state);
+        core::Log::Info("CommandListBGFX::BindPipeline: after setState");
     }
+    core::Log::Info("CommandListBGFX::BindPipeline: done");
 }
 
 void CommandListBGFX::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
@@ -133,10 +147,13 @@ void CommandListBGFX::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint
 }
 
 void CommandListBGFX::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {
-    (void)buffer;
-    (void)binding;
     (void)offset;
     (void)size;
+    // BGFX does not expose binding application buffers as UBO; uniforms are set via setUniform.
+    // Bones use the UBO path (create/update buffer, then this call) per RHI standard; when BGFX
+    // supports external UBO binding, implement it here.
+    if (binding == UniformBinding::Bones && buffer)
+        core::Log::InfoF("CommandListBGFX::BindUniformBuffer: bones binding=%u size=%u (no-op on BGFX)", binding, size);
 }
 
 void CommandListBGFX::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {
@@ -156,6 +173,13 @@ void CommandListBGFX::UnbindTexture(uint32_t binding) {
         m_boundTextures[binding] = nullptr;
 }
 
+void CommandListBGFX::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
+    (void)offset;
+    (void)size;
+    (void)data;
+    // BGFX does not expose push constants; use setUniform for small per-draw data.
+}
+
 void CommandListBGFX::SetPackedUniforms() {
     bgfx::Encoder* enc = static_cast<bgfx::Encoder*>(m_encoder);
     if (!enc || m_currentProgramIdx == kInvalidIdx) return;
@@ -171,7 +195,11 @@ void CommandListBGFX::SetPackedUniforms() {
 
 void CommandListBGFX::SetUniformInt(const char* name, int value) {
     if (value >= 0 && value < kMaxTextureBindings) {
-        m_samplerNameForUnit[value] = name;
+        // Only store non-empty names so setTexture loop never calls GetOrCreateUniform("")
+        if (name && name[0] != '\0')
+            m_samplerNameForUnit[value] = name;
+        else
+            m_samplerNameForUnit[value] = nullptr;
         return;
     }
     float f = static_cast<float>(value);
@@ -210,11 +238,13 @@ void CommandListBGFX::SetUniformVec3(const char* name, const float* data) {
     if (!data) return;
     bgfx::Encoder* enc = static_cast<bgfx::Encoder*>(m_encoder);
     if (!enc) return;
+    core::Log::InfoF("CommandListBGFX::SetUniformVec3: name='%s' before GetOrCreateUniform", name ? name : "(null)");
     uint16_t hidx = m_device->GetOrCreateUniform(name, DeviceBGFX::UniformKind::Vec4);
     if (hidx == kInvalidIdx) return;
     float v[4] = { data[0], data[1], data[2], 0.f };
     bgfx::UniformHandle uh; uh.idx = hidx;
     enc->setUniform(uh, v, 1);
+    core::Log::InfoF("CommandListBGFX::SetUniformVec3: name='%s' after setUniform", name ? name : "(null)");
 }
 
 void CommandListBGFX::SetUniformVec4(const char* name, const float* data) {
@@ -239,6 +269,34 @@ void CommandListBGFX::SetUniformMat4(const char* name, const float* data) {
 
 void CommandListBGFX::SetUniformMat4Array(const char* name, const float* data, size_t count) {
     if (!data || count == 0) return;
+    // Standard: bones always in UBO at binding Bones (3). Use buffer path; do not use setUniform
+    // (would exceed push constant size on Vulkan).
+    if (name && std::strcmp(name, kBonesUniformName) == 0 && m_device) {
+        core::Log::InfoF("CommandListBGFX::SetUniformMat4Array: bones UBO path count=%zu (no setUniform)", count);
+        const size_t required = count * sizeof(float) * 16;
+        if (!m_bonesUBO || m_bonesUBOSize < required) {
+            if (m_bonesUBO) {
+                m_device->DestroyBuffer(m_bonesUBO);
+                m_bonesUBO = nullptr;
+                m_bonesUBOSize = 0;
+            }
+            BufferDesc bd;
+            bd.sizeInBytes = required;
+            bd.usage = BufferUsage::Uniform;
+            bd.memoryHint = BufferMemoryHint::HostVisible;
+            m_bonesUBO = m_device->CreateBuffer(bd, nullptr);
+            m_bonesUBOSize = m_bonesUBO ? required : 0;
+            if (!m_bonesUBO)
+                core::Log::Warn("CommandListBGFX::SetUniformMat4Array: failed to create bones UBO");
+        }
+        if (m_bonesUBO) {
+            m_bonesUBO->Update(data, 0, required);
+            BindUniformBuffer(m_bonesUBO, UniformBinding::Bones, 0, static_cast<uint32_t>(required));
+        }
+        return;
+    }
+    if (count > 8u)
+        core::Log::WarnF("CommandListBGFX::SetUniformMat4Array: setUniform path for '%s' count=%zu (large array may exceed Vulkan push constant limit)", name ? name : "(null)", count);
     bgfx::Encoder* enc = static_cast<bgfx::Encoder*>(m_encoder);
     if (!enc) return;
     uint16_t hidx = m_device->GetOrCreateUniform(name, DeviceBGFX::UniformKind::Mat4);
@@ -273,29 +331,65 @@ void CommandListBGFX::Draw(uint32_t vertexCount, uint32_t firstVertex) {
 void CommandListBGFX::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     (void)vertexOffset;
     bgfx::Encoder* enc = static_cast<bgfx::Encoder*>(m_encoder);
-    if (!enc || m_currentProgramIdx == kInvalidIdx) return;
+    if (!enc || m_currentProgramIdx == kInvalidIdx) {
+        core::Log::Info("CommandListBGFX::DrawIndexed: skipping (no encoder or invalid program)");
+        return;
+    }
+    if (indexCount == 0) {
+        core::Log::Info("CommandListBGFX::DrawIndexed: skipping (indexCount=0)");
+        return;
+    }
+    if (m_currentVbIdx == kInvalidIdx || m_currentIbIdx == kInvalidIdx) {
+        core::Log::InfoF("CommandListBGFX::DrawIndexed: skipping (invalid VB or IB: vb=%d ib=%d, mesh may be from different backend)",
+            m_currentVbIdx == kInvalidIdx ? 0 : 1, m_currentIbIdx == kInvalidIdx ? 0 : 1);
+        return;
+    }
+    core::Log::InfoF("CommandListBGFX::DrawIndexed: before SetPackedUniforms indexCount=%u", indexCount);
     SetPackedUniforms();
+    core::Log::Info("CommandListBGFX::DrawIndexed: after SetPackedUniforms, before setTexture");
     for (int i = 0; i < kMaxTextureBindings; i++) {
         if (!m_boundTextures[i] || !m_samplerNameForUnit[i]) continue;
-        TextureBGFX* tex = static_cast<TextureBGFX*>(m_boundTextures[i]);
-        if (tex->m_texIdx == TextureBGFX::kInvalidIdx) continue;
-        uint16_t uidx = m_device->GetOrCreateUniform(m_samplerNameForUnit[i], DeviceBGFX::UniformKind::Sampler);
-        if (uidx != kInvalidIdx) {
-            bgfx::UniformHandle uh; uh.idx = uidx;
-            bgfx::TextureHandle th; th.idx = tex->m_texIdx;
-            enc->setTexture(static_cast<uint8_t>(i), uh, th);
+        const char* name = m_samplerNameForUnit[i];
+        if (name[0] == '\0') continue;  // skip empty name (should not happen after SetUniformInt guard)
+        // BGFX expects valid C-style uniform names (letter/underscore first). Skip invalid to avoid crash.
+        char c = name[0];
+        if (c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z')) {
+            core::Log::WarnF("CommandListBGFX::DrawIndexed: slot %d skip invalid sampler name (first char 0x%02x)", i, static_cast<unsigned char>(c));
+            continue;
         }
+        TextureBGFX* tex = static_cast<TextureBGFX*>(m_boundTextures[i]);
+        if (!tex || tex->m_texIdx == TextureBGFX::kInvalidIdx) {
+            core::Log::InfoF("CommandListBGFX::DrawIndexed: slot %d skip (null tex or invalid texIdx)", i);
+            continue;
+        }
+        core::Log::InfoF("CommandListBGFX::DrawIndexed: setTexture slot=%d name='%s' texIdx=%u", i, name, tex->m_texIdx);
+        uint16_t uidx = m_device->GetOrCreateUniform(name, DeviceBGFX::UniformKind::Sampler);
+        if (uidx == kInvalidIdx) {
+            core::Log::WarnF("CommandListBGFX::DrawIndexed: slot %d GetOrCreateUniform failed for name='%s'", i, name);
+            continue;
+        }
+        bgfx::UniformHandle uh; uh.idx = uidx;
+        bgfx::TextureHandle th; th.idx = tex->m_texIdx;
+        enc->setTexture(static_cast<uint8_t>(i), uh, th);
+        core::Log::InfoF("CommandListBGFX::DrawIndexed: setTexture slot=%d done", i);
     }
-    if (m_currentVbIdx != kInvalidIdx) {
-        bgfx::VertexBufferHandle vb; vb.idx = m_currentVbIdx;
-        enc->setVertexBuffer(0, vb);
+    core::Log::Info("CommandListBGFX::DrawIndexed: after setTexture, before setVertexBuffer/setIndexBuffer");
+    /* Some drivers/BGFX can choke on very large index counts per draw; cap and skip to avoid crash. */
+    constexpr uint32_t kMaxIndexCountPerDraw = 1u << 20;  /* 1M */
+    if (indexCount > kMaxIndexCountPerDraw) {
+        core::Log::InfoF("CommandListBGFX::DrawIndexed: skipping (indexCount=%u exceeds limit %u)", indexCount, kMaxIndexCountPerDraw);
+        return;
     }
-    if (m_currentIbIdx != kInvalidIdx) {
-        bgfx::IndexBufferHandle ib; ib.idx = m_currentIbIdx;
-        enc->setIndexBuffer(ib, firstIndex, indexCount);
-    }
+    if (indexCount > 65535u)
+        core::Log::InfoF("CommandListBGFX::DrawIndexed: submit large draw indexCount=%u firstIndex=%u", indexCount, firstIndex);
+    bgfx::VertexBufferHandle vb; vb.idx = m_currentVbIdx;
+    enc->setVertexBuffer(0, vb);
+    bgfx::IndexBufferHandle ib; ib.idx = m_currentIbIdx;
+    enc->setIndexBuffer(ib, firstIndex, indexCount);
+    core::Log::Info("CommandListBGFX::DrawIndexed: before enc->submit");
     bgfx::ProgramHandle prog; prog.idx = m_currentProgramIdx;
     enc->submit(m_viewId, prog);
+    core::Log::Info("CommandListBGFX::DrawIndexed: after enc->submit");
 }
 
 void CommandListBGFX::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {

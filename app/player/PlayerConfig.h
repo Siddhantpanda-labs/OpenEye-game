@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eyelib/render/RenderBackend.h"
+
 #include <string>
 #include <vector>
 
@@ -38,6 +40,8 @@ struct RuntimeOptions {
     bool timeModeSet = false;
     TimeMode timeMode = TimeMode::Realtime;
     bool showHelp = false;
+    /** Render backend (e.g. from --renderer bgfx|opengl). */
+    eyelib::render::RenderBackend renderBackend = eyelib::render::RenderBackend::Default;
 };
 
 void PrintUsage(const char* exeName);

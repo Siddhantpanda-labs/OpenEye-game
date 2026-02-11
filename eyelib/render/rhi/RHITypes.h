@@ -32,10 +32,12 @@ enum class BufferMemoryHint {
     HostVisible,  // CPU visible (upload or readback)
 };
 
+struct VertexLayout;  // forward
 struct BufferDesc {
     size_t sizeInBytes = 0;
     BufferUsage usage = BufferUsage::Vertex;
     BufferMemoryHint memoryHint = BufferMemoryHint::DeviceOnly;
+    const VertexLayout* vertexLayout = nullptr;  // optional; set when creating mesh VBs so BGFX can use full layout
 };
 
 // ---- Texture ----

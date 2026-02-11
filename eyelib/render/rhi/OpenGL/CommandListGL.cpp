@@ -6,6 +6,7 @@
 #include "eyelib/render/rhi/OpenGL/TextureGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
 #include <glad/glad.h>
 #include <cstring>
 
@@ -233,6 +234,13 @@ void CommandListGL::UnbindTexture(uint32_t binding) {
     glBindTextureUnit(binding, 0);
 }
 
+void CommandListGL::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
+    (void)offset;
+    (void)size;
+    (void)data;
+    // OpenGL has no native push constants; use SetUniformMat4/SetUniform* for per-draw data, or a small UBO.
+}
+
 static GLint GetUniformLocation(PipelineGL* pipeline, const char* name) {
     if (!pipeline || !pipeline->m_program || !name) return -1;
     return glGetUniformLocation(pipeline->m_program, name);
@@ -274,38 +282,36 @@ void CommandListGL::SetUniformMat4(const char* name, const float* data) {
 
 void CommandListGL::SetUniformMat4Array(const char* name, const float* data, size_t count) {
     if (!data) return;
-    GLint loc = GetUniformLocation(m_currentPipeline, name);
-    if (loc >= 0) {
-        glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, static_cast<GLsizei>(count), GL_FALSE, data);
-        return;
-    }
-
-    // Fallback: support u_Bones in std140 UBO (binding = 3)
-    if (!m_currentPipeline || !m_currentPipeline->m_program || !m_device || !name) return;
-    if (std::strcmp(name, "u_Bones") != 0) return;
-    if (count == 0) return;
-
-    const size_t required = count * sizeof(float) * 16;
-    if (!m_bonesUBO || m_bonesUBOSize < required) {
-        if (m_bonesUBO) {
-            m_device->DestroyBuffer(m_bonesUBO);
-            m_bonesUBO = nullptr;
-            m_bonesUBOSize = 0;
+    // Standard: u_Bones always in UBO at binding Bones (3). Try block first.
+    if (name && std::strcmp(name, kBonesUniformName) == 0 && count > 0 &&
+        m_currentPipeline && m_currentPipeline->m_program && m_device) {
+        const GLuint blockIndex = glGetUniformBlockIndex(m_currentPipeline->m_program, kBonesBlockName);
+        if (blockIndex != GL_INVALID_INDEX) {
+            const size_t required = count * sizeof(float) * 16;
+            if (!m_bonesUBO || m_bonesUBOSize < required) {
+                if (m_bonesUBO) {
+                    m_device->DestroyBuffer(m_bonesUBO);
+                    m_bonesUBO = nullptr;
+                    m_bonesUBOSize = 0;
+                }
+                BufferDesc bd;
+                bd.sizeInBytes = required;
+                bd.usage = BufferUsage::Uniform;
+                bd.memoryHint = BufferMemoryHint::HostVisible;
+                m_bonesUBO = m_device->CreateBuffer(bd, nullptr);
+                m_bonesUBOSize = m_bonesUBO ? required : 0;
+            }
+            if (m_bonesUBO) {
+                m_bonesUBO->Update(data, 0, required);
+                glUniformBlockBinding(m_currentPipeline->m_program, blockIndex, UniformBinding::Bones);
+                BindUniformBuffer(m_bonesUBO, UniformBinding::Bones, 0, static_cast<uint32_t>(required));
+            }
+            return;
         }
-        BufferDesc bd;
-        bd.sizeInBytes = required;
-        bd.usage = BufferUsage::Uniform;
-        bd.memoryHint = BufferMemoryHint::HostVisible;
-        m_bonesUBO = m_device->CreateBuffer(bd, nullptr);
-        m_bonesUBOSize = m_bonesUBO ? required : 0;
     }
-    if (!m_bonesUBO) return;
-    m_bonesUBO->Update(data, 0, required);
-
-    const GLuint blockIndex = glGetUniformBlockIndex(m_currentPipeline->m_program, "Bones");
-    if (blockIndex == GL_INVALID_INDEX) return;
-    glUniformBlockBinding(m_currentPipeline->m_program, blockIndex, 3);
-    BindUniformBuffer(m_bonesUBO, 3, 0, static_cast<uint32_t>(required));
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0)
+        glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, static_cast<GLsizei>(count), GL_FALSE, data);
 }
 
 void CommandListGL::Draw(uint32_t vertexCount, uint32_t firstVertex) {

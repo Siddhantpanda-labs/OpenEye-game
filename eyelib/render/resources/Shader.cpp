@@ -1,10 +1,9 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
-#include <sstream>
-#include <unordered_set>
 
 namespace eyelib {
 namespace render {
@@ -32,85 +31,44 @@ Shader& Shader::operator=(Shader&& other) noexcept {
     return *this;
 }
 
-namespace {
-bool AppendShaderSource(const std::string& path,
-                        std::string& out,
-                        std::unordered_set<std::string>& includeStack,
-                        int depth) {
-    if (depth > 32) {
-        core::Log::ErrorF("Shader include depth exceeded: %s", path.c_str());
-        return false;
-    }
-
-    const std::string normalized = platform::filesystem::NormalizePath(path);
-    if (includeStack.count(normalized) != 0) {
-        core::Log::ErrorF("Shader include cycle detected: %s", normalized.c_str());
-        return false;
-    }
-
-    std::vector<uint8_t> data = platform::filesystem::ReadFile(normalized);
-    if (data.empty()) {
-        core::Log::ErrorF("Shader include not found: %s", normalized.c_str());
-        return false;
-    }
-
-    includeStack.insert(normalized);
-    std::string src(reinterpret_cast<const char*>(data.data()), data.size());
-    std::istringstream stream(src);
-    std::string line;
-    const std::string baseDir = platform::filesystem::GetDirectory(normalized);
-
-    while (std::getline(stream, line)) {
-        std::string trimmed = line;
-        trimmed.erase(0, trimmed.find_first_not_of(" \t"));
-        if (trimmed.rfind("#include", 0) == 0) {
-            const size_t firstQuote = trimmed.find_first_of("\"<");
-            const size_t lastQuote = trimmed.find_last_of("\">");
-            if (firstQuote != std::string::npos && lastQuote != std::string::npos && lastQuote > firstQuote + 1) {
-                const std::string includeFile = trimmed.substr(firstQuote + 1, lastQuote - firstQuote - 1);
-                const std::string includePath = platform::filesystem::NormalizePath(baseDir + "/" + includeFile);
-                if (!AppendShaderSource(includePath, out, includeStack, depth + 1)) {
-                    includeStack.erase(normalized);
-                    return false;
-                }
-                continue;
-            }
-        }
-
-        out.append(line);
-        out.push_back('\n');
-    }
-
-    includeStack.erase(normalized);
-    return true;
-}
-
-bool LoadShaderSource(const std::string& path, std::string& out) {
-    std::unordered_set<std::string> includeStack;
-    out.clear();
-    return AppendShaderSource(path, out, includeStack, 0);
-}
-} // namespace
-
 bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
     rhi::IDevice* device = rhi::GetDefaultDevice();
     if (!device) return false;
     return BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList);
 }
 
+namespace {
+// Accepts either a logical name (e.g. "passes/forward/skinned") or a file path (e.g. "assets/shaders/passes/forward/skinned.vert").
+std::string LogicalNameFromPath(const std::string& vertexPath) {
+    std::string base = vertexPath;
+    if (base.size() >= 5 && (base.compare(base.size() - 5, 5, ".vert") == 0 || base.compare(base.size() - 5, 5, ".frag") == 0))
+        base.resize(base.size() - 5);
+    const char* p = "assets/shaders/";
+    if (base.size() > 14 && base.compare(0, 14, p) == 0)
+        base = base.substr(14);
+    if (base.size() > 7 && base.compare(0, 7, "opengl/") == 0)
+        base = base.substr(7);
+    return base.empty() ? std::string() : base;
+}
+} // namespace
+
 bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
+    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (device) {
+        std::string logicalName = LogicalNameFromPath(vertexPath);
+        if (!logicalName.empty() && Load(device, logicalName, Mesh::GetVertexLayoutRHI()))
+            return true;
+    }
     std::string vertexSrc;
     if (!LoadShaderSource(vertexPath, vertexSrc)) {
         core::Log::ErrorF("Failed to load vertex shader: %s", vertexPath.c_str());
         return false;
     }
-
     std::string fragmentSrc;
     if (!LoadShaderSource(fragmentPath, fragmentSrc)) {
         core::Log::ErrorF("Failed to load fragment shader: %s", fragmentPath.c_str());
         return false;
     }
-
     return BuildFromSource(vertexSrc, fragmentSrc);
 }
 
@@ -176,6 +134,17 @@ bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, c
     std::string fragmentSrc;
     if (!LoadShaderSource(fragmentPath, fragmentSrc)) return false;
     return BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology);
+}
+
+bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+                  rhi::PrimitiveTopology topology) {
+    if (!device || shaderName.empty()) return false;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology);
+    if (!pipe) return false;
+    m_pipelineRHI = pipe;
+    m_deviceRHI = device;
+    return true;
 }
 
 void Shader::Destroy() {
