@@ -16,13 +16,17 @@
 #if OPENEYE_USE_DILIGENT
 #include "eyelib/render/rhi/diligent/DeviceDiligentImpl.h"
 #include "Graphics/GraphicsEngine/interface/RenderDevice.h"
+#include "Graphics/GraphicsEngine/interface/Buffer.h"
 #include "Graphics/GraphicsEngine/interface/Shader.h"
 #include "Graphics/GraphicsEngine/interface/PipelineState.h"
 #include "Graphics/GraphicsEngine/interface/InputLayout.h"
 #include "Graphics/GraphicsEngine/interface/PipelineResourceSignature.h"
 #include "Graphics/GraphicsEngine/interface/GraphicsTypes.h"
+#include "Graphics/GraphicsEngine/interface/Texture.h"
 #include "Graphics/GraphicsEngine/interface/SwapChain.h"
-#include "Graphics/GraphicsEngine/interface/Buffer.h"
+#include "Graphics/GraphicsEngine/interface/DeviceContext.h"
+#include "Graphics/GraphicsEngine/interface/Sampler.h"
+#include "Graphics/GraphicsEngine/interface/ShaderResourceBinding.h"
 #include "Common/interface/RefCntAutoPtr.hpp"
 #endif
 
@@ -37,6 +41,15 @@ DeviceDiligent::DeviceDiligent(void* nwh, uint32_t width, uint32_t height, Devic
 }
 
 DeviceDiligent::~DeviceDiligent() {
+#if OPENEYE_USE_DILIGENT
+    if (m_blitPipeline) { DestroyPipeline(m_blitPipeline); m_blitPipeline = nullptr; }
+    if (m_blitVB) { DestroyBuffer(m_blitVB); m_blitVB = nullptr; }
+    if (m_blitIB) { DestroyBuffer(m_blitIB); m_blitIB = nullptr; }
+    if (m_blitSampler) {
+        static_cast<Diligent::ISampler*>(m_blitSampler)->Release();
+        m_blitSampler = nullptr;
+    }
+#endif
     m_immediateCommandList.reset();
     m_impl.reset();
 }
@@ -48,16 +61,16 @@ void* DeviceDiligent::GetImmediateContext() const {
     return nullptr;
 }
 
-void* DeviceDiligent::GetSwapChainBackBufferRTV() const {
+void* DeviceDiligent::GetRenderDevice() const {
 #if OPENEYE_USE_DILIGENT
-    if (m_impl && m_impl->pSwapChain) return m_impl->pSwapChain->GetCurrentBackBufferRTV();
+    if (m_impl && m_impl->pDevice) return m_impl->pDevice.RawPtr();
 #endif
     return nullptr;
 }
 
-void* DeviceDiligent::GetDiligentDevice() const {
+void* DeviceDiligent::GetSwapChainBackBufferRTV() const {
 #if OPENEYE_USE_DILIGENT
-    if (m_impl && m_impl->pDevice) return m_impl->pDevice.RawPtr();
+    if (m_impl && m_impl->pSwapChain) return m_impl->pSwapChain->GetCurrentBackBufferRTV();
 #endif
     return nullptr;
 }
@@ -75,18 +88,20 @@ IBuffer* DeviceDiligent::CreateBuffer(const BufferDesc& desc, const void* initia
     b->m_size = desc.sizeInBytes;
 #if OPENEYE_USE_DILIGENT
     if (m_impl && m_impl->pDevice && desc.sizeInBytes > 0) {
-        using namespace Diligent;
         const bool isVertex = HasUsage(desc.usage, BufferUsage::Vertex);
         const bool isIndex = HasUsage(desc.usage, BufferUsage::Index);
         if (isVertex || isIndex) {
-            Diligent::BufferDesc dgDesc;
-            dgDesc.Size = desc.sizeInBytes;
-            dgDesc.Usage = Diligent::USAGE_DEFAULT;
-            dgDesc.BindFlags = isVertex ? Diligent::BIND_VERTEX_BUFFER : Diligent::BIND_INDEX_BUFFER;
-            Diligent::BufferData initData(initialData, initialData ? desc.sizeInBytes : 0, m_impl->pContext.RawPtr());
+            Diligent::BufferDesc d;
+            d.Size = static_cast<Diligent::Uint64>(desc.sizeInBytes);
+            d.BindFlags = isVertex ? Diligent::BIND_VERTEX_BUFFER : Diligent::BIND_INDEX_BUFFER;
+            d.Usage = (initialData && desc.sizeInBytes > 0) ? Diligent::USAGE_IMMUTABLE : Diligent::USAGE_DEFAULT;
+            d.Mode = Diligent::BUFFER_MODE_STRUCTURED;
+            d.ElementByteStride = 0;
+            Diligent::BufferData bdata(initialData, desc.sizeInBytes, m_impl->pContext);
             Diligent::IBuffer* pNative = nullptr;
-            m_impl->pDevice->CreateBuffer(dgDesc, initialData ? &initData : nullptr, &pNative);
+            m_impl->pDevice->CreateBuffer(d, initialData ? &bdata : nullptr, &pNative);
             if (pNative) {
+                pNative->AddRef();
                 b->m_pNative = pNative;
                 return b;
             }
@@ -103,15 +118,8 @@ IBuffer* DeviceDiligent::CreateBuffer(const BufferDesc& desc, const void* initia
 }
 
 void DeviceDiligent::DestroyBuffer(IBuffer* buffer) {
-    if (!buffer) return;
-    auto* b = static_cast<BufferDiligent*>(buffer);
-#if OPENEYE_USE_DILIGENT
-    if (b->m_pNative) {
-        static_cast<Diligent::IBuffer*>(b->m_pNative)->Release();
-        b->m_pNative = nullptr;
-    }
-#endif
-    delete b;
+    if (buffer)
+        delete static_cast<BufferDiligent*>(buffer);
 }
 
 ITexture* DeviceDiligent::CreateTexture(const TextureDesc& desc, const void* initialData) {
@@ -405,6 +413,7 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_ShadowMap", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     } else {
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture_sampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     }
     PipelineResourceSignatureDesc prsDesc;
     prsDesc.Name = "ForwardPRS";
@@ -449,10 +458,11 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     if (pPSOPtr) {
         pPSOPtr->AddRef();
         p->m_pNative = pPSOPtr;
-        Diligent::IShaderResourceBinding* pSRB = nullptr;
-        pPRS->CreateShaderResourceBinding(&pSRB);
-        if (pSRB) {
-            p->m_pSRB = pSRB;
+        Diligent::IShaderResourceBinding* pSRBPtr = nullptr;
+        pPRS->CreateShaderResourceBinding(&pSRBPtr, true);
+        if (pSRBPtr) {
+            pSRBPtr->AddRef();
+            p->m_pSRB = pSRBPtr;
         }
     }
 #endif
@@ -469,6 +479,23 @@ void DeviceDiligent::DestroyPipeline(IPipeline* pipeline) {
         delete static_cast<PipelineDiligent*>(pipeline);
 }
 
+#if OPENEYE_USE_DILIGENT
+static Diligent::TEXTURE_FORMAT ToDiligentFormat(RHITextureFormat fmt) {
+    using namespace Diligent;
+    switch (fmt) {
+        case RHITextureFormat::R8: return TEX_FORMAT_R8_UNORM;
+        case RHITextureFormat::RG8: return TEX_FORMAT_RG8_UNORM;
+        case RHITextureFormat::RGB8: return TEX_FORMAT_RGBA8_UNORM;
+        case RHITextureFormat::RGBA8: return TEX_FORMAT_RGBA8_UNORM;
+        case RHITextureFormat::RGB16F: return TEX_FORMAT_RGBA16_FLOAT;
+        case RHITextureFormat::RGBA16F: return TEX_FORMAT_RGBA16_FLOAT;
+        case RHITextureFormat::Depth24: return TEX_FORMAT_D32_FLOAT;
+        case RHITextureFormat::Depth24Stencil8: return TEX_FORMAT_D24_UNORM_S8_UINT;
+        default: return TEX_FORMAT_RGBA8_UNORM;
+    }
+}
+#endif
+
 IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t height,
                                                    const std::vector<RHITextureFormat>& colorFormats,
                                                    RHITextureFormat depthFormat,
@@ -477,18 +504,70 @@ IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t heigh
     auto* rt = new RenderTargetDiligent();
     rt->m_width = width;
     rt->m_height = height;
-    for (RHITextureFormat fmt : colorFormats) {
-        auto tex = std::make_unique<TextureDiligent>();
-        tex->m_width = width;
-        tex->m_height = height;
-        tex->m_format = fmt;
-        rt->m_colorTextures.push_back(std::move(tex));
-    }
-    if (depthFormat != RHITextureFormat::None) {
-        rt->m_depthTexture = std::make_unique<TextureDiligent>();
-        rt->m_depthTexture->m_width = width;
-        rt->m_depthTexture->m_height = height;
-        rt->m_depthTexture->m_format = depthFormat;
+#if OPENEYE_USE_DILIGENT
+    if (m_impl && m_impl->pDevice) {
+        using namespace Diligent;
+        for (RHITextureFormat fmt : colorFormats) {
+            auto tex = std::make_unique<TextureDiligent>();
+            tex->m_width = width;
+            tex->m_height = height;
+            tex->m_format = fmt;
+            Diligent::TextureDesc dgDesc;
+            dgDesc.Type = RESOURCE_DIM_TEX_2D;
+            dgDesc.Width = width;
+            dgDesc.Height = height;
+            dgDesc.Format = ToDiligentFormat(fmt);
+            dgDesc.BindFlags = BIND_RENDER_TARGET | BIND_SHADER_RESOURCE;
+            dgDesc.Usage = USAGE_DEFAULT;
+            Diligent::ITexture* pTex = nullptr;
+            m_impl->pDevice->CreateTexture(dgDesc, nullptr, &pTex);
+            if (pTex) {
+                pTex->AddRef();
+                tex->m_pNative = pTex;
+                Diligent::ITextureView* pRTV = pTex->GetDefaultView(TEXTURE_VIEW_RENDER_TARGET);
+                if (pRTV) { pRTV->AddRef(); tex->m_pRTV = pRTV; }
+                Diligent::ITextureView* pSRV = pTex->GetDefaultView(TEXTURE_VIEW_SHADER_RESOURCE);
+                if (pSRV) { pSRV->AddRef(); tex->m_pSRV = pSRV; }
+            }
+            rt->m_colorTextures.push_back(std::move(tex));
+        }
+        if (depthFormat != RHITextureFormat::None) {
+            rt->m_depthTexture = std::make_unique<TextureDiligent>();
+            rt->m_depthTexture->m_width = width;
+            rt->m_depthTexture->m_height = height;
+            rt->m_depthTexture->m_format = depthFormat;
+            Diligent::TextureDesc dgDesc;
+            dgDesc.Type = RESOURCE_DIM_TEX_2D;
+            dgDesc.Width = width;
+            dgDesc.Height = height;
+            dgDesc.Format = ToDiligentFormat(depthFormat);
+            dgDesc.BindFlags = BIND_DEPTH_STENCIL;
+            dgDesc.Usage = USAGE_DEFAULT;
+            Diligent::ITexture* pTex = nullptr;
+            m_impl->pDevice->CreateTexture(dgDesc, nullptr, &pTex);
+            if (pTex) {
+                pTex->AddRef();
+                rt->m_depthTexture->m_pNative = pTex;
+                Diligent::ITextureView* pDSV = pTex->GetDefaultView(TEXTURE_VIEW_DEPTH_STENCIL);
+                if (pDSV) { pDSV->AddRef(); rt->m_depthTexture->m_pDSV = pDSV; }
+            }
+        }
+    } else
+#endif
+    {
+        for (RHITextureFormat fmt : colorFormats) {
+            auto tex = std::make_unique<TextureDiligent>();
+            tex->m_width = width;
+            tex->m_height = height;
+            tex->m_format = fmt;
+            rt->m_colorTextures.push_back(std::move(tex));
+        }
+        if (depthFormat != RHITextureFormat::None) {
+            rt->m_depthTexture = std::make_unique<TextureDiligent>();
+            rt->m_depthTexture->m_width = width;
+            rt->m_depthTexture->m_height = height;
+            rt->m_depthTexture->m_format = depthFormat;
+        }
     }
     return rt;
 }
@@ -535,6 +614,85 @@ ITexture* DeviceDiligent::CreateTextureWrapper(void* nativeTextureId, uint32_t w
     return t;
 }
 
+#if OPENEYE_USE_DILIGENT
+void DeviceDiligent::EnsureBlitResources() {
+    if (!m_impl || !m_impl->pDevice || m_blitPipeline) return;
+    using namespace Diligent;
+    VertexLayout emptyLayout;
+    m_blitPipeline = CreateGraphicsPipelineFromName("passes/post/copy", emptyLayout, PrimitiveTopology::TriangleList);
+    if (!m_blitPipeline || !static_cast<PipelineDiligent*>(m_blitPipeline)->HasValidProgram()) return;
+    struct PosTexVertex { float x, y, u, v; };
+    const PosTexVertex quadVerts[] = {
+        {-1.f, -1.f, 0.f, 1.f},
+        { 1.f, -1.f, 1.f, 1.f},
+        {-1.f,  1.f, 0.f, 0.f},
+        { 1.f,  1.f, 1.f, 0.f},
+    };
+    const uint16_t quadIndices[] = { 0, 1, 2, 1, 3, 2 };
+    BufferDesc vbDesc;
+    vbDesc.sizeInBytes = sizeof(quadVerts);
+    vbDesc.usage = BufferUsage::Vertex;
+    vbDesc.memoryHint = BufferMemoryHint::DeviceOnly;
+    m_blitVB = CreateBuffer(vbDesc, quadVerts);
+    BufferDesc ibDesc;
+    ibDesc.sizeInBytes = sizeof(quadIndices);
+    ibDesc.usage = BufferUsage::Index;
+    ibDesc.memoryHint = BufferMemoryHint::DeviceOnly;
+    m_blitIB = CreateBuffer(ibDesc, quadIndices);
+    SamplerDesc sampDesc;
+    sampDesc.MinFilter = FILTER_TYPE_LINEAR;
+    sampDesc.MagFilter = FILTER_TYPE_LINEAR;
+    sampDesc.MipFilter = FILTER_TYPE_LINEAR;
+    ISampler* pSamp = nullptr;
+    m_impl->pDevice->CreateSampler(sampDesc, &pSamp);
+    if (pSamp) { pSamp->AddRef(); m_blitSampler = pSamp; }
+}
+
+void DeviceDiligent::BlitToDefaultFramebuffer(IRenderTarget* src) {
+    if (!src || !m_impl || !m_impl->pContext) return;
+    EnsureBlitResources();
+    if (!m_blitPipeline || !m_blitVB || !m_blitIB) return;
+    ITexture* color0 = src->GetColorTexture(0);
+    if (!color0) return;
+    TextureDiligent* tex = static_cast<TextureDiligent*>(color0);
+    if (!tex->m_pSRV) return;
+    Diligent::IDeviceContext* ctx = m_impl->pContext.RawPtr();
+    PipelineDiligent* pl = static_cast<PipelineDiligent*>(m_blitPipeline);
+    if (!pl->m_pNative || !pl->m_pSRB) return;
+    Diligent::ITextureView* pRTV = static_cast<Diligent::ITextureView*>(GetSwapChainBackBufferRTV());
+    if (!pRTV) return;
+    ctx->SetRenderTargets(1, &pRTV, nullptr, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    Diligent::Viewport vp;
+    vp.TopLeftX = vp.TopLeftY = 0.f;
+    vp.Width = static_cast<float>(m_width);
+    vp.Height = static_cast<float>(m_height);
+    vp.MinDepth = 0.f; vp.MaxDepth = 1.f;
+    ctx->SetViewports(1, &vp, m_width, m_height);
+    ctx->SetPipelineState(static_cast<Diligent::IPipelineState*>(pl->m_pNative));
+    Diligent::IShaderResourceBinding* pSRB = static_cast<Diligent::IShaderResourceBinding*>(pl->m_pSRB);
+    if (auto* vTex = pSRB->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "u_Texture"))
+        vTex->Set(static_cast<Diligent::ITextureView*>(tex->m_pSRV));
+    if (m_blitSampler) {
+        if (auto* vSamp = pSRB->GetVariableByName(Diligent::SHADER_TYPE_PIXEL, "u_Texture_sampler"))
+            vSamp->Set(static_cast<Diligent::ISampler*>(m_blitSampler));
+    }
+    ctx->CommitShaderResources(pSRB, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    Diligent::IBuffer* pVB = static_cast<Diligent::IBuffer*>(static_cast<BufferDiligent*>(m_blitVB)->m_pNative);
+    Diligent::IBuffer* pIB = static_cast<Diligent::IBuffer*>(static_cast<BufferDiligent*>(m_blitIB)->m_pNative);
+    if (!pVB || !pIB) return;
+    Diligent::Uint64 voff = 0;
+    ctx->SetVertexBuffers(0, 1, &pVB, &voff, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    ctx->SetIndexBuffer(pIB, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    Diligent::DrawIndexedAttribs attr;
+    attr.NumIndices = 6;
+    attr.IndexType = Diligent::VT_UINT16;
+    ctx->DrawIndexed(attr);
+}
+#else
+void DeviceDiligent::EnsureBlitResources() {}
+void DeviceDiligent::BlitToDefaultFramebuffer(IRenderTarget* src) { (void)src; }
+#endif
+
 void DeviceDiligent::Present() {
 #if OPENEYE_USE_DILIGENT
     if (m_impl && m_impl->pSwapChain)
@@ -542,7 +700,6 @@ void DeviceDiligent::Present() {
 #endif
 }
 
-void DeviceDiligent::BlitToDefaultFramebuffer(IRenderTarget* src) { (void)src; }
 
 void DeviceDiligent::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) {
     (void)nativeFbo;

@@ -1,7 +1,6 @@
 #include "eyelib/render/rhi/diligent/PipelineDiligent.h"
 #if OPENEYE_USE_DILIGENT
 #include "Graphics/GraphicsEngine/interface/PipelineState.h"
-#include "Graphics/GraphicsEngine/interface/PipelineResourceSignature.h"
 #include "Graphics/GraphicsEngine/interface/ShaderResourceBinding.h"
 #endif
 

@@ -17,7 +17,7 @@ struct BufferDiligent : IBuffer {
 
     size_t m_size = 0;
     std::vector<uint8_t> m_cpuData;  // host-visible staging when no native buffer
-    /** When non-null, holds Diligent::IBuffer* (owned; Release in dtor). Used for Vertex/Index and internal uniform buffers. */
+    /** When non-null, holds Diligent::IBuffer* (owned; Release in dtor). Present when device created a real GPU buffer. */
     void* m_pNative = nullptr;
 };
 

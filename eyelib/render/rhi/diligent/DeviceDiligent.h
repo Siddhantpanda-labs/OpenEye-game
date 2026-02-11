@@ -20,10 +20,10 @@ struct DeviceDiligent : IDevice {
 
     /** For CommandListDiligent: immediate context when real, else nullptr. */
     void* GetImmediateContext() const;
+    /** For CommandListDiligent: render device when real, else nullptr. */
+    void* GetRenderDevice() const;
     /** For CommandListDiligent: swap chain back-buffer RTV when real, else nullptr. */
     void* GetSwapChainBackBufferRTV() const;
-    /** For CommandListDiligent: Diligent IRenderDevice* when real, else nullptr. */
-    void* GetDiligentDevice() const;
 
     ICommandList* GetImmediateCommandList() override;
     void SubmitCommandList(ICommandList* list) override;
@@ -65,11 +65,17 @@ struct DeviceDiligent : IDevice {
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
     void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) override;
 
+    void EnsureBlitResources();
+
 private:
     std::unique_ptr<CommandListDiligent> m_immediateCommandList;
     std::unique_ptr<DeviceDiligentImpl> m_impl;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    IPipeline* m_blitPipeline = nullptr;
+    IBuffer* m_blitVB = nullptr;
+    IBuffer* m_blitIB = nullptr;
+    void* m_blitSampler = nullptr;  // Diligent::ISampler*
 };
 
 } // namespace rhi

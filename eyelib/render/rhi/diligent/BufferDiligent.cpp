@@ -1,8 +1,8 @@
 #include "eyelib/render/rhi/diligent/BufferDiligent.h"
-#include <cstring>
 #if OPENEYE_USE_DILIGENT
 #include "Graphics/GraphicsEngine/interface/Buffer.h"
 #endif
+#include <cstring>
 
 namespace eyelib {
 namespace render {
@@ -22,7 +22,10 @@ size_t BufferDiligent::GetSize() const {
 }
 
 void* BufferDiligent::Map(size_t offset, size_t size) {
-    if (m_pNative) return nullptr;  // GPU buffers not mappable via RHI Map
+    // Native GPU buffers (vertex/index) are not mappable without a context; use CPU staging only.
+#if OPENEYE_USE_DILIGENT
+    if (m_pNative) return nullptr;
+#endif
     if (m_cpuData.empty()) return nullptr;
     size_t mapSize = (size == 0) ? (m_size - offset) : size;
     if (offset + mapSize > m_size) return nullptr;
@@ -35,7 +38,10 @@ void BufferDiligent::Update(const void* data, size_t offset, size_t size) {
     if (!data || offset >= m_size) return;
     size_t copySize = (size == 0) ? (m_size - offset) : size;
     if (offset + copySize > m_size) copySize = m_size - offset;
-    if (m_pNative) return;  // GPU buffer updates not supported via RHI Update (use at creation)
+    // Native vertex/index buffers are updated at creation only; uniform data goes through command list staging.
+#if OPENEYE_USE_DILIGENT
+    if (m_pNative) return;
+#endif
     if (!m_cpuData.empty())
         std::memcpy(m_cpuData.data() + offset, data, copySize);
 }

@@ -1,14 +1,18 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHI.h"
+#include <cstddef>
+#include <cstdint>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
 
 struct DeviceDiligent;
+struct PipelineDiligent;
+struct BufferDiligent;
 
-/** Stub command list: all operations no-op. */
+/** Command list for Diligent: records draw and state; implements constants via SRB + dynamic CBs. */
 struct CommandListDiligent : ICommandList {
     explicit CommandListDiligent(DeviceDiligent* device);
     ~CommandListDiligent() override;
@@ -60,27 +64,30 @@ struct CommandListDiligent : ICommandList {
     void CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) override;
 
 private:
-    void EnsureConstantBuffers();
-    void CommitUniformsAndResources();
+    void EnsureDynamicConstantBuffers();
+    void CommitShaderResources();
 
     DeviceDiligent* m_device = nullptr;
-    IPipeline* m_currentPipeline = nullptr;
+    PipelineDiligent* m_currentPipeline = nullptr;
     IBuffer* m_currentVertexBuffer = nullptr;
     uint32_t m_currentVertexOffset = 0;
-    uint32_t m_currentVertexBinding = 0;
     IBuffer* m_currentIndexBuffer = nullptr;
-    IndexType m_currentIndexType = IndexType::UInt32;
+    IndexType m_currentIndexType = IndexType::UInt16;
     uint32_t m_currentIndexOffset = 0;
 
-    static constexpr size_t kConstantsSize = 256u;
-    static constexpr size_t kMaterialSize = 256u;
-    static constexpr size_t kBonesSize = 8192u;
-    std::vector<uint8_t> m_constantsStaging;
-    std::vector<uint8_t> m_materialStaging;
-    std::vector<uint8_t> m_bonesStaging;
-    void* m_pConstantsBuffer = nullptr;
-    void* m_pMaterialBuffer = nullptr;
-    void* m_pBonesBuffer = nullptr;
+    static constexpr size_t kConstantsSize = 288u;   // 4 mat4 + extra for skinned
+    static constexpr size_t kMaterialSize = 384u;
+    static constexpr size_t kBonesSize = 128u * 64u; // 128 * float4x4
+    alignas(16) uint8_t m_constantsStaging[kConstantsSize]{};
+    alignas(16) uint8_t m_materialStaging[kMaterialSize]{};
+    alignas(16) uint8_t m_bonesStaging[kBonesSize]{};
+    bool m_constantsDirty = false;
+    bool m_materialDirty = false;
+    bool m_bonesDirty = false;
+
+    void* m_cbConstants = nullptr;  // Diligent::IBuffer* (owned)
+    void* m_cbMaterial = nullptr;
+    void* m_cbBones = nullptr;
 };
 
 } // namespace rhi

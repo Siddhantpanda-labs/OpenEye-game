@@ -15,7 +15,7 @@ struct PipelineDiligent : IPipeline {
     RasterState m_raster;
     /** When non-null, holds Diligent::IPipelineState* (owned; Release in dtor). Used when created from name. */
     void* m_pNative = nullptr;
-    /** When non-null, holds Diligent::IShaderResourceBinding* (owned; Release in dtor). Created from PSO's PRS. */
+    /** When non-null, holds Diligent::IShaderResourceBinding* (owned; Release in dtor). Used for binding Constants/Material/Bones. */
     void* m_pSRB = nullptr;
 
     bool HasValidProgram() const override { return m_pNative != nullptr; }

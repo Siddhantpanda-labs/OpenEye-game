@@ -10,7 +10,26 @@
 #include "Graphics/GraphicsEngine/interface/GraphicsTypes.h"
 #include "Platforms/Win32/interface/Win32NativeWindow.h"
 #include "Common/interface/RefCntAutoPtr.hpp"
+#include "Primitives/interface/DebugOutput.h"
 #include "eyelib/render/rhi/diligent/DeviceDiligentImpl.h"
+
+namespace {
+void DILIGENT_CALL_TYPE DiligentMessageCallback(Diligent::DEBUG_MESSAGE_SEVERITY Severity,
+                                                const char* Message,
+                                                const char* Function,
+                                                const char* File,
+                                                int Line) {
+    (void)Function;
+    (void)File;
+    (void)Line;
+    if (Severity == Diligent::DEBUG_MESSAGE_SEVERITY_INFO)
+        return;
+    if (Severity == Diligent::DEBUG_MESSAGE_SEVERITY_WARNING)
+        eyelib::core::Log::WarnF("Diligent: %s", Message ? Message : "");
+    else
+        eyelib::core::Log::ErrorF("Diligent: %s", Message ? Message : "");
+}
+} // namespace
 #endif
 
 namespace eyelib {
@@ -30,6 +49,7 @@ std::unique_ptr<IDevice> CreateDiligentDevice(void* nwh, uint32_t width, uint32_
         core::Log::Error("CreateDiligentDevice: GetEngineFactoryVk failed");
         return std::make_unique<DeviceDiligent>(nwh, width, height, nullptr);
     }
+    pFactoryVk->SetMessageCallback(DiligentMessageCallback);
 
     EngineVkCreateInfo engineCI;
     engineCI.SetValidationLevel(VALIDATION_LEVEL_DISABLED);

@@ -20,6 +20,14 @@ struct TextureDiligent : ITexture {
     uint32_t m_depthOrArray = 1;
     TextureType m_type = TextureType::Texture2D;
     RHITextureFormat m_format = RHITextureFormat::RGBA8;
+    /** Diligent::ITexture* (owned; Release in dtor). */
+    void* m_pNative = nullptr;
+    /** Diligent::ITextureView* RTV for color (owned). */
+    void* m_pRTV = nullptr;
+    /** Diligent::ITextureView* SRV for sampling (owned). */
+    void* m_pSRV = nullptr;
+    /** Diligent::ITextureView* DSV for depth (owned). */
+    void* m_pDSV = nullptr;
 };
 
 } // namespace rhi
