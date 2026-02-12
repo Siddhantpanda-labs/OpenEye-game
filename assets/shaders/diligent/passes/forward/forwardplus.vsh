@@ -18,12 +18,13 @@ struct PSInput
     float3x3 TBN      : TEXCOORD4;
 };
 
+// Engine uploads GLM matrices (column-major). Do NOT use row_major.
 cbuffer Constants : register(b0)
 {
-    row_major float4x4 u_Model;
-    row_major float4x4 u_View;
-    row_major float4x4 u_Projection;
-    row_major float4x4 u_NormalMatrix;
+    float4x4 u_Model;
+    float4x4 u_View;
+    float4x4 u_Projection;
+    float4x4 u_NormalMatrix;
     float4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;

@@ -418,6 +418,7 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     // Pipeline Resource Signature: declare every cbuffer/texture/sampler the shaders use.
     // Names must match HLSL exactly (e.g. "Constants", "Material", "Bones", "u_ShadowMap").
     const std::string nameStr(shaderName);
+    const bool isTest = (nameStr.find("test/") == 0);
     const bool isForward = (nameStr.find("passes/forward/") != std::string::npos);
     const bool isShadow = (nameStr.find("passes/shadow/") != std::string::npos);
     const bool isPost = (nameStr.find("passes/post/") != std::string::npos);
@@ -448,12 +449,14 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Skybox", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_LinearSampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture_sampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+    } else if (nameStr == "test/cube") {
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_VERTEX, "Constants", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     } else {
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture_sampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     }
     PipelineResourceSignatureDesc prsDesc;
-    prsDesc.Name = isForward ? "ForwardPRS" : (isShadow ? "ShadowPRS" : (isPost ? "PostPRS" : "CopyPRS"));
+    prsDesc.Name = isTest ? "TestPRS" : (isForward ? "ForwardPRS" : (isShadow ? "ShadowPRS" : (isPost ? "PostPRS" : "CopyPRS")));
     prsDesc.Resources = resourceList.data();
     prsDesc.NumResources = static_cast<Uint32>(resourceList.size());
     prsDesc.UseCombinedTextureSamplers = isForward;
@@ -486,7 +489,14 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         if (isForward) {
             psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA16_FLOAT;
             psoci.GraphicsPipeline.DSVFormat = TEX_FORMAT_D32_FLOAT;
+            psoci.GraphicsPipeline.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;  // match SetCullFace(false)
         } else {
+            // No depth buffer for post/test/copy; disable depth so draw succeeds
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthEnable = false;
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthWriteEnable = false;
+            // Fullscreen quad is visible from +Z; disable cull for post/test/copy.
+            // test/cube: no cull so cube is visible (no depth buffer; winding can hide faces otherwise).
+            psoci.GraphicsPipeline.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
             if (isPost) {
             // Bloom stages render to HDR RTs (RGBA16F); tonemap/composite/fxaa/copy render to LDR (RGBA8) or swapchain.
             if (nameStr == "passes/post/bloom_extract" || nameStr == "passes/post/bloom_blur")
@@ -496,13 +506,29 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
             else
                 psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
         } else {
-            psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
-            if (m_impl->pSwapChain) {
-                const auto& scDesc = m_impl->pSwapChain->GetDesc();
-                psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+            // test/*: match swap chain when drawing to screen, else RGBA8_UNORM for offscreen RT
+            if (isTest) {
+                if (m_impl->pSwapChain) {
+                    const auto& scDesc = m_impl->pSwapChain->GetDesc();
+                    psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+                } else
+                    psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
+            } else {
+                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
+                if (m_impl->pSwapChain) {
+                    const auto& scDesc = m_impl->pSwapChain->GetDesc();
+                    psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+                }
             }
         }
         }
+    }
+    // test/cube: explicit rasterizer. CW = front (D3D default). Cube indices wound CW from outside.
+    if (nameStr == "test/cube") {
+        auto& r = psoci.GraphicsPipeline.RasterizerDesc;
+        r.FillMode = Diligent::FILL_MODE_SOLID;
+        r.CullMode = Diligent::CULL_MODE_BACK;
+        r.FrontCounterClockwise = false;  // CW = front (D3D11 default)
     }
     Diligent::IPipelineResourceSignature* pPRSArray[] = { pPRS.RawPtr() };
     psoci.ppResourceSignatures = pPRSArray;

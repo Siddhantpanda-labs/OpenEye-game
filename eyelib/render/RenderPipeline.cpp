@@ -260,6 +260,8 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
+    core::Log::Info("RenderForward: executing");
+
     const int kShadowMapUnit = 5;
     if (m_shadowMap && cmd) {
         rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
@@ -278,6 +280,8 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     const CameraView cam = view.GetCamera();
     const LightParams light = view.GetLight();
 
+    size_t forwardDrawCount = 0;
+    size_t forwardSkipNoShader = 0;
     view.ForEachOpaqueDrawable([&](const Drawable& d) {
         if (!d.mesh || !d.material) return;
         if (d.materialInstance) {
@@ -286,7 +290,11 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
             d.material->Bind();
         }
         Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
-        if (sh) {
+        if (!sh) {
+            forwardSkipNoShader++;
+            return;
+        }
+        {
             sh->SetMat4("u_Model", d.transform);
             sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
             sh->SetMat4("u_View", cam.view);
@@ -349,8 +357,11 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
         d.mesh->Draw();
         d.mesh->Unbind();
         sh->Unbind();
+        forwardDrawCount++;
         }
     });
+
+    core::Log::InfoF("RenderForward: drew %zu opaque, skipped %zu (no shader)", forwardDrawCount, forwardSkipNoShader);
 
     if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 

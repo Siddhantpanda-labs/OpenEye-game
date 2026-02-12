@@ -7,8 +7,9 @@ struct PSInput
     float2 TexCoord : TEXCOORD2;
 };
 
-// Vulkan std140: every block 16-byte aligned; float3 must be followed by pad to 16 bytes
-cbuffer Material : register(b0)
+// Vulkan: bindings must be unique across stages. Vertex uses Constants at b0, so Material must NOT also be b0.
+// Keep Material at b1 (DeviceDiligent binds by name; this avoids descriptor binding collisions).
+cbuffer Material : register(b1)
 {
     float3 u_Albedo;
     float  _pad0;

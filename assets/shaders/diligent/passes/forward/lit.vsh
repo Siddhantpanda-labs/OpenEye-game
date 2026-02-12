@@ -16,10 +16,11 @@ struct PSInput
 
 cbuffer Constants : register(b0)
 {
-    row_major float4x4 u_Model;
-    row_major float4x4 u_View;
-    row_major float4x4 u_Projection;
-    row_major float4x4 u_NormalMatrix;
+    // IMPORTANT: Engine uploads GLM matrices (column-major). Do NOT mark these row_major.
+    float4x4 u_Model;
+    float4x4 u_View;
+    float4x4 u_Projection;
+    float4x4 u_NormalMatrix;
 };
 
 void main(in VSInput VSIn, out PSInput PSIn)

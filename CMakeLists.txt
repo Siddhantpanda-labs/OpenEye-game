@@ -324,4 +324,11 @@ if(OPENEYE_USE_BGFX)
     add_subdirectory(app/bgfx_test)
 endif()
 
+# --------------------------------------
+# Diligent standalone test (clear + present)
+# --------------------------------------
+if(OPENEYE_USE_DILIGENT)
+    add_subdirectory(app/diligent_test)
+endif()
+
 

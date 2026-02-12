@@ -84,7 +84,7 @@ void CommandListDiligent::EnsureDynamicConstantBuffers() {
     dgDesc.BindFlags = Diligent::BIND_UNIFORM_BUFFER;
     dgDesc.Usage = Diligent::USAGE_DYNAMIC;
     dgDesc.CPUAccessFlags = Diligent::CPU_ACCESS_WRITE;
-    dgDesc.Mode = Diligent::BUFFER_MODE_STRUCTURED;
+    // Constant buffers are raw; do not use BUFFER_MODE_STRUCTURED (that is for SRV structured buffers).
     pDevice->CreateBuffer(dgDesc, nullptr, reinterpret_cast<Diligent::IBuffer**>(&m_cbConstants));
     dgDesc.Size = static_cast<Diligent::Uint64>(kMaterialSize);
     pDevice->CreateBuffer(dgDesc, nullptr, reinterpret_cast<Diligent::IBuffer**>(&m_cbMaterial));
@@ -94,7 +94,18 @@ void CommandListDiligent::EnsureDynamicConstantBuffers() {
 
 void CommandListDiligent::CommitShaderResources() {
     auto* ctx = static_cast<Diligent::IDeviceContext*>(m_device->GetImmediateContext());
-    if (!ctx || !m_currentPipeline || !m_currentPipeline->m_pSRB) return;
+    if (!ctx) {
+        static int once; if (once++ == 0) core::Log::Warn("CommitShaderResources: no context");
+        return;
+    }
+    if (!m_currentPipeline || !m_currentPipeline->m_pNative) {
+        static int once; if (once++ == 0) core::Log::Warn("CommitShaderResources: no pipeline bound");
+        return;
+    }
+    if (!m_currentPipeline->m_pSRB) {
+        static int once; if (once++ == 0) core::Log::WarnF("CommitShaderResources: no SRB for pipeline '%s'", m_currentPipeline->m_shaderName.c_str());
+        return;
+    }
     Diligent::IShaderResourceBinding* pSRB = static_cast<Diligent::IShaderResourceBinding*>(m_currentPipeline->m_pSRB);
     EnsureDynamicConstantBuffers();
     auto* pCbConstants = static_cast<Diligent::IBuffer*>(m_cbConstants);
@@ -154,6 +165,18 @@ void CommandListDiligent::CommitShaderResources() {
             TextureDiligent* td = static_cast<TextureDiligent*>(tex);
             if (td->m_pSRV)
                 setVar(Diligent::SHADER_TYPE_PIXEL, varName, static_cast<Diligent::IDeviceObject*>(td->m_pSRV));
+        }
+    } else if (shaderName.size() >= 5 && shaderName.compare(0, 5, "test/") == 0) {
+        if (shaderName != "test/cube") {
+            Diligent::ISampler* pLinSamp = static_cast<Diligent::ISampler*>(m_device->GetLinearSampler());
+            if (pLinSamp)
+                setVar(Diligent::SHADER_TYPE_PIXEL, "u_Texture_sampler", pLinSamp);
+            ITexture* tex = m_boundTextures[0];
+            if (tex) {
+                TextureDiligent* td = static_cast<TextureDiligent*>(tex);
+                if (td->m_pSRV)
+                    setVar(Diligent::SHADER_TYPE_PIXEL, "u_Texture", static_cast<Diligent::IDeviceObject*>(td->m_pSRV));
+            }
         }
     }
 
@@ -399,6 +422,8 @@ void CommandListDiligent::SetUniformMat4(const char* name, const float* data) {
     if (strcmp(name, "u_Model") == 0) { memcpy(m_constantsStaging + 0, data, matSize); m_constantsDirty = true; return; }
     if (strcmp(name, "u_View") == 0) { memcpy(m_constantsStaging + 64, data, matSize); m_constantsDirty = true; return; }
     if (strcmp(name, "u_Projection") == 0) { memcpy(m_constantsStaging + 128, data, matSize); m_constantsDirty = true; return; }
+    if (strcmp(name, "u_MVP") == 0) { memcpy(m_constantsStaging + 0, data, matSize); m_constantsDirty = true; return; }
+    if (strcmp(name, "u_ModelForNormal") == 0) { memcpy(m_constantsStaging + 64, data, matSize); m_constantsDirty = true; return; }
     if (strcmp(name, "u_NormalMatrix") == 0) { memcpy(m_constantsStaging + 192, data, matSize); m_constantsDirty = true; return; }
 #endif
 }
@@ -475,10 +500,9 @@ void CommandListDiligent::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, 
         ctx->DrawIndexed(attr);
     }
     s_drawSkipReason = 0;
-    if (s_successCount < 5) {
-        core::Log::InfoF("Diligent DrawIndexed: draw #%u indexCount=%u", s_successCount + 1, indexCount);
-        s_successCount++;
-    }
+    if (s_successCount == 0)
+        core::Log::InfoF("Diligent DrawIndexed: first draw indexCount=%u (further draws not logged)", indexCount);
+    s_successCount++;
 #endif
     (void)indexCount;
     (void)firstIndex;

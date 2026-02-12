@@ -9,8 +9,9 @@ struct PSInput
     float2 TexCoord : TEXCOORD2;
 };
 
-// Vulkan std140: every block 16-byte aligned
-cbuffer Material : register(b0)
+// Vulkan: bindings must be unique across stages.
+// Skinned VS uses: Constants=b0, Bones=b1. So Material must be b2 to avoid binding collisions.
+cbuffer Material : register(b2)
 {
     float3 u_Albedo;
     float  _pad0;

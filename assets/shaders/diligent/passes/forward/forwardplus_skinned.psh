@@ -43,7 +43,7 @@ cbuffer Constants : register(b0)
     int u_UseAOTexture;
     int u_UseEmissiveTexture;
     float u_ShadowBias;
-    row_major float4x4 u_LightSpaceMatrix;
+    float4x4 u_LightSpaceMatrix;  // column-major (GLM)
 };
 
 struct PointLight

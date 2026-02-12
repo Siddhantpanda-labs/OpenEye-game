@@ -23,10 +23,11 @@ struct PSInput
 
 cbuffer Constants : register(b0)
 {
-    row_major float4x4 u_Model;
-    row_major float4x4 u_View;
-    row_major float4x4 u_Projection;
-    row_major float4x4 u_NormalMatrix;
+    // IMPORTANT: Engine uploads GLM matrices (column-major). Do NOT mark these row_major.
+    float4x4 u_Model;
+    float4x4 u_View;
+    float4x4 u_Projection;
+    float4x4 u_NormalMatrix;
     float4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -36,7 +37,8 @@ cbuffer Constants : register(b0)
 
 cbuffer Bones : register(b1)
 {
-    row_major float4x4 u_Bones[MAX_BONES];
+    // IMPORTANT: Bone matrices are also uploaded as column-major.
+    float4x4 u_Bones[MAX_BONES];
 };
 
 void main(in VSInput VSIn, out PSInput PSIn)

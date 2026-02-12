@@ -9,8 +9,8 @@ struct PSInput
     float2 TexCoord : TEXCOORD2;
 };
 
-// Vulkan std140: every block 16-byte aligned
-cbuffer Material : register(b0)
+// Vulkan: bindings must be unique across stages. Vertex uses Constants at b0, so Material must NOT also be b0.
+cbuffer Material : register(b1)
 {
     float3 u_Albedo;
     float  _pad0;
