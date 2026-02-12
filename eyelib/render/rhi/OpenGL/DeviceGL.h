@@ -51,7 +51,7 @@ struct DeviceGL : IDevice {
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
-    void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) override;
+    void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
 
 private:
     std::unique_ptr<CommandListGL> m_immediateCommandList;

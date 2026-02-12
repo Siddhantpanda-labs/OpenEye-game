@@ -24,6 +24,8 @@ struct DeviceDiligent : IDevice {
     void* GetRenderDevice() const;
     /** For CommandListDiligent: swap chain back-buffer RTV when real, else nullptr. */
     void* GetSwapChainBackBufferRTV() const;
+    /** For CommandListDiligent: linear sampler for post/copy (ensures blit resources). */
+    void* GetLinearSampler();
 
     ICommandList* GetImmediateCommandList() override;
     void SubmitCommandList(ICommandList* list) override;
@@ -63,7 +65,7 @@ struct DeviceDiligent : IDevice {
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
-    void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) override;
+    void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
 
     void EnsureBlitResources();
 

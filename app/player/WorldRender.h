@@ -28,10 +28,10 @@ public:
                 eyelib::api::AssetRegistry* assetRegistry,
                 uint32_t width, uint32_t height);
 
-    /** Render-thread only: apply a Resize command (Phase 5). Call before RenderSceneOnly when draining the command queue. */
+    /** Render-thread only: apply a Resize (Phase 5). Must be called at frame boundary, before RenderSceneOnly for this frame. */
     void ApplyResize(uint32_t width, uint32_t height);
 
-    /** Render-thread only: Resize (if needed), Render(scene), BlitToScreen. No World/animation access. */
+    /** Render-thread only: Resize (if needed), Render(scene), BlitToScreen. No World/animation access. Resize only runs when size changed. */
     bool RenderSceneOnly(const eyelib::api::RenderScene& scene, uint32_t width, uint32_t height);
 
     /** Game-thread only: fill scene from world + animation. Used with RenderFrameSync when using a render thread. */

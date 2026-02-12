@@ -57,6 +57,11 @@ public:
      * @param dt Fixed delta time in seconds
      */
     static void SetFixedDeltaTime(float dt);
+
+    /** Smoothed delta time (EMA) for stable display. */
+    static float SmoothedDeltaTime();
+    /** EMA alpha for smoothed delta (0–1). Default 0.1. */
+    static void SetSmoothedDeltaAlpha(float alpha);
 };
 
 } // namespace api

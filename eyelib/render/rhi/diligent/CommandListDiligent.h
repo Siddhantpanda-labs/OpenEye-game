@@ -88,6 +88,9 @@ private:
     void* m_cbConstants = nullptr;  // Diligent::IBuffer* (owned)
     void* m_cbMaterial = nullptr;
     void* m_cbBones = nullptr;
+
+    static constexpr uint32_t kMaxTextureSlots = 8u;
+    ITexture* m_boundTextures[kMaxTextureSlots] = {};
 };
 
 } // namespace rhi

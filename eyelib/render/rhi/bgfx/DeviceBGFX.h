@@ -54,7 +54,7 @@ struct DeviceBGFX : IDevice {
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
-    void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) override;
+    void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
 
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }

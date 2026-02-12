@@ -3,14 +3,11 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/rhi/RHI.h"
+#include <functional>
 #include <memory>
-#include <span>
 #include <vector>
 
 namespace eyelib {
-namespace api {
-struct Drawable;
-}
 namespace render {
 
 class Shader;
@@ -35,10 +32,10 @@ public:
                 float nearPlane,
                 float farPlane);
 
-    /** Zero-copy: render from API drawables. cmd used for ShadowMap bind/unbind. */
+    using DrawableFeed = std::function<void(std::function<void(const Drawable&)>)>;
     void Render(ShadowMap& shadowMap,
                 rhi::ICommandList* cmd,
-                std::span<const api::Drawable> drawables,
+                DrawableFeed feedDrawables,
                 const math::Vec3& lightDir,
                 const math::Mat4& view,
                 const math::Mat4& projection,
@@ -51,6 +48,15 @@ public:
 private:
     void EnsureDefaultShader();
     void EnsureSkinnedShader();
+    void RenderDrawables(ShadowMap& shadowMap,
+                        rhi::ICommandList* cmd,
+                        DrawableFeed feedDrawables,
+                        const math::Vec3& lightDir,
+                        const math::Mat4& view,
+                        const math::Mat4& projection,
+                        const math::Vec3& cameraPos,
+                        float nearPlane,
+                        float farPlane);
 
     std::shared_ptr<Shader> m_depthShader;
     std::shared_ptr<Shader> m_depthSkinnedShader;

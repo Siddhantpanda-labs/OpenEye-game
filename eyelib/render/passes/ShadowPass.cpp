@@ -1,5 +1,4 @@
 #include "eyelib/render/passes/ShadowPass.h"
-#include "api/render/RenderScene.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
@@ -46,7 +45,34 @@ void ShadowPass::Render(ShadowMap& shadowMap,
                         const math::Vec3& cameraPos,
                         float nearPlane,
                         float farPlane) {
-    if (drawables.empty()) return;
+    RenderDrawables(shadowMap, cmd,
+                   [&drawables](std::function<void(const Drawable&)> c) {
+                       for (const auto& d : drawables) c(d);
+                   },
+                   lightDir, view, projection, cameraPos, nearPlane, farPlane);
+}
+
+void ShadowPass::Render(ShadowMap& shadowMap,
+                        rhi::ICommandList* cmd,
+                        DrawableFeed feedDrawables,
+                        const math::Vec3& lightDir,
+                        const math::Mat4& view,
+                        const math::Mat4& projection,
+                        const math::Vec3& cameraPos,
+                        float nearPlane,
+                        float farPlane) {
+    RenderDrawables(shadowMap, cmd, std::move(feedDrawables), lightDir, view, projection, cameraPos, nearPlane, farPlane);
+}
+
+void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
+                                rhi::ICommandList* cmd,
+                                DrawableFeed feedDrawables,
+                                const math::Vec3& lightDir,
+                                const math::Mat4& view,
+                                const math::Mat4& projection,
+                                const math::Vec3& cameraPos,
+                                float nearPlane,
+                                float farPlane) {
     EnsureDefaultShader();
     EnsureSkinnedShader();
     bool depthValid = m_depthShader && m_depthShader->IsValid();
@@ -77,9 +103,9 @@ void ShadowPass::Render(ShadowMap& shadowMap,
 
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
-    for (const auto& d : drawables) {
+    feedDrawables([this, &shadowMap, cmd, lightMatrix](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-        if (!d.mesh || !material) continue;
+        if (!d.mesh || !material) return;
 
         const math::Mat4* bonePtr = nullptr;
         size_t boneCount = 0;
@@ -116,80 +142,7 @@ void ShadowPass::Render(ShadowMap& shadowMap,
         d.mesh->Bind();
         d.mesh->Draw();
         d.mesh->Unbind();
-    }
-
-    if (cmd) {
-        cmd->SetCullFrontFace(false);
-    }
-    m_depthShader->Unbind();
-    if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid())
-        m_depthSkinnedShader->Unbind();
-    shadowMap.Unbind(cmd);
-    m_currentShadowMap = nullptr;
-}
-
-void ShadowPass::Render(ShadowMap& shadowMap,
-                        rhi::ICommandList* cmd,
-                        std::span<const api::Drawable> drawables,
-                        const math::Vec3& lightDir,
-                        const math::Mat4& view,
-                        const math::Mat4& projection,
-                        const math::Vec3& cameraPos,
-                        float nearPlane,
-                        float farPlane) {
-    if (drawables.empty()) return;
-    EnsureDefaultShader();
-    EnsureSkinnedShader();
-    bool depthValid = m_depthShader && m_depthShader->IsValid();
-    bool skinnedValid = m_depthSkinnedShader && m_depthSkinnedShader->IsValid();
-    rhi::IPipeline* pipe = m_depthShader ? m_depthShader->GetPipelineRHI() : nullptr;
-    bool programValid = (!pipe || pipe->HasValidProgram());
-    core::Log::InfoF("ShadowPass(api): depth shader valid=%d skinned shader valid=%d pipeline program valid=%d", depthValid ? 1 : 0, skinnedValid ? 1 : 0, programValid ? 1 : 0);
-    if (!depthValid) {
-        core::Log::Info("ShadowPass(api): skipped (depth shader invalid or missing)");
-        return;
-    }
-    if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("ShadowPass(api): skipped (no valid backend program)");
-        return;
-    }
-    core::Log::Info("ShadowPass(api): executing");
-
-    shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
-    shadowMap.BindForShadowPass(cmd);
-    m_currentShadowMap = &shadowMap;
-
-    if (cmd) {
-        cmd->SetDepthTest(true);
-        cmd->SetDepthFuncLess(true);
-        cmd->SetCullFace(true);
-        cmd->SetCullFrontFace(true);
-    }
-
-    const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
-
-    for (const auto& apiD : drawables) {
-        Mesh* mesh = apiD.mesh ? apiD.mesh->GetInternal().get() : nullptr;
-        if (!mesh || !apiD.material) continue;
-
-        const math::Mat4* bonePtr = apiD.bones;
-        size_t boneCount = apiD.boneCount;
-
-        if (bonePtr && boneCount > 0 && m_depthSkinnedShader->IsValid()) {
-            boneCount = std::min(boneCount, kMaxBones);
-            m_depthSkinnedShader->Bind();
-            m_depthSkinnedShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
-            m_depthSkinnedShader->SetMat4("u_Model", apiD.transform);
-            m_depthSkinnedShader->SetMat4Array("u_Bones", bonePtr, boneCount);
-        } else {
-            m_depthShader->Bind();
-            m_depthShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
-            m_depthShader->SetMat4("u_Model", apiD.transform);
-        }
-        mesh->Bind();
-        mesh->Draw();
-        mesh->Unbind();
-    }
+    });
 
     if (cmd) {
         cmd->SetCullFrontFace(false);

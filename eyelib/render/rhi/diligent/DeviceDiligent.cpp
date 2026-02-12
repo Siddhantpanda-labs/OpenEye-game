@@ -75,6 +75,15 @@ void* DeviceDiligent::GetSwapChainBackBufferRTV() const {
     return nullptr;
 }
 
+void* DeviceDiligent::GetLinearSampler() {
+#if OPENEYE_USE_DILIGENT
+    EnsureBlitResources();
+    return m_blitSampler;
+#else
+    return nullptr;
+#endif
+}
+
 ICommandList* DeviceDiligent::GetImmediateCommandList() {
     return m_immediateCommandList.get();
 }
@@ -320,8 +329,10 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     p->m_topology = topology;
 
 #if OPENEYE_USE_DILIGENT
-    if (!m_impl || !m_impl->pDevice || !shaderName || !shaderName[0])
-        return p;
+    if (!m_impl || !m_impl->pDevice || !shaderName || !shaderName[0]) {
+        delete p;
+        return nullptr;
+    }
 
     using namespace Diligent;
     using namespace eyelib::platform::filesystem;
@@ -337,13 +348,17 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         vshPath = baseDir + shaderName + ".vsh";
         pshPath = baseDir + shaderName + ".psh";
     }
-    if (!FileExists(vshPath) || !FileExists(pshPath))
-        return p;
+    if (!FileExists(vshPath) || !FileExists(pshPath)) {
+        delete p;
+        return nullptr;
+    }
 
     std::vector<uint8_t> vsBuf = ReadFile(vshPath);
     std::vector<uint8_t> psBuf = ReadFile(pshPath);
-    if (vsBuf.empty() || psBuf.empty())
-        return p;
+    if (vsBuf.empty() || psBuf.empty()) {
+        delete p;
+        return nullptr;
+    }
     vsBuf.push_back(0);
     psBuf.push_back(0);
     const char* vsSrc = reinterpret_cast<const char*>(vsBuf.data());
@@ -356,7 +371,8 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     if (!pVs->IsValid() || !pPs->IsValid()) {
         DestroyShader(pRhiVs);
         DestroyShader(pRhiPs);
-        return p;
+        delete p;
+        return nullptr;
     }
 
     Diligent::IShader* pDgVs = static_cast<Diligent::IShader*>(pVs->m_pNative);
@@ -403,23 +419,44 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     // Names must match HLSL exactly (e.g. "Constants", "Material", "Bones", "u_ShadowMap").
     const std::string nameStr(shaderName);
     const bool isForward = (nameStr.find("passes/forward/") != std::string::npos);
+    const bool isShadow = (nameStr.find("passes/shadow/") != std::string::npos);
+    const bool isPost = (nameStr.find("passes/post/") != std::string::npos);
     const bool isSkinned = (nameStr.find("skinned") != std::string::npos);
     std::vector<PipelineResourceDesc> resourceList;
     if (isForward) {
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_VERTEX, "Constants", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         if (isSkinned)
             resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_VERTEX, "Bones", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "Constants", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "Material", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_ShadowMap", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+    } else if (isShadow) {
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_VERTEX, "Constants", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        if (isSkinned)
+            resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_VERTEX, "Bones", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+    } else if (isPost) {
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "Constants", 1u, SHADER_RESOURCE_TYPE_CONSTANT_BUFFER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_HDRTexture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_SceneTexture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_BloomTexture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "g_Position", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "g_Normal", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "g_Depth", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "g_Albedo", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "g_Velocity", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Skybox", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_LinearSampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
+        resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture_sampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     } else {
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture", 1u, SHADER_RESOURCE_TYPE_TEXTURE_SRV, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
         resourceList.push_back(PipelineResourceDesc{SHADER_TYPE_PIXEL, "u_Texture_sampler", 1u, SHADER_RESOURCE_TYPE_SAMPLER, SHADER_RESOURCE_VARIABLE_TYPE_DYNAMIC});
     }
     PipelineResourceSignatureDesc prsDesc;
-    prsDesc.Name = "ForwardPRS";
+    prsDesc.Name = isForward ? "ForwardPRS" : (isShadow ? "ShadowPRS" : (isPost ? "PostPRS" : "CopyPRS"));
     prsDesc.Resources = resourceList.data();
     prsDesc.NumResources = static_cast<Uint32>(resourceList.size());
-    prsDesc.UseCombinedTextureSamplers = true;
+    prsDesc.UseCombinedTextureSamplers = isForward;
     prsDesc.CombinedSamplerSuffix = "_sampler";
     Diligent::IPipelineResourceSignature* pPRSPtr = nullptr;
     m_impl->pDevice->CreatePipelineResourceSignature(prsDesc, &pPRSPtr);
@@ -441,11 +478,31 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
             : (topology == PrimitiveTopology::PointList)
                 ? PRIMITIVE_TOPOLOGY_POINT_LIST
                 : PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    psoci.GraphicsPipeline.NumRenderTargets = 1;
-    psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
-    if (m_impl->pSwapChain) {
-        const auto& scDesc = m_impl->pSwapChain->GetDesc();
-        psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+    if (isShadow) {
+        psoci.GraphicsPipeline.NumRenderTargets = 0;
+        psoci.GraphicsPipeline.DSVFormat = TEX_FORMAT_D32_FLOAT;
+    } else {
+        psoci.GraphicsPipeline.NumRenderTargets = 1;
+        if (isForward) {
+            psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA16_FLOAT;
+            psoci.GraphicsPipeline.DSVFormat = TEX_FORMAT_D32_FLOAT;
+        } else {
+            if (isPost) {
+            // Bloom stages render to HDR RTs (RGBA16F); tonemap/composite/fxaa/copy render to LDR (RGBA8) or swapchain.
+            if (nameStr == "passes/post/bloom_extract" || nameStr == "passes/post/bloom_blur")
+                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA16_FLOAT;
+            else if (nameStr == "passes/post/copy" && m_impl->pSwapChain)
+                psoci.GraphicsPipeline.RTVFormats[0] = m_impl->pSwapChain->GetDesc().ColorBufferFormat;
+            else
+                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
+        } else {
+            psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
+            if (m_impl->pSwapChain) {
+                const auto& scDesc = m_impl->pSwapChain->GetDesc();
+                psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+            }
+        }
+        }
     }
     Diligent::IPipelineResourceSignature* pPRSArray[] = { pPRS.RawPtr() };
     psoci.ppResourceSignatures = pPRSArray;
@@ -458,12 +515,17 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     if (pPSOPtr) {
         pPSOPtr->AddRef();
         p->m_pNative = pPSOPtr;
+        p->m_shaderName = nameStr;
         Diligent::IShaderResourceBinding* pSRBPtr = nullptr;
         pPRS->CreateShaderResourceBinding(&pSRBPtr, true);
         if (pSRBPtr) {
             pSRBPtr->AddRef();
             p->m_pSRB = pSRBPtr;
         }
+    }
+    if (!p->m_pNative) {
+        delete p;
+        return nullptr;
     }
 #endif
     return p;
@@ -616,11 +678,19 @@ ITexture* DeviceDiligent::CreateTextureWrapper(void* nativeTextureId, uint32_t w
 
 #if OPENEYE_USE_DILIGENT
 void DeviceDiligent::EnsureBlitResources() {
-    if (!m_impl || !m_impl->pDevice || m_blitPipeline) return;
+    if (!m_impl || !m_impl->pDevice) {
+        static bool once;
+        if (!once) { core::Log::Warn("Diligent EnsureBlitResources: skip (no impl/device)"); once = true; }
+        return;
+    }
+    if (m_blitPipeline) return;
     using namespace Diligent;
     VertexLayout emptyLayout;
     m_blitPipeline = CreateGraphicsPipelineFromName("passes/post/copy", emptyLayout, PrimitiveTopology::TriangleList);
-    if (!m_blitPipeline || !static_cast<PipelineDiligent*>(m_blitPipeline)->HasValidProgram()) return;
+    if (!m_blitPipeline || !static_cast<PipelineDiligent*>(m_blitPipeline)->HasValidProgram()) {
+        core::Log::Warn("Diligent EnsureBlitResources: failed (copy pipeline null or invalid program)");
+        return;
+    }
     struct PosTexVertex { float x, y, u, v; };
     const PosTexVertex quadVerts[] = {
         {-1.f, -1.f, 0.f, 1.f},
@@ -643,24 +713,52 @@ void DeviceDiligent::EnsureBlitResources() {
     sampDesc.MinFilter = FILTER_TYPE_LINEAR;
     sampDesc.MagFilter = FILTER_TYPE_LINEAR;
     sampDesc.MipFilter = FILTER_TYPE_LINEAR;
+    sampDesc.AddressU = sampDesc.AddressV = sampDesc.AddressW = TEXTURE_ADDRESS_CLAMP;
     ISampler* pSamp = nullptr;
     m_impl->pDevice->CreateSampler(sampDesc, &pSamp);
-    if (pSamp) { pSamp->AddRef(); m_blitSampler = pSamp; }
+    if (!pSamp) {
+        core::Log::Warn("Diligent EnsureBlitResources: failed (CreateSampler returned null)");
+        return;
+    }
+    pSamp->AddRef();
+    m_blitSampler = pSamp;
+    core::Log::Info("Diligent EnsureBlitResources: OK (pipeline+VB+IB+sampler)");
 }
 
 void DeviceDiligent::BlitToDefaultFramebuffer(IRenderTarget* src) {
-    if (!src || !m_impl || !m_impl->pContext) return;
+    static int s_blitSkipReason = -1;  // -1=none, 0=done, 1=no src/impl/ctx, 2=no pipe/vb/ib/samp, 3=no color0, 4=no SRV, 5=no PSO/SRB, 6=no RTV, 7=no VB/IB native
+    if (!src || !m_impl || !m_impl->pContext) {
+        if (s_blitSkipReason != 1) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (no src or impl or context)"); s_blitSkipReason = 1; }
+        return;
+    }
     EnsureBlitResources();
-    if (!m_blitPipeline || !m_blitVB || !m_blitIB) return;
+    if (!m_blitPipeline || !m_blitVB || !m_blitIB || !m_blitSampler) {
+        if (s_blitSkipReason != 2) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (no pipeline/VB/IB/sampler)"); s_blitSkipReason = 2; }
+        return;
+    }
     ITexture* color0 = src->GetColorTexture(0);
-    if (!color0) return;
+    if (!color0) {
+        if (s_blitSkipReason != 3) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (no color texture 0)"); s_blitSkipReason = 3; }
+        return;
+    }
     TextureDiligent* tex = static_cast<TextureDiligent*>(color0);
-    if (!tex->m_pSRV) return;
+    if (!tex->m_pSRV) {
+        if (s_blitSkipReason != 4) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (color texture has no SRV)"); s_blitSkipReason = 4; }
+        return;
+    }
     Diligent::IDeviceContext* ctx = m_impl->pContext.RawPtr();
     PipelineDiligent* pl = static_cast<PipelineDiligent*>(m_blitPipeline);
-    if (!pl->m_pNative || !pl->m_pSRB) return;
+    if (!pl->m_pNative || !pl->m_pSRB) {
+        if (s_blitSkipReason != 5) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (no PSO or SRB)"); s_blitSkipReason = 5; }
+        return;
+    }
     Diligent::ITextureView* pRTV = static_cast<Diligent::ITextureView*>(GetSwapChainBackBufferRTV());
-    if (!pRTV) return;
+    if (!pRTV) {
+        if (s_blitSkipReason != 6) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (no swap chain RTV)"); s_blitSkipReason = 6; }
+        return;
+    }
+    // Do not transition the source texture here: it may already be SHADER_RESOURCE from the post chain.
+    // CommitShaderResources(TRANSITION) below will transition it to SHADER_RESOURCE if needed.
     ctx->SetRenderTargets(1, &pRTV, nullptr, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     Diligent::Viewport vp;
     vp.TopLeftX = vp.TopLeftY = 0.f;
@@ -679,7 +777,11 @@ void DeviceDiligent::BlitToDefaultFramebuffer(IRenderTarget* src) {
     ctx->CommitShaderResources(pSRB, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     Diligent::IBuffer* pVB = static_cast<Diligent::IBuffer*>(static_cast<BufferDiligent*>(m_blitVB)->m_pNative);
     Diligent::IBuffer* pIB = static_cast<Diligent::IBuffer*>(static_cast<BufferDiligent*>(m_blitIB)->m_pNative);
-    if (!pVB || !pIB) return;
+    if (!pVB || !pIB) {
+        if (s_blitSkipReason != 7) { core::Log::Warn("Diligent BlitToDefaultFramebuffer: skip (blit VB/IB native null)"); s_blitSkipReason = 7; }
+        return;
+    }
+    if (s_blitSkipReason != 0) { core::Log::Info("Diligent BlitToDefaultFramebuffer: drawing fullscreen quad"); s_blitSkipReason = 0; }
     Diligent::Uint64 voff = 0;
     ctx->SetVertexBuffers(0, 1, &pVB, &voff, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
     ctx->SetIndexBuffer(pIB, 0, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
@@ -719,8 +821,8 @@ void DeviceDiligent::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* d
     (void)colorOnly;
 }
 
-void DeviceDiligent::BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) {
-    (void)nativeFbo;
+void DeviceDiligent::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
+    (void)src;
     (void)dst;
 }
 

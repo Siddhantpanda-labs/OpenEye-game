@@ -1,5 +1,4 @@
 #include "eyelib/render/passes/TransparencyPass.h"
-#include "api/render/RenderScene.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
@@ -76,63 +75,6 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         d.mesh->Bind();
         d.mesh->Draw();
         d.mesh->Unbind();
-        sh->Unbind();
-    }
-
-    if (cmd) {
-        cmd->SetDepthWrite(true);
-        cmd->SetBlend(false);
-    }
-}
-
-void TransparencyPass::Render(rhi::ICommandList* cmd,
-                              std::span<const api::Drawable> transparent,
-                              const math::Mat4& view,
-                              const math::Mat4& projection,
-                              const math::Vec3& viewPos) {
-    if (transparent.empty()) return;
-
-    struct Entry { size_t idx; float dist; };
-    std::vector<Entry> sorted;
-    sorted.reserve(transparent.size());
-    for (size_t i = 0; i < transparent.size(); ++i) {
-        const auto& apiD = transparent[i];
-        if (!apiD.mesh || !apiD.material) continue;
-        if (apiD.params.alpha >= 0.99f) continue;
-        float d = distanceToCamera(apiD.transform, viewPos);
-        sorted.push_back({i, d});
-    }
-    std::sort(sorted.begin(), sorted.end(), [](const Entry& a, const Entry& b) {
-        return a.dist > b.dist;
-    });
-
-    if (cmd) {
-        cmd->SetBlend(true);
-        cmd->SetDepthWrite(false);
-        cmd->SetDepthTest(true);
-    }
-
-    for (const auto& e : sorted) {
-        const auto& apiD = transparent[e.idx];
-        Mesh* mesh = apiD.mesh ? apiD.mesh->GetInternal().get() : nullptr;
-        Material* material = apiD.material ? apiD.material->GetInternal().get() : nullptr;
-        if (!mesh || !material) continue;
-        Shader* sh = material->GetShader().get();
-        if (!sh) continue;
-        sh->Bind();
-        sh->SetMat4("u_Model", apiD.transform);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(apiD.transform)));
-        sh->SetMat4("u_View", view);
-        sh->SetMat4("u_Projection", projection);
-        sh->SetVec3("u_ViewPos", viewPos);
-        if (apiD.bones && apiD.boneCount > 0) {
-            const size_t boneCount = std::min(apiD.boneCount, kMaxBones);
-            sh->SetMat4Array("u_Bones", apiD.bones, boneCount);
-        }
-        sh->SetFloat("u_Alpha", apiD.params.alpha);
-        mesh->Bind();
-        mesh->Draw();
-        mesh->Unbind();
         sh->Unbind();
     }
 

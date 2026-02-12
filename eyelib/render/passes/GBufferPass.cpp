@@ -1,5 +1,4 @@
 #include "eyelib/render/passes/GBufferPass.h"
-#include "api/render/RenderScene.h"
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Material.h"
@@ -38,7 +37,30 @@ void GBufferPass::Render(GBuffer& gbuffer,
                          const math::Mat4& projection,
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection) {
-    if (drawables.empty()) return;
+    RenderDrawables(gbuffer, cmd,
+                    [&drawables](std::function<void(const Drawable&)> c) {
+                        for (const auto& d : drawables) c(d);
+                    },
+                    view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::Render(GBuffer& gbuffer,
+                         rhi::ICommandList* cmd,
+                         DrawableFeed feedDrawables,
+                         const math::Mat4& view,
+                         const math::Mat4& projection,
+                         const math::Mat4& prevView,
+                         const math::Mat4& prevProjection) {
+    RenderDrawables(gbuffer, cmd, std::move(feedDrawables), view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::RenderDrawables(GBuffer& gbuffer,
+                                  rhi::ICommandList* cmd,
+                                  DrawableFeed feedDrawables,
+                                  const math::Mat4& view,
+                                  const math::Mat4& projection,
+                                  const math::Mat4& prevView,
+                                  const math::Mat4& prevProjection) {
     EnsureDefaultShader();
     bool shaderValid = m_geometryShader && m_geometryShader->IsValid();
     rhi::IPipeline* pipe = m_geometryShader ? m_geometryShader->GetPipelineRHI() : nullptr;
@@ -70,10 +92,9 @@ void GBufferPass::Render(GBuffer& gbuffer,
         cmd->SetCullFace(false);
     }
 
-    core::Log::InfoF("GBufferPass: drawing %zu drawables", drawables.size());
-    for (const auto& d : drawables) {
+    feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-        if (!d.mesh || !material) continue;
+        if (!d.mesh || !material) return;
 
         auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
             return d.materialInstance ? d.materialInstance->GetVec4(name, def) : material->GetVec4(name, def);
@@ -154,7 +175,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
         d.mesh->Bind();
         d.mesh->Draw();
         d.mesh->Unbind();
-    }
+    });
 
     core::Log::Info("GBufferPass: drew, unbinding");
     m_geometryShader->Unbind();
@@ -166,125 +187,6 @@ void GBufferPass::Render(GBuffer& gbuffer,
         cmd->SetCullFace(true);
     }
     core::Log::Info("GBufferPass: done");
-}
-
-void GBufferPass::Render(GBuffer& gbuffer,
-                         rhi::ICommandList* cmd,
-                         std::span<const api::Drawable> drawables,
-                         const math::Mat4& view,
-                         const math::Mat4& projection,
-                         const math::Mat4& prevView,
-                         const math::Mat4& prevProjection) {
-    if (drawables.empty()) return;
-    EnsureDefaultShader();
-    bool shaderValid = m_geometryShader && m_geometryShader->IsValid();
-    rhi::IPipeline* pipe = m_geometryShader ? m_geometryShader->GetPipelineRHI() : nullptr;
-    bool programValid = (!pipe || pipe->HasValidProgram());
-    core::Log::InfoF("GBufferPass(api): geometry shader valid=%d pipeline program valid=%d", shaderValid ? 1 : 0, programValid ? 1 : 0);
-    if (!shaderValid) {
-        core::Log::Info("GBufferPass(api): skipped (geometry shader invalid or missing)");
-        return;
-    }
-    if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("GBufferPass(api): skipped (no valid backend program)");
-        return;
-    }
-    core::Log::Info("GBufferPass(api): executing");
-
-    m_currentGBuffer = &gbuffer;
-    gbuffer.BindForGeometryPass(cmd);
-    core::Log::Info("GBufferPass(api): BindForGeometryPass done");
-
-    m_geometryShader->Bind();
-    m_geometryShader->SetMat4("u_View", view);
-    m_geometryShader->SetMat4("u_Projection", projection);
-    m_geometryShader->SetMat4("u_PrevView", prevView);
-    m_geometryShader->SetMat4("u_PrevProjection", prevProjection);
-
-    if (cmd) {
-        cmd->SetDepthTest(true);
-        cmd->SetDepthWrite(true);
-        cmd->SetCullFace(false);
-    }
-
-    core::Log::InfoF("GBufferPass(api): drawing %zu drawables", drawables.size());
-    size_t drawn = 0;
-    for (size_t idx = 0; idx < drawables.size(); ++idx) {
-        const auto& apiD = drawables[idx];
-        core::Log::InfoF("GBufferPass(api): drawable %zu: get mesh/material", idx);
-        Mesh* mesh = apiD.mesh ? apiD.mesh->GetInternal().get() : nullptr;
-        Material* material = apiD.material ? apiD.material->GetInternal().get() : nullptr;
-        if (!mesh || !material) continue;
-        core::Log::InfoF("GBufferPass(api): drawable %zu: set uniforms (model/params)", idx);
-        const auto& p = apiD.params;
-        m_geometryShader->SetMat4("u_Model", apiD.transform);
-        m_geometryShader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(apiD.transform)));
-        m_geometryShader->SetVec3("u_Albedo", p.albedo);
-        m_geometryShader->SetFloat("u_Metallic", p.metallic);
-        m_geometryShader->SetFloat("u_Roughness", p.roughness);
-        m_geometryShader->SetFloat("u_AO", p.ao);
-        core::Log::InfoF("GBufferPass(api): drawable %zu: set UV params", idx);
-        m_geometryShader->SetVec4("u_UVTransform", p.uvTransform);
-        m_geometryShader->SetFloat("u_UVRotation", p.uvRotation);
-        m_geometryShader->SetFloat("u_TexCoordIndex", p.texCoordIndex);
-        m_geometryShader->SetFloat("u_FlipV", p.flipV);
-
-        bool hasBones = false;
-        if (apiD.bones && apiD.boneCount > 0) {
-            const size_t boneCount = std::min(static_cast<size_t>(apiD.boneCount), kMaxBones);
-            core::Log::InfoF("GBufferPass(api): drawable %zu: set bones (count=%zu, clamped to %zu)", idx, static_cast<size_t>(apiD.boneCount), boneCount);
-            m_geometryShader->SetMat4Array("u_Bones", apiD.bones, boneCount);
-            hasBones = true;
-        }
-        if (!hasBones) {
-            static const math::Mat4 identityBone = math::Mat4(1.0f);
-            m_geometryShader->SetMat4Array("u_Bones", &identityBone, 1);
-        }
-        core::Log::InfoF("GBufferPass(api): drawable %zu: bones set, bind textures", idx);
-
-        core::Log::InfoF("GBufferPass(api): drawable %zu: bind textures", idx);
-        const std::shared_ptr<api::Texture>* texs[] = {
-            &p.albedoTexture, &p.normalTexture, &p.metallicRoughnessTexture,
-            &p.aoTexture, &p.emissiveTexture, &p.metallicTexture, &p.roughnessTexture
-        };
-        const char* textureOrder[] = {
-            "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
-            "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
-        };
-        int unit = 0;
-        for (size_t i = 0; i < 7; ++i) {
-            const auto& tex = *texs[i];
-            if (tex && tex->IsValid()) {
-                tex->GetInternal()->Bind(static_cast<int>(unit));
-                m_geometryShader->SetInt(textureOrder[i], static_cast<int>(unit));
-                ++unit;
-            }
-        }
-        m_geometryShader->SetFloat("u_HasAlbedoTexture", (p.albedoTexture && p.albedoTexture->IsValid()) ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasNormalTexture", (p.normalTexture && p.normalTexture->IsValid()) ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasMetallicRoughnessTexture", (p.metallicRoughnessTexture && p.metallicRoughnessTexture->IsValid()) ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasAOTexture", (p.aoTexture && p.aoTexture->IsValid()) ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasMetallicTexture", (p.metallicTexture && p.metallicTexture->IsValid()) ? 1.0f : 0.0f);
-        m_geometryShader->SetFloat("u_HasRoughnessTexture", (p.roughnessTexture && p.roughnessTexture->IsValid()) ? 1.0f : 0.0f);
-
-        core::Log::InfoF("GBufferPass(api): drawable %zu: mesh Bind", idx);
-        mesh->Bind();
-        core::Log::InfoF("GBufferPass(api): drawable %zu: mesh Draw", idx);
-        mesh->Draw();
-        core::Log::InfoF("GBufferPass(api): drawable %zu: mesh Unbind", idx);
-        mesh->Unbind();
-        ++drawn;
-    }
-
-    core::Log::InfoF("GBufferPass(api): drew %zu meshes, unbinding", drawn);
-    m_geometryShader->Unbind();
-    gbuffer.Unbind(cmd);
-    m_currentGBuffer = nullptr;
-    if (cmd) {
-        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
-        cmd->SetCullFace(true);
-    }
-    core::Log::Info("GBufferPass(api): done");
 }
 
 } // namespace render

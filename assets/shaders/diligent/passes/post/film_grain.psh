@@ -1,0 +1,12 @@
+Texture2D u_Texture : register(t0);
+SamplerState u_LinearSampler : register(s0);
+cbuffer Constants : register(b0) { float u_Intensity; float u_Time; };
+struct PSInput { float4 Position : SV_POSITION; float2 TexCoord : TEXCOORD0; };
+float Random(float2 co) { return frac(sin(dot(co.xy, float2(12.9898, 78.233)) + u_Time) * 43758.5453); }
+void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
+{
+    float3 color = u_Texture.Sample(u_LinearSampler, PSIn.TexCoord).rgb;
+    float grain = (Random(PSIn.TexCoord * 1000.0) * 2.0 - 1.0) * u_Intensity;
+    color += grain * 0.1;
+    FragColor = float4(color, 1.0);
+}

@@ -1,4 +1,5 @@
 #include "api/render/RenderPipeline.h"
+#include "api/render/RenderSceneAdapter.h"
 #include "api/render/RenderTarget.h"
 #include "api/platform/Window.h"
 #include "api/core/All.h"
@@ -80,7 +81,8 @@ RenderPipeline::Mode RenderPipeline::GetMode() const {
 }
 
 void RenderPipeline::Render(const RenderScene& scene) {
-    m_impl->pipeline->Render(scene);
+    ApiRenderSceneView view(scene);
+    m_impl->pipeline->Render(view);
 }
 
 void RenderPipeline::BlitToScreen() {

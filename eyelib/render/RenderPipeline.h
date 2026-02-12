@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/IRenderSceneView.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -9,9 +10,6 @@
 #include <vector>
 
 namespace eyelib {
-namespace api {
-struct RenderScene;
-}
 namespace render {
 
 class GBuffer;
@@ -43,16 +41,17 @@ public:
 
     /** Initialize with injected RHI device (no backend include in this module). */
     bool Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height);
+    /** Resize pipeline (GBuffer, HDR RT, post-process). May only be called at frame boundary, before Render() for this frame. Never call mid-frame or while a command list is active. */
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
 
     void SetMode(PipelineMode mode) { m_mode = mode; }
     PipelineMode GetMode() const { return m_mode; }
 
-    /** Render from API scene (unified type). Zero-copy: uses scene data directly, no scratch copy. */
-    void Render(const api::RenderScene& scene);
-    /** Render from internal scene (e.g. ECS RenderSystem path). */
+    /** Render scene (ECS or converted from API at the api layer). */
     void Render(const RenderScene& scene);
+    /** Render from a read-only view (zero-copy when view wraps API scene). */
+    void Render(const IRenderSceneView& view);
     void BlitToScreen();
     /** Returns true when the pipeline has a valid render target to present. */
     bool HasValidOutput() const;
@@ -76,14 +75,10 @@ private:
     void EnsureResources(uint32_t width, uint32_t height);
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
-    void BuildAndExecuteFrameGraph(const RenderScene& scene);
-    void BuildAndExecuteFrameGraph(const api::RenderScene& scene);
-    void RenderForward(const RenderScene& scene);
-    void RenderForward(const api::RenderScene& scene);
-    void RenderForwardPlus(const RenderScene& scene);
-    void RenderForwardPlus(const api::RenderScene& scene);
-    void RenderSkybox(const RenderScene& scene, bool useGbufferDepth);
-    void RenderSkybox(const api::RenderScene& scene, bool useGbufferDepth);
+    void BuildAndExecuteFrameGraph(const IRenderSceneView& view);
+    void RenderForward(const IRenderSceneView& view);
+    void RenderForwardPlus(const IRenderSceneView& view);
+    void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
     void EnsureSkyboxShader();
 
@@ -118,6 +113,13 @@ private:
     // Forward+ only: scratch for api lights -> internal layout (SSBO std140); drawables are zero-copy
     std::vector<PointLight> m_scratchPointLights;
     std::vector<SpotLight> m_scratchSpotLights;
+    // Scratch for transparent drawables when using view (sorting requires a list)
+    mutable std::vector<Drawable> m_scratchTransparent;
+
+#ifndef NDEBUG
+    /** Debug guard: set during Render() to catch invalid Resize() mid-frame. */
+    bool m_rendering = false;
+#endif
 };
 
 } // namespace render

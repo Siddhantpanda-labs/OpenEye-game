@@ -5,6 +5,9 @@
 #include "eyelib/render/rhi/diligent/RenderTargetDiligent.h"
 #include "eyelib/render/rhi/diligent/TextureDiligent.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/core/Log.h"
+#include <string>
+#include <cstring>
 
 #if OPENEYE_USE_DILIGENT
 #include "Graphics/GraphicsEngine/interface/RenderDevice.h"
@@ -33,6 +36,46 @@ CommandListDiligent::~CommandListDiligent() {
 }
 
 #if OPENEYE_USE_DILIGENT
+namespace {
+// Map (post shader name, slot) -> HLSL texture variable name for SRB binding.
+const char* PostSlotToVariableName(const char* shaderName, uint32_t slot) {
+    if (!shaderName || slot >= 8) return nullptr;
+    if (strcmp(shaderName, "passes/post/tonemap") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
+    if (strcmp(shaderName, "passes/post/bloom_extract") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
+    if (strcmp(shaderName, "passes/post/bloom_blur") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(shaderName, "passes/post/bloom_composite") == 0) {
+        if (slot == 0) return "u_SceneTexture";
+        if (slot == 1) return "u_BloomTexture";
+        return nullptr;
+    }
+    if (strcmp(shaderName, "passes/post/chromatic_aberration") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(shaderName, "passes/post/fxaa") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(shaderName, "passes/post/vignette") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(shaderName, "passes/post/motion_blur") == 0) {
+        if (slot == 0) return "u_Texture";
+        if (slot == 1) return "g_Velocity";
+        return nullptr;
+    }
+    if (strcmp(shaderName, "passes/post/film_grain") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(shaderName, "passes/post/ssao") == 0) {
+        if (slot == 0) return "g_Position";
+        if (slot == 1) return "g_Normal";
+        if (slot == 2) return "g_Depth";
+        return nullptr;
+    }
+    if (strcmp(shaderName, "passes/post/ssr") == 0) {
+        if (slot == 0) return "g_Position";
+        if (slot == 1) return "g_Normal";
+        if (slot == 2) return "g_Albedo";
+        if (slot == 3) return "u_SceneTexture";
+        if (slot == 4) return "u_Skybox";
+        return nullptr;
+    }
+    if (strcmp(shaderName, "passes/post/copy") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    return nullptr;
+}
+} // namespace
+
 void CommandListDiligent::EnsureDynamicConstantBuffers() {
     auto* pDevice = static_cast<Diligent::IRenderDevice*>(m_device->GetRenderDevice());
     if (!pDevice || m_cbConstants) return;
@@ -82,12 +125,38 @@ void CommandListDiligent::CommitShaderResources() {
         if (auto* v = pSRB->GetVariableByName(st, name))
             v->Set(pObj);
     };
+    const std::string& shaderName = m_currentPipeline->m_shaderName;
+
     if (pCbConstants) {
         setVar(Diligent::SHADER_TYPE_VERTEX, "Constants", pCbConstants);
         setVar(Diligent::SHADER_TYPE_PIXEL, "Constants", pCbConstants);
     }
     if (pCbMaterial) setVar(Diligent::SHADER_TYPE_PIXEL, "Material", pCbMaterial);
     if (pCbBones) setVar(Diligent::SHADER_TYPE_VERTEX, "Bones", pCbBones);
+
+    if (shaderName.size() >= 14 && shaderName.compare(0, 14, "passes/forward/") == 0 && m_boundTextures[5]) {
+        TextureDiligent* shadowTex = static_cast<TextureDiligent*>(m_boundTextures[5]);
+        if (shadowTex->m_pSRV)
+            setVar(Diligent::SHADER_TYPE_PIXEL, "u_ShadowMap", static_cast<Diligent::IDeviceObject*>(shadowTex->m_pSRV));
+    }
+
+    if (shaderName.size() >= 12 && shaderName.compare(0, 12, "passes/post/") == 0) {
+        Diligent::ISampler* pLinSamp = static_cast<Diligent::ISampler*>(m_device->GetLinearSampler());
+        if (pLinSamp) {
+            setVar(Diligent::SHADER_TYPE_PIXEL, "u_LinearSampler", pLinSamp);
+            setVar(Diligent::SHADER_TYPE_PIXEL, "u_Texture_sampler", pLinSamp);
+        }
+        for (uint32_t s = 0; s < kMaxTextureSlots; s++) {
+            ITexture* tex = m_boundTextures[s];
+            if (!tex) continue;
+            const char* varName = PostSlotToVariableName(shaderName.c_str(), s);
+            if (!varName) continue;
+            TextureDiligent* td = static_cast<TextureDiligent*>(tex);
+            if (td->m_pSRV)
+                setVar(Diligent::SHADER_TYPE_PIXEL, varName, static_cast<Diligent::IDeviceObject*>(td->m_pSRV));
+        }
+    }
+
     ctx->CommitShaderResources(pSRB, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 }
 #else
@@ -109,14 +178,20 @@ void CommandListDiligent::SetRenderTarget(IRenderTarget* rt) {
         return;
     }
     auto* rtd = static_cast<RenderTargetDiligent*>(rt);
-    ITexture* color0 = rtd->GetColorTexture(0);
-    if (!color0) return;
-    TextureDiligent* colorTex = static_cast<TextureDiligent*>(color0);
-    if (!colorTex->m_pRTV) return;
-    Diligent::ITextureView* pRTV = static_cast<Diligent::ITextureView*>(colorTex->m_pRTV);
     Diligent::ITextureView* pDSV = nullptr;
     if (rtd->m_depthTexture && rtd->m_depthTexture->m_pDSV)
         pDSV = static_cast<Diligent::ITextureView*>(rtd->m_depthTexture->m_pDSV);
+
+    ITexture* color0 = rtd->GetColorTexture(0);
+    if (!color0) {
+        // Depth-only render target (e.g. shadow map): bind only DSV, no color RTVs
+        if (pDSV)
+            ctx->SetRenderTargets(0, nullptr, pDSV, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        return;
+    }
+    TextureDiligent* colorTex = static_cast<TextureDiligent*>(color0);
+    if (!colorTex->m_pRTV) return;
+    Diligent::ITextureView* pRTV = static_cast<Diligent::ITextureView*>(colorTex->m_pRTV);
     ctx->SetRenderTargets(1, &pRTV, pDSV, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
 #endif
 }
@@ -128,10 +203,33 @@ void CommandListDiligent::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttac
 
 void CommandListDiligent::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) {
 #if OPENEYE_USE_DILIGENT
-    (void)rt;
-    (void)clear;
-    // TODO: clear when RT has native RTV
+    if (!rt) return;
+    auto* ctx = static_cast<Diligent::IDeviceContext*>(m_device->GetImmediateContext());
+    if (!ctx) return;
+    auto* rtd = static_cast<RenderTargetDiligent*>(rt);
+    ITexture* color0 = rtd->GetColorTexture(0);
+    Diligent::ITextureView* pRTV = nullptr;
+    if (color0) {
+        TextureDiligent* colorTex = static_cast<TextureDiligent*>(color0);
+        if (colorTex->m_pRTV)
+            pRTV = static_cast<Diligent::ITextureView*>(colorTex->m_pRTV);
+    }
+    Diligent::ITextureView* pDSV = nullptr;
+    if (rtd->m_depthTexture && rtd->m_depthTexture->m_pDSV)
+        pDSV = static_cast<Diligent::ITextureView*>(rtd->m_depthTexture->m_pDSV);
+
+    if (pRTV || pDSV) {
+        if (pRTV)
+            ctx->SetRenderTargets(1, &pRTV, pDSV, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        else if (pDSV)
+            ctx->SetRenderTargets(0, nullptr, pDSV, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        if (pRTV)
+            ctx->ClearRenderTarget(pRTV, clear.color, Diligent::RESOURCE_STATE_TRANSITION_MODE_NONE);
+        if (pDSV)
+            ctx->ClearDepthStencil(pDSV, Diligent::CLEAR_DEPTH_FLAG | Diligent::CLEAR_STENCIL_FLAG, clear.depth, static_cast<Diligent::Uint8>(clear.stencil), Diligent::RESOURCE_STATE_TRANSITION_MODE_NONE);
+    }
 #endif
+    (void)clear;
 }
 
 void CommandListDiligent::ClearDefaultFramebuffer(const ClearValue& clear) {
@@ -173,7 +271,36 @@ void CommandListDiligent::SetCullFrontFace(bool cullFront) { (void)cullFront; }
 void CommandListDiligent::SetBlend(bool enable) { (void)enable; }
 
 void CommandListDiligent::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) { (void)buffer; (void)fromState; (void)toState; }
-void CommandListDiligent::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) { (void)texture; (void)fromState; (void)toState; }
+
+void CommandListDiligent::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
+#if OPENEYE_USE_DILIGENT
+    if (!texture || !m_device) return;
+    auto* ctx = static_cast<Diligent::IDeviceContext*>(m_device->GetImmediateContext());
+    if (!ctx) return;
+    TextureDiligent* td = static_cast<TextureDiligent*>(texture);
+    if (!td->m_pNative) return;
+    auto toDg = [](ResourceState s) {
+        switch (s) {
+            case ResourceState::RenderTarget: return Diligent::RESOURCE_STATE_RENDER_TARGET;
+            case ResourceState::ShaderResource: return Diligent::RESOURCE_STATE_SHADER_RESOURCE;
+            case ResourceState::DepthWrite: return Diligent::RESOURCE_STATE_DEPTH_WRITE;
+            case ResourceState::DepthRead: return Diligent::RESOURCE_STATE_DEPTH_READ;
+            case ResourceState::TransferSrc: return Diligent::RESOURCE_STATE_COPY_SOURCE;
+            case ResourceState::TransferDst: return Diligent::RESOURCE_STATE_COPY_DEST;
+            case ResourceState::Present: return Diligent::RESOURCE_STATE_PRESENT;
+            default: return Diligent::RESOURCE_STATE_UNKNOWN;
+        }
+    };
+    Diligent::StateTransitionDesc barrier;
+    barrier.pResource = static_cast<Diligent::IDeviceObject*>(td->m_pNative);
+    barrier.OldState = toDg(fromState);
+    barrier.NewState = toDg(toState);
+    if (barrier.OldState != Diligent::RESOURCE_STATE_UNKNOWN && barrier.NewState != Diligent::RESOURCE_STATE_UNKNOWN)
+        ctx->TransitionResourceStates(1, &barrier);
+#endif
+    (void)fromState;
+    (void)toState;
+}
 
 void CommandListDiligent::BindPipeline(IPipeline* pipeline) {
 #if OPENEYE_USE_DILIGENT
@@ -197,8 +324,21 @@ void CommandListDiligent::BindIndexBuffer(IBuffer* buffer, IndexType indexType, 
 }
 void CommandListDiligent::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) { (void)buffer; (void)binding; (void)offset; (void)size; }
 void CommandListDiligent::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) { (void)buffer; (void)binding; (void)offset; (void)size; }
-void CommandListDiligent::BindTexture(ITexture* texture, uint32_t binding) { (void)texture; (void)binding; }
-void CommandListDiligent::UnbindTexture(uint32_t binding) { (void)binding; }
+void CommandListDiligent::BindTexture(ITexture* texture, uint32_t binding) {
+#if OPENEYE_USE_DILIGENT
+    if (binding < kMaxTextureSlots)
+        m_boundTextures[binding] = texture;
+#endif
+    (void)texture;
+    (void)binding;
+}
+void CommandListDiligent::UnbindTexture(uint32_t binding) {
+#if OPENEYE_USE_DILIGENT
+    if (binding < kMaxTextureSlots)
+        m_boundTextures[binding] = nullptr;
+#endif
+    (void)binding;
+}
 
 void CommandListDiligent::SetPushConstants(uint32_t offset, uint32_t size, const void* data) { (void)offset; (void)size; (void)data; }
 
@@ -293,29 +433,51 @@ void CommandListDiligent::Draw(uint32_t vertexCount, uint32_t firstVertex) {
 
 void CommandListDiligent::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
 #if OPENEYE_USE_DILIGENT
+    static int s_drawSkipReason = -1;  // 1=no ctx/pipe, 2=no VB, 3=no IB
+    static unsigned s_successCount = 0;
     auto* ctx = static_cast<Diligent::IDeviceContext*>(m_device->GetImmediateContext());
-    if (!ctx || !m_currentPipeline || !m_currentPipeline->m_pNative) return;
-    CommitShaderResources();
-    if (m_currentVertexBuffer) {
-        auto* vb = static_cast<BufferDiligent*>(m_currentVertexBuffer);
-        if (vb->m_pNative) {
-            Diligent::IBuffer* pVB = static_cast<Diligent::IBuffer*>(vb->m_pNative);
-            Diligent::Uint64 voff = m_currentVertexOffset;
-            ctx->SetVertexBuffers(0, 1, &pVB, &voff, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-        }
+    if (!ctx || !m_currentPipeline || !m_currentPipeline->m_pNative) {
+        if (s_drawSkipReason != 1) { core::Log::Warn("Diligent DrawIndexed: skip (no context or no pipeline bound)"); s_drawSkipReason = 1; }
+        return;
     }
-    if (m_currentIndexBuffer) {
-        auto* ib = static_cast<BufferDiligent*>(m_currentIndexBuffer);
-        if (ib->m_pNative) {
-            const Diligent::VALUE_TYPE vt = (m_currentIndexType == IndexType::UInt32) ? Diligent::VT_UINT32 : Diligent::VT_UINT16;
-            ctx->SetIndexBuffer(static_cast<Diligent::IBuffer*>(ib->m_pNative), m_currentIndexOffset, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
-            Diligent::DrawIndexedAttribs attr;
-            attr.NumIndices = indexCount;
-            attr.IndexType = vt;
-            attr.FirstIndexLocation = firstIndex;
-            attr.BaseVertex = vertexOffset;
-            ctx->DrawIndexed(attr);
-        }
+    CommitShaderResources();
+    if (!m_currentVertexBuffer) {
+        if (s_drawSkipReason != 2) { core::Log::Warn("Diligent DrawIndexed: skip (no vertex buffer bound)"); s_drawSkipReason = 2; }
+        return;
+    }
+    auto* vb = static_cast<BufferDiligent*>(m_currentVertexBuffer);
+    if (!vb->m_pNative) {
+        if (s_drawSkipReason != 2) { core::Log::Warn("Diligent DrawIndexed: skip (vertex buffer native null)"); s_drawSkipReason = 2; }
+        return;
+    }
+    if (!m_currentIndexBuffer) {
+        if (s_drawSkipReason != 3) { core::Log::Warn("Diligent DrawIndexed: skip (no index buffer bound)"); s_drawSkipReason = 3; }
+        return;
+    }
+    auto* ib = static_cast<BufferDiligent*>(m_currentIndexBuffer);
+    if (!ib->m_pNative) {
+        if (s_drawSkipReason != 3) { core::Log::Warn("Diligent DrawIndexed: skip (index buffer native null)"); s_drawSkipReason = 3; }
+        return;
+    }
+    {
+        Diligent::IBuffer* pVB = static_cast<Diligent::IBuffer*>(vb->m_pNative);
+        Diligent::Uint64 voff = m_currentVertexOffset;
+        ctx->SetVertexBuffers(0, 1, &pVB, &voff, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+    }
+    {
+        const Diligent::VALUE_TYPE vt = (m_currentIndexType == IndexType::UInt32) ? Diligent::VT_UINT32 : Diligent::VT_UINT16;
+        ctx->SetIndexBuffer(static_cast<Diligent::IBuffer*>(ib->m_pNative), m_currentIndexOffset, Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+        Diligent::DrawIndexedAttribs attr;
+        attr.NumIndices = indexCount;
+        attr.IndexType = vt;
+        attr.FirstIndexLocation = firstIndex;
+        attr.BaseVertex = vertexOffset;
+        ctx->DrawIndexed(attr);
+    }
+    s_drawSkipReason = 0;
+    if (s_successCount < 5) {
+        core::Log::InfoF("Diligent DrawIndexed: draw #%u indexCount=%u", s_successCount + 1, indexCount);
+        s_successCount++;
     }
 #endif
     (void)indexCount;

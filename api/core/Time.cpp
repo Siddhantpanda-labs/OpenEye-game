@@ -36,5 +36,13 @@ void Time::SetFixedDeltaTime(float dt) {
     eyelib::core::Time::SetFixedDeltaTime(dt);
 }
 
+float Time::SmoothedDeltaTime() {
+    return eyelib::core::Time::SmoothedDeltaTime();
+}
+
+void Time::SetSmoothedDeltaAlpha(float alpha) {
+    eyelib::core::Time::SetSmoothedDeltaAlpha(alpha);
+}
+
 } // namespace api
 } // namespace eyelib

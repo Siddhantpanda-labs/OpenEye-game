@@ -73,8 +73,8 @@ struct IDevice {
     virtual void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) = 0;
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to RHI render target. */
     virtual void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) = 0;
-    /** Blit only depth from native FBO to dst (for deferred: copy GBuffer depth to HDR for transparency). */
-    virtual void BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) = 0;
+    /** Blit only depth from src to dst (e.g. GBuffer depth to HDR RT for transparency). Backend may no-op if not supported. */
+    virtual void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) = 0;
 };
 
 // ---- Command list ----

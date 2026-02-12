@@ -1,5 +1,4 @@
 #include "eyelib/render/passes/LightingPass.h"
-#include "api/render/Light.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
@@ -177,91 +176,6 @@ void LightingPass::Render(GBuffer& gbuffer,
     if (shadowMap && cmd) cmd->UnbindTexture(5);
     m_lightingShader->Unbind();
     core::Log::Info("LightingPass: done");
-}
-
-void LightingPass::Render(GBuffer& gbuffer,
-                          rhi::ICommandList* cmd,
-                          const api::render::DirectionalLight& light,
-                          const math::Mat4& view,
-                          const math::Mat4& projection,
-                          const math::Vec3& viewPos,
-                          ShadowMap* shadowMap,
-                          std::span<const api::render::PointLight> pointLights,
-                          std::span<const api::render::SpotLight> spotLights) {
-    (void)view;
-    (void)projection;
-    core::Log::Info("LightingPass(api): entry");
-    EnsureDefaultShader();
-    core::Log::Info("LightingPass(api): after EnsureDefaultShader, before IsValid");
-    if (!m_lightingShader || !m_lightingShader->IsValid()) {
-        core::Log::Info("LightingPass(api): skipped (shader invalid)");
-        return;
-    }
-    core::Log::Info("LightingPass(api): before BindForLightingPass");
-    gbuffer.BindForLightingPass(cmd);
-    core::Log::Info("LightingPass(api): after BindForLightingPass, before Bind");
-    m_lightingShader->Bind();
-    core::Log::Info("LightingPass(api): after Bind");
-    m_lightingShader->SetInt("u_Position", 0);
-    core::Log::Info("LightingPass(api): after SetInt u_Position");
-    m_lightingShader->SetInt("u_Normal", 1);
-    m_lightingShader->SetInt("u_Albedo", 2);
-    m_lightingShader->SetInt("u_PBR", 3);
-    core::Log::Info("LightingPass(api): after SetInt 0-3");
-    if (shadowMap) {
-        if (cmd) {
-            rhi::ITexture* shadowTex = shadowMap->GetDepthTextureRHI();
-            if (shadowTex) cmd->BindTexture(shadowTex, 5);
-        }
-        m_lightingShader->SetMat4("u_LightSpaceMatrix", shadowMap->GetShadowMatrix());
-        m_lightingShader->SetFloat("u_ShadowBias", 0.005f);
-    }
-    core::Log::Info("LightingPass(api): after shadow setup");
-    m_lightingShader->SetInt("u_ShadowMap", 5);
-    m_lightingShader->SetInt("u_UseShadows", shadowMap ? 1 : 0);
-    core::Log::Info("LightingPass(api): after SetInt ShadowMap/UseShadows");
-    m_lightingShader->SetVec3("u_ViewPos", viewPos);
-    m_lightingShader->SetVec3("u_LightDir", light.direction);
-    m_lightingShader->SetVec3("u_LightColor", light.color);
-    m_lightingShader->SetFloat("u_LightIntensity", light.intensity);
-    m_lightingShader->SetVec3("u_Ambient", light.ambient);
-    m_lightingShader->SetFloat("u_Exposure", light.exposure);
-
-    const int numPoint = static_cast<int>(std::min(pointLights.size(), size_t(kMaxPointLights)));
-    m_lightingShader->SetInt("u_PointLightCount", numPoint);
-    for (int i = 0; i < numPoint; ++i) {
-        const auto& p = pointLights[static_cast<size_t>(i)];
-        m_lightingShader->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
-        m_lightingShader->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
-        m_lightingShader->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
-        m_lightingShader->SetFloat("u_PointLightRadius[" + std::to_string(i) + "]", p.radius);
-    }
-
-    const int numSpot = static_cast<int>(std::min(spotLights.size(), size_t(kMaxSpotLights)));
-    m_lightingShader->SetInt("u_SpotLightCount", numSpot);
-    for (int i = 0; i < numSpot; ++i) {
-        const auto& s = spotLights[static_cast<size_t>(i)];
-        m_lightingShader->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
-        m_lightingShader->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
-        m_lightingShader->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
-        m_lightingShader->SetFloat("u_SpotLightIntensity[" + std::to_string(i) + "]", s.intensity);
-        m_lightingShader->SetFloat("u_SpotLightRange[" + std::to_string(i) + "]", s.range);
-        m_lightingShader->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
-        m_lightingShader->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
-    }
-
-    core::Log::Info("LightingPass(api): before DrawFullscreenQuad");
-    if (cmd) {
-        cmd->SetDepthTest(false);
-        cmd->SetBlend(false);
-    }
-    DrawFullscreenQuad(cmd);
-    core::Log::Info("LightingPass(api): after DrawFullscreenQuad");
-    if (cmd) cmd->SetDepthTest(true);
-
-    if (shadowMap && cmd) cmd->UnbindTexture(5);
-    m_lightingShader->Unbind();
-    core::Log::Info("LightingPass(api): done");
 }
 
 } // namespace render

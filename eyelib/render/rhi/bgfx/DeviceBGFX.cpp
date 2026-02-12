@@ -590,8 +590,8 @@ void DeviceBGFX::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, 
     (void)colorOnly;
 }
 
-void DeviceBGFX::BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) {
-    (void)nativeFbo;
+void DeviceBGFX::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
+    (void)src;
     (void)dst;
 }
 

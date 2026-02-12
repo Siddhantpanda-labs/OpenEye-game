@@ -20,6 +20,10 @@ Exe directory is tried first (e.g. `{exe_dir}/assets/shaders/diligent/...`), the
 - **Vertex attributes**: use `ATTRIB0`, `ATTRIB1`, ... in the vertex shader so they match the engine’s input layout (same order as in OpenGL/BGFX passes).
 - **Textures**: use `Texture2D` + `SamplerState` with `register(t0)`, `register(s0)`, etc., as required by the pipeline.
 
+## Forward+ bindings
+
+For `passes/forward/forwardplus` and `forwardplus_skinned`, material textures use `t0`–`t5` (albedo, normal, metallic-roughness, AO, emissive, shadow map). Light data uses `t6`–`t8`: `StructuredBuffer<uint> lightIndices` (t6), `StructuredBuffer<PointLight>` (t7), `StructuredBuffer<SpotLight>` (t8). The Diligent pipeline should bind the three storage buffers at slots 6, 7, 8 so they do not overlap with texture slots.
+
 ## Other backends
 
 - **OpenGL**: resolves names to `shaders/opengl/{name}.vert` and `.frag` (GLSL).

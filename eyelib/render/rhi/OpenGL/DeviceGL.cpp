@@ -510,13 +510,15 @@ void DeviceGL::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bo
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
-void DeviceGL::BlitDepthOnlyFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst) {
-    if (!dst) return;
+void DeviceGL::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
+    if (!src || !dst) return;
+    void* nativeFbo = src->GetNativeFramebuffer();
+    if (!nativeFbo) return;
     auto* d = static_cast<RenderTargetGL*>(dst);
     const uint32_t w = dst->GetWidth();
     const uint32_t h = dst->GetHeight();
     if (w == 0 || h == 0) return;
-    GLuint srcFbo = (nativeFbo != nullptr) ? static_cast<GLuint>(reinterpret_cast<uintptr_t>(nativeFbo)) : 0;
+    GLuint srcFbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(nativeFbo));
     glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, d->m_fbo);
     glBlitFramebuffer(0, 0, static_cast<GLint>(w), static_cast<GLint>(h),

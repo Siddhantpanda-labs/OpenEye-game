@@ -12,6 +12,8 @@ float Time::s_fixedDeltaTime = 1.0f / 60.0f; // 60 Hz by default
 double Time::s_lastTime = 0.0;
 double Time::s_fpsAccumulator = 0.0;
 int Time::s_fpsFrames = 0;
+float Time::s_smoothedDeltaTime = 0.0f;
+float Time::s_smoothedDeltaAlpha = 0.1f;
 
 void Time::Initialize() {
     s_lastTime = glfwGetTime();
@@ -27,6 +29,11 @@ void Time::Update() {
     double currentTime = glfwGetTime();
     s_deltaTime = static_cast<float>(currentTime - s_lastTime);
     s_lastTime = currentTime;
+
+    if (s_frameCount == 0)
+        s_smoothedDeltaTime = s_deltaTime;
+    else
+        s_smoothedDeltaTime = s_smoothedDeltaAlpha * s_deltaTime + (1.f - s_smoothedDeltaAlpha) * s_smoothedDeltaTime;
     
     s_totalTime += s_deltaTime;
     s_frameCount++;

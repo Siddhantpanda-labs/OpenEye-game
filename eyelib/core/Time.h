@@ -59,6 +59,10 @@ public:
      */
     static void SetFixedDeltaTime(float dt) { s_fixedDeltaTime = dt; }
 
+    /** Smoothed delta time (EMA) for stable display and tuning. Default alpha 0.1. */
+    static float SmoothedDeltaTime() { return s_smoothedDeltaTime; }
+    static void SetSmoothedDeltaAlpha(float alpha) { s_smoothedDeltaAlpha = (alpha > 0.f && alpha <= 1.f) ? alpha : 0.1f; }
+
 private:
     static float s_deltaTime;
     static float s_totalTime;
@@ -68,6 +72,8 @@ private:
     static double s_lastTime;
     static double s_fpsAccumulator;
     static int s_fpsFrames;
+    static float s_smoothedDeltaTime;
+    static float s_smoothedDeltaAlpha;
 };
 
 } // namespace core

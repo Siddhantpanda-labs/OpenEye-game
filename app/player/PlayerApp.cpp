@@ -409,6 +409,9 @@ int RunPlayer(int argc, char** argv) {
 
     RenderFrameSync frameSync;
     std::thread renderThread;
+    eyelib::api::platform::time::FramePacer framePacer;
+    if (!options.headless && !options.vsync)
+        framePacer.SetTargetFPS(60.0);
 
     if (!options.headless) {
         // Warmup: run one BuildScene + RenderSceneOnly on the main thread (which still has the GL
@@ -427,7 +430,7 @@ int RunPlayer(int argc, char** argv) {
                 if (!frame) {
                     break;
                 }
-                // Robust: use current framebuffer size from the system (single source of truth).
+                // Frame boundary: resize only before render (never mid-frame). Single source of truth for size.
                 window.RefreshFramebufferSize();
                 const int fbWidth = window.Width();
                 const int fbHeight = window.Height();
@@ -438,7 +441,7 @@ int RunPlayer(int argc, char** argv) {
                 window.ApplyVsync();
                 const uint32_t w = static_cast<uint32_t>(fbWidth);
                 const uint32_t h = static_cast<uint32_t>(fbHeight);
-                renderBridge.ApplyResize(w, h);
+                renderBridge.ApplyResize(w, h);  // No-op if size unchanged; pipeline Resize only at boundary
                 const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
                 if (rendered) {
                     if (options.overlay && overlay.IsReady()) {
@@ -453,7 +456,9 @@ int RunPlayer(int argc, char** argv) {
 
     auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge,
                    &scriptingBridge, &audioBridge, &shaderWatcher, &jobPool,
-                   &frameSync, &renderBridge, &overlay, &assetRegistry](float deltaSeconds) {
+                   &frameSync, &renderBridge, &overlay, &assetRegistry, &framePacer](float deltaSeconds) {
+        if (!options.headless && !options.vsync)
+            framePacer.WaitForNextFrame();
         if (!options.headless) {
             if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();
@@ -498,7 +503,7 @@ int RunPlayer(int argc, char** argv) {
         if (!options.headless) {
             OverlaySnapshot snap;
             snap.fps = eyelib::api::core::Time::FPS();
-            snap.frameTimeMs = eyelib::api::core::Time::DeltaTime() * 1000.0f;
+            snap.frameTimeMs = eyelib::api::core::Time::SmoothedDeltaTime() * 1000.0f;
             snap.entityCount = world.GetEntityCount();
             snap.scenePath = options.scenePath;
             const int slot = frameSync.GetFillSlot();

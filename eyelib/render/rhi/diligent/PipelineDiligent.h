@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHI.h"
+#include <string>
 
 namespace eyelib {
 namespace render {
@@ -17,6 +18,8 @@ struct PipelineDiligent : IPipeline {
     void* m_pNative = nullptr;
     /** When non-null, holds Diligent::IShaderResourceBinding* (owned; Release in dtor). Used for binding Constants/Material/Bones. */
     void* m_pSRB = nullptr;
+    /** Logical shader name (e.g. "passes/post/tonemap") when created from name; used for slot->variable binding. */
+    std::string m_shaderName;
 
     bool HasValidProgram() const override { return m_pNative != nullptr; }
 };

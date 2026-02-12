@@ -3,14 +3,11 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/GBuffer.h"
 #include "eyelib/render/rhi/RHI.h"
+#include <functional>
 #include <memory>
-#include <span>
 #include <vector>
 
 namespace eyelib {
-namespace api {
-struct Drawable;
-}
 namespace render {
 
 class Shader;
@@ -33,10 +30,11 @@ public:
                 const math::Mat4& prevView,
                 const math::Mat4& prevProjection);
 
-    /** Zero-copy: render from API drawables. cmd used for depth/cull state. */
+    /** Zero-copy: feed invokes consumer for each drawable. */
+    using DrawableFeed = std::function<void(std::function<void(const Drawable&)>)>;
     void Render(GBuffer& gbuffer,
                 rhi::ICommandList* cmd,
-                std::span<const api::Drawable> drawables,
+                DrawableFeed feedDrawables,
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Mat4& prevView,
@@ -46,6 +44,13 @@ public:
 
 private:
     void EnsureDefaultShader();
+    void RenderDrawables(GBuffer& gbuffer,
+                         rhi::ICommandList* cmd,
+                         DrawableFeed feedDrawables,
+                         const math::Mat4& view,
+                         const math::Mat4& projection,
+                         const math::Mat4& prevView,
+                         const math::Mat4& prevProjection);
 
     std::shared_ptr<Shader> m_geometryShader;
     GBuffer* m_currentGBuffer = nullptr;

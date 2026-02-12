@@ -245,6 +245,9 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!hdrInputTexture || !GetOutputTextureRHI()) {
         return hdrInputTexture;
     }
+    rhi::ICommandList* cmdPost = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    if (cmdPost)
+        rhi::BarrierTextureForShaderRead(cmdPost, hdrInputTexture);
 
     // SSAO (applied before tone mapping, in linear space)
     rhi::ITexture* ssaoTexture = nullptr;
@@ -287,6 +290,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (settings.enableBloom && bloomTexture && m_bloomCompositeShader && m_bloomCompositeShader->IsValid()) {
         rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
         if (cmd && m_outputRT) {
+            rhi::BarrierTextureForShaderRead(cmd, toneMappedTexture);
+            rhi::BarrierTextureForShaderRead(cmd, bloomTexture);
             cmd->SetRenderTarget(m_outputRT);
             cmd->SetViewport(0, 0, m_width, m_height);
             cmd->SetDepthTest(false);
@@ -392,6 +397,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->BindTexture(hdrTexture, 0);
     DrawFullscreenQuad(cmd);
     m_bloomExtractShader->Unbind();
+    rhi::BarrierTextureForShaderRead(cmd, GetColorTexture(m_bloomExtractRT));
     return GetColorTexture(m_bloomExtractRT);
 }
 
@@ -411,6 +417,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     for (int i = 0; i < iterations; ++i) {
         rhi::IRenderTarget* rt = m_pingPongRT[horizontal ? 0 : 1];
         if (!rt) break;
+        if (i > 0)
+            rhi::BarrierTextureForShaderRead(cmd, currentTexture);
         cmd->SetRenderTarget(rt);
         cmd->SetViewport(0, 0, m_width, m_height);
         cmd->SetDepthTest(false);

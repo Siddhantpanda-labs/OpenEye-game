@@ -1,0 +1,16 @@
+Texture2D u_Texture : register(t0);
+SamplerState u_LinearSampler : register(s0);
+cbuffer Constants : register(b0) { float2 u_Resolution; float u_Intensity; };
+struct PSInput { float4 Position : SV_POSITION; float2 TexCoord : TEXCOORD0; };
+void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
+{
+    float2 center = float2(0.5, 0.5);
+    float2 dist = PSIn.TexCoord - center;
+    float distFromCenter = length(dist);
+    float2 offsetDir = normalize(dist);
+    float offset = u_Intensity * distFromCenter;
+    float r = u_Texture.Sample(u_LinearSampler, PSIn.TexCoord + offsetDir * offset).r;
+    float g = u_Texture.Sample(u_LinearSampler, PSIn.TexCoord).g;
+    float b = u_Texture.Sample(u_LinearSampler, PSIn.TexCoord - offsetDir * offset * 0.5).b;
+    FragColor = float4(r, g, b, 1.0);
+}

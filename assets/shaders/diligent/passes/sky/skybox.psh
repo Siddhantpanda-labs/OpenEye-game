@@ -1,0 +1,27 @@
+// Diligent HLSL: passes/sky/skybox (same as opengl passes/sky/skybox.frag)
+struct PSInput
+{
+    float4 Position : SV_POSITION;
+    float2 TexCoord : TEXCOORD0;
+};
+
+cbuffer Constants : register(b0)
+{
+    row_major float4x4 u_InverseViewMatrix;
+    row_major float4x4 u_InverseProjectionMatrix;
+};
+
+TextureCube u_Skybox : register(t0);
+SamplerState u_Skybox_sampler : register(s0);
+
+void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
+{
+    float2 ndc = PSIn.TexCoord * 2.0 - 1.0;
+    float4 clip = float4(ndc, 1.0, 1.0);
+    float4 viewDirH = mul(u_InverseProjectionMatrix, clip);
+    viewDirH /= viewDirH.w;
+    float3 viewDir = normalize(viewDirH.xyz);
+    float3 worldDir = normalize(mul((float3x3)u_InverseViewMatrix, viewDir));
+    float3 color = u_Skybox.Sample(u_Skybox_sampler, worldDir).rgb;
+    FragColor = float4(color, 1.0);
+}
