@@ -1,16 +1,49 @@
-# RHI BGFX Backend Integration Plan
+# RHI Backend Integration Plan (BGFX + Diligent Status)
 
-**Goal:** Replace the custom OpenGL and Vulkan RHI backends with a single **bgfx-backed RHI implementation**. The render module (pipeline, passes, RHIUtils) stays unchanged; only the code under the RHI hood switches to bgfx. Integration is **minimal and flexible**: we align with bgfx’s design where it makes sense instead of forcing a strict 1:1 RHI↔bgfx mapping, so the result is maintainable.
-
+**Goal:** Replace the custom OpenGL and Vulkan RHI backends with a single modern RHI implementation. **Diligent Engine** is implemented and in use; **BGFX** remains the planned alternative (see sections below). The render module (pipeline, passes, RHIUtils) stays unchanged; only the code under the RHI hood switches per backend.’s 
 **Motivation (threading):** With the current OpenGL backend, the GL context lives only on the render thread. That has caused threading issues and flickering. Bgfx is built for multithreading: **thread-safe resource API** (create/destroy/update from any thread), **encoder API** (multiple threads can record work via `bgfx::begin()`), and a clear **API thread vs render thread** model. Using bgfx under the RHI should eliminate context ownership problems and stabilize rendering when the game thread and render thread are both active.
 
 **Scope:** `eyelib/render/rhi/` (add bgfx backend, eventually remove OpenGL/Vulkan), `eyelib/platform/` (device creation: init bgfx instead of GL/Vulkan). **Unchanged:** `api/render/`, render module (RenderPipeline, passes, RHIUtils, FrameGraph, resources), game/render thread responsibilities, unified RenderScene and frame allocator.
 
-**References:** `RHI_And_Graphics_Backend_Plan.md` (existing RHI design and interfaces); `Render_Thread_Unified_Scene_Plan.md` (thread model).
+**References:** `RHI_And_Graphics_Backend_Plan.md` (RHI design); `RHI_Diligent_Integration_Plan.md` (Diligent plan); `Render_Thread_Unified_Scene_Plan.md` (thread model).
 
 ---
 
-## 1. Target Architecture
+## Current Backend Status: Diligent Implemented
+
+**Diligent Engine** is the RHI backend that has been **implemented and is usable**. It is built when `OPENEYE_USE_DILIGENT=ON` (CMake option; requires `thirdparty/DiligentCore`). The player can run with `--renderer diligent` to use this backend.
+
+### Where We Are (Diligent)
+
+| Area | Status |
+|------|--------|
+| **Device & context** | DeviceDiligent, CreateDeviceDiligent; swap chain (D3D11/OpenGL/Vk). |
+| **Buffers, textures, render targets** | Implemented (BufferDiligent, TextureDiligent, RenderTargetDiligent). |
+| **Shaders & pipelines** | HLSL shaders under `assets/shaders/diligent/`; CreateGraphicsPipelineFromName; PRS by reflection. |
+| **Forward rendering** | basic, lit, skinned; **forwardplus** and **forwardplus_skinned** (column-major matrices, CullMode NONE baked into forward PSO). |
+| **Shadows** | Shadow pass; shadow map bind at unit 5. |
+| **Post-process & blit** | passes/post/copy; BlitToDefaultFramebuffer (fullscreen quad); post chain when enabled. |
+| **Clear** | ClearRenderTarget, ClearDefaultFramebuffer (swap chain). |
+| **Command list** | SetRenderTarget, SetViewport, BindPipeline, BindBuffer, DrawIndexed, etc. |
+| **Culling/depth toggles** | SetCullFace / SetDepthTest / SetDepthWrite / SetDepthFuncLess are **no-ops**; forward PSO uses CULL_MODE_NONE and default depth so engine intent is matched by pipeline state. |
+
+**Not yet done for Diligent:** Deferred pipeline (GBuffer + Lighting) may need verification; full dynamic cull/depth per-draw would require PSO variants or dynamic state if needed later.
+
+### Current Problems (Diligent)
+
+1. **Grey clear color vs OpenGL "blackish" background**  
+   In `RenderPipeline::BlitToScreen()` the **swap chain** is cleared to **(0.12, 0.12, 0.15, 1)** before the blit (`eyelib/render/RenderPipeline.cpp` ~710–716). That makes the visible background dark grey/blue. OpenGL often appears more black because the back buffer may be cleared elsewhere to black. To match OpenGL, change this clear to black (e.g. `0, 0, 0, 1`).
+
+2. **Grey "on top" or mesh flicker**  
+   The clear is applied **before** the blit (clear → blit → present), so the grey is not literally drawn on top. If grey appears in mesh areas or as flicker, likely causes are:
+   - **Blit viewport/size mismatch:** `DeviceDiligent::BlitToDefaultFramebuffer` uses `m_width`/`m_height` for the fullscreen quad; if these differ from the swap chain size (e.g. after resize or DPI), the quad may not cover the whole screen and the cleared grey shows at edges or in gaps.
+   - **Pixels not written:** Where scene or post-process does not write (e.g. depth discard, culling, or a missing pass), the **HDR clear** color **(0.1, 0.1, 0.15)** remains and is blitted; that can look like grey flicker or patches on meshes.
+
+   **Suggested next steps:** Use black for the swap-chain clear if a blackish background is desired; ensure blit viewport and render-target dimensions match the swap chain; verify no unintended discard/cull in forward passes.
+
+---
+
+## 1. Target Architecture (BGFX — planned)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -185,3 +218,4 @@ eyelib/render/rhi/
 ## 10. Document History
 
 - **Created:** RHI BGFX Integration Plan; goal to replace custom OpenGL/Vulkan with bgfx under RHI; minimal, flexible refactor; render module unchanged; threading motivation and phased implementation.
+- **Updated:** Retitled to include Diligent status; added "Current Backend Status: Diligent Implemented" with where we are (Diligent), current problems (grey clear, possible flicker/viewport), and reference to RHI_Diligent_Integration_Plan.md. BGFX sections kept as planned alternative.
