@@ -18,16 +18,16 @@ ShadowPass::ShadowPass() = default;
 
 void ShadowPass::EnsureDefaultShader() {
     if (m_depthShader && m_depthShader->IsValid()) return;
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (!device) return;
+    if (!m_device) return;
+    rhi::IDevice* device = m_device;
     m_depthShader = std::make_shared<Shader>();
     m_depthShader->Load(device, "passes/shadow/shadow", Mesh::GetVertexLayoutRHI());
 }
 
 void ShadowPass::EnsureSkinnedShader() {
     if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid()) return;
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (!device) return;
+    if (!m_device) return;
+    rhi::IDevice* device = m_device;
     m_depthSkinnedShader = std::make_shared<Shader>();
     m_depthSkinnedShader->Load(device, "passes/shadow/shadow_skinned", Mesh::GetVertexLayoutRHI());
 }
@@ -85,7 +85,7 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
         return;
     }
     if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("ShadowPass: skipped (no valid backend program, e.g. BGFX GLSL-only)");
+        core::Log::Info("ShadowPass: skipped (no valid backend program)");
         return;
     }
     core::Log::Info("ShadowPass: executing");

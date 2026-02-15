@@ -90,13 +90,18 @@ public:
     rhi::IndexType GetRHIIndexType() const;
     static rhi::VertexLayout GetVertexLayoutRHI();
 
+    /** Set device to use for UploadToGPU() without device, Bind(), Draw(). */
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
     const assets::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
 private:
+    rhi::IDevice* GetDevice() const;
     void Invalidate();
 
+    rhi::IDevice* m_injectedDevice = nullptr;
     std::vector<Vertex> m_vertices;
     std::vector<uint32_t> m_indices32;
     std::vector<uint16_t> m_indices16;

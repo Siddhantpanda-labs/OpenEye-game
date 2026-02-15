@@ -13,6 +13,11 @@ uniform mat4 u_View;
 uniform mat4 u_Projection;
 uniform mat4 u_PrevView;
 uniform mat4 u_PrevProjection;
+// GPU-driven scene path: per-draw model matrices (binding 4); use when u_UsePerDrawTransformBuffer != 0
+layout(std430, binding = 4) readonly buffer PerDrawModel {
+    mat4 u_ModelArray[];
+};
+uniform int u_UsePerDrawTransformBuffer = 0;
 
 uniform vec4 u_UVTransform = vec4(0.0, 0.0, 1.0, 1.0);
 uniform float u_UVRotation = 0.0;
@@ -54,8 +59,9 @@ void main() {
     nrm = mat3(skin) * nrm;
     tang = mat3(skin) * tang;
 
-    vec4 worldPos = u_Model * pos;
-    mat3 normalMatrix = mat3(transpose(inverse(u_Model)));
+    mat4 model = (u_UsePerDrawTransformBuffer != 0) ? u_ModelArray[gl_DrawID] : u_Model;
+    vec4 worldPos = model * pos;
+    mat3 normalMatrix = mat3(transpose(inverse(model)));
     vec3 worldNormal = normalize(normalMatrix * nrm);
     vec3 worldTangent;
     if (length(tang) < 0.001) {

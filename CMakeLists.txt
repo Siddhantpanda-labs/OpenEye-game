@@ -36,8 +36,16 @@ option(OPENEYE_BUILD_PLAYER "Build unified runtime player" ON)
 option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
-option(OPENEYE_USE_BGFX "Use bgfx as RHI backend (Phase 0: fetch and build)" ON)
 option(OPENEYE_USE_DILIGENT "Use Diligent Engine as RHI backend (requires thirdparty/DiligentCore)" OFF)
+
+# Player build uses OpenGL only (no Diligent)
+if(OPENEYE_BUILD_PLAYER)
+    if(OPENEYE_USE_DILIGENT)
+        set(OPENEYE_USE_DILIGENT OFF CACHE BOOL "Use Diligent (disabled for player; OpenGL is default)" FORCE)
+        message(STATUS "Player build: Diligent disabled; OpenGL is the default backend")
+    endif()
+    set(OPENEYE_DILIGENT_AVAILABLE 0 CACHE INTERNAL "Diligent disabled for player build" FORCE)
+endif()
 
 # Global include directories (components will add their own)
 # These are for legacy compatibility and third-party includes
@@ -50,13 +58,6 @@ if(OPENEYE_USE_LZ4 OR OPENEYE_USE_ZSTD)
 endif()
 
 # --------------------------------------
-# BGFX (FetchContent: bx, bimg, bgfx via pr0g/bgfx.cmake)
-# --------------------------------------
-if(OPENEYE_USE_BGFX)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchBGFX.cmake)
-endif()
-
-# --------------------------------------
 # Diligent Engine (optional; requires thirdparty/DiligentCore + submodules)
 # --------------------------------------
 if(OPENEYE_USE_DILIGENT)
@@ -64,9 +65,9 @@ if(OPENEYE_USE_DILIGENT)
 endif()
 
 # --------------------------------------
-# GLAD (match GameEngine approach - simple static library)
+# GLAD 2 (header-only + single loader .c for MX context)
 # --------------------------------------
-add_library(glad STATIC ${CMAKE_SOURCE_DIR}/thirdparty/glad/src/glad.c)
+add_library(glad STATIC ${CMAKE_SOURCE_DIR}/thirdparty/glad/src/glad_gl_loader.c)
 target_include_directories(glad PUBLIC ${CMAKE_SOURCE_DIR}/thirdparty/glad/include)
 
 # --------------------------------------
@@ -315,13 +316,6 @@ endif()
 # --------------------------------------
 if(OPENEYE_BUILD_TESTS)
     add_subdirectory(app/test)
-endif()
-
-# --------------------------------------
-# BGFX Phase 0 test (init + one frame)
-# --------------------------------------
-if(OPENEYE_USE_BGFX)
-    add_subdirectory(app/bgfx_test)
 endif()
 
 # --------------------------------------

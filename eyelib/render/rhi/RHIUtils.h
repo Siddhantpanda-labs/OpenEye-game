@@ -16,6 +16,8 @@ void ClearAndSetRenderTargetWithViewport(ICommandList* cmd, IRenderTarget* rt,
 void DrawFullscreenQuad(ICommandList* cmd, IPipeline* pipeline);
 void BarrierTextureForShaderRead(ICommandList* cmd, ITexture* texture);
 void BarrierTextureForRenderTarget(ICommandList* cmd, ITexture* texture);
+/** Transition indirect buffer from ShaderResource (after compute write) to IndirectDraw for Draw*Indirect. Call before MultiDrawIndexedIndirect etc. */
+void BarrierBufferForIndirectDraw(ICommandList* cmd, IBuffer* buffer);
 
 } // namespace rhi
 } // namespace render

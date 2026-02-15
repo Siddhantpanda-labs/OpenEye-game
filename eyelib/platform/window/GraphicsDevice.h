@@ -13,7 +13,7 @@ class Window;
 /**
  * Single entry point to create an RHI device. Backend is chosen at runtime.
  * If window is null (e.g. headless), returns nullptr.
- * If backend is BGFX but BGFX is not built, falls back to OpenGL.
+ * Default backend is OpenGL. Diligent is only used when explicitly requested and built (e.g. editor); player builds use OpenGL only.
  */
 std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
     Window* window,

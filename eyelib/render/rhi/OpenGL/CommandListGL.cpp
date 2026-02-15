@@ -1,10 +1,12 @@
 #include "eyelib/render/rhi/OpenGL/CommandListGL.h"
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
 #include "eyelib/render/rhi/OpenGL/PipelineGL.h"
+#include "eyelib/render/rhi/OpenGL/DescriptorSetGL.h"
 #include "eyelib/render/rhi/OpenGL/RenderTargetGL.h"
 #include "eyelib/render/rhi/OpenGL/BufferGL.h"
 #include "eyelib/render/rhi/OpenGL/TextureGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
+#include "eyelib/render/rhi/OpenGL/FenceGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include <glad/glad.h>
@@ -116,18 +118,68 @@ void CommandListGL::SetBlend(bool enable) {
     }
 }
 
+namespace {
+GLbitfield ResourceStateToMemoryBarrierBuffer(ResourceState fromState, ResourceState toState) {
+    (void)fromState;
+    GLbitfield bits = 0;
+    switch (toState) {
+    case ResourceState::IndirectDraw:
+        bits |= GL_COMMAND_BARRIER_BIT;
+        /* After compute writing to SSBO, ensure storage writes are visible before indirect read. */
+        bits |= GL_SHADER_STORAGE_BARRIER_BIT;
+        break;
+    case ResourceState::VertexBuffer:
+        bits |= GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT;
+        break;
+    case ResourceState::IndexBuffer:
+        bits |= GL_ELEMENT_ARRAY_BARRIER_BIT;
+        break;
+    case ResourceState::UniformBuffer:
+    case ResourceState::ShaderResource:
+        bits |= GL_UNIFORM_BARRIER_BIT;
+        break;
+    case ResourceState::TransferSrc:
+    case ResourceState::TransferDst:
+        bits |= GL_BUFFER_UPDATE_BARRIER_BIT;
+        break;
+    default:
+        break;
+    }
+    return bits;
+}
+
+GLbitfield ResourceStateToMemoryBarrierTexture(ResourceState fromState, ResourceState toState) {
+    GLbitfield bits = 0;
+    if (toState == ResourceState::ShaderResource || toState == ResourceState::DepthRead) {
+        if (fromState == ResourceState::RenderTarget || fromState == ResourceState::DepthWrite)
+            bits |= GL_TEXTURE_FETCH_BARRIER_BIT | GL_FRAMEBUFFER_BARRIER_BIT;
+    } else if (toState == ResourceState::RenderTarget || toState == ResourceState::DepthWrite) {
+        if (fromState == ResourceState::ShaderResource || fromState == ResourceState::DepthRead)
+            bits |= GL_FRAMEBUFFER_BARRIER_BIT;
+    }
+    if (toState == ResourceState::ShaderResource)
+        bits |= GL_SHADER_IMAGE_ACCESS_BARRIER_BIT;
+    return bits;
+}
+} // namespace
+
 void CommandListGL::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
     (void)buffer;
-    (void)fromState;
-    (void)toState;
-    // OpenGL: no explicit buffer barriers for our usage.
+    GLbitfield bits = ResourceStateToMemoryBarrierBuffer(fromState, toState);
+    if (bits) glMemoryBarrier(bits);
 }
 
 void CommandListGL::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
     (void)texture;
-    (void)fromState;
-    (void)toState;
-    // OpenGL: layout is implicit; glMemoryBarrier if needed for image load/store.
+    GLbitfield bits = ResourceStateToMemoryBarrierTexture(fromState, toState);
+    if (bits) {
+        glMemoryBarrier(bits);
+        /* Same-texture read-after-write: glTextureBarrier() when available (ARB_texture_barrier / GL 4.5). */
+        if (GLAD_GL_ARB_texture_barrier &&
+            (fromState == ResourceState::RenderTarget || fromState == ResourceState::DepthWrite) &&
+            (toState == ResourceState::ShaderResource || toState == ResourceState::DepthRead))
+            glTextureBarrier();
+    }
 }
 
 static void ApplyBlend(const BlendState& b) {
@@ -171,6 +223,8 @@ void CommandListGL::BindPipeline(IPipeline* pipeline) {
     m_currentPipeline = static_cast<PipelineGL*>(pipeline);
     if (!m_currentPipeline) return;
     glUseProgram(m_currentPipeline->m_program);
+    if (m_currentPipeline->m_hasTessellation)
+        glPatchParameteri(GL_PATCH_VERTICES, static_cast<GLint>(m_currentPipeline->m_patchVertexCount));
     ApplyBlend(m_currentPipeline->m_blend);
     ApplyDepthStencil(m_currentPipeline->m_depthStencil);
     ApplyRaster(m_currentPipeline->m_raster);
@@ -224,6 +278,14 @@ void CommandListGL::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_
                       size > 0 ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->GetSize()));
 }
 
+void CommandListGL::BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) {
+    if (!m_device->GetCapabilities().supportsAtomicCounters) return;
+    if (!buffer) return;
+    auto* b = static_cast<BufferGL*>(buffer);
+    GLsizeiptr sz = size > 0 ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->GetSize());
+    glBindBufferRange(GL_ATOMIC_COUNTER_BUFFER, slot, b->m_handle, static_cast<GLintptr>(offset), sz);
+}
+
 void CommandListGL::BindTexture(ITexture* texture, uint32_t binding) {
     if (!texture) return;
     auto* t = static_cast<TextureGL*>(texture);
@@ -232,6 +294,33 @@ void CommandListGL::BindTexture(ITexture* texture, uint32_t binding) {
 
 void CommandListGL::UnbindTexture(uint32_t binding) {
     glBindTextureUnit(binding, 0);
+}
+
+void CommandListGL::BindDescriptorSet(IDescriptorSet* set) {
+    if (!set) return;
+    auto* ds = static_cast<DescriptorSetGL*>(set);
+    for (const auto& t : ds->textures) {
+        if (t.texture) {
+            auto* tex = static_cast<TextureGL*>(t.texture);
+            glBindTextureUnit(t.binding, tex->m_handle);
+        } else {
+            glBindTextureUnit(t.binding, 0);
+        }
+    }
+    for (const auto& b : ds->buffers) {
+        if (!b.buffer) continue;
+        auto* buf = static_cast<BufferGL*>(b.buffer);
+        GLsizeiptr sz = b.size > 0 ? static_cast<GLsizeiptr>(b.size) : static_cast<GLsizeiptr>(buf->GetSize());
+        if (b.isStorage)
+            glBindBufferRange(GL_SHADER_STORAGE_BUFFER, b.binding, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
+        else
+            glBindBufferRange(GL_UNIFORM_BUFFER, b.binding, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
+    }
+}
+
+void CommandListGL::BindBindlessHeap(IBindlessHeap* heap) {
+    (void)heap;
+    // OpenGL bindless: handles are made resident on the heap; no per-draw bind. Shaders use handle (uint64) directly.
 }
 
 void CommandListGL::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
@@ -278,6 +367,18 @@ void CommandListGL::SetUniformMat4(const char* name, const float* data) {
     if (!data) return;
     GLint loc = GetUniformLocation(m_currentPipeline, name);
     if (loc >= 0) glProgramUniformMatrix4fv(m_currentPipeline->m_program, loc, 1, GL_FALSE, data);
+}
+
+void CommandListGL::SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) {
+    if (!m_device->GetCapabilities().supportsShaderSubroutines || !m_currentPipeline || !m_currentPipeline->m_program || !indices) return;
+    glUniformSubroutinesuiv(GLEnums::ShaderStageToGL(stage), static_cast<GLsizei>(count), indices);
+}
+
+void CommandListGL::SetUniformHandle64(const char* name, uint64_t handle) {
+    if (!m_device->GetCapabilities().supportsBindless) return;
+    GLint loc = GetUniformLocation(m_currentPipeline, name);
+    if (loc >= 0 && GLAD_GL_ARB_bindless_texture)
+        glProgramUniformHandleui64ARB(m_currentPipeline->m_program, loc, static_cast<GLuint64>(handle));
 }
 
 void CommandListGL::SetUniformMat4Array(const char* name, const float* data, size_t count) {
@@ -334,6 +435,48 @@ void CommandListGL::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex,
     DrawIndexed(indexCount, firstIndex, vertexOffset);
 }
 
+void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
+    glBindVertexArray(m_vao);
+    auto* b = static_cast<BufferGL*>(indirectBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    glDrawArraysIndirect(mode, reinterpret_cast<const void*>(offset));
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
+void CommandListGL::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
+    glBindVertexArray(m_vao);
+    auto* b = static_cast<BufferGL*>(indirectBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
+    glDrawElementsIndirect(mode, idxType, reinterpret_cast<const void*>(offset));
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
+void CommandListGL::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
+    glBindVertexArray(m_vao);
+    auto* b = static_cast<BufferGL*>(indirectBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    glMultiDrawArraysIndirect(mode, reinterpret_cast<const void*>(offset), static_cast<GLsizei>(drawCount), static_cast<GLsizei>(stride));
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
+void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
+    glBindVertexArray(m_vao);
+    auto* b = static_cast<BufferGL*>(indirectBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
+    glMultiDrawElementsIndirect(mode, idxType, reinterpret_cast<const void*>(offset), static_cast<GLsizei>(drawCount), static_cast<GLsizei>(stride));
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
 void CommandListGL::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
     glDispatchCompute(groupCountX, groupCountY, groupCountZ);
 }
@@ -350,6 +493,54 @@ void CommandListGL::EndQuery(IQueryPool* pool, uint32_t index) {
     if (!p || index >= p->m_queryIds.size()) return;
     GLenum type = (p->m_type == QueryType::Timestamp) ? GL_TIME_ELAPSED : GL_TIME_ELAPSED;
     glEndQuery(type);
+}
+
+void CommandListGL::BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) {
+    if (slot >= kMaxTransformFeedbackBuffers) return;
+    m_tfBuffers[slot].buffer = buffer ? static_cast<BufferGL*>(buffer) : nullptr;
+    m_tfBuffers[slot].offset = offset;
+    m_tfBuffers[slot].size = size;
+}
+
+void CommandListGL::BeginTransformFeedback(PrimitiveTopology primitiveMode) {
+    if (!m_device->GetCapabilities().supportsTransformFeedback) return;
+    for (uint32_t i = 0; i < kMaxTransformFeedbackBuffers; ++i) {
+        if (m_tfBuffers[i].buffer && m_tfBuffers[i].buffer->m_handle) {
+            GLsizeiptr sz = m_tfBuffers[i].size > 0 ? static_cast<GLsizeiptr>(m_tfBuffers[i].size)
+                                                    : static_cast<GLsizeiptr>(m_tfBuffers[i].buffer->GetSize());
+            glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, i, m_tfBuffers[i].buffer->m_handle,
+                static_cast<GLintptr>(m_tfBuffers[i].offset), sz);
+        }
+    }
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(primitiveMode);
+    glBeginTransformFeedback(mode);
+}
+
+void CommandListGL::EndTransformFeedback() {
+    if (!m_device->GetCapabilities().supportsTransformFeedback) return;
+    glEndTransformFeedback();
+}
+
+void CommandListGL::BeginConditionalRender(IQueryPool* pool, uint32_t index) {
+    if (!m_device->GetCapabilities().supportsConditionalRender || !pool || m_inConditionalRender) return;
+    auto* q = static_cast<QueryPoolGL*>(pool);
+    if (index >= q->m_queryIds.size()) return;
+    glBeginConditionalRender(q->m_queryIds[index], GL_QUERY_WAIT);
+    m_inConditionalRender = true;
+}
+
+void CommandListGL::EndConditionalRender() {
+    if (!m_inConditionalRender) return;
+    glEndConditionalRender();
+    m_inConditionalRender = false;
+}
+
+IFence* CommandListGL::InsertFence() {
+    GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!sync) return nullptr;
+    auto* f = new FenceGL();
+    f->m_sync = static_cast<void*>(sync);
+    return f;
 }
 
 void CommandListGL::CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) {

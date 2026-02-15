@@ -8,6 +8,7 @@
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
+#include <cstdint>
 
 namespace eyelib {
 namespace render {
@@ -20,8 +21,8 @@ GBufferPass::GBufferPass() = default;
 
 void GBufferPass::EnsureDefaultShader() {
     if (m_geometryShader && m_geometryShader->IsValid()) return;
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (!device) return;
+    if (!m_device) return;
+    rhi::IDevice* device = m_device;
     m_geometryShader = std::make_shared<Shader>();
     m_geometryShader->Load(device, "passes/deferred/gbuffer_skinned", Mesh::GetVertexLayoutRHI());
 }
@@ -71,7 +72,7 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         return;
     }
     if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("GBufferPass: skipped (no valid backend program, e.g. BGFX GLSL-only)");
+        core::Log::Info("GBufferPass: skipped (no valid backend program)");
         return;
     }
     core::Log::Info("GBufferPass: executing");
@@ -92,7 +93,11 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         cmd->SetCullFace(false);
     }
 
-    feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection](const Drawable& d) {
+    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && m_device && m_device->GetCapabilities().supportsBindless);
+    if (useBindless && cmd)
+        cmd->BindBindlessHeap(m_bindlessHeap);
+
+    feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection, useBindless](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
@@ -104,6 +109,12 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         };
         auto getTexture = [&](const std::string& name) {
             return d.materialInstance ? d.materialInstance->GetTexture(name) : material->GetTexture(name);
+        };
+        auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
+            return d.materialInstance ? d.materialInstance->GetTextureRHI(name) : material->GetTextureRHI(name);
+        };
+        auto bindTextureToSlot = [&](const std::string& name, int unit) -> bool {
+            return d.materialInstance ? d.materialInstance->BindTextureToSlot(name, unit) : material->BindTextureToSlot(name, unit);
         };
 
         m_geometryShader->SetMat4("u_Model", d.transform);
@@ -147,18 +158,24 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
             m_geometryShader->SetMat4Array("u_Bones", &identityBone, 1);
         }
 
-        // Material textures: bind in fixed order and set u_Has* for gbuffer_skinned.frag
+        // Material textures: C2 unified path — bindless (handle) or bind-per-slot
         const char* textureOrder[] = {
             "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
             "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
         };
-        int unit = 0;
-        for (const char* texName : textureOrder) {
-            auto tex = getTexture(texName);
-            if (tex && tex->IsValid()) {
-                tex->Bind(unit);
-                m_geometryShader->SetInt(texName, unit);
-                ++unit;
+        if (useBindless) {
+            for (const char* texName : textureOrder) {
+                rhi::ITexture* rhiTex = getTextureRHI(texName);
+                rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
+                m_geometryShader->SetHandle64(texName, static_cast<uint64_t>(h));
+            }
+        } else {
+            int unit = 0;
+            for (const char* texName : textureOrder) {
+                if (bindTextureToSlot(texName, unit)) {
+                    m_geometryShader->SetInt(texName, unit);
+                    ++unit;
+                }
             }
         }
         auto hasTex = [&](const std::string& name) {
@@ -187,6 +204,106 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         cmd->SetCullFace(true);
     }
     core::Log::Info("GBufferPass: done");
+}
+
+void GBufferPass::RenderIndirect(GBuffer& gbuffer,
+                                  rhi::ICommandList* cmd,
+                                  rhi::IBuffer* indirectBuffer,
+                                  uint32_t drawCount,
+                                  uint32_t stride,
+                                  const Mesh* mesh,
+                                  const math::Mat4& view,
+                                  const math::Mat4& projection,
+                                  const math::Mat4* prevView,
+                                  const math::Mat4* prevProjection) {
+    if (!m_device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid())
+        return;
+    if (!m_device->GetCapabilities().supportsMultiDrawIndirect)
+        return;
+
+    EnsureDefaultShader();
+    if (!m_geometryShader || !m_geometryShader->IsValid()) return;
+    rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
+
+    m_currentGBuffer = &gbuffer;
+    gbuffer.BindForGeometryPass(cmd);
+    m_geometryShader->Bind();
+    m_geometryShader->SetMat4("u_View", view);
+    m_geometryShader->SetMat4("u_Projection", projection);
+    if (prevView && prevProjection) {
+        m_geometryShader->SetMat4("u_PrevView", *prevView);
+        m_geometryShader->SetMat4("u_PrevProjection", *prevProjection);
+    }
+
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthWrite(true);
+        cmd->SetCullFace(false);
+    }
+
+    cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
+    cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
+    cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
+
+    m_geometryShader->Unbind();
+    gbuffer.Unbind(cmd);
+    m_currentGBuffer = nullptr;
+    if (cmd)
+        cmd->SetCullFace(true);
+}
+
+void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
+                                                 rhi::ICommandList* cmd,
+                                                 rhi::IBuffer* indirectBuffer,
+                                                 uint32_t drawCount,
+                                                 uint32_t stride,
+                                                 const Mesh* mesh,
+                                                 rhi::IBuffer* perDrawTransformBuffer,
+                                                 uint32_t transformCount,
+                                                 const math::Mat4& view,
+                                                 const math::Mat4& projection,
+                                                 const math::Mat4* prevView,
+                                                 const math::Mat4* prevProjection) {
+    if (!m_device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid()
+        || !perDrawTransformBuffer || transformCount == 0)
+        return;
+    if (!m_device->GetCapabilities().supportsMultiDrawIndirect)
+        return;
+
+    EnsureDefaultShader();
+    if (!m_geometryShader || !m_geometryShader->IsValid()) return;
+    rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
+
+    m_currentGBuffer = &gbuffer;
+    gbuffer.BindForGeometryPass(cmd);
+    m_geometryShader->Bind();
+    m_geometryShader->SetMat4("u_View", view);
+    m_geometryShader->SetMat4("u_Projection", projection);
+    if (prevView && prevProjection) {
+        m_geometryShader->SetMat4("u_PrevView", *prevView);
+        m_geometryShader->SetMat4("u_PrevProjection", *prevProjection);
+    }
+    m_geometryShader->SetInt("u_UsePerDrawTransformBuffer", 1);
+
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthWrite(true);
+        cmd->SetCullFace(false);
+        cmd->BindStorageBuffer(perDrawTransformBuffer, 4, 0, transformCount * 64u);
+    }
+
+    cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
+    cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
+    cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
+
+    m_geometryShader->SetInt("u_UsePerDrawTransformBuffer", 0);
+    m_geometryShader->Unbind();
+    gbuffer.Unbind(cmd);
+    m_currentGBuffer = nullptr;
+    if (cmd)
+        cmd->SetCullFace(true);
 }
 
 } // namespace render

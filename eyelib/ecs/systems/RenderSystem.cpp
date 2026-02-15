@@ -180,16 +180,13 @@ void RenderSystem::Update(World& world, float deltaTime) {
             }
             auto* renderer = &s_volumeRenderer;
             pipeline->SetPrePostProcessCallback([volumes = std::move(volumesToRender), renderer](render::rhi::IRenderTarget* hdrRT, unsigned int width, unsigned int height, const render::RenderScene& scene) {
-                (void)width;
-                (void)height;
                 if (!hdrRT) return;
-                unsigned int hdrFbo = static_cast<unsigned int>(reinterpret_cast<uintptr_t>(hdrRT->GetNativeFramebuffer()));
-                if (hdrFbo == 0) return;
+                renderer->SetViewport(width, height);
                 for (const auto& item : volumes) {
                     if (!item.simulation) continue;
                     renderer->UpdateFromSimulation(*item.simulation, item.densityScale);
                     renderer->RenderVolume(*item.simulation, scene.camera, item.model,
-                                           math::Vec3(0.5f), item.volumeSize, hdrFbo);
+                                           math::Vec3(0.5f), item.volumeSize, hdrRT);
                 }
             });
         } else {

@@ -279,7 +279,7 @@ void Window::SetupCallbacks() {
 bool Window::InitializeGL() {
     if (m_glInitialized) return true;
 
-    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+    if (!gladLoadGL(reinterpret_cast<GLADloadfunc>(glfwGetProcAddress))) {
         core::Log::Error("Failed to initialize GLAD");
         return false;
     }

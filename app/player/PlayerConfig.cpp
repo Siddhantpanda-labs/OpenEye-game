@@ -23,7 +23,7 @@ void PrintUsage(const char* exeName) {
         << "  --height <number>  Window height (default: 720)\n"
         << "  --title <string>   Window title (default: OpenEye Player)\n"
         << "  --novsync          Disable vsync\n"
-        << "  --renderer <name>  Render backend: opengl | bgfx | diligent (default: opengl)\n"
+        << "  --renderer <name>  Render backend: opengl | diligent (default: opengl)\n"
         << "  --headless         Run without creating a window\n"
         << "  --fixed <seconds>  Fixed timestep override\n"
         << "  --time-scale <n>   Time scale multiplier (default: 1.0)\n"
@@ -190,7 +190,6 @@ bool LoadConfig(const std::string& path, RuntimeOptions& options, std::string& e
     if (j.contains("renderer") && j.at("renderer").is_string()) {
         const std::string r = j.at("renderer").get<std::string>();
         if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
-        else if (r == "bgfx") options.renderBackend = eyelib::render::RenderBackend::BGFX;
         else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
         else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
     }
@@ -342,11 +341,10 @@ bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& erro
         if (arg == "--renderer" && i + 1 < argc) {
             const std::string r = argv[++i];
             if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
-            else if (r == "bgfx") options.renderBackend = eyelib::render::RenderBackend::BGFX;
             else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
             else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
             else {
-                error = "Invalid --renderer value; use opengl, bgfx, or diligent.";
+                error = "Invalid --renderer value; use opengl, diligent, or default.";
                 return false;
             }
             continue;

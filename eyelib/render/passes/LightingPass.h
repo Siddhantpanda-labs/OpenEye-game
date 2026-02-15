@@ -18,6 +18,7 @@ public:
     LightingPass();
     ~LightingPass();
 
+    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
 
@@ -40,6 +41,7 @@ private:
     std::shared_ptr<Shader> m_lightingShader;
     rhi::IBuffer* m_fullscreenVBO = nullptr;
     rhi::IBuffer* m_fullscreenIBO = nullptr;
+    rhi::IDevice* m_device = nullptr;
 };
 
 } // namespace render

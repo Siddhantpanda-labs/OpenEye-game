@@ -121,7 +121,17 @@ public:
      */
     rhi::IRenderTarget* GetOutputRenderTargetRHI() const { return m_outputRT; }
     rhi::ITexture* GetOutputTextureRHI() const;
+    /** E6: Ping-pong RT for graph-driven post (e.g. tone-mapped intermediate). Index 0 or 1. */
+    rhi::IRenderTarget* GetPingPongRT(int index) const { return (index >= 0 && index <= 1) ? m_pingPongRT[index] : nullptr; }
     bool HasValidOutputFrame() const { return m_lastOutputValid; }
+
+    /**
+     * E6: Add post-processing as frame-graph passes. Each effect is one pass; order is modular.
+     * hdrInput: FG handle for HDR color. toneMappedOutput: FG handle for tone-map result (e.g. ping-pong RT texture). finalOutput: FG handle for final LDR (e.g. m_outputRT texture).
+     * Call after adding main passes; adds ToneMap then FXAA. Side-effect.
+     */
+    void AddPostPassesToFrameGraph(class FrameGraph* fg, int hdrInput, int toneMappedOutput, int finalOutput,
+                                  const Settings& settings, rhi::ICommandList* cmd);
 
 private:
     void CreateFramebuffers();
@@ -133,6 +143,10 @@ private:
     void LoadShaders();
 
     rhi::IDevice* m_deviceRHI = nullptr;
+
+    // Descriptor set for single-texture passes (Phase 3: layout-driven binding)
+    rhi::IPipelineLayout* m_singleTexLayout = nullptr;
+    rhi::IDescriptorSet* m_singleTexSet = nullptr;
 
     // Fullscreen quad for post passes (vec2 pos + vec2 uv, matches post shaders)
     rhi::IBuffer* m_fullscreenVBO = nullptr;

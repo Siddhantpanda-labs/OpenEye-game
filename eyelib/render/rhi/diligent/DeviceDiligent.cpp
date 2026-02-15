@@ -3,6 +3,8 @@
 #include "eyelib/render/rhi/diligent/TextureDiligent.h"
 #include "eyelib/render/rhi/diligent/ShaderDiligent.h"
 #include "eyelib/render/rhi/diligent/PipelineDiligent.h"
+#include "eyelib/render/rhi/diligent/PipelineLayoutDiligent.h"
+#include "eyelib/render/rhi/diligent/DescriptorSetDiligent.h"
 #include "eyelib/render/rhi/diligent/RenderTargetDiligent.h"
 #include "eyelib/render/rhi/diligent/QueryPoolDiligent.h"
 #include "eyelib/render/rhi/RHITypes.h"
@@ -37,6 +39,8 @@ namespace rhi {
 DeviceDiligent::DeviceDiligent(void* nwh, uint32_t width, uint32_t height, DeviceDiligentImpl* impl)
     : m_impl(impl), m_width(width), m_height(height) {
     (void)nwh;
+    m_caps.supportsCompute = true;   // Diligent supports compute
+    m_caps.supportsMultiDrawIndirect = true;  // D3D12/Vk support it; D3D11/GL depend on impl
     m_immediateCommandList = std::make_unique<CommandListDiligent>(this);
 }
 
@@ -52,6 +56,22 @@ DeviceDiligent::~DeviceDiligent() {
 #endif
     m_immediateCommandList.reset();
     m_impl.reset();
+}
+
+const RHICapabilities& DeviceDiligent::GetCapabilities() const {
+    return m_caps;
+}
+
+const char* DeviceDiligent::GetShaderBackendName() const {
+    return "diligent";
+}
+
+const char* DeviceDiligent::GetShaderVertexExtension() const {
+    return ".vsh";
+}
+
+const char* DeviceDiligent::GetShaderFragmentExtension() const {
+    return ".psh";
 }
 
 void* DeviceDiligent::GetImmediateContext() const {
@@ -82,6 +102,14 @@ void* DeviceDiligent::GetLinearSampler() {
 #else
     return nullptr;
 #endif
+}
+
+ICommandList* DeviceDiligent::CreateCommandList() {
+    return nullptr;  // Single immediate list for now
+}
+
+void DeviceDiligent::DestroyCommandList(ICommandList* list) {
+    (void)list;
 }
 
 ICommandList* DeviceDiligent::GetImmediateCommandList() {
@@ -145,6 +173,33 @@ ITexture* DeviceDiligent::CreateTexture(const TextureDesc& desc, const void* ini
 void DeviceDiligent::DestroyTexture(ITexture* texture) {
     if (texture)
         delete static_cast<TextureDiligent*>(texture);
+}
+
+void DeviceDiligent::CommitSparseTexturePages(ITexture* texture, uint32_t level, int32_t x, int32_t y, int32_t z, uint32_t width, uint32_t height, uint32_t depth, bool commit) {
+    (void)texture; (void)level; (void)x; (void)y; (void)z; (void)width; (void)height; (void)depth; (void)commit;
+}
+
+void DeviceDiligent::CommitSparseBufferPages(IBuffer* buffer, size_t offset, size_t size, bool commit) {
+    (void)buffer; (void)offset; (void)size; (void)commit;
+}
+
+ITexture* DeviceDiligent::CreateTextureView(ITexture* source, RHITextureFormat viewFormat, uint32_t baseMipLevel, uint32_t mipLevels, uint32_t baseLayer, uint32_t layerCount) {
+    (void)source; (void)viewFormat; (void)baseMipLevel; (void)mipLevels; (void)baseLayer; (void)layerCount;
+    return nullptr;
+}
+
+ITexture* DeviceDiligent::CreateTextureBuffer(IBuffer* buffer, RHITextureFormat format, size_t offset, size_t size) {
+    (void)buffer; (void)format; (void)offset; (void)size;
+    return nullptr;
+}
+
+bool DeviceDiligent::WaitFence(IFence* fence, uint64_t timeoutMs) {
+    (void)fence; (void)timeoutMs;
+    return true;
+}
+
+void DeviceDiligent::DestroyFence(IFence* fence) {
+    (void)fence;
 }
 
 IShader* DeviceDiligent::CreateShader(ShaderStage stage, const char* source, size_t sourceLen) {
@@ -557,6 +612,22 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     return p;
 }
 
+IPipeline* DeviceDiligent::CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) {
+    (void)data;
+    (void)size;
+    (void)binaryFormat;
+    (void)layout;
+    (void)topology;
+    return nullptr;
+}
+
+bool DeviceDiligent::GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) {
+    (void)pipeline;
+    (void)outData;
+    (void)outFormat;
+    return false;
+}
+
 IPipeline* DeviceDiligent::CreateComputePipeline(void* computeShader) {
     (void)computeShader;
     return new PipelineDiligent();
@@ -686,6 +757,37 @@ IQueryPool* DeviceDiligent::CreateQueryPool(QueryType type, uint32_t count) {
 void DeviceDiligent::DestroyQueryPool(IQueryPool* pool) {
     if (pool)
         delete static_cast<QueryPoolDiligent*>(pool);
+}
+
+IPipelineLayout* DeviceDiligent::CreatePipelineLayout(const PipelineLayoutDesc& desc) {
+    auto* layout = new PipelineLayoutDiligent();
+    layout->desc = desc;
+    return layout;
+}
+
+void DeviceDiligent::DestroyPipelineLayout(IPipelineLayout* layout) {
+    delete static_cast<PipelineLayoutDiligent*>(layout);
+}
+
+IDescriptorSet* DeviceDiligent::CreateDescriptorSet(IPipelineLayout* layout) {
+    if (!layout) return nullptr;
+    auto* pl = static_cast<PipelineLayoutDiligent*>(layout);
+    auto* set = new DescriptorSetDiligent();
+    set->layout = pl;
+    return set;
+}
+
+void DeviceDiligent::DestroyDescriptorSet(IDescriptorSet* set) {
+    delete static_cast<DescriptorSetDiligent*>(set);
+}
+
+IBindlessHeap* DeviceDiligent::CreateBindlessHeap() {
+    if (!GetCapabilities().supportsBindless) return nullptr;
+    return nullptr;  // Skeleton: full implementation (e.g. descriptor indexing) deferred
+}
+
+void DeviceDiligent::DestroyBindlessHeap(IBindlessHeap* heap) {
+    (void)heap;
 }
 
 int DeviceDiligent::GetMaxSamples(int requestedSamples) {

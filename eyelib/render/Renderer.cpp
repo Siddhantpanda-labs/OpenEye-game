@@ -21,7 +21,7 @@ void Renderer::Shutdown() {
 }
 
 void Renderer::Clear(float r, float g, float b, float a) {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;

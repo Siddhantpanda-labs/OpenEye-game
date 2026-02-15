@@ -18,15 +18,11 @@ target_include_directories(EyelibDebug
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/eyelib>
         $<INSTALL_INTERFACE:include>
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/thirdparty/glad/include
 )
 
 target_link_libraries(EyelibDebug
     PUBLIC
         EyelibCore
         EyelibMath
-    PRIVATE
-        glad
 )
 

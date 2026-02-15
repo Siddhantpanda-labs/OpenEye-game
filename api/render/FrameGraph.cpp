@@ -60,10 +60,6 @@ FGTextureHandle FrameGraph::CreateTexture(const FGTextureDesc& desc) {
     return m_impl->fg->CreateTexture(internal);
 }
 
-FGTextureHandle FrameGraph::ImportTexture(const std::string& name, uint32_t textureId, unsigned width, unsigned height) {
-    return m_impl->fg->ImportTexture(name, textureId, width, height);
-}
-
 int FrameGraph::AddPass(const std::string& name, const ExecuteFunc& execute,
                         const std::vector<FGTextureHandle>& reads,
                         const std::vector<FGTextureHandle>& writes,

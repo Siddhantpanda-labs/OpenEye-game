@@ -37,6 +37,8 @@ public:
     void SetShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetShader() const { return m_shader; }
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
 private:
     struct Vertex {
         math::Vec2 position;
@@ -59,6 +61,7 @@ private:
     std::vector<Vertex> m_vertices;
     std::vector<unsigned int> m_indices;
     std::vector<Batch> m_batches;
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IBuffer* m_vertexBufferRHI = nullptr;
     rhi::IBuffer* m_indexBufferRHI = nullptr;

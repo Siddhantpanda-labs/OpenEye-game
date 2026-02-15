@@ -24,16 +24,15 @@ rhi::VertexLayout GetFullscreenVertexLayout() {
 LightingPass::LightingPass() = default;
 
 LightingPass::~LightingPass() {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (device) {
-        if (m_fullscreenVBO) { device->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
-        if (m_fullscreenIBO) { device->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
+    if (m_device) {
+        if (m_fullscreenVBO) { m_device->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
+        if (m_fullscreenIBO) { m_device->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
     }
 }
 
 void LightingPass::EnsureFullscreenQuad() {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (!device || m_fullscreenVBO) return;
+    if (!m_device || m_fullscreenVBO) return;
+    rhi::IDevice* device = m_device;
     const float vertices[] = {
         -1.f, -1.f, 0.f, 0.f,
          1.f, -1.f, 1.f, 0.f,
@@ -64,7 +63,8 @@ void LightingPass::EnsureDefaultShader() {
         core::Log::Info("LightingPass::EnsureDefaultShader: already valid, return");
         return;
     }
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    if (!m_device) return;
+    rhi::IDevice* device = m_device;
     core::Log::InfoF("LightingPass::EnsureDefaultShader: device=%p", static_cast<void*>(device));
     if (!device) return;
     m_lightingShader = std::make_shared<Shader>();

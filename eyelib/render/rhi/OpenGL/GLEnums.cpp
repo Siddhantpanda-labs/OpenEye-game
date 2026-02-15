@@ -22,6 +22,7 @@ unsigned int TextureTypeToGL(TextureType type) {
         case TextureType::Texture2DArray: return GL_TEXTURE_2D_ARRAY;
         case TextureType::TextureCube: return GL_TEXTURE_CUBE_MAP;
         case TextureType::Texture3D: return GL_TEXTURE_3D;
+        case TextureType::TextureBuffer: return GL_TEXTURE_BUFFER;
         default: return GL_TEXTURE_2D;
     }
 }
@@ -77,6 +78,9 @@ unsigned int ShaderStageToGL(ShaderStage stage) {
         case ShaderStage::Vertex: return GL_VERTEX_SHADER;
         case ShaderStage::Fragment: return GL_FRAGMENT_SHADER;
         case ShaderStage::Compute: return GL_COMPUTE_SHADER;
+        case ShaderStage::TessControl: return GL_TESS_CONTROL_SHADER;
+        case ShaderStage::TessEvaluation: return GL_TESS_EVALUATION_SHADER;
+        case ShaderStage::Geometry: return GL_GEOMETRY_SHADER;
         default: return GL_VERTEX_SHADER;
     }
 }
@@ -87,6 +91,7 @@ unsigned int PrimitiveTopologyToGL(PrimitiveTopology topo) {
         case PrimitiveTopology::TriangleStrip: return GL_TRIANGLE_STRIP;
         case PrimitiveTopology::PointList: return GL_POINTS;
         case PrimitiveTopology::LineList: return GL_LINES;
+        case PrimitiveTopology::PatchList: return GL_PATCHES;
         default: return GL_TRIANGLES;
     }
 }

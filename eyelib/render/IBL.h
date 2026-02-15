@@ -26,6 +26,8 @@ public:
     /** Initialize IBL from an environment cubemap texture. */
     bool Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes = 32, uint32_t prefilterRes = 512);
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
     /**
      * @brief Get generated textures.
      */
@@ -44,6 +46,7 @@ public:
     bool IsValid() const { return m_irradianceRHI && m_prefilterRHI && m_brdfLUTRHI; }
 
 private:
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_environmentRHI = nullptr;
     rhi::ITexture* m_irradianceRHI = nullptr;

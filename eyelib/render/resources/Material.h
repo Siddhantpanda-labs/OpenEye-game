@@ -12,6 +12,7 @@
 namespace eyelib {
 namespace render {
 
+namespace rhi { struct ITexture; }
 class Shader;
 class Texture2D;
 
@@ -30,6 +31,10 @@ public:
 
     void SetTexture(const std::string& name, std::shared_ptr<Texture2D> texture);
     std::shared_ptr<Texture2D> GetTexture(const std::string& name) const;
+    /** C2: RHI texture for bindless or external binding. Returns nullptr if no texture or invalid. */
+    rhi::ITexture* GetTextureRHI(const std::string& name) const;
+    /** C2: Bind texture to the given unit; returns true if bound. Use for non-bindless path. */
+    bool BindTextureToSlot(const std::string& name, int unit) const;
 
     void SetAlbedo(const math::Vec3& color);
     void SetMetallic(float value);

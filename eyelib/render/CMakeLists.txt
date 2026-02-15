@@ -5,6 +5,7 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIContext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/GLEnums.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BindlessHeapGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BufferGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/TextureGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/ShaderGL.cpp
@@ -12,26 +13,14 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/RenderTargetGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/QueryPoolGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/CommandListGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeferredCommandListGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DescriptorSetGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeviceGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
 )
 
-if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
-    list(APPEND RENDER_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/BGFXEnums.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/BufferBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/TextureBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/ShaderBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/PipelineBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/RenderTargetBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/QueryPoolBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/CommandListBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/DeviceBGFX.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/bgfx/CreateDeviceBGFX.cpp
-    )
-endif()
-
-# Diligent Engine RHI backend (stub when engine not linked; see documentation/plans/RHI_Diligent_Integration_Plan.md)
+# Diligent Engine RHI backend (only built when Diligent is available; see documentation/plans/RHI_Diligent_Integration_Plan.md)
+if(OPENEYE_DILIGENT_AVAILABLE)
 list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/DiligentEnums.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/BufferDiligent.cpp
@@ -39,17 +28,21 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/ShaderDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/RenderTargetDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/QueryPoolDiligent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/DescriptorSetDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/PipelineDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/CommandListDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/DeviceDiligent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/diligent/CreateDeviceDiligent.cpp
 )
+endif()
 
 list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/GpuProfilerRHI.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/GpuProfilerRHI.h
     ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.cpp
@@ -63,6 +56,12 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderSourceLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderReflection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderReflection.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/PipelineCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PipelineCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.cpp
@@ -71,6 +70,10 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.cpp
@@ -130,12 +133,6 @@ target_link_libraries(EyelibRender
     PRIVATE
         glad
 )
-
-if(OPENEYE_USE_BGFX AND OPENEYE_BGFX_AVAILABLE)
-    target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_BGFX=1)
-    target_include_directories(EyelibRender PRIVATE ${OPENEYE_BGFX_SOURCE_DIR}/bgfx/include ${OPENEYE_BGFX_SOURCE_DIR}/bx/include)
-    target_link_libraries(EyelibRender PRIVATE bgfx glfw)
-endif()
 
 if(OPENEYE_DILIGENT_AVAILABLE)
     target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_DILIGENT=1)

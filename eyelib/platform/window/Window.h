@@ -69,7 +69,7 @@ public:
     // Opaque access for internal engine integration (do not expose in api/)
     ::GLFWwindow* NativeHandle() const { return m_window; }
 
-    /** Native window handle for RHI (e.g. HWND on Windows). Use for BGFX/Vulkan surface. */
+    /** Native window handle for RHI (e.g. HWND on Windows). Use for Vulkan/Diligent surface. */
     void* GetNativeWindowHandle() const;
 
     // Callbacks

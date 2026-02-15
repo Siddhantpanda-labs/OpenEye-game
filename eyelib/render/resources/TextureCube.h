@@ -41,7 +41,11 @@ public:
     unsigned int Id() const;
     rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
 private:
+    rhi::IDevice* GetDevice() const;
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_textureRHI = nullptr;
     int m_size = 0;

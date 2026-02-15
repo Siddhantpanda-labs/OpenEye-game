@@ -8,6 +8,14 @@
 namespace eyelib {
 namespace debug {
 
+/** Implemented by render module (e.g. GpuProfilerRHI) so Profiler stays backend-agnostic. */
+class IGpuProfiler {
+public:
+    virtual ~IGpuProfiler() = default;
+    virtual void BeginGpuSample(const char* name) = 0;
+    virtual void EndGpuSample() = 0;
+};
+
 struct ProfileSample {
     std::string name;
     double milliseconds = 0.0;
@@ -28,6 +36,7 @@ public:
     static void AddSample(const char* name, double milliseconds);
     static void BeginSample(const char* name);
     static void EndSample();
+    static void SetGpuProfiler(IGpuProfiler* profiler);
     static void BeginGpuSample(const char* name);
     static void EndGpuSample();
 

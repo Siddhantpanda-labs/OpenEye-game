@@ -3,10 +3,13 @@
 #include "eyelib/render/IRenderSceneView.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
+#include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/passes/LightCullPass.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace eyelib {
@@ -19,6 +22,8 @@ class ShadowPass;
 class LightingPass;
 class ClusteredLightGrid;
 class PostProcessor;
+class GpuProfilerRHI;
+class Mesh;
 class Shader;
 class TextureCube;
 class FullscreenQuad;
@@ -67,7 +72,16 @@ public:
 
     void SetFrameSize(unsigned w, unsigned h);
     void SetPrePostProcessCallback(PrePostCallback cb) { m_prePostCallback = std::move(cb); }
-    
+
+    /** When true and GpuCullPass is supported, deferred GBuffer uses MultiDrawIndexedIndirect (E8). Default false. */
+    void SetUseGpuDrivenGBuffer(bool use) { m_useGpuDrivenGBuffer = use; }
+    bool GetUseGpuDrivenGBuffer() const { return m_useGpuDrivenGBuffer; }
+
+    /** E9: Bindless heap (null when !supportsBindless). */
+    rhi::IBindlessHeap* GetBindlessHeap() const { return m_bindlessHeap; }
+    /** E9: Get or allocate bindless handle for texture; returns kInvalidBindlessHandle when bindless unsupported or texture null. */
+    rhi::BindlessHandle GetOrAllocateBindlessHandle(rhi::ITexture* texture);
+
     /** HDR color texture for post-processing (RHI path only; no GL id in this module). */
     rhi::ITexture* GetHDRColorTextureRHI() const;
 
@@ -81,6 +95,8 @@ private:
     void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
     void EnsureSkyboxShader();
+    /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
+    void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);
 
     std::unique_ptr<rhi::IDevice> m_device;
     std::unique_ptr<GBuffer> m_gbuffer;
@@ -88,12 +104,44 @@ private:
     std::unique_ptr<GBufferPass> m_gbufferPass;
     std::unique_ptr<ShadowPass> m_shadowPass;
     std::unique_ptr<LightingPass> m_lightingPass;
+    std::unique_ptr<GpuCullPass> m_gpuCullPass;
+    std::unique_ptr<LightCullPass> m_lightCullPass;
     std::unique_ptr<FrameGraph> m_frameGraph;
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
+    std::unique_ptr<GpuProfilerRHI> m_gpuProfilerRHI;
     std::shared_ptr<Shader> m_forwardPlusShader;
     std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
     std::shared_ptr<Shader> m_skyboxShader;
+
+    /** Quad mesh for GPU-driven GBuffer path (matches current cull output: 6 indices). */
+    std::unique_ptr<Mesh> m_gpuDrivenQuad;
+
+    /** If true, deferred GBuffer uses RenderIndirect when GpuCullPass is supported (E8). */
+    bool m_useGpuDrivenGBuffer = false;
+
+    /** A2: Draw list for GpuCullPass (scene-fed); max 256 entries. */
+    rhi::IBuffer* m_gpuCullDrawListBuffer = nullptr;
+    /** Per-draw transforms for GPU-driven path (same order as draw list). */
+    rhi::IBuffer* m_gpuCullTransformBuffer = nullptr;
+    /** Scratch for building draw list each frame (A2). */
+    std::vector<GpuCullDrawEntry> m_scratchGpuCullDrawList;
+    /** Scratch transforms in same order as draw list (for indirect scene path). */
+    std::vector<math::Mat4> m_scratchGpuCullTransforms;
+    /** True when all opaque drawables share the same mesh (enables indirect scene path). */
+    bool m_gpuCullSingleMesh = false;
+    /** Representative mesh when single-mesh; kept alive for GBuffer pass. */
+    std::shared_ptr<Mesh> m_gpuCullRepresentativeMesh;
+
+    /** Previous frame depth RT for GPU occlusion culling (same size as GBuffer). */
+    rhi::IRenderTarget* m_prevFrameDepthRT = nullptr;
+    /** True after first frame's depth copy so cull can use occlusion. */
+    bool m_havePrevDepth = false;
+
+    /** E9: Bindless heap (created when supportsBindless). */
+    rhi::IBindlessHeap* m_bindlessHeap = nullptr;
+    /** E9: Cache ITexture* -> BindlessHandle for GetOrAllocateBindlessHandle. */
+    std::unordered_map<rhi::ITexture*, rhi::BindlessHandle> m_bindlessHandleCache;
 
     rhi::IRenderTarget* m_hdrRenderTarget = nullptr;
 

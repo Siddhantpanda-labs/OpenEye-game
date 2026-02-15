@@ -27,7 +27,7 @@ public:
     RenderPipeline(RenderPipeline&& other) noexcept;
     RenderPipeline& operator=(RenderPipeline&& other) noexcept;
 
-    /** Create device and pipeline. Requires a window; backend chosen at runtime (e.g. --renderer bgfx|opengl). */
+    /** Create device and pipeline. Requires a window; backend chosen at runtime (e.g. --renderer opengl|diligent). */
     bool Initialize(Window& window, uint32_t width, uint32_t height,
                     ::eyelib::render::RenderBackend backend = ::eyelib::render::RenderBackend::Default);
     void Resize(uint32_t width, uint32_t height);

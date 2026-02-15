@@ -13,6 +13,14 @@ struct DeviceGL : IDevice {
     DeviceGL();
     ~DeviceGL() override;
 
+    const RHICapabilities& GetCapabilities() const override;
+    const char* GetShaderBackendName() const override;
+    const char* GetShaderVertexExtension() const override;
+    const char* GetShaderFragmentExtension() const override;
+
+    ICommandList* CreateCommandList() override;
+    void DestroyCommandList(ICommandList* list) override;
+
     ICommandList* GetImmediateCommandList() override;
     void SubmitCommandList(ICommandList* list) override;
 
@@ -21,6 +29,12 @@ struct DeviceGL : IDevice {
 
     ITexture* CreateTexture(const TextureDesc& desc, const void* initialData) override;
     void DestroyTexture(ITexture* texture) override;
+    void CommitSparseTexturePages(ITexture* texture, uint32_t level, int32_t x, int32_t y, int32_t z, uint32_t width, uint32_t height, uint32_t depth, bool commit) override;
+    void CommitSparseBufferPages(IBuffer* buffer, size_t offset, size_t size, bool commit) override;
+    ITexture* CreateTextureView(ITexture* source, RHITextureFormat viewFormat, uint32_t baseMipLevel, uint32_t mipLevels, uint32_t baseLayer, uint32_t layerCount) override;
+    ITexture* CreateTextureBuffer(IBuffer* buffer, RHITextureFormat format, size_t offset, size_t size) override;
+    bool WaitFence(IFence* fence, uint64_t timeoutMs) override;
+    void DestroyFence(IFence* fence) override;
 
     IShader* CreateShader(ShaderStage stage, const char* source, size_t sourceLen) override;
     IShader* CreateShaderFromBinary(ShaderStage stage, const void* data, size_t size) override;
@@ -29,6 +43,8 @@ struct DeviceGL : IDevice {
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;
     IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) override;
+    IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) override;
+    bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
     void DestroyPipeline(IPipeline* pipeline) override;
 
@@ -44,6 +60,14 @@ struct DeviceGL : IDevice {
     IQueryPool* CreateQueryPool(QueryType type, uint32_t count) override;
     void DestroyQueryPool(IQueryPool* pool) override;
 
+    IPipelineLayout* CreatePipelineLayout(const PipelineLayoutDesc& desc) override;
+    void DestroyPipelineLayout(IPipelineLayout* layout) override;
+    IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) override;
+    void DestroyDescriptorSet(IDescriptorSet* set) override;
+
+    IBindlessHeap* CreateBindlessHeap() override;
+    void DestroyBindlessHeap(IBindlessHeap* heap) override;
+
     int GetMaxSamples(int requestedSamples) override;
 
     void Present() override;
@@ -54,6 +78,8 @@ struct DeviceGL : IDevice {
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
 
 private:
+    void QueryCapabilities();
+    RHICapabilities m_caps;
     std::unique_ptr<CommandListGL> m_immediateCommandList;
 };
 

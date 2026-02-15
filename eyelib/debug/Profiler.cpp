@@ -6,8 +6,6 @@
 #include <stack>
 #include <unordered_map>
 
-#include <glad/glad.h>
-
 namespace eyelib {
 namespace debug {
 
@@ -21,8 +19,7 @@ std::vector<ProfileSample> g_lastSamples;
 std::vector<ProfileSample> g_currentSamples;
 std::unordered_map<std::string, ProfileStats> g_stats;
 std::vector<std::pair<std::string, uint64_t>> g_stack;
-std::vector<std::pair<std::string, GLuint>> g_gpuStack;
-bool g_gpuAvailable = true;
+IGpuProfiler* g_gpuProfiler = nullptr;
 
 static uint64_t NowTicks() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
@@ -85,34 +82,19 @@ void Profiler::EndSample() {
     RecordSample(entry.first, ms);
 }
 
+void Profiler::SetGpuProfiler(IGpuProfiler* profiler) {
+    std::scoped_lock lock(g_profMutex);
+    g_gpuProfiler = profiler;
+}
+
 void Profiler::BeginGpuSample(const char* name) {
-    if (!name || !g_gpuAvailable) return;
-    if (!glGetString(GL_VERSION)) {
-        g_gpuAvailable = false;
-        return;
-    }
-    GLuint q = 0;
-    glGenQueries(1, &q);
-    if (!q) return;
-    glBeginQuery(GL_TIME_ELAPSED, q);
-    if (glGetError() != GL_NO_ERROR) {
-        glDeleteQueries(1, &q);
-        g_gpuAvailable = false;
-        return;
-    }
-    g_gpuStack.emplace_back(std::string("GPU:") + name, q);
+    if (g_gpuProfiler && name)
+        g_gpuProfiler->BeginGpuSample(name);
 }
 
 void Profiler::EndGpuSample() {
-    if (!g_gpuAvailable || g_gpuStack.empty()) return;
-    auto entry = g_gpuStack.back();
-    g_gpuStack.pop_back();
-    glEndQuery(GL_TIME_ELAPSED);
-    GLuint64 ns = 0;
-    glGetQueryObjectui64v(entry.second, GL_QUERY_RESULT, &ns);
-    glDeleteQueries(1, &entry.second);
-    const double ms = static_cast<double>(ns) / 1'000'000.0;
-    RecordSample(entry.first, ms);
+    if (g_gpuProfiler)
+        g_gpuProfiler->EndGpuSample();
 }
 
 double Profiler::GetLastFrameMs() {
@@ -155,7 +137,6 @@ void Profiler::Reset() {
     g_currentSamples.clear();
     g_lastSamples.clear();
     g_stack.clear();
-    g_gpuStack.clear();
     g_lastFrameMs = 0.0;
 }
 

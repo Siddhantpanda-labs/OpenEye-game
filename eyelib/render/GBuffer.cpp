@@ -30,9 +30,8 @@ GBuffer& GBuffer::operator=(GBuffer&& other) noexcept {
 }
 
 bool GBuffer::Initialize(uint32_t width, uint32_t height) {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
-    if (!device) return false;
-    return Initialize(device, width, height);
+    // Device must be passed explicitly; use Initialize(device, width, height).
+    return false;
 }
 
 bool GBuffer::Initialize(rhi::IDevice* device, uint32_t width, uint32_t height) {
@@ -81,8 +80,8 @@ void GBuffer::BindForLightingPass(rhi::ICommandList* cmd) {
 }
 
 void GBuffer::BindDepthTexture(unsigned int textureUnit) {
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
-    if (!device) return;
+    if (!m_deviceRHI) return;
+    rhi::IDevice* device = m_deviceRHI;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     rhi::ITexture* depth = GetDepthTextureRHI();
     if (cmd && depth) cmd->BindTexture(depth, textureUnit);

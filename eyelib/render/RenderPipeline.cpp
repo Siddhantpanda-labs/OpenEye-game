@@ -1,5 +1,6 @@
 #include "eyelib/render/RenderPipeline.h"
 #include "eyelib/render/GBuffer.h"
+#include "eyelib/render/GpuProfilerRHI.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/ClusteredLightGrid.h"
 #include "eyelib/render/PostProcessor.h"
@@ -7,8 +8,11 @@
 #include "eyelib/render/passes/ShadowPass.h"
 #include "eyelib/render/passes/LightingPass.h"
 #include "eyelib/render/passes/TransparencyPass.h"
+#include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/passes/LightCullPass.h"
 #include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/debug/Presets.h"
+#include "eyelib/debug/Profiler.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
@@ -20,6 +24,7 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/math/TransformUtils.h"
@@ -44,6 +49,9 @@ RenderPipeline::~RenderPipeline() {
 }
 
 void RenderPipeline::Shutdown() {
+    debug::Profiler::SetGpuProfiler(nullptr);
+    m_gpuProfilerRHI.reset();
+
     DestroyHDRFramebuffer();
     // Destroy all objects that hold a raw pointer to m_device before destroying the device.
     // Their destructors call back into the device (DestroyRenderTarget, DestroyPipeline, etc.).
@@ -54,10 +62,18 @@ void RenderPipeline::Shutdown() {
     m_frameGraph.reset();
     m_lightingPass.reset();
     m_shadowPass.reset();
+    m_gpuDrivenQuad.reset();
+    m_lightCullPass.reset();
+    m_gpuCullPass.reset();
     m_gbufferPass.reset();
     m_shadowMap.reset();
     m_gbuffer.reset();
     if (m_device) {
+        if (m_bindlessHeap) { m_device->DestroyBindlessHeap(m_bindlessHeap); m_bindlessHeap = nullptr; }
+        m_bindlessHandleCache.clear();
+        if (m_gpuCullDrawListBuffer) { m_device->DestroyBuffer(m_gpuCullDrawListBuffer); m_gpuCullDrawListBuffer = nullptr; }
+        if (m_gpuCullTransformBuffer) { m_device->DestroyBuffer(m_gpuCullTransformBuffer); m_gpuCullTransformBuffer = nullptr; }
+        if (m_prevFrameDepthRT) { m_device->DestroyRenderTarget(m_prevFrameDepthRT); m_prevFrameDepthRT = nullptr; }
         if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
         if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
         if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
@@ -79,7 +95,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
 
     core::Log::Info("RenderPipeline::Initialize: initializing GBuffer");
     m_gbuffer = std::make_unique<GBuffer>();
-    if (!m_gbuffer->Initialize(width, height)) {
+    if (!m_gbuffer->Initialize(m_device.get(), width, height)) {
         core::Log::Error("RenderPipeline::Initialize: GBuffer::Initialize failed");
         return false;
     }
@@ -92,8 +108,54 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     }
 
     m_gbufferPass = std::make_unique<GBufferPass>();
+    if (m_device->GetCapabilities().supportsBindless)
+        m_bindlessHeap = m_device->CreateBindlessHeap();
+    if (m_bindlessHeap)
+        m_gbufferPass->SetBindlessHeap(m_bindlessHeap);
+    m_gbufferPass->SetBindlessGetHandle([this](rhi::ITexture* t) { return GetOrAllocateBindlessHandle(t); });
+    m_gpuCullPass = std::make_unique<GpuCullPass>();
+    m_gpuCullPass->SetDevice(m_device.get());
+    if (m_gpuCullPass->IsSupported())
+        m_gpuCullPass->Initialize();
+    m_lightCullPass = std::make_unique<LightCullPass>();
+    m_lightCullPass->SetDevice(m_device.get());
+    if (m_lightCullPass->IsSupported())
+        m_lightCullPass->Initialize();
+    // A2: Draw list buffer for GpuCullPass (scene-fed); max entries match cull pass limit.
+    constexpr uint32_t kMaxGpuCullDraws = 256;
+    if (m_device && m_gpuCullPass->IsSupported()) {
+        rhi::BufferDesc bd;
+        bd.sizeInBytes = kMaxGpuCullDraws * sizeof(GpuCullDrawEntry);
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_gpuCullDrawListBuffer = m_device->CreateBuffer(bd, nullptr);
+        bd.sizeInBytes = kMaxGpuCullDraws * sizeof(math::Mat4);
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_gpuCullTransformBuffer = m_device->CreateBuffer(bd, nullptr);
+    }
+    // Quad for GPU-driven GBuffer path (E8): matches cull_indirect.comp output (6 indices, 1 draw).
+    m_gpuDrivenQuad = std::make_unique<Mesh>();
+    {
+        std::vector<Vertex> verts(4);
+        verts[0].position = math::Vec3(-1.0f, -1.0f, 0.0f);
+        verts[0].uv = math::Vec2(0.0f, 0.0f);
+        verts[1].position = math::Vec3(1.0f, -1.0f, 0.0f);
+        verts[1].uv = math::Vec2(1.0f, 0.0f);
+        verts[2].position = math::Vec3(1.0f, 1.0f, 0.0f);
+        verts[2].uv = math::Vec2(1.0f, 1.0f);
+        verts[3].position = math::Vec3(-1.0f, 1.0f, 0.0f);
+        verts[3].uv = math::Vec2(0.0f, 1.0f);
+        std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
+        m_gpuDrivenQuad->SetVertices(verts);
+        m_gpuDrivenQuad->SetIndices(indices);
+        m_gpuDrivenQuad->UploadToGPU(m_device.get());
+    }
     m_shadowPass = std::make_unique<ShadowPass>();
     m_lightingPass = std::make_unique<LightingPass>();
+    m_gbufferPass->SetDevice(m_device.get());
+    m_shadowPass->SetDevice(m_device.get());
+    m_lightingPass->SetDevice(m_device.get());
     m_frameGraph = std::make_unique<FrameGraph>();
     m_frameGraph->SetDevice(m_device.get());
     m_frameGraph->SetFrameSize(width, height);
@@ -102,7 +164,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
 
     core::Log::Info("RenderPipeline::Initialize: initializing PostProcessor");
     m_postProcessor = std::make_unique<PostProcessor>();
-    if (!m_postProcessor->Initialize(width, height)) {
+    if (!m_postProcessor->Initialize(width, height, m_device.get())) {
         core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
         return false;
     }
@@ -113,10 +175,17 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
         core::Log::Error("RenderPipeline::Initialize: CreateHDRFramebuffer failed (m_hdrRenderTarget is null)");
         return false;
     }
+    if (width > 0 && height > 0) {
+        std::vector<rhi::RHITextureFormat> noColor;
+        m_prevFrameDepthRT = m_device->CreateRenderTarget(width, height, noColor, rhi::RHITextureFormat::Depth24, 1);
+    }
 
     // Initialize previous matrices (identity for first frame)
     m_prevView = math::Mat4(1.0f);
     m_prevProjection = math::Mat4(1.0f);
+
+    m_gpuProfilerRHI = std::make_unique<GpuProfilerRHI>(m_device.get());
+    debug::Profiler::SetGpuProfiler(m_gpuProfilerRHI.get());
 
     core::Log::Info("RenderPipeline::Initialize: pipeline init success");
     return true;
@@ -131,6 +200,15 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     m_width = width;
     m_height = height;
     if (m_gbuffer) m_gbuffer->Resize(width, height);
+    if (m_prevFrameDepthRT) {
+        m_device->DestroyRenderTarget(m_prevFrameDepthRT);
+        m_prevFrameDepthRT = nullptr;
+        m_havePrevDepth = false;
+    }
+    if (m_device && width > 0 && height > 0) {
+        std::vector<rhi::RHITextureFormat> noColor;
+        m_prevFrameDepthRT = m_device->CreateRenderTarget(width, height, noColor, rhi::RHITextureFormat::Depth24, 1);
+    }
     DestroyHDRFramebuffer();
     CreateHDRFramebuffer();
     if (m_frameGraph) m_frameGraph->SetFrameSize(width, height);
@@ -174,6 +252,48 @@ rhi::ITexture* RenderPipeline::GetHDRColorTextureRHI() const {
     return m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
 }
 
+rhi::BindlessHandle RenderPipeline::GetOrAllocateBindlessHandle(rhi::ITexture* texture) {
+    if (!texture || !m_bindlessHeap || !m_device->GetCapabilities().supportsBindless)
+        return rhi::kInvalidBindlessHandle;
+    auto it = m_bindlessHandleCache.find(texture);
+    if (it != m_bindlessHandleCache.end())
+        return it->second;
+    rhi::BindlessHandle h = m_bindlessHeap->AllocateTextureHandle(texture);
+    if (h != rhi::kInvalidBindlessHandle)
+        m_bindlessHandleCache[texture] = h;
+    return h;
+}
+
+void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount) {
+    if (!m_gbufferPass || !m_gbuffer) return;
+    const bool useIndirectQuad = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported()
+        && m_gpuDrivenQuad && m_gpuDrivenQuad->IsValid() && (gpuCullDrawListCount == 0);
+    const bool useIndirectScene = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported()
+        && gpuCullDrawListCount > 0 && m_gpuCullSingleMesh && m_gpuCullRepresentativeMesh && m_gpuCullRepresentativeMesh->IsValid()
+        && m_gpuCullTransformBuffer;
+    if (useIndirectQuad) {
+        m_gbufferPass->RenderIndirect(*m_gbuffer, cmd,
+            m_gpuCullPass->GetIndirectBuffer(),
+            m_gpuCullPass->GetDrawCount(),
+            m_gpuCullPass->GetIndirectStride(),
+            m_gpuDrivenQuad.get(),
+            cam.view, cam.projection, &m_prevView, &m_prevProjection);
+    } else if (useIndirectScene) {
+        m_gbufferPass->RenderIndirectWithPerDrawData(*m_gbuffer, cmd,
+            m_gpuCullPass->GetIndirectBuffer(),
+            m_gpuCullPass->GetDrawCount(),
+            m_gpuCullPass->GetIndirectStride(),
+            m_gpuCullRepresentativeMesh.get(),
+            m_gpuCullTransformBuffer,
+            gpuCullDrawListCount,
+            cam.view, cam.projection, &m_prevView, &m_prevProjection);
+    } else {
+        m_gbufferPass->Render(*m_gbuffer, cmd,
+            [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
+            cam.view, cam.projection, m_prevView, m_prevProjection);
+    }
+}
+
 void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     if (!m_frameGraph || !m_gbuffer || !m_shadowMap || !m_gbufferPass || !m_shadowPass || !m_lightingPass) return;
     m_frameGraph->Clear();
@@ -192,14 +312,77 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     rhi::ITexture* hdrDepthTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetDepthTexture() : nullptr;
     auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
     auto hdrDepth = m_frameGraph->ImportTextureRHI("HDRDepth", hdrDepthTex, m_width, m_height);
-    auto gbPos = m_frameGraph->ImportTexture("GBufferPos", m_gbuffer->GetPositionTexture(), m_width, m_height);
-    auto gbNorm = m_frameGraph->ImportTexture("GBufferNorm", m_gbuffer->GetNormalTexture(), m_width, m_height);
-    auto gbAlb = m_frameGraph->ImportTexture("GBufferAlb", m_gbuffer->GetAlbedoTexture(), m_width, m_height);
-    auto gbPBR = m_frameGraph->ImportTexture("GBufferPBR", m_gbuffer->GetPBRParamsTexture(), m_width, m_height);
-    auto gbVelocity = m_frameGraph->ImportTexture("GBufferVelocity", m_gbuffer->GetVelocityTexture(), m_width, m_height);
-    auto gbDepth = m_frameGraph->ImportTexture("GBufferDepth", m_gbuffer->GetDepthTexture(), m_width, m_height);
+    auto gbPos = m_frameGraph->ImportTextureRHI("GBufferPos", m_gbuffer->GetPositionTextureRHI(), m_width, m_height);
+    auto gbNorm = m_frameGraph->ImportTextureRHI("GBufferNorm", m_gbuffer->GetNormalTextureRHI(), m_width, m_height);
+    auto gbAlb = m_frameGraph->ImportTextureRHI("GBufferAlb", m_gbuffer->GetAlbedoTextureRHI(), m_width, m_height);
+    auto gbPBR = m_frameGraph->ImportTextureRHI("GBufferPBR", m_gbuffer->GetPBRParamsTextureRHI(), m_width, m_height);
+    auto gbVelocity = m_frameGraph->ImportTextureRHI("GBufferVelocity", m_gbuffer->GetVelocityTextureRHI(), m_width, m_height);
+    auto gbDepth = m_frameGraph->ImportTextureRHI("GBufferDepth", m_gbuffer->GetDepthTextureRHI(), m_width, m_height);
     auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
     rhi::ICommandList* cmd = GetRHICommandList();
+
+    // A2: Build draw list from scene for GpuCullPass (frustum cull input).
+    constexpr uint32_t kMaxGpuCullDraws = 256;
+    m_scratchGpuCullDrawList.clear();
+    m_scratchGpuCullTransforms.clear();
+    m_gpuCullSingleMesh = true;
+    m_gpuCullRepresentativeMesh.reset();
+    Mesh* firstMeshPtr = nullptr;
+    view.ForEachOpaqueDrawable([this, &firstMeshPtr](const Drawable& d) {
+        if (!d.mesh || !d.mesh->IsValid() || m_scratchGpuCullDrawList.size() >= kMaxGpuCullDraws) return;
+        if (!firstMeshPtr) {
+            firstMeshPtr = d.mesh.get();
+            m_gpuCullRepresentativeMesh = d.mesh;
+        } else if (d.mesh.get() != firstMeshPtr) {
+            m_gpuCullSingleMesh = false;
+        }
+        math::AABB localAABB = d.mesh->GetAABB();
+        if (!localAABB.IsValid()) return;
+        math::AABB worldAABB = localAABB.Transform(d.transform);
+        GpuCullDrawEntry e = {};
+        e.aabbMin[0] = worldAABB.min.x;
+        e.aabbMin[1] = worldAABB.min.y;
+        e.aabbMin[2] = worldAABB.min.z;
+        e.aabbMax[0] = worldAABB.max.x;
+        e.aabbMax[1] = worldAABB.max.y;
+        e.aabbMax[2] = worldAABB.max.z;
+        const size_t indexCount = d.mesh->GetIndexCount();
+        e.indexCount = static_cast<uint32_t>(indexCount);
+        e.instanceCount = 1u;
+        e.firstIndex = 0u;
+        e.baseVertex = 0;
+        e.baseInstance = 0u;
+        m_scratchGpuCullDrawList.push_back(e);
+        m_scratchGpuCullTransforms.push_back(d.transform);
+    });
+    if (m_scratchGpuCullDrawList.empty()) m_gpuCullSingleMesh = false;
+    const uint32_t gpuCullDrawListCount = static_cast<uint32_t>(m_scratchGpuCullDrawList.size());
+
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
+        m_gpuCullPass->SetDevice(m_device.get());
+        if (gpuCullDrawListCount > 0 && m_gpuCullDrawListBuffer) {
+            const size_t uploadSize = gpuCullDrawListCount * sizeof(GpuCullDrawEntry);
+            m_gpuCullDrawListBuffer->Update(m_scratchGpuCullDrawList.data(), 0, uploadSize);
+            if (m_gpuCullTransformBuffer && m_scratchGpuCullTransforms.size() >= gpuCullDrawListCount) {
+                const size_t transformSize = gpuCullDrawListCount * sizeof(math::Mat4);
+                m_gpuCullTransformBuffer->Update(m_scratchGpuCullTransforms.data(), 0, transformSize);
+            }
+            m_gpuCullPass->SetDrawList(m_gpuCullDrawListBuffer, gpuCullDrawListCount);
+            const math::Mat4 viewProj = cam.projection * cam.view;
+            m_gpuCullPass->SetViewProj(&viewProj[0][0]);
+        } else {
+            m_gpuCullPass->SetDrawList(nullptr, 0);
+        }
+        if (m_havePrevDepth && m_prevFrameDepthRT && m_prevFrameDepthRT->GetDepthTexture())
+            m_gpuCullPass->SetOcclusionDepth(m_prevFrameDepthRT->GetDepthTexture(), m_width, m_height);
+        else
+            m_gpuCullPass->SetOcclusionDepth(nullptr, 0, 0);
+        m_frameGraph->AddPass("GPU Cull",
+            [this, cmd](const FGPassResources&) {
+                if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
+            },
+            {}, {}, true);
+    }
 
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
@@ -212,12 +395,18 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     }
 
     m_frameGraph->AddPass("GBuffer",
-        [this, &view, &cam, cmd](const FGPassResources&) {
-            m_gbufferPass->Render(*m_gbuffer, cmd,
-                [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-                cam.view, cam.projection, m_prevView, m_prevProjection);
+        [this, &view, &cam, cmd, gpuCullDrawListCount](const FGPassResources&) {
+            RenderOpaqueGeometryToGBuffer(cmd, view, cam, gpuCullDrawListCount);
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
+
+    m_frameGraph->AddPass("Copy depth for occlusion",
+        [this](const FGPassResources&) {
+            if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
+                m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
+            m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+        },
+        { gbDepth }, {}, true);
 
     std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
     if (light.castShadows) lightingReads.push_back(shadowTex);
@@ -246,6 +435,17 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
         },
         {}, { hdrColor }, true);
 
+    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
+        rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
+        rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
+        if (postToneMappedTex && postOutputTex) {
+            auto postToneMapped = m_frameGraph->ImportTextureRHI("PostToneMapped", postToneMappedTex, m_width, m_height);
+            auto postOutput = m_frameGraph->ImportTextureRHI("PostOutput", postOutputTex, m_width, m_height);
+            PostProcessor::Settings settings;
+            m_postProcessor->AddPostPassesToFrameGraph(m_frameGraph.get(), hdrColor, postToneMapped, postOutput, settings, cmd);
+        }
+    }
+
     m_frameGraph->Compile();
     m_frameGraph->Execute(GetRHICommandList());
 }
@@ -262,7 +462,7 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
 
     core::Log::Info("RenderForward: executing");
 
-    const int kShadowMapUnit = 5;
+    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
     if (m_shadowMap && cmd) {
         rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
         if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
@@ -391,10 +591,6 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         m_clusteredLightGrid->Initialize(m_width, m_height, cam.nearPlane, cam.farPlane);
     }
 
-    // Build clustered light grid
-    m_clusteredLightGrid->BuildLightGrid(m_scratchPointLights, m_scratchSpotLights,
-                                         cam.view, cam.projection, cam.viewPos);
-
     // Upload lights to SSBOs (RHI)
     rhi::ICommandList* cmdFwd = GetRHICommandList();
     const size_t kMaxPointLights = 256;
@@ -411,7 +607,6 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         if (m_pointLightBuffer) {
             const size_t sz = m_scratchPointLights.size() * sizeof(PointLight);
             m_pointLightBuffer->Update(m_scratchPointLights.data(), 0, sz);
-            if (cmdFwd) cmdFwd->BindStorageBuffer(m_pointLightBuffer, 3, 0, static_cast<uint32_t>(sz));
         }
     }
     if (!m_scratchSpotLights.empty() && m_device) {
@@ -425,7 +620,6 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         if (m_spotLightBuffer) {
             const size_t sz = m_scratchSpotLights.size() * sizeof(SpotLight);
             m_spotLightBuffer->Update(m_scratchSpotLights.data(), 0, sz);
-            if (cmdFwd) cmdFwd->BindStorageBuffer(m_spotLightBuffer, 4, 0, static_cast<uint32_t>(sz));
         }
     }
     if (m_device && !m_lightIndexBuffer) {
@@ -435,7 +629,29 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
         m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
     }
-    m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
+
+    // Light grid: GPU compute cull (when supported) or CPU fallback
+    if (m_lightCullPass && m_lightCullPass->IsSupported() && m_lightIndexBuffer) {
+        m_lightCullPass->SetDevice(m_device.get());
+        m_lightCullPass->SetPointLights(m_pointLightBuffer, static_cast<uint32_t>(m_scratchPointLights.size()));
+        m_lightCullPass->SetSpotLights(m_spotLightBuffer, static_cast<uint32_t>(m_scratchSpotLights.size()));
+        m_lightCullPass->SetOutputBuffer(m_lightIndexBuffer);
+        m_lightCullPass->SetViewProj(&cam.view[0][0], &cam.projection[0][0]);
+        m_lightCullPass->SetParams(
+            m_clusteredLightGrid->GetTileCountX(),
+            m_clusteredLightGrid->GetTileCountY(),
+            m_clusteredLightGrid->GetSliceCount(),
+            m_clusteredLightGrid->GetLogNear(),
+            m_clusteredLightGrid->GetLogFar(),
+            m_clusteredLightGrid->GetNearPlane(),
+            m_clusteredLightGrid->GetFarPlane(),
+            m_width, m_height);
+        m_lightCullPass->Execute(cmdFwd);
+    } else {
+        m_clusteredLightGrid->BuildLightGrid(m_scratchPointLights, m_scratchSpotLights,
+                                             cam.view, cam.projection, cam.viewPos);
+        m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
+    }
     if (cmdFwd && m_lightIndexBuffer) cmdFwd->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (light.castShadows && m_shadowMap && m_shadowPass) {
@@ -468,7 +684,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     }
     if (cmdFwd) { cmdFwd->SetDepthTest(true); cmdFwd->SetCullFace(false); }
 
-    const int kShadowMapUnit = 5;
+    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
     if (light.castShadows && m_shadowMap && cmdFwd) {
         rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
         if (shadowTex) cmdFwd->BindTexture(shadowTex, kShadowMapUnit);
@@ -681,7 +897,7 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
         DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
     
-    if (m_postProcessor) {
+    if (m_postProcessor && m_mode != PipelineMode::Deferred) {
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);

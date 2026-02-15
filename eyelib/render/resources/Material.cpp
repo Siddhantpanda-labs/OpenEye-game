@@ -1,7 +1,7 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
-
+#include "eyelib/render/rhi/RHI.h"
 #include <functional>
 
 namespace eyelib {
@@ -24,6 +24,18 @@ void Material::SetTexture(const std::string& name, std::shared_ptr<Texture2D> te
 std::shared_ptr<Texture2D> Material::GetTexture(const std::string& name) const {
     auto it = m_textures.find(name);
     return it != m_textures.end() ? it->second : nullptr;
+}
+
+rhi::ITexture* Material::GetTextureRHI(const std::string& name) const {
+    std::shared_ptr<Texture2D> tex = GetTexture(name);
+    return (tex && tex->IsValid()) ? tex->GetTextureRHI() : nullptr;
+}
+
+bool Material::BindTextureToSlot(const std::string& name, int unit) const {
+    std::shared_ptr<Texture2D> tex = GetTexture(name);
+    if (!tex || !tex->IsValid()) return false;
+    tex->Bind(unit);
+    return true;
 }
 
 void Material::SetAlbedo(const math::Vec3& color) { m_albedo = color; m_hashDirty = true; }

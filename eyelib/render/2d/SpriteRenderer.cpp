@@ -35,7 +35,7 @@ void SpriteRenderer::Shutdown() {
 
 bool SpriteRenderer::Initialize() {
     if (m_initialized) return true;
-    m_deviceRHI = rhi::GetDefaultDevice();
+    m_deviceRHI = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
     if (!m_deviceRHI) return false;
     EnsureShader();
     if (!m_shader || !m_shader->IsValid()) {
@@ -49,7 +49,7 @@ bool SpriteRenderer::Initialize() {
 void SpriteRenderer::EnsureShader() {
     if (m_shader && m_shader->IsValid()) return;
     m_shader = std::make_shared<Shader>();
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     m_shader->Load(device, "passes/2d/sprite", GetVertexLayout());
 }
@@ -139,7 +139,7 @@ void SpriteRenderer::Render(const math::Mat4& view, const math::Mat4& projection
     BuildBatches();
     if (m_vertices.empty() || m_indices.empty()) return;
 
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;

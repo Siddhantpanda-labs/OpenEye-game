@@ -1,21 +1,22 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHI.h"
+#include <functional>
+#include <vector>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
 
-struct DeviceBGFX;
-struct PipelineBGFX;
-struct BufferBGFX;
-struct TextureBGFX;
-struct RenderTargetBGFX;
+struct DeviceGL;
 
-/** BGFX backend: records into current frame encoder (Begin/End scope). */
-struct CommandListBGFX : ICommandList {
-    explicit CommandListBGFX(DeviceBGFX* device);
-    ~CommandListBGFX() override;
+/** OpenGL deferred command list: records to a CPU-side stream; replay on Submit().
+ *  CreateCommandList() returns this; recording is between Begin() and End().
+ *  SubmitCommandList() must be called on the render thread with GL context current.
+ *  Multithreaded recording: use one list per worker thread; each list is single-threaded for recording. */
+struct DeferredCommandListGL : ICommandList {
+    explicit DeferredCommandListGL(DeviceGL* device);
+    ~DeferredCommandListGL() override;
 
     void Begin() override;
     void End() override;
@@ -40,8 +41,11 @@ struct CommandListBGFX : ICommandList {
     void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) override;
     void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
+    void BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) override;
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
+    void BindDescriptorSet(IDescriptorSet* set) override;
+    void BindBindlessHeap(IBindlessHeap* heap) override;
 
     void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
 
@@ -52,42 +56,42 @@ struct CommandListBGFX : ICommandList {
     void SetUniformVec4(const char* name, const float* data) override;
     void SetUniformMat4(const char* name, const float* data) override;
     void SetUniformMat4Array(const char* name, const float* data, size_t count) override;
+    void SetUniformHandle64(const char* name, uint64_t handle) override;
+    void SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) override;
 
     void Draw(uint32_t vertexCount, uint32_t firstVertex) override;
     void DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
     void DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
+    void DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) override;
+    void DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) override;
+    void MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
+    void MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
     void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 
     void BeginQuery(IQueryPool* pool, uint32_t index) override;
     void EndQuery(IQueryPool* pool, uint32_t index) override;
 
+    void BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) override;
+    void BeginTransformFeedback(PrimitiveTopology primitiveMode) override;
+    void EndTransformFeedback() override;
+
+    void BeginConditionalRender(IQueryPool* pool, uint32_t index) override;
+    void EndConditionalRender() override;
+
+    IFence* InsertFence() override;
+
     void CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) override;
 
+    /** Replay recorded commands onto the given list (e.g. immediate). Called by DeviceGL::SubmitCommandList. */
+    void Replay(ICommandList* target);
+
 private:
-    void SetPackedUniforms();
-    static constexpr int kMaxTextureBindings = 8;
-    DeviceBGFX* m_device = nullptr;
-    const char* m_samplerNameForUnit[kMaxTextureBindings] = {};  // Set by SetInt(name, unit)
-    void* m_encoder = nullptr;  // bgfx::Encoder*
-    uint16_t m_currentProgramIdx = 0xffff;  // bgfx ProgramHandle.idx
-    uint16_t m_currentVbIdx = 0xffff;       // bgfx VertexBufferHandle.idx
-    uint16_t m_currentIbIdx = 0xffff;       // bgfx IndexBufferHandle.idx
-    uint16_t m_viewId = 0;
-    uint32_t m_viewport[4] = {0, 0, 0, 0};
-    uint64_t m_stateOverride = 0;
-    bool m_depthTest = true;
-    bool m_depthWrite = true;
-    bool m_depthFuncLess = true;
-    bool m_cullFace = false;
-    bool m_cullFront = false;
-    bool m_blend = false;
-    ITexture* m_boundTextures[kMaxTextureBindings] = {};
-    float m_tonemapParams[4] = {1.f, 1.f, 0.f, 0.f};   // x=exposure, y=useACES
-    float m_bloomExtractParams[4] = {1.f, 0.f, 0.f, 0.f}; // x=threshold
-    float m_blurParams[4] = {0.f, 0.f, 0.f, 1.f};      // xy=resolution, z=horizontal, w=intensity
-    float m_bloomCompositeParams[4] = {0.5f, 0.f, 0.f, 0.f}; // x=bloomIntensity
-    IBuffer* m_bonesUBO = nullptr;
-    size_t m_bonesUBOSize = 0;
+    using CommandFn = std::function<void(ICommandList*)>;
+    void Record(CommandFn fn);
+
+    DeviceGL* m_device = nullptr;
+    std::vector<CommandFn> m_commands;
+    bool m_recording = false;
 };
 
 } // namespace rhi

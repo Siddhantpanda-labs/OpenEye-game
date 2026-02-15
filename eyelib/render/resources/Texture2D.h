@@ -65,16 +65,21 @@ public:
     /** Map render-layer TextureFormat to RHI format (for use by RenderTarget etc.). */
     static rhi::RHITextureFormat TextureFormatToRHI(TextureFormat f);
 
+    /** Set device to use for Create() without device, LoadFromMemory, SetData, Bind. */
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
     const assets::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
 private:
+    rhi::IDevice* GetDevice() const;
     static rhi::RHITextureFormat ToRHIFormat(TextureFormat f);
 
     int m_width = 0;
     int m_height = 0;
     TextureFormat m_format = TextureFormat::RGBA8;
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_textureRHI = nullptr;
     bool m_wrappedRHI = false;  // true = WrapRHI, do not destroy

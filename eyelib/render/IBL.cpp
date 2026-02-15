@@ -195,7 +195,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         core::Log::ErrorF("IBL::Initialize: Invalid environment cubemap");
         return false;
     }
-    m_deviceRHI = rhi::GetDefaultDevice();
+    m_deviceRHI = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
     if (!m_deviceRHI) return false;
 
     if (m_irradianceRHI) { m_deviceRHI->DestroyTexture(m_irradianceRHI); m_irradianceRHI = nullptr; }

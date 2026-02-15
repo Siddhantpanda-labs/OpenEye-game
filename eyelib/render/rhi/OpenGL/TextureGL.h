@@ -19,7 +19,9 @@ struct TextureGL : ITexture {
     uint32_t m_depthOrArray = 1;
     TextureType m_type = TextureType::Texture2D;
     RHITextureFormat m_format = RHITextureFormat::RGBA8;
-    bool m_owned = true;  // false when created via CreateTextureWrapper
+    bool m_owned = true;   // false when created via CreateTextureWrapper
+    bool m_isView = false; // true when created via CreateTextureView (own handle, view of another)
+    bool m_isTextureBuffer = false; // true when created via CreateTextureBuffer (TBO)
 };
 
 } // namespace rhi

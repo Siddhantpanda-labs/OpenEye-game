@@ -17,6 +17,17 @@ namespace eyelib {
 namespace render {
 
 namespace {
+rhi::IDevice*& GetDebugDrawInjectedDevice() {
+    static rhi::IDevice* s_injected = nullptr;
+    return s_injected;
+}
+} // namespace
+
+void DebugDrawRenderer::SetDevice(rhi::IDevice* device) {
+    GetDebugDrawInjectedDevice() = device;
+}
+
+namespace {
 struct LineVertex {
     math::Vec3 position;
     math::Vec4 color;
@@ -48,7 +59,7 @@ static rhi::VertexLayout GetLineLayout() {
 static void EnsureResources() {
     if (s_initialized) return;
     s_initialized = true;
-    s_deviceRHI = rhi::GetDefaultDevice();
+    s_deviceRHI = GetDebugDrawInjectedDevice() ? GetDebugDrawInjectedDevice() : rhi::GetDefaultDevice();
 
     s_shader = std::make_shared<Shader>();
     if (!s_deviceRHI || !s_shader->Load(s_deviceRHI, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList)) {

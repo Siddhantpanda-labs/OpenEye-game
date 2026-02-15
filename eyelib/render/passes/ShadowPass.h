@@ -18,6 +18,7 @@ public:
     ShadowPass();
     ~ShadowPass() = default;
 
+    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void SetDepthShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetDepthShader() const { return m_depthShader; }
 
@@ -61,6 +62,7 @@ private:
     std::shared_ptr<Shader> m_depthShader;
     std::shared_ptr<Shader> m_depthSkinnedShader;
     ShadowMap* m_currentShadowMap = nullptr;
+    rhi::IDevice* m_device = nullptr;
 };
 
 } // namespace render

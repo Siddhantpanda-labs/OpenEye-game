@@ -1,8 +1,13 @@
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
+#include "eyelib/render/rhi/OpenGL/DeferredCommandListGL.h"
+#include "eyelib/render/rhi/OpenGL/BindlessHeapGL.h"
 #include "eyelib/render/rhi/OpenGL/BufferGL.h"
 #include "eyelib/render/rhi/OpenGL/TextureGL.h"
+#include "eyelib/render/rhi/OpenGL/FenceGL.h"
 #include "eyelib/render/rhi/OpenGL/ShaderGL.h"
 #include "eyelib/render/rhi/OpenGL/PipelineGL.h"
+#include "eyelib/render/rhi/OpenGL/PipelineLayoutGL.h"
+#include "eyelib/render/rhi/OpenGL/DescriptorSetGL.h"
 #include "eyelib/render/rhi/OpenGL/RenderTargetGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
@@ -18,12 +23,62 @@ namespace eyelib {
 namespace render {
 namespace rhi {
 
-DeviceGL::DeviceGL() {
+DeviceGL::DeviceGL() : m_caps{} {
     m_immediateCommandList = std::make_unique<CommandListGL>(this);
+    QueryCapabilities();
 }
 
 DeviceGL::~DeviceGL() {
     m_immediateCommandList.reset();
+}
+
+void DeviceGL::QueryCapabilities() {
+    m_caps = RHICapabilities{};
+    const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    if (!ext) return;
+    auto has = [&ext](const char* name) {
+        std::string s(ext);
+        std::string n(name);
+        return s.find(n) != std::string::npos;
+    };
+    m_caps.supportsBindless = has("GL_ARB_bindless_texture");
+    m_caps.supportsCompute = has("GL_ARB_compute_shader");
+    m_caps.supportsMultiDrawIndirect = has("GL_ARB_multi_draw_indirect");
+    m_caps.supportsAsyncCompute = false;  // OpenGL has no async compute queue
+    m_caps.supportsRayTracing = false;
+    m_caps.supportsTessellation = has("GL_ARB_tessellation_shader");
+    m_caps.supportsGeometryShader = has("GL_ARB_geometry_shader4") || has("GL_EXT_geometry_shader4");
+    m_caps.supportsTransformFeedback = has("GL_ARB_transform_feedback2") || has("GL_EXT_transform_feedback");
+    m_caps.supportsConditionalRender = has("GL_ARB_conditional_render") || has("GL_NV_conditional_render");
+    m_caps.supportsSparseTexture = has("GL_ARB_sparse_texture");
+    m_caps.supportsSparseBuffer = has("GL_ARB_sparse_buffer");
+    m_caps.supportsAtomicCounters = has("GL_ARB_shader_atomic_counters");
+    m_caps.supportsShaderSubroutines = has("GL_ARB_shader_subroutine");
+}
+
+const RHICapabilities& DeviceGL::GetCapabilities() const {
+    return m_caps;
+}
+
+const char* DeviceGL::GetShaderBackendName() const {
+    return "opengl";
+}
+
+const char* DeviceGL::GetShaderVertexExtension() const {
+    return ".vert";
+}
+
+const char* DeviceGL::GetShaderFragmentExtension() const {
+    return ".frag";
+}
+
+ICommandList* DeviceGL::CreateCommandList() {
+    return new DeferredCommandListGL(this);
+}
+
+void DeviceGL::DestroyCommandList(ICommandList* list) {
+    if (list && list != m_immediateCommandList.get())
+        delete static_cast<DeferredCommandListGL*>(list);
 }
 
 ICommandList* DeviceGL::GetImmediateCommandList() {
@@ -31,8 +86,10 @@ ICommandList* DeviceGL::GetImmediateCommandList() {
 }
 
 void DeviceGL::SubmitCommandList(ICommandList* list) {
-    (void)list;
-    // OpenGL is immediate; Submit is no-op. For Vulkan we would submit to queue.
+    if (!list || list == m_immediateCommandList.get())
+        return;
+    auto* deferred = static_cast<DeferredCommandListGL*>(list);
+    deferred->Replay(m_immediateCommandList.get());
 }
 
 IBuffer* DeviceGL::CreateBuffer(const BufferDesc& desc, const void* initialData) {
@@ -41,17 +98,29 @@ IBuffer* DeviceGL::CreateBuffer(const BufferDesc& desc, const void* initialData)
     buf->m_size = desc.sizeInBytes;
     buf->m_hint = desc.memoryHint;
     glCreateBuffers(1, &buf->m_handle);
-    GLenum usage = (desc.memoryHint == BufferMemoryHint::HostVisible) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
-    if (initialData)
-        glNamedBufferData(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), initialData, usage);
-    else
-        glNamedBufferData(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), nullptr, usage);
+    const bool usePersistent = (desc.memoryHint == BufferMemoryHint::HostVisiblePersistent) && GLAD_GL_ARB_buffer_storage;
+    const bool useSparse = desc.sparse && m_caps.supportsSparseBuffer;
+    buf->m_persistent = usePersistent;
+    buf->m_sparse = useSparse;
+    if (useSparse) {
+        glNamedBufferStorage(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), nullptr, GL_SPARSE_STORAGE_BIT_ARB);
+    } else if (usePersistent) {
+        glNamedBufferStorage(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), initialData,
+                             GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT | GL_DYNAMIC_STORAGE_BIT);
+    } else {
+        GLenum usage = (desc.memoryHint == BufferMemoryHint::HostVisible) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+        if (initialData)
+            glNamedBufferData(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), initialData, usage);
+        else
+            glNamedBufferData(buf->m_handle, static_cast<GLsizeiptr>(desc.sizeInBytes), nullptr, usage);
+    }
     return buf;
 }
 
 void DeviceGL::DestroyBuffer(IBuffer* buffer) {
     auto* b = static_cast<BufferGL*>(buffer);
     if (b && b->m_handle) {
+        b->UnmapPersistent();
         glDeleteBuffers(1, &b->m_handle);
         b->m_handle = 0;
     }
@@ -68,6 +137,8 @@ ITexture* DeviceGL::CreateTexture(const TextureDesc& desc, const void* initialDa
 
     GLenum target = GLEnums::TextureTypeToGL(desc.type);
     glCreateTextures(target, 1, &tex->m_handle);
+    if (desc.sparse && m_caps.supportsSparseTexture)
+        glTextureParameteri(tex->m_handle, GL_TEXTURE_SPARSE_ARB, GL_TRUE);
 
     if (desc.type == TextureType::Texture2D) {
         glTextureStorage2D(tex->m_handle, desc.mipLevels,
@@ -138,6 +209,86 @@ void DeviceGL::DestroyTexture(ITexture* texture) {
         t->m_handle = 0;
     }
     delete t;
+}
+
+void DeviceGL::CommitSparseTexturePages(ITexture* texture, uint32_t level, int32_t x, int32_t y, int32_t z, uint32_t width, uint32_t height, uint32_t depth, bool commit) {
+    if (!texture || !m_caps.supportsSparseTexture) return;
+    auto* t = static_cast<TextureGL*>(texture);
+    if (!t->m_handle) return;
+    GLenum target = GLEnums::TextureTypeToGL(t->m_type);
+    glBindTexture(target, t->m_handle);
+    glTexPageCommitmentARB(target, static_cast<GLint>(level), x, y, z,
+        static_cast<GLsizei>(width), static_cast<GLsizei>(height), static_cast<GLsizei>(depth),
+        commit ? GL_TRUE : GL_FALSE);
+    glBindTexture(target, 0);
+}
+
+void DeviceGL::CommitSparseBufferPages(IBuffer* buffer, size_t offset, size_t size, bool commit) {
+    if (!buffer || !m_caps.supportsSparseBuffer) return;
+    auto* b = static_cast<BufferGL*>(buffer);
+    if (!b->m_handle || !b->m_sparse) return;
+    glNamedBufferPageCommitmentARB(b->m_handle, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(size), commit ? GL_TRUE : GL_FALSE);
+}
+
+ITexture* DeviceGL::CreateTextureView(ITexture* source, RHITextureFormat viewFormat, uint32_t baseMipLevel, uint32_t mipLevels, uint32_t baseLayer, uint32_t layerCount) {
+    if (!source) return nullptr;
+    auto* src = static_cast<TextureGL*>(source);
+    if (!src->m_handle) return nullptr;
+    GLenum target = GLEnums::TextureTypeToGL(src->m_type);
+    GLuint viewHandle = 0;
+    glGenTextures(1, &viewHandle);
+    glTextureView(viewHandle, target, src->m_handle,
+        GLEnums::TextureFormatToGLInternal(viewFormat),
+        baseMipLevel, static_cast<GLsizei>(mipLevels), baseLayer, static_cast<GLsizei>(layerCount));
+    auto* tex = new TextureGL();
+    tex->m_handle = viewHandle;
+    tex->m_width = src->m_width;
+    tex->m_height = src->m_height;
+    tex->m_depthOrArray = src->m_depthOrArray;
+    tex->m_type = src->m_type;
+    tex->m_format = viewFormat;
+    tex->m_owned = true;
+    tex->m_isView = true;
+    return tex;
+}
+
+ITexture* DeviceGL::CreateTextureBuffer(IBuffer* buffer, RHITextureFormat format, size_t offset, size_t size) {
+    if (!buffer || size == 0) return nullptr;
+    auto* buf = static_cast<BufferGL*>(buffer);
+    if (!buf->m_handle) return nullptr;
+    GLuint texHandle = 0;
+    glCreateTextures(GL_TEXTURE_BUFFER, 1, &texHandle);
+    glTextureBufferRange(texHandle, GLEnums::TextureFormatToGLInternal(format),
+        buf->m_handle, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(size));
+    auto* tex = new TextureGL();
+    tex->m_handle = texHandle;
+    tex->m_width = static_cast<uint32_t>(size / 4);  // approximate; TBO is 1D
+    tex->m_height = 1;
+    tex->m_depthOrArray = 1;
+    tex->m_type = TextureType::TextureBuffer;
+    tex->m_format = format;
+    tex->m_owned = true;
+    tex->m_isTextureBuffer = true;
+    return tex;
+}
+
+bool DeviceGL::WaitFence(IFence* fence, uint64_t timeoutMs) {
+    if (!fence) return true;
+    auto* f = static_cast<FenceGL*>(fence);
+    if (!f->m_sync) return true;
+    GLuint64 timeoutNs = (timeoutMs == 0) ? 0 : (timeoutMs == UINT64_MAX ? GL_TIMEOUT_IGNORED : static_cast<GLuint64>(timeoutMs) * 1000000u);
+    GLenum waitRet = glClientWaitSync(static_cast<GLsync>(f->m_sync), GL_SYNC_FLUSH_COMMANDS_BIT, timeoutNs);
+    return (waitRet == GL_ALREADY_SIGNALED || waitRet == GL_CONDITION_SATISFIED);
+}
+
+void DeviceGL::DestroyFence(IFence* fence) {
+    if (!fence) return;
+    auto* f = static_cast<FenceGL*>(fence);
+    if (f->m_sync) {
+        glDeleteSync(static_cast<GLsync>(f->m_sync));
+        f->m_sync = nullptr;
+    }
+    delete f;
 }
 
 ITexture* DeviceGL::CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) {
@@ -214,9 +365,22 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     ShaderGL* fs = static_cast<ShaderGL*>(desc.fragmentShader);
     if (!vs || !fs || !vs->m_handle || !fs->m_handle) return nullptr;
 
+    ShaderGL* tcs = static_cast<ShaderGL*>(desc.tessControlShader);
+    ShaderGL* tes = static_cast<ShaderGL*>(desc.tessEvalShader);
+    ShaderGL* gs = static_cast<ShaderGL*>(desc.geometryShader);
+    if ((tcs && !tes) || (!tcs && tes)) return nullptr;  // tessellation requires both control and eval
+
     GLuint program = glCreateProgram();
     glAttachShader(program, vs->m_handle);
     glAttachShader(program, fs->m_handle);
+    if (tcs && tcs->m_handle) glAttachShader(program, tcs->m_handle);
+    if (tes && tes->m_handle) glAttachShader(program, tes->m_handle);
+    if (gs && gs->m_handle) glAttachShader(program, gs->m_handle);
+
+    if (!desc.transformFeedbackVaryings.empty() && m_caps.supportsTransformFeedback) {
+        glTransformFeedbackVaryings(program, static_cast<GLsizei>(desc.transformFeedbackVaryings.size()),
+            desc.transformFeedbackVaryings.data(), GL_INTERLEAVED_ATTRIBS);
+    }
     glLinkProgram(program);
     GLint ok = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &ok);
@@ -231,7 +395,10 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     auto* p = new PipelineGL();
     p->m_program = program;
     p->m_vertexLayout = desc.vertexLayout;
-    p->m_topology = desc.topology;
+    p->m_topology = (tcs && tes) ? PrimitiveTopology::PatchList : desc.topology;
+    p->m_patchVertexCount = desc.patchVertexCount;
+    p->m_hasTessellation = (tcs && tes && tcs->m_handle && tes->m_handle);
+    p->m_hasGeometry = (gs && gs->m_handle);
     p->m_blend = desc.blend;
     p->m_depthStencil = desc.depthStencil;
     p->m_raster = desc.raster;
@@ -274,6 +441,41 @@ IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, cons
     DestroyShader(vs);
     DestroyShader(fs);
     return pipe;
+}
+
+bool DeviceGL::GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) {
+    auto* p = static_cast<PipelineGL*>(pipeline);
+    if (!p || !p->m_program) return false;
+    GLint len = 0;
+    glGetProgramiv(p->m_program, GL_PROGRAM_BINARY_LENGTH, &len);
+    if (len <= 0) return false;
+    outData.resize(static_cast<size_t>(len));
+    GLsizei written = 0;
+    GLenum fmt = 0;
+    glGetProgramBinary(p->m_program, len, &written, &fmt, outData.data());
+    if (written <= 0) return false;
+    outData.resize(static_cast<size_t>(written));
+    outFormat = static_cast<uint32_t>(fmt);
+    return true;
+}
+
+IPipeline* DeviceGL::CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) {
+    if (!data || size == 0) return nullptr;
+    GLuint program = glCreateProgram();
+    glProgramBinary(program, static_cast<GLenum>(binaryFormat), data, static_cast<GLsizei>(size));
+    GLint ok = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        glDeleteProgram(program);
+        return nullptr;
+    }
+    auto* p = new PipelineGL();
+    p->m_program = program;
+    p->m_vertexLayout = layout;
+    p->m_topology = topology;
+    p->m_depthStencil.depthTest = true;
+    p->m_depthStencil.depthWrite = true;
+    return p;
 }
 
 IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
@@ -447,6 +649,37 @@ void DeviceGL::DestroyQueryPool(IQueryPool* pool) {
         p->m_queryIds.clear();
     }
     delete p;
+}
+
+IPipelineLayout* DeviceGL::CreatePipelineLayout(const PipelineLayoutDesc& desc) {
+    auto* layout = new PipelineLayoutGL();
+    layout->desc = desc;
+    return layout;
+}
+
+void DeviceGL::DestroyPipelineLayout(IPipelineLayout* layout) {
+    delete static_cast<PipelineLayoutGL*>(layout);
+}
+
+IDescriptorSet* DeviceGL::CreateDescriptorSet(IPipelineLayout* layout) {
+    if (!layout) return nullptr;
+    auto* pl = static_cast<PipelineLayoutGL*>(layout);
+    auto* set = new DescriptorSetGL();
+    set->layout = pl;
+    return set;
+}
+
+void DeviceGL::DestroyDescriptorSet(IDescriptorSet* set) {
+    delete static_cast<DescriptorSetGL*>(set);
+}
+
+IBindlessHeap* DeviceGL::CreateBindlessHeap() {
+    if (!GetCapabilities().supportsBindless) return nullptr;
+    return new BindlessHeapGL();
+}
+
+void DeviceGL::DestroyBindlessHeap(IBindlessHeap* heap) {
+    delete static_cast<BindlessHeapGL*>(heap);
 }
 
 int DeviceGL::GetMaxSamples(int requestedSamples) {

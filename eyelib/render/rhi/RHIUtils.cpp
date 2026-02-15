@@ -35,6 +35,11 @@ void BarrierTextureForRenderTarget(ICommandList* cmd, ITexture* texture) {
     cmd->BarrierTexture(texture, ResourceState::ShaderResource, ResourceState::RenderTarget);
 }
 
+void BarrierBufferForIndirectDraw(ICommandList* cmd, IBuffer* buffer) {
+    if (!cmd || !buffer) return;
+    cmd->BarrierBuffer(buffer, ResourceState::ShaderResource, ResourceState::IndirectDraw);
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

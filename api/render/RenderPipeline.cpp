@@ -24,8 +24,7 @@ RenderPipeline& RenderPipeline::operator=(RenderPipeline&& other) noexcept = def
 
 bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height,
                                 ::eyelib::render::RenderBackend backend) {
-    const char* backendName = (backend == ::eyelib::render::RenderBackend::BGFX) ? "BGFX" :
-                              (backend == ::eyelib::render::RenderBackend::Diligent) ? "Diligent" :
+    const char* backendName = (backend == ::eyelib::render::RenderBackend::Diligent) ? "Diligent" :
                               (backend == ::eyelib::render::RenderBackend::OpenGL) ? "OpenGL" : "Default";
     core::Log::InfoF("RenderPipeline::Initialize: backend=%s width=%u height=%u", backendName, width, height);
 

@@ -34,9 +34,10 @@ Texture3D::~Texture3D() {
 }
 
 Texture3D::Texture3D(Texture3D&& other) noexcept
-    : m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
+    : m_injectedDevice(other.m_injectedDevice), m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
       m_width(other.m_width), m_height(other.m_height), m_depth(other.m_depth), m_format(other.m_format),
       m_cpuData(std::move(other.m_cpuData)) {
+    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_textureRHI = nullptr;
 }
@@ -44,6 +45,7 @@ Texture3D::Texture3D(Texture3D&& other) noexcept
 Texture3D& Texture3D::operator=(Texture3D&& other) noexcept {
     if (this != &other) {
         if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_injectedDevice = other.m_injectedDevice;
         m_deviceRHI = other.m_deviceRHI;
         m_textureRHI = other.m_textureRHI;
         m_width = other.m_width;
@@ -51,14 +53,19 @@ Texture3D& Texture3D::operator=(Texture3D&& other) noexcept {
         m_depth = other.m_depth;
         m_format = other.m_format;
         m_cpuData = std::move(other.m_cpuData);
+        other.m_injectedDevice = nullptr;
         other.m_deviceRHI = nullptr;
         other.m_textureRHI = nullptr;
     }
     return *this;
 }
 
+rhi::IDevice* Texture3D::GetDevice() const {
+    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+}
+
 bool Texture3D::Create(int width, int height, int depth, TextureFormat format, const void* data) {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return false;
     return Create(device, width, height, depth, format, data);
 }
@@ -93,7 +100,7 @@ bool Texture3D::Create(rhi::IDevice* device, int width, int height, int depth, T
 
 void Texture3D::SetData(const void* data, int x, int y, int z, int width, int height, int depth) {
     if (!data || m_width <= 0 || m_height <= 0 || m_depth <= 0) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     if (width <= 0) width = m_width;
     if (height <= 0) height = m_height;
@@ -121,7 +128,7 @@ std::vector<uint8_t> Texture3D::GetData() const {
 
 void Texture3D::Bind(int slot) const {
     if (!m_textureRHI) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));

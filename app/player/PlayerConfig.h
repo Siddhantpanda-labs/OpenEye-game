@@ -40,7 +40,7 @@ struct RuntimeOptions {
     bool timeModeSet = false;
     TimeMode timeMode = TimeMode::Realtime;
     bool showHelp = false;
-    /** Render backend (e.g. from --renderer bgfx|opengl). */
+    /** Render backend (e.g. from --renderer opengl|diligent). */
     eyelib::render::RenderBackend renderBackend = eyelib::render::RenderBackend::Default;
 };
 

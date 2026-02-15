@@ -1,5 +1,6 @@
 #include "eyelib/render/PostProcessor.h"
 #include "eyelib/render/GBuffer.h"
+#include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
@@ -67,6 +68,8 @@ void PostProcessor::DrawFullscreenQuad(rhi::ICommandList* cmd) {
 
 void PostProcessor::DestroyFramebuffers() {
     if (!m_deviceRHI) return;
+    if (m_singleTexSet) { m_deviceRHI->DestroyDescriptorSet(m_singleTexSet); m_singleTexSet = nullptr; }
+    if (m_singleTexLayout) { m_deviceRHI->DestroyPipelineLayout(m_singleTexLayout); m_singleTexLayout = nullptr; }
     for (auto& rt : m_pingPongRT) {
         if (rt) {
             m_deviceRHI->DestroyRenderTarget(rt);
@@ -83,7 +86,6 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
     m_height = height;
     m_lastOutputValid = false;
     if (device) m_deviceRHI = device;
-    if (!m_deviceRHI) m_deviceRHI = rhi::GetDefaultDevice();
     if (!m_deviceRHI) {
         core::Log::Error("PostProcessor::Initialize: no RHI device");
         return false;
@@ -98,6 +100,13 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
     }
     core::Log::Info("PostProcessor::Initialize: creating framebuffers");
     CreateFramebuffers();
+    // Pipeline layout + descriptor set for single-texture passes (Phase 3)
+    {
+        rhi::PipelineLayoutDesc layoutDesc;
+        layoutDesc.bindings = {{0u, rhi::BindingType::Texture}};
+        m_singleTexLayout = m_deviceRHI->CreatePipelineLayout(layoutDesc);
+        m_singleTexSet = m_singleTexLayout ? m_deviceRHI->CreateDescriptorSet(m_singleTexLayout) : nullptr;
+    }
     rhi::ITexture* outTex = GetOutputTextureRHI();
     if (!m_outputRT) {
         core::Log::Error("PostProcessor::Initialize: m_outputRT is null after CreateFramebuffers");
@@ -508,7 +517,12 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_fxaaShader->Bind();
     m_fxaaShader->SetInt("u_Texture", 0);
     m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-    cmd->BindTexture(texture, 0);
+    if (m_singleTexSet) {
+        m_singleTexSet->UpdateTexture(0, texture);
+        cmd->BindDescriptorSet(m_singleTexSet);
+    } else {
+        cmd->BindTexture(texture, 0);
+    }
     DrawFullscreenQuad(cmd);
     m_fxaaShader->Unbind();
     return GetOutputTextureRHI();
@@ -653,6 +667,53 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     DrawFullscreenQuad(cmd);
     m_filmGrainShader->Unbind();
     return GetOutputTextureRHI();
+}
+
+void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int toneMappedOutput, int finalOutput,
+                                              const Settings& settings, rhi::ICommandList* cmd) {
+    if (!fg || !cmd || !m_pingPongRT[0] || !m_outputRT) return;
+
+    fg->AddPass("Post.ToneMap",
+        [this, hdrInput, settings, cmd](const FGPassResources& res) {
+            rhi::ITexture* hdrTex = res.getTextureRHI(hdrInput);
+            if (!hdrTex || !m_toneMappingShader || !m_toneMappingShader->IsValid()) return;
+            cmd->SetRenderTarget(m_pingPongRT[0]);
+            cmd->SetViewport(0, 0, res.width, res.height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            cmd->SetBlend(false);
+            rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
+            cmd->ClearRenderTarget(m_pingPongRT[0], clearBlack);
+            m_toneMappingShader->Bind();
+            m_toneMappingShader->SetInt("u_HDRTexture", 0);
+            m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
+            m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
+            cmd->BindTexture(hdrTex, 0);
+            DrawFullscreenQuad(cmd);
+            m_toneMappingShader->Unbind();
+            m_lastOutputValid = true;
+        },
+        { hdrInput }, { toneMappedOutput }, true);
+
+    fg->AddPass("Post.FXAA",
+        [this, toneMappedOutput, settings, cmd](const FGPassResources& res) {
+            rhi::ITexture* toneMappedTex = res.getTextureRHI(toneMappedOutput);
+            if (!toneMappedTex || !m_fxaaShader || !m_fxaaShader->IsValid()) return;
+            cmd->SetRenderTarget(m_outputRT);
+            cmd->SetViewport(0, 0, res.width, res.height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            cmd->SetBlend(false);
+            m_fxaaShader->Bind();
+            m_fxaaShader->SetInt("u_Texture", 0);
+            m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(res.width), static_cast<float>(res.height)));
+            cmd->BindTexture(toneMappedTex, 0);
+            DrawFullscreenQuad(cmd);
+            m_fxaaShader->Unbind();
+        },
+        { toneMappedOutput }, { finalOutput }, true);
 }
 
 rhi::ITexture* PostProcessor::GetColorTexture(rhi::IRenderTarget* rt) const {

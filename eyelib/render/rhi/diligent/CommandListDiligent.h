@@ -42,6 +42,8 @@ struct CommandListDiligent : ICommandList {
     void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
+    void BindDescriptorSet(IDescriptorSet* set) override;
+    void BindBindlessHeap(IBindlessHeap* heap) override;
 
     void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
 
@@ -52,14 +54,28 @@ struct CommandListDiligent : ICommandList {
     void SetUniformVec4(const char* name, const float* data) override;
     void SetUniformMat4(const char* name, const float* data) override;
     void SetUniformMat4Array(const char* name, const float* data, size_t count) override;
+    void SetUniformHandle64(const char* name, uint64_t handle) override;
 
     void Draw(uint32_t vertexCount, uint32_t firstVertex) override;
     void DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
     void DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
+    void DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) override;
+    void DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) override;
+    void MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
+    void MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
     void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 
     void BeginQuery(IQueryPool* pool, uint32_t index) override;
     void EndQuery(IQueryPool* pool, uint32_t index) override;
+
+    void BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) override;
+    void BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) override;
+    void BeginTransformFeedback(PrimitiveTopology primitiveMode) override;
+    void EndTransformFeedback() override;
+    void BeginConditionalRender(IQueryPool* pool, uint32_t index) override;
+    void EndConditionalRender() override;
+    void SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) override;
+    IFence* InsertFence() override;
 
     void CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) override;
 

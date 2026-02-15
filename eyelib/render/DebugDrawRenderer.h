@@ -10,6 +10,7 @@ namespace render {
 
 class DebugDrawRenderer {
 public:
+    static void SetDevice(rhi::IDevice* device);
     static void Render(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height);
     static void SetTextFontPath(const std::string& path, float pixelHeight = 16.0f);
     static void SetTextSize(float pixelHeight);

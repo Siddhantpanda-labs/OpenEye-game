@@ -1,6 +1,7 @@
 #include "eyelib/render/rhi/diligent/CommandListDiligent.h"
 #include "eyelib/render/rhi/diligent/DeviceDiligent.h"
 #include "eyelib/render/rhi/diligent/PipelineDiligent.h"
+#include "eyelib/render/rhi/diligent/DescriptorSetDiligent.h"
 #include "eyelib/render/rhi/diligent/BufferDiligent.h"
 #include "eyelib/render/rhi/diligent/RenderTargetDiligent.h"
 #include "eyelib/render/rhi/diligent/TextureDiligent.h"
@@ -363,6 +364,25 @@ void CommandListDiligent::UnbindTexture(uint32_t binding) {
     (void)binding;
 }
 
+void CommandListDiligent::BindBindlessHeap(IBindlessHeap* heap) {
+    (void)heap;
+    // Skeleton: no-op until bindless heap is implemented
+}
+
+void CommandListDiligent::BindDescriptorSet(IDescriptorSet* set) {
+    if (!set) return;
+    auto* ds = static_cast<DescriptorSetDiligent*>(set);
+    for (const auto& t : ds->textures)
+        BindTexture(t.texture, t.binding);
+    for (const auto& b : ds->buffers) {
+        if (!b.buffer) continue;
+        if (b.isStorage)
+            BindStorageBuffer(b.buffer, b.binding, b.offset, b.size);
+        else
+            BindUniformBuffer(b.buffer, b.binding, b.offset, b.size);
+    }
+}
+
 void CommandListDiligent::SetPushConstants(uint32_t offset, uint32_t size, const void* data) { (void)offset; (void)size; (void)data; }
 
 void CommandListDiligent::SetUniformInt(const char* name, int value) {
@@ -427,6 +447,8 @@ void CommandListDiligent::SetUniformMat4(const char* name, const float* data) {
     if (strcmp(name, "u_NormalMatrix") == 0) { memcpy(m_constantsStaging + 192, data, matSize); m_constantsDirty = true; return; }
 #endif
 }
+
+void CommandListDiligent::SetUniformHandle64(const char* name, uint64_t handle) { (void)name; (void)handle; }
 
 void CommandListDiligent::SetUniformMat4Array(const char* name, const float* data, size_t count) {
 #if OPENEYE_USE_DILIGENT
@@ -512,10 +534,23 @@ void CommandListDiligent::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, 
 void CommandListDiligent::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     DrawIndexed(indexCount, firstIndex, vertexOffset);
 }
+void CommandListDiligent::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
+void CommandListDiligent::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
+void CommandListDiligent::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
+void CommandListDiligent::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
 void CommandListDiligent::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) { (void)groupCountX; (void)groupCountY; (void)groupCountZ; }
 
 void CommandListDiligent::BeginQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
 void CommandListDiligent::EndQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
+
+void CommandListDiligent::BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) { (void)slot; (void)buffer; (void)offset; (void)size; }
+void CommandListDiligent::BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) { (void)slot; (void)buffer; (void)offset; (void)size; }
+void CommandListDiligent::BeginTransformFeedback(PrimitiveTopology primitiveMode) { (void)primitiveMode; }
+void CommandListDiligent::EndTransformFeedback() {}
+void CommandListDiligent::BeginConditionalRender(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
+void CommandListDiligent::EndConditionalRender() {}
+void CommandListDiligent::SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) { (void)stage; (void)count; (void)indices; }
+IFence* CommandListDiligent::InsertFence() { return nullptr; }
 
 void CommandListDiligent::CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) { (void)src; (void)srcOffset; (void)dst; (void)dstOffset; (void)size; }
 

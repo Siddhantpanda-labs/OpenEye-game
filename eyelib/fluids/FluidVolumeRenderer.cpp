@@ -1,8 +1,7 @@
 #include "eyelib/fluids/FluidVolumeRenderer.h"
-
+#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
-
-#include <glad/glad.h>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <algorithm>
 #include <vector>
@@ -14,31 +13,48 @@ FluidVolumeRenderer::FluidVolumeRenderer() = default;
 FluidVolumeRenderer::~FluidVolumeRenderer() { Shutdown(); }
 
 bool FluidVolumeRenderer::Initialize() {
+    m_device = render::rhi::GetDefaultDevice();
+    if (!m_device) {
+        core::Log::Error("FluidVolumeRenderer::Initialize: no RHI device (set default device first)");
+        return false;
+    }
     CreateCube();
     EnsureShaders();
     if (!m_backgroundTexture) {
         m_backgroundTexture = std::make_shared<render::Texture2D>();
         const uint8_t black[4] = { 0, 0, 0, 255 };
-        m_backgroundTexture->Create(1, 1, render::TextureFormat::RGBA8, black);
+        m_backgroundTexture->Create(m_device, 1, 1, render::TextureFormat::RGBA8, black);
     }
     core::Log::Info("FluidVolumeRenderer initialized");
     return true;
 }
 
 void FluidVolumeRenderer::Shutdown() {
-    if (m_cubeVBO) { glDeleteBuffers(1, &m_cubeVBO); m_cubeVBO = 0; }
-    if (m_cubeVAO) { glDeleteVertexArrays(1, &m_cubeVAO); m_cubeVAO = 0; }
-    if (m_rayDataFrontTex) { glDeleteTextures(1, &m_rayDataFrontTex); m_rayDataFrontTex = 0; }
-    if (m_rayDataBackTex) { glDeleteTextures(1, &m_rayDataBackTex); m_rayDataBackTex = 0; }
-    if (m_rayDataFrontFBO) { glDeleteFramebuffers(1, &m_rayDataFrontFBO); m_rayDataFrontFBO = 0; }
-    if (m_rayDataBackFBO) { glDeleteFramebuffers(1, &m_rayDataBackFBO); m_rayDataBackFBO = 0; }
+    if (m_device) {
+        if (m_cubeVB) { m_device->DestroyBuffer(m_cubeVB); m_cubeVB = nullptr; }
+        if (m_rayDataFrontRT) { m_device->DestroyRenderTarget(m_rayDataFrontRT); m_rayDataFrontRT = nullptr; }
+        if (m_rayDataBackRT) { m_device->DestroyRenderTarget(m_rayDataBackRT); m_rayDataBackRT = nullptr; }
+    }
+    m_device = nullptr;
     m_densityTexture.reset();
     m_obstacleTexture.reset();
     m_backgroundTexture.reset();
 }
 
+void FluidVolumeRenderer::SetViewport(unsigned int width, unsigned int height) {
+    if (width == m_viewportW && height == m_viewportH) return;
+    m_viewportW = width;
+    m_viewportH = height;
+    if (m_device) {
+        if (m_rayDataFrontRT) { m_device->DestroyRenderTarget(m_rayDataFrontRT); m_rayDataFrontRT = nullptr; }
+        if (m_rayDataBackRT) { m_device->DestroyRenderTarget(m_rayDataBackRT); m_rayDataBackRT = nullptr; }
+    }
+}
+
 void FluidVolumeRenderer::UpdateFromSimulation(const FluidSimulation& sim, float densityScale) {
     if (!sim.IsInitialized()) return;
+    m_device = render::rhi::GetDefaultDevice();
+    if (!m_device) return;
     const auto desc = sim.GetDesc();
     const math::IVec3 res = desc.resolution;
     if (res.x <= 0 || res.y <= 0 || res.z <= 0) return;
@@ -47,8 +63,8 @@ void FluidVolumeRenderer::UpdateFromSimulation(const FluidSimulation& sim, float
         m_cachedResolution.x != res.x || m_cachedResolution.y != res.y || m_cachedResolution.z != res.z) {
         m_densityTexture = std::make_shared<render::Texture3D>();
         m_obstacleTexture = std::make_shared<render::Texture3D>();
-        m_densityTexture->Create(res.x, res.y, res.z, render::TextureFormat::R8);
-        m_obstacleTexture->Create(res.x, res.y, res.z, render::TextureFormat::R8);
+        m_densityTexture->Create(m_device, res.x, res.y, res.z, render::TextureFormat::R8);
+        m_obstacleTexture->Create(m_device, res.x, res.y, res.z, render::TextureFormat::R8);
         m_cachedResolution = res;
     }
 
@@ -81,8 +97,11 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
                                        const math::Mat4& model,
                                        const math::Vec3& emissionPos01,
                                        const math::Vec3& volumeSize,
-                                       unsigned int targetFbo) {
-    if (!sim.IsInitialized()) return;
+                                       render::rhi::IRenderTarget* target) {
+    if (!sim.IsInitialized() || !m_device || !target) return;
+    m_device = render::rhi::GetDefaultDevice();
+    if (!m_device) return;
+
     EnsureRayDataTargets();
     EnsureShaders();
     if (!m_densityTexture || !m_obstacleTexture) {
@@ -92,35 +111,46 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
 
     const auto desc = sim.GetDesc();
     const math::IVec3 res = desc.resolution;
+    if (!m_rayDataBackRT || !m_rayDataFrontRT || !m_cubeVB) return;
 
-    glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
+    render::rhi::ICommandList* cmd = m_device->GetImmediateCommandList();
+    if (!cmd) return;
 
-    // Render back faces (exit points)
-    glCullFace(GL_FRONT);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_rayDataBackFBO);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    const unsigned int w = m_viewportW;
+    const unsigned int h = m_viewportH;
+    render::rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
+
+    cmd->SetBlend(false);
+    cmd->SetCullFace(true);
+    cmd->SetDepthTest(true);
+
+    // Back faces (exit points)
+    cmd->SetCullFrontFace(true);
+    cmd->SetRenderTarget(m_rayDataBackRT);
+    cmd->SetViewport(0, 0, w, h);
+    cmd->ClearRenderTarget(m_rayDataBackRT, clearBlack);
     m_shRayDataBack->Bind();
     m_shRayDataBack->SetMat4("model", model);
     m_shRayDataBack->SetMat4("view", camera.view);
     m_shRayDataBack->SetMat4("projection", camera.projection);
-    glBindVertexArray(m_cubeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    cmd->BindVertexBuffer(m_cubeVB, 0);
+    cmd->Draw(36, 0);
 
-    // Render front faces (entry points)
-    glCullFace(GL_BACK);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_rayDataFrontFBO);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    // Front faces (entry points)
+    cmd->SetCullFrontFace(false);
+    cmd->SetRenderTarget(m_rayDataFrontRT);
+    cmd->SetViewport(0, 0, w, h);
+    cmd->ClearRenderTarget(m_rayDataFrontRT, clearBlack);
     m_shRayDataFront->Bind();
     m_shRayDataFront->SetMat4("model", model);
     m_shRayDataFront->SetMat4("view", camera.view);
     m_shRayDataFront->SetMat4("projection", camera.projection);
-    glBindVertexArray(m_cubeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    cmd->BindVertexBuffer(m_cubeVB, 0);
+    cmd->Draw(36, 0);
 
-    // Raymarch to target framebuffer
-    glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
+    // Raymarch to target
+    cmd->SetRenderTarget(target);
+    cmd->SetViewport(0, 0, target->GetWidth(), target->GetHeight());
     m_shRaymarch->Bind();
     m_shRaymarch->SetMat4("model", model);
     m_shRaymarch->SetMat4("view", camera.view);
@@ -140,86 +170,64 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
     m_shRaymarch->SetVec3("cameraUp", up);
     m_shRaymarch->SetVec3("cameraFront", forward);
     m_shRaymarch->SetFloat("nearPlane", camera.nearPlane);
-    m_shRaymarch->SetVec2("InverseScreenSize", math::Vec2(1.0f / std::max(1, m_viewportW),
-                                                          1.0f / std::max(1, m_viewportH)));
+    m_shRaymarch->SetVec2("InverseScreenSize", math::Vec2(1.0f / std::max(1u, m_viewportW),
+                                                          1.0f / std::max(1u, m_viewportH)));
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_rayDataBackTex);
+    render::rhi::ITexture* rayBackTex = m_rayDataBackRT->GetColorTexture(0);
+    render::rhi::ITexture* rayFrontTex = m_rayDataFrontRT->GetColorTexture(0);
+    if (rayBackTex) cmd->BindTexture(rayBackTex, 0);
+    if (rayFrontTex) cmd->BindTexture(rayFrontTex, 1);
     m_shRaymarch->SetInt("RayDataBack", 0);
-
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, m_rayDataFrontTex);
     m_shRaymarch->SetInt("RayDataFront", 1);
 
     m_densityTexture->Bind(2);
     m_shRaymarch->SetInt("DensityTexture", 2);
-
     m_obstacleTexture->Bind(3);
     m_shRaymarch->SetInt("ObstacleTexture", 3);
-
     if (m_backgroundTexture) {
         m_backgroundTexture->Bind(4);
         m_shRaymarch->SetInt("BackgroundTexture", 4);
     }
 
-    glBindVertexArray(m_cubeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    cmd->BindVertexBuffer(m_cubeVB, 0);
+    cmd->Draw(36, 0);
 
-    glBindVertexArray(0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    cmd->SetRenderTarget(nullptr);
 }
 
 void FluidVolumeRenderer::EnsureRayDataTargets() {
-    GLint vp[4];
-    glGetIntegerv(GL_VIEWPORT, vp);
-    const int w = vp[2];
-    const int h = vp[3];
-    if (w == m_viewportW && h == m_viewportH && m_rayDataFrontTex && m_rayDataBackTex)
-        return;
-    m_viewportW = w;
-    m_viewportH = h;
+    if (!m_device || m_viewportW == 0 || m_viewportH == 0) return;
+    if (m_rayDataFrontRT && m_rayDataBackRT) return;
 
-    auto createTex = [&](unsigned int& tex) {
-        if (tex) glDeleteTextures(1, &tex);
-        glGenTextures(1, &tex);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    };
-    auto createFBO = [&](unsigned int& fbo, unsigned int tex) {
-        if (fbo) glDeleteFramebuffers(1, &fbo);
-        glGenFramebuffers(1, &fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
-        GLenum drawBuffers[1] = { GL_COLOR_ATTACHMENT0 };
-        glDrawBuffers(1, drawBuffers);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    };
-
-    createTex(m_rayDataBackTex);
-    createTex(m_rayDataFrontTex);
-    createFBO(m_rayDataBackFBO, m_rayDataBackTex);
-    createFBO(m_rayDataFrontFBO, m_rayDataFrontTex);
+    const unsigned int w = m_viewportW;
+    const unsigned int h = m_viewportH;
+    std::vector<render::rhi::RHITextureFormat> colorFormats = { render::rhi::RHITextureFormat::RGBA16F };
+    m_rayDataBackRT = m_device->CreateRenderTarget(w, h, colorFormats, render::rhi::RHITextureFormat::None, 1);
+    m_rayDataFrontRT = m_device->CreateRenderTarget(w, h, colorFormats, render::rhi::RHITextureFormat::None, 1);
 }
 
 void FluidVolumeRenderer::EnsureShaders() {
+    if (!m_device) m_device = render::rhi::GetDefaultDevice();
+    if (!m_device) return;
+
+    render::rhi::VertexLayout posOnly;
+    posOnly.strideInBytes = 12;
+    posOnly.attributes = { { 0, render::rhi::VertexAttributeType::Float3, 0 } };
+
     if (!m_shRayDataBack) {
         m_shRayDataBack = std::make_shared<render::Shader>();
-        m_shRayDataBack->LoadFromFile("assets/shaders/fluids/rendering/raydata.vert",
-                                      "assets/shaders/fluids/rendering/raydata_back.frag");
+        m_shRayDataBack->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
+                                     "assets/shaders/fluids/rendering/raydata_back.frag", posOnly);
     }
     if (!m_shRayDataFront) {
         m_shRayDataFront = std::make_shared<render::Shader>();
-        m_shRayDataFront->LoadFromFile("assets/shaders/fluids/rendering/raydata.vert",
-                                       "assets/shaders/fluids/rendering/raydata_front.frag");
+        m_shRayDataFront->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
+                                      "assets/shaders/fluids/rendering/raydata_front.frag", posOnly);
     }
     if (!m_shRaymarch) {
         m_shRaymarch = std::make_shared<render::Shader>();
-        m_shRaymarch->LoadFromFile("assets/shaders/fluids/rendering/raydata.vert",
-                                   "assets/shaders/fluids/rendering/raymarching.frag");
+        m_shRaymarch->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
+                                  "assets/shaders/fluids/rendering/raymarching.frag", posOnly);
     }
 }
 
@@ -238,14 +246,14 @@ void FluidVolumeRenderer::CreateCube() {
         -1.0f,-1.0f, 1.0f, -1.0f,-1.0f,-1.0f, -1.0f, 1.0f,-1.0f,
         -1.0f,-1.0f, 1.0f, -1.0f, 1.0f,-1.0f, -1.0f, 1.0f, 1.0f
     };
-    glGenVertexArrays(1, &m_cubeVAO);
-    glGenBuffers(1, &m_cubeVBO);
-    glBindVertexArray(m_cubeVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_cubeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glBindVertexArray(0);
+    if (!m_device) m_device = render::rhi::GetDefaultDevice();
+    if (!m_device) return;
+
+    render::rhi::BufferDesc bd;
+    bd.sizeInBytes = sizeof(verts);
+    bd.usage = render::rhi::BufferUsage::Vertex;
+    bd.memoryHint = render::rhi::BufferMemoryHint::DeviceOnly;
+    m_cubeVB = m_device->CreateBuffer(bd, verts);
 }
 
 } // namespace fluids

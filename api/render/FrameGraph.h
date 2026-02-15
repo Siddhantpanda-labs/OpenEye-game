@@ -47,7 +47,6 @@ public:
     FrameGraph& operator=(FrameGraph&& other) noexcept;
 
     FGTextureHandle CreateTexture(const FGTextureDesc& desc);
-    FGTextureHandle ImportTexture(const std::string& name, uint32_t textureId, unsigned width, unsigned height);
 
     int AddPass(const std::string& name, const ExecuteFunc& execute,
                 const std::vector<FGTextureHandle>& reads = {},

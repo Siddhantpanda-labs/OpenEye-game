@@ -20,7 +20,10 @@ public:
     void Clear(float r, float g, float b, float a);
     void Draw(const Mesh& mesh, const Shader& shader);
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
 private:
+    rhi::IDevice* m_injectedDevice = nullptr;
     bool m_initialized = false;
 };
 

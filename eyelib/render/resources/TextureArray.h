@@ -38,7 +38,11 @@ public:
     bool IsValid() const { return m_textureRHI != nullptr; }
     unsigned int Id() const;
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
 private:
+    rhi::IDevice* GetDevice() const;
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_textureRHI = nullptr;
     int m_width = 0, m_height = 0, m_layers = 0;

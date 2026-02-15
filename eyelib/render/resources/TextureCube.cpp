@@ -35,8 +35,9 @@ TextureCube::~TextureCube() {
 }
 
 TextureCube::TextureCube(TextureCube&& other) noexcept
-    : m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
+    : m_injectedDevice(other.m_injectedDevice), m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
       m_size(other.m_size), m_cpuData(std::move(other.m_cpuData)) {
+    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_textureRHI = nullptr;
     other.m_size = 0;
@@ -45,10 +46,12 @@ TextureCube::TextureCube(TextureCube&& other) noexcept
 TextureCube& TextureCube::operator=(TextureCube&& other) noexcept {
     if (this != &other) {
         if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+        m_injectedDevice = other.m_injectedDevice;
         m_deviceRHI = other.m_deviceRHI;
         m_textureRHI = other.m_textureRHI;
         m_size = other.m_size;
         m_cpuData = std::move(other.m_cpuData);
+        other.m_injectedDevice = nullptr;
         other.m_deviceRHI = nullptr;
         other.m_textureRHI = nullptr;
         other.m_size = 0;
@@ -95,7 +98,7 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
 
     (void)isSRGB;
     (void)generateMipmaps;
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return false;
 
     const size_t bpp = BytesPerPixel(fmt);
@@ -128,9 +131,13 @@ bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
     return LoadFromFiles(faces, isSRGB, generateMipmaps);
 }
 
+rhi::IDevice* TextureCube::GetDevice() const {
+    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+}
+
 void TextureCube::Bind(int slot) const {
     if (!m_textureRHI) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));

@@ -87,7 +87,9 @@ void Texture2D::WrapRHI(rhi::ITexture* texture) {
 
 Texture2D::Texture2D(Texture2D&& other) noexcept
     : m_width(other.m_width), m_height(other.m_height), m_format(other.m_format),
-      m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI), m_wrappedRHI(other.m_wrappedRHI) {
+      m_injectedDevice(other.m_injectedDevice), m_deviceRHI(other.m_deviceRHI),
+      m_textureRHI(other.m_textureRHI), m_wrappedRHI(other.m_wrappedRHI) {
+    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_textureRHI = nullptr;
     other.m_wrappedRHI = false;
@@ -99,9 +101,11 @@ Texture2D& Texture2D::operator=(Texture2D&& other) noexcept {
         m_width = other.m_width;
         m_height = other.m_height;
         m_format = other.m_format;
+        m_injectedDevice = other.m_injectedDevice;
         m_deviceRHI = other.m_deviceRHI;
         m_textureRHI = other.m_textureRHI;
         m_wrappedRHI = other.m_wrappedRHI;
+        other.m_injectedDevice = nullptr;
         other.m_deviceRHI = nullptr;
         other.m_textureRHI = nullptr;
         other.m_wrappedRHI = false;
@@ -109,8 +113,12 @@ Texture2D& Texture2D::operator=(Texture2D&& other) noexcept {
     return *this;
 }
 
+rhi::IDevice* Texture2D::GetDevice() const {
+    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+}
+
 bool Texture2D::Create(int width, int height, TextureFormat format, const void* data) {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return false;
     return Create(device, width, height, format, data);
 }
@@ -160,7 +168,7 @@ bool Texture2D::LoadFromFile(const std::string& path, bool isSRGB, bool generate
 
 bool Texture2D::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bool generateMipmaps) {
     if (!data || size == 0) return false;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return false;
 
     stbi_set_flip_vertically_on_load(0);
@@ -189,7 +197,7 @@ bool Texture2D::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bo
 
 void Texture2D::SetData(const void* data, int x, int y, int width, int height) {
     if (!data || m_width <= 0 || m_height <= 0) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     if (width <= 0) width = m_width;
     if (height <= 0) height = m_height;
@@ -218,7 +226,7 @@ unsigned int Texture2D::Id() const {
 
 void Texture2D::Bind(int slot) const {
     if (!m_textureRHI) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));

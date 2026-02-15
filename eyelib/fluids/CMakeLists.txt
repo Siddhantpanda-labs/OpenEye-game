@@ -21,7 +21,6 @@ target_include_directories(EyelibFluids
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/eyelib>
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/thirdparty/glad/include>
         $<INSTALL_INTERFACE:include>
 )
 

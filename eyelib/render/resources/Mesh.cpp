@@ -81,9 +81,11 @@ Mesh::Mesh(Mesh&& other) noexcept
       m_submeshes(std::move(other.m_submeshes)),
       m_aabb(other.m_aabb),
       m_aabbDirty(other.m_aabbDirty),
+      m_injectedDevice(other.m_injectedDevice),
       m_deviceRHI(other.m_deviceRHI),
       m_vertexBufferRHI(other.m_vertexBufferRHI),
       m_indexBufferRHI(other.m_indexBufferRHI) {
+    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_vertexBufferRHI = nullptr;
     other.m_indexBufferRHI = nullptr;
@@ -99,9 +101,11 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
     m_submeshes = std::move(other.m_submeshes);
     m_aabb = other.m_aabb;
     m_aabbDirty = other.m_aabbDirty;
+    m_injectedDevice = other.m_injectedDevice;
     m_deviceRHI = other.m_deviceRHI;
     m_vertexBufferRHI = other.m_vertexBufferRHI;
     m_indexBufferRHI = other.m_indexBufferRHI;
+    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_vertexBufferRHI = nullptr;
     other.m_indexBufferRHI = nullptr;
@@ -183,8 +187,12 @@ void Mesh::Optimize() {
     if (!m_indices32.empty()) optimizeVertexCache(m_indices32);
 }
 
+rhi::IDevice* Mesh::GetDevice() const {
+    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+}
+
 void Mesh::UploadToGPU() {
-    rhi::IDevice* device = rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device) return;
     UploadToGPU(device);
 }
@@ -256,7 +264,7 @@ rhi::VertexLayout Mesh::GetVertexLayoutRHI() {
 }
 
 void Mesh::Bind() const {
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;
@@ -269,7 +277,7 @@ void Mesh::Unbind() const {
 }
 
 void Mesh::Draw(int submeshIndex) const {
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = GetDevice();
     if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;

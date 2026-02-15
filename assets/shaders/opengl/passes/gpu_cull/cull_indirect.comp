@@ -1,0 +1,126 @@
+#version 430 core
+// A1: Reads optional draw list (AABB + DrawIndexedIndirectCommand per entry), frustum culls,
+//     writes one indirect command per input (visible = full command, culled = instanceCount 0).
+//     Without draw list: legacy single quad draw (binding 1 unused).
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  baseVertex;
+    uint baseInstance;
+};
+
+// Per-draw input: AABB (world) + draw params. Layout matches GpuCullDrawEntry (52 bytes).
+struct DrawEntry {
+    vec3 aabbMin;
+    float _pad0;
+    vec3 aabbMax;
+    float _pad1;
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  baseVertex;
+    uint baseInstance;
+};
+
+layout(std430, binding = 0) buffer IndirectOut {
+    DrawIndexedIndirectCommand outCommands[];
+};
+
+layout(std430, binding = 1) readonly buffer DrawListIn {
+    DrawEntry drawList[];
+};
+
+uniform mat4 u_ViewProj;
+uniform uint u_NumDraws;
+uniform int u_UseOcclusionCull = 0;
+uniform vec2 u_DepthSize = vec2(1.0, 1.0);
+layout(binding = 2) uniform sampler2D u_DepthTex;
+
+// Frustum planes from view-proj (normalized).
+vec4 frustumPlanes[6];
+
+void deriveFrustumPlanes() {
+    mat4 M = u_ViewProj;
+    // Left, Right, Bottom, Top, Near, Far
+    frustumPlanes[0] = vec4(M[0][3] + M[0][0], M[1][3] + M[1][0], M[2][3] + M[2][0], M[3][3] + M[3][0]); // left
+    frustumPlanes[1] = vec4(M[0][3] - M[0][0], M[1][3] - M[1][0], M[2][3] - M[2][0], M[3][3] - M[3][0]); // right
+    frustumPlanes[2] = vec4(M[0][3] + M[0][1], M[1][3] + M[1][1], M[2][3] + M[2][1], M[3][3] + M[3][1]); // bottom
+    frustumPlanes[3] = vec4(M[0][3] - M[0][1], M[1][3] - M[1][1], M[2][3] - M[2][1], M[3][3] - M[3][1]); // top
+    frustumPlanes[4] = vec4(M[0][3] + M[0][2], M[1][3] + M[1][2], M[2][3] + M[2][2], M[3][3] + M[3][2]); // near
+    frustumPlanes[5] = vec4(M[0][3] - M[0][2], M[1][3] - M[1][2], M[2][3] - M[2][2], M[3][3] - M[3][2]); // far
+    for (int i = 0; i < 6; ++i)
+        frustumPlanes[i] /= length(frustumPlanes[i].xyz);
+}
+
+// Test AABB against frustum. Returns true if visible (intersects or inside).
+bool aabbVisible(vec3 aabbMin, vec3 aabbMax) {
+    vec3 center = (aabbMin + aabbMax) * 0.5;
+    vec3 halfExtent = (aabbMax - aabbMin) * 0.5;
+    for (int i = 0; i < 6; ++i) {
+        vec3 n = frustumPlanes[i].xyz;
+        float d = frustumPlanes[i].w;
+        float r = dot(halfExtent, abs(n));
+        if (dot(center, n) + d + r < 0.0)
+            return false;
+    }
+    return true;
+}
+
+// Project AABB center to NDC and sample depth; return true if not occluded.
+bool notOccluded(vec3 aabbMin, vec3 aabbMax) {
+    vec3 center = (aabbMin + aabbMax) * 0.5;
+    vec4 clip = u_ViewProj * vec4(center, 1.0);
+    if (clip.w <= 0.0) return true;
+    vec2 ndc = clip.xy / clip.w;
+    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0) return true;
+    float ndcZ = clip.z / clip.w;
+    float depthVal = ndcZ * 0.5 + 0.5;
+    vec2 uv = ndc * 0.5 + 0.5;
+    uv.y = 1.0 - uv.y;
+    float sampledDepth = texture(u_DepthTex, uv).r;
+    const float epsilon = 0.0001;
+    return depthVal <= sampledDepth + epsilon;
+}
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+
+    if (u_NumDraws == 0u) {
+        // Legacy: write one quad draw at slot 0
+        if (id == 0u) {
+            outCommands[0].indexCount = 6u;
+            outCommands[0].instanceCount = 1u;
+            outCommands[0].firstIndex = 0u;
+            outCommands[0].baseVertex = 0;
+            outCommands[0].baseInstance = 0u;
+        }
+        return;
+    }
+
+    if (id >= u_NumDraws)
+        return;
+
+    deriveFrustumPlanes();
+    DrawEntry e = drawList[id];
+    bool visible = aabbVisible(e.aabbMin, e.aabbMax);
+    if (visible && u_UseOcclusionCull != 0)
+        visible = notOccluded(e.aabbMin, e.aabbMax);
+
+    if (visible) {
+        outCommands[id].indexCount = e.indexCount;
+        outCommands[id].instanceCount = e.instanceCount;
+        outCommands[id].firstIndex = e.firstIndex;
+        outCommands[id].baseVertex = e.baseVertex;
+        outCommands[id].baseInstance = e.baseInstance;
+    } else {
+        outCommands[id].indexCount = e.indexCount;
+        outCommands[id].instanceCount = 0u;  // no-op draw
+        outCommands[id].firstIndex = e.firstIndex;
+        outCommands[id].baseVertex = e.baseVertex;
+        outCommands[id].baseInstance = e.baseInstance;
+    }
+}

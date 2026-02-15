@@ -32,6 +32,8 @@ public:
     /** Submit batched primitives to GPU. Call after Draw* calls. */
     void Flush();
 
+    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
+
 private:
     void FlushLines();
     void FlushTriangles();
@@ -47,6 +49,7 @@ private:
     std::vector<unsigned int> m_triIndices;
     math::Mat4 m_view{1.0f};
     math::Mat4 m_projection{1.0f};
+    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IBuffer* m_lineVbo = nullptr;
     rhi::IBuffer* m_lineEbo = nullptr;

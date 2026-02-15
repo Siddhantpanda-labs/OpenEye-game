@@ -32,7 +32,7 @@ void Primitives::Shutdown() {
 
 bool Primitives::Initialize() {
     if (m_initialized) return true;
-    m_deviceRHI = rhi::GetDefaultDevice();
+    m_deviceRHI = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
     if (!m_deviceRHI) return false;
     m_initialized = true;
     return true;
@@ -123,12 +123,12 @@ void Primitives::FlushLines() {
     static std::shared_ptr<Shader> s_shader;
     if (!s_shader || !s_shader->IsValid()) {
         s_shader = std::make_shared<Shader>();
-        rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+        rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
         if (!device) return;
         s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;
@@ -156,12 +156,12 @@ void Primitives::FlushTriangles() {
     static std::shared_ptr<Shader> s_shader;
     if (!s_shader || !s_shader->IsValid()) {
         s_shader = std::make_shared<Shader>();
-        rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+        rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
         if (!device) return;
         s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
     if (!s_shader->IsValid()) return;
-    rhi::IDevice* device = m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice();
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;

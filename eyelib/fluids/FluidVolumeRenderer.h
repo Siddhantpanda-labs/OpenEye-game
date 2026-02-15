@@ -2,6 +2,7 @@
 
 #include "eyelib/fluids/FluidSimulation.h"
 #include "eyelib/render/RenderTypes.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/Texture3D.h"
@@ -12,42 +13,44 @@ namespace eyelib {
 namespace fluids {
 
 /**
- * @brief GPU volume renderer for fluid density/temperature.
+ * @brief GPU volume renderer for fluid density/temperature. Uses RHI only.
  */
 class FluidVolumeRenderer {
 public:
     FluidVolumeRenderer();
     ~FluidVolumeRenderer();
 
+    /** Initialize; uses rhi::GetDefaultDevice() so call after render pipeline has set the device. */
     bool Initialize();
     void Shutdown();
+
+    /** Set viewport size for ray data targets (call before RenderVolume when size changes). */
+    void SetViewport(unsigned int width, unsigned int height);
 
     void UpdateFromSimulation(const FluidSimulation& sim, float densityScale = 1.0f);
 
     void SetBackgroundTexture(const std::shared_ptr<render::Texture2D>& background);
 
+    /** Render to the given RHI render target. */
     void RenderVolume(const FluidSimulation& sim,
                       const render::CameraView& camera,
                       const math::Mat4& model,
                       const math::Vec3& emissionPos01,
                       const math::Vec3& volumeSize,
-                      unsigned int targetFbo = 0);
+                      render::rhi::IRenderTarget* target = nullptr);
 
 private:
     void EnsureRayDataTargets();
     void EnsureShaders();
     void CreateCube();
 
-    // GPU resources
-    unsigned int m_cubeVAO = 0;
-    unsigned int m_cubeVBO = 0;
-    unsigned int m_rayDataFrontTex = 0;
-    unsigned int m_rayDataBackTex = 0;
-    unsigned int m_rayDataFrontFBO = 0;
-    unsigned int m_rayDataBackFBO = 0;
+    render::rhi::IDevice* m_device = nullptr;
+    render::rhi::IBuffer* m_cubeVB = nullptr;
+    render::rhi::IRenderTarget* m_rayDataFrontRT = nullptr;
+    render::rhi::IRenderTarget* m_rayDataBackRT = nullptr;
 
-    int m_viewportW = 0;
-    int m_viewportH = 0;
+    unsigned int m_viewportW = 0;
+    unsigned int m_viewportH = 0;
 
     std::shared_ptr<render::Shader> m_shRayDataBack;
     std::shared_ptr<render::Shader> m_shRayDataFront;

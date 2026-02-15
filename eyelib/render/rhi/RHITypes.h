@@ -11,12 +11,13 @@ namespace rhi {
 // ---- Buffer ----
 
 enum class BufferUsage : uint32_t {
-    Vertex     = 1u << 0,
-    Index      = 1u << 1,
-    Uniform    = 1u << 2,
-    Storage    = 1u << 3,
+    Vertex      = 1u << 0,
+    Index       = 1u << 1,
+    Uniform     = 1u << 2,
+    Storage     = 1u << 3,
     TransferSrc = 1u << 4,
     TransferDst = 1u << 5,
+    IndirectDraw = 1u << 6,  ///< Buffer holds DrawIndirectCommand(s); required for Draw*Indirect. Vulkan: VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT.
 };
 inline BufferUsage operator|(BufferUsage a, BufferUsage b) {
     return static_cast<BufferUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -28,8 +29,9 @@ inline bool HasUsage(BufferUsage flags, BufferUsage bit) {
 
 /** CPU can read/write (e.g. for upload or readback). */
 enum class BufferMemoryHint {
-    DeviceOnly,   // GPU only
-    HostVisible,  // CPU visible (upload or readback)
+    DeviceOnly,            // GPU only
+    HostVisible,          // CPU visible (upload or readback)
+    HostVisiblePersistent, // CPU visible, persistent map (ARB_buffer_storage; high-throughput streaming)
 };
 
 struct VertexLayout;  // forward
@@ -37,7 +39,9 @@ struct BufferDesc {
     size_t sizeInBytes = 0;
     BufferUsage usage = BufferUsage::Vertex;
     BufferMemoryHint memoryHint = BufferMemoryHint::DeviceOnly;
-    const VertexLayout* vertexLayout = nullptr;  // optional; set when creating mesh VBs so BGFX can use full layout
+    const VertexLayout* vertexLayout = nullptr;  // optional; set when creating mesh VBs for full layout
+    /** If true and backend supports sparse buffer (ARB_sparse_buffer), create as sparse; commit pages via CommitSparseBufferPages. */
+    bool sparse = false;
 };
 
 // ---- Texture ----
@@ -47,6 +51,7 @@ enum class TextureType {
     Texture2DArray,
     TextureCube,
     Texture3D,
+    TextureBuffer,  ///< Buffer-backed texture (TBO); created via CreateTextureBuffer
 };
 
 enum class RHITextureFormat {
@@ -83,6 +88,8 @@ struct TextureDesc {
     TextureUsage usage = TextureUsage::ShaderResource;
     uint32_t mipLevels = 1;
     uint32_t samples = 1;  // 1 = no MSAA
+    /** If true and backend supports sparse (ARB_sparse_texture), create as sparse/virtual. */
+    bool sparse = false;
 };
 
 // ---- Resource states (for barriers) ----
@@ -99,6 +106,8 @@ enum class ResourceState : uint32_t {
     TransferDst,
     TransferSrc,
     Present,
+    /** Buffer read by GPU as indirect draw/dispatch parameters. Vulkan: VK_ACCESS_INDIRECT_COMMAND_READ_BIT. */
+    IndirectDraw,
 };
 
 // ---- Shader ----
@@ -107,6 +116,9 @@ enum class ShaderStage {
     Vertex,
     Fragment,
     Compute,
+    TessControl,
+    TessEvaluation,
+    Geometry,
 };
 
 // ---- Pipeline ----
@@ -116,6 +128,7 @@ enum class PrimitiveTopology {
     TriangleStrip,
     PointList,
     LineList,
+    PatchList,  ///< For tessellation; patch vertex count set in PipelineDesc::patchVertexCount
 };
 
 enum class IndexType {
@@ -184,8 +197,15 @@ struct PipelineDesc {
     void* vertexShader = nullptr;    // IShader* (typed in RHI.h)
     void* fragmentShader = nullptr;
     void* computeShader = nullptr;
+    void* tessControlShader = nullptr;   // optional; requires TessEvaluation if set
+    void* tessEvalShader = nullptr;     // optional
+    void* geometryShader = nullptr;     // optional
     VertexLayout vertexLayout;
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+    /** Patch size when using tessellation (PatchList or tess shaders present). Default 3 = triangle patches. */
+    uint32_t patchVertexCount = 3;
+    /** Transform feedback: varyings to capture (names as in shader). Set before CreateGraphicsPipeline. */
+    std::vector<const char*> transformFeedbackVaryings;
     BlendState blend;
     DepthStencilState depthStencil;
     RasterState raster;
@@ -209,10 +229,75 @@ struct ClearValue {
     uint32_t stencil = 0;
 };
 
+// ---- Pipeline layout & descriptors (Phase 3: Vulkan prep) ----
+
+/** Type of a single binding in a descriptor set / pipeline layout. */
+enum class BindingType : uint32_t {
+    Texture,
+    TextureCube,
+    UniformBuffer,
+    StorageBuffer,
+};
+
+/** Describes one binding (slot) in a pipeline layout. */
+struct BindingDesc {
+    uint32_t binding = 0;
+    BindingType type = BindingType::Texture;
+};
+
+/** Describes the full layout of one descriptor set (set index 0 for now). Vulkan: maps to VkDescriptorSetLayout. */
+struct PipelineLayoutDesc {
+    std::vector<BindingDesc> bindings;
+};
+
+// ---- Indirect draw (Phase 4: GPU-driven) ----
+
+/** Layout matches GL DrawArraysIndirectCommand / Vulkan VkDrawIndirectCommand. */
+struct DrawArraysIndirectCommand {
+    uint32_t vertexCount = 0;
+    uint32_t instanceCount = 0;
+    uint32_t firstVertex = 0;
+    uint32_t baseInstance = 0;
+};
+
+/** Layout matches GL DrawElementsIndirectCommand / Vulkan VkDrawIndexedIndirectCommand. */
+struct DrawIndexedIndirectCommand {
+    uint32_t indexCount = 0;
+    uint32_t instanceCount = 0;
+    uint32_t firstIndex = 0;
+    int32_t  vertexOffset = 0;
+    uint32_t baseInstance = 0;
+};
+
 // ---- Query ----
 
 enum class QueryType {
     Timestamp,
+};
+
+// ---- Bindless (Phase 4.4 skeleton) ----
+
+/** Opaque handle for a bindless texture or buffer. 0 = invalid. Backend-specific (e.g. GL uint64, Vulkan descriptor index). */
+using BindlessHandle = uint64_t;
+constexpr BindlessHandle kInvalidBindlessHandle = 0;
+
+// ---- Capabilities ----
+
+/** Backend capabilities; query via IDevice::GetCapabilities(). Branch on caps, not on backend type. */
+struct RHICapabilities {
+    bool supportsBindless = false;           ///< Bindless textures/buffers (e.g. ARB_bindless_texture, descriptor indexing)
+    bool supportsCompute = false;            ///< Compute shaders / Dispatch
+    bool supportsMultiDrawIndirect = false;  ///< Multi-draw indirect (glMultiDrawArraysIndirect etc.)
+    bool supportsAsyncCompute = false;      ///< Async compute queue (Vulkan-style)
+    bool supportsRayTracing = false;         ///< Ray tracing (optional; future)
+    bool supportsTessellation = false;       ///< Tessellation control/eval shaders (OpenGL 4.0+)
+    bool supportsGeometryShader = false;    ///< Geometry shader stage
+    bool supportsTransformFeedback = false; ///< Transform feedback (capture vertex outputs to buffer)
+    bool supportsConditionalRender = false; ///< Conditional render (skip draw based on query result)
+    bool supportsSparseTexture = false;     ///< Sparse/virtual textures (ARB_sparse_texture)
+    bool supportsSparseBuffer = false;      ///< Sparse buffers (ARB_sparse_buffer)
+    bool supportsAtomicCounters = false;    ///< Atomic counter buffers (ARB_shader_atomic_counters)
+    bool supportsShaderSubroutines = false; ///< Shader subroutines (ARB_shader_subroutine)
 };
 
 } // namespace rhi
