@@ -423,35 +423,47 @@ int RunPlayer(int argc, char** argv) {
             static_cast<uint32_t>(window.Width()),
             static_cast<uint32_t>(window.Height()));
 
-        renderThread = std::thread([&window, &frameSync, &renderBridge, &overlay, &options]() {
-            window.MakeContextCurrent();
-            for (;;) {
-                std::optional<RenderFrameSync::AcquiredFrame> frame = frameSync.AcquireFrame();
-                if (!frame) {
-                    break;
-                }
-                // Frame boundary: resize only before render (never mid-frame). Single source of truth for size.
-                window.RefreshFramebufferSize();
-                const int fbWidth = window.Width();
-                const int fbHeight = window.Height();
-                if (fbWidth <= 0 || fbHeight <= 0) {
-                    frameSync.ReleaseFrame(frame->slot);
-                    continue;
-                }
-                window.ApplyVsync();
-                const uint32_t w = static_cast<uint32_t>(fbWidth);
-                const uint32_t h = static_cast<uint32_t>(fbHeight);
-                renderBridge.ApplyResize(w, h);  // No-op if size unchanged; pipeline Resize only at boundary
-                const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
-                if (rendered) {
-                    if (options.overlay && overlay.IsReady()) {
-                        overlay.Render(frame->overlay);
+        frameSync.SetFenceWaiter([&renderBridge](void* f) { renderBridge.WaitAndDestroyFence(f); });
+
+        if (kUseRenderThread) {
+            renderThread = std::thread([&window, &frameSync, &renderBridge, &overlay, &options]() {
+                window.MakeContextCurrent();
+                for (;;) {
+                    std::optional<RenderFrameSync::AcquiredFrame> frame = frameSync.AcquireFrame();
+                    if (!frame) {
+                        break;
                     }
-                    window.SwapBuffers();
+                    window.RefreshFramebufferSize();
+                    const int fbWidth = window.Width();
+                    const int fbHeight = window.Height();
+                    if (fbWidth <= 0 || fbHeight <= 0) {
+                        frameSync.ReleaseFrame(frame->slot, nullptr);
+                        continue;
+                    }
+                    window.ApplyVsync();
+                    const uint32_t w = static_cast<uint32_t>(fbWidth);
+                    const uint32_t h = static_cast<uint32_t>(fbHeight);
+                    renderBridge.ApplyResize(w, h);
+                    const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
+                    void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
+                    if (rendered) {
+                        const bool kFlickerTestSkipOverlay = true;
+                        if (!kFlickerTestSkipOverlay && options.overlay && overlay.IsReady()) {
+                            overlay.Render(frame->overlay);
+                        }
+                        renderBridge.Finish();
+                        if (gpuFence) {
+                            renderBridge.WaitFence(gpuFence);
+                        } else {
+                            renderBridge.Finish();
+                        }
+                        renderBridge.Finish();
+                        window.SwapBuffers();
+                    }
+                    frameSync.ReleaseFrame(frame->slot, gpuFence);
                 }
-                frameSync.ReleaseFrame(frame->slot);
-            }
-        });
+            });
+        }
     }
 
     auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge,
@@ -499,7 +511,7 @@ int RunPlayer(int argc, char** argv) {
             }
         }
 
-        // Submit frame to render thread (game thread never touches GL after this).
+        // Build scene and either submit to render thread or render inline.
         if (!options.headless) {
             OverlaySnapshot snap;
             snap.fps = eyelib::api::core::Time::FPS();
@@ -514,16 +526,48 @@ int RunPlayer(int argc, char** argv) {
                 frameSync.GetSceneBuffer(slot), frameSync.GetFrameAllocator(slot));
             const int w = window.Width();
             const int h = window.Height();
-            frameSync.SubmitFrame(slot,
-                static_cast<uint32_t>(w > 0 ? w : 1),
-                static_cast<uint32_t>(h > 0 ? h : 1),
-                snap);
+
+            if (kUseRenderThread) {
+                frameSync.SubmitFrame(slot,
+                    static_cast<uint32_t>(w > 0 ? w : 1),
+                    static_cast<uint32_t>(h > 0 ? h : 1),
+                    snap);
+            } else {
+                // Single-threaded: render and present inline (same ordering as render thread).
+                window.RefreshFramebufferSize();
+                const int fbWidth = window.Width();
+                const int fbHeight = window.Height();
+                if (fbWidth > 0 && fbHeight > 0) {
+                    window.ApplyVsync();
+                    const uint32_t rw = static_cast<uint32_t>(fbWidth);
+                    const uint32_t rh = static_cast<uint32_t>(fbHeight);
+                    renderBridge.ApplyResize(rw, rh);
+                    if (options.overlay && overlay.IsReady()) {
+                        overlay.Render(snap);
+                    }
+                    const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(slot), rw, rh);
+                    void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
+                    if (rendered) {
+                        renderBridge.Finish();
+                        if (gpuFence) {
+                            renderBridge.WaitFence(gpuFence);
+                        } else {
+                            renderBridge.Finish();
+                        }
+                        renderBridge.Finish();
+                        window.SwapBuffers();
+                    }
+                    frameSync.ReleaseFrame(slot, gpuFence);
+                } else {
+                    frameSync.ReleaseFrame(slot, nullptr);
+                }
+            }
         }
     };
 
     eyelib::api::core::Engine::Run(update, nullptr);
 
-    if (!options.headless && renderThread.joinable()) {
+    if (!options.headless && kUseRenderThread && renderThread.joinable()) {
         frameSync.SignalShutdown();
         renderThread.join();
     }

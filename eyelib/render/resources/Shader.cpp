@@ -47,17 +47,21 @@ bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fr
 }
 
 namespace {
-// Accepts a vertex shader path (e.g. assets/shaders/opengl/passes/forward/skinned.vert or .../diligent/.../skinned.vsh).
+// Accepts a vertex shader path (e.g. assets/shaders/opengl/passes/forward/skinned.vert) or logical name (e.g. passes/forward/skinned).
 // Returns logical name (e.g. "passes/forward/skinned") by stripping assets/shaders/, backend segment, and extension.
 std::string LogicalNameFromPath(const std::string& vertexPath) {
     std::string base = vertexPath;
     const char* prefix = "assets/shaders/";
     const size_t prefixLen = 14;
-    if (base.size() > prefixLen && base.compare(0, prefixLen, prefix) == 0)
+    bool hadPrefix = (base.size() > prefixLen && base.compare(0, prefixLen, prefix) == 0);
+    if (hadPrefix)
         base = base.substr(prefixLen);
-    size_t firstSlash = base.find('/');
-    if (firstSlash != std::string::npos)
-        base = base.substr(firstSlash + 1);
+    // Only strip first segment (backend name opengl/diligent) when we had the assets/shaders/ prefix
+    if (hadPrefix) {
+        size_t firstSlash = base.find('/');
+        if (firstSlash != std::string::npos)
+            base = base.substr(firstSlash + 1);
+    }
     auto stripExt = [](std::string& s, const char* ext, size_t len) {
         if (s.size() >= len && s.compare(s.size() - len, len, ext) == 0) s.resize(s.size() - len);
     };

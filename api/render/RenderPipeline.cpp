@@ -4,6 +4,7 @@
 #include "api/platform/Window.h"
 #include "api/core/All.h"
 #include "eyelib/render/RenderPipeline.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
 
 namespace eyelib {
@@ -61,6 +62,30 @@ void* RenderPipeline::GetDevice() const {
     return m_impl->pipeline ? m_impl->pipeline->GetRHIDevice() : nullptr;
 }
 
+void* RenderPipeline::InsertFrameFence() {
+    if (!m_impl->pipeline) return nullptr;
+    auto* cmd = m_impl->pipeline->GetRHICommandList();
+    if (!cmd) return nullptr;
+    return cmd->InsertFence();
+}
+
+void RenderPipeline::WaitFence(void* fence) {
+    if (!fence || !m_impl->pipeline) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    if (!device) return;
+    auto* f = static_cast<::eyelib::render::rhi::IFence*>(fence);
+    device->WaitFence(f, 5000);
+}
+
+void RenderPipeline::WaitAndDestroyFence(void* fence) {
+    if (!fence || !m_impl->pipeline) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    if (!device) return;
+    auto* f = static_cast<::eyelib::render::rhi::IFence*>(fence);
+    device->WaitFence(f, 5000);
+    device->DestroyFence(f);
+}
+
 void RenderPipeline::Shutdown() {
     m_impl->pipeline->Shutdown();
 }
@@ -86,6 +111,10 @@ void RenderPipeline::Render(const RenderScene& scene) {
 
 void RenderPipeline::BlitToScreen() {
     m_impl->pipeline->BlitToScreen();
+}
+
+void RenderPipeline::Finish() {
+    m_impl->pipeline->Finish();
 }
 
 bool RenderPipeline::HasValidOutput() const {

@@ -16,7 +16,7 @@ uniform vec3 u_Ambient = vec3(0.1);
 uniform float u_Exposure = 1.0;
 uniform float u_Alpha = 1.0;
 
-uniform sampler2D u_ShadowMap;
+layout(binding = 5) uniform sampler2D u_ShadowMap;
 uniform mat4 u_LightSpaceMatrix;
 uniform float u_ShadowBias = 0.005;
 uniform int u_UseShadows = 0;

@@ -78,23 +78,27 @@ std::shared_ptr<::eyelib::render::TextureCube> ApiRenderSceneView::GetSkybox() c
 }
 
 void ApiRenderSceneView::ForEachOpaqueDrawable(std::function<void(const ::eyelib::render::Drawable&)> cb) const {
-    for (const auto& d : m_scene.opaque)
-        cb(ToEngineDrawable(d));
+    if (!m_scene.opaque) return;
+    for (size_t i = 0; i < m_scene.opaqueCount; ++i)
+        cb(ToEngineDrawable(m_scene.opaque[i]));
 }
 
 void ApiRenderSceneView::ForEachTransparentDrawable(std::function<void(const ::eyelib::render::Drawable&)> cb) const {
-    for (const auto& d : m_scene.transparent)
-        cb(ToEngineDrawable(d));
+    if (!m_scene.transparent) return;
+    for (size_t i = 0; i < m_scene.transparentCount; ++i)
+        cb(ToEngineDrawable(m_scene.transparent[i]));
 }
 
 void ApiRenderSceneView::ForEachPointLight(std::function<void(const ::eyelib::render::PointLight&)> cb) const {
-    for (const auto& p : m_scene.pointLights)
-        cb(ToEnginePointLight(p));
+    if (!m_scene.pointLights) return;
+    for (size_t i = 0; i < m_scene.pointLightCount; ++i)
+        cb(ToEnginePointLight(m_scene.pointLights[i]));
 }
 
 void ApiRenderSceneView::ForEachSpotLight(std::function<void(const ::eyelib::render::SpotLight&)> cb) const {
-    for (const auto& s : m_scene.spotLights)
-        cb(ToEngineSpotLight(s));
+    if (!m_scene.spotLights) return;
+    for (size_t i = 0; i < m_scene.spotLightCount; ++i)
+        cb(ToEngineSpotLight(m_scene.spotLights[i]));
 }
 
 } // namespace api

@@ -45,7 +45,7 @@ uniform float u_SpotLightRange[MAX_SPOT_LIGHTS];
 uniform float u_SpotLightInnerCos[MAX_SPOT_LIGHTS];
 uniform float u_SpotLightOuterCos[MAX_SPOT_LIGHTS];
 
-uniform sampler2D u_ShadowMap;
+layout(binding = 5) uniform sampler2D u_ShadowMap;
 uniform mat4 u_LightSpaceMatrix;
 uniform float u_ShadowBias = 0.005;
 uniform int u_UseShadows = 0;

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "api/core/FrameAllocatorAdaptor.h"
 #include "api/render/Mesh.h"
 #include "api/render/Material.h"
 #include "api/render/MaterialInstance.h"
@@ -8,6 +7,7 @@
 #include "api/render/Texture.h"
 #include "api/render/TextureCube.h"
 #include "eyelib/math/Types.h"
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -65,24 +65,30 @@ using DirectionalLight = ::eyelib::api::render::DirectionalLight;
 using PointLight = ::eyelib::api::render::PointLight;
 using SpotLight = ::eyelib::api::render::SpotLight;
 
+/**
+ * POD-like scene: raw arrays + counts. All array memory is owned by a FrameAllocator
+ * (filled in BuildScene when frameAlloc is provided) or by optional internal storage
+ * (when frameAlloc is null, e.g. single-threaded path). Reset only on render thread in ReleaseFrame.
+ */
 struct RenderScene {
-    using DrawableAllocator = ::api::FrameAllocatorAdaptor<Drawable>;
-    using PointLightAllocator = ::api::FrameAllocatorAdaptor<PointLight>;
-    using SpotLightAllocator = ::api::FrameAllocatorAdaptor<SpotLight>;
+    Drawable* opaque = nullptr;
+    size_t opaqueCount = 0;
+    Drawable* transparent = nullptr;
+    size_t transparentCount = 0;
+    PointLight* pointLights = nullptr;
+    size_t pointLightCount = 0;
+    SpotLight* spotLights = nullptr;
+    size_t spotLightCount = 0;
 
-    explicit RenderScene(::api::FrameAllocator* frameAlloc = nullptr)
-        : opaque(DrawableAllocator(frameAlloc)),
-          transparent(DrawableAllocator(frameAlloc)),
-          pointLights(PointLightAllocator(frameAlloc)),
-          spotLights(SpotLightAllocator(frameAlloc)) {}
-
-    std::vector<Drawable, DrawableAllocator> opaque;
-    std::vector<Drawable, DrawableAllocator> transparent;
     CameraView camera;
     DirectionalLight light;
     std::shared_ptr<TextureCube> skybox;
-    std::vector<PointLight, PointLightAllocator> pointLights;
-    std::vector<SpotLight, SpotLightAllocator> spotLights;
+
+    /** Used only when building without a frame allocator (e.g. WorldRender::Render single-threaded). */
+    std::vector<Drawable> opaqueStorage;
+    std::vector<Drawable> transparentStorage;
+    std::vector<PointLight> pointLightsStorage;
+    std::vector<SpotLight> spotLightsStorage;
 };
 
 } // namespace api

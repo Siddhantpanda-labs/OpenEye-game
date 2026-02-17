@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <optional>
 #include <glm/glm.hpp>
 
 namespace openeye::player {
@@ -242,40 +243,141 @@ std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
     return registry->GetMaterial(materialId);
 }
 
+namespace {
+
+RenderSnapshot CreateRenderSnapshotFromObservation(const eyelib::api::world::Observation& obs) {
+    RenderSnapshot s;
+    const auto r = obs.GetRenderablesView();
+    s.renderables.assign(r.begin(), r.end());
+    const auto m = obs.GetMeshRenderersView();
+    s.meshRenderers.assign(m.begin(), m.end());
+    const auto c = obs.GetCamerasView();
+    s.cameras.assign(c.begin(), c.end());
+    const auto l = obs.GetLightsView();
+    s.lights.assign(l.begin(), l.end());
+    for (const auto& e : s.renderables) {
+        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
+    }
+    for (const auto& e : s.meshRenderers) {
+        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
+    }
+    for (const auto& e : s.cameras) {
+        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
+    }
+    for (const auto& e : s.lights) {
+        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
+    }
+    return s;
+}
+
+} // namespace
+
+std::optional<eyelib::world::components::Transform> RenderSnapshot::GetTransform(eyelib::world::EntityId entity) const {
+    auto it = transformCache.find(entity);
+    if (it != transformCache.end()) return it->second;
+    return std::nullopt;
+}
+
+RenderSnapshot CreateRenderSnapshot(const eyelib::api::world::World& world) {
+    return CreateRenderSnapshotFromObservation(world.GetObservation());
+}
+
 void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                                    const RuntimeOptions& options,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
+    BuildScene(CreateRenderSnapshot(world), options, animationBridge, assetRegistry, scene, frameAlloc);
+}
+
+void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
+                                   const RuntimeOptions& options,
+                                   const WorldAnimationBridge* animationBridge,
+                                   eyelib::api::AssetRegistry* assetRegistry,
+                                   eyelib::api::RenderScene& scene,
+                                   api::FrameAllocator* frameAlloc) {
+    BuildScene(CreateRenderSnapshotFromObservation(obs), options, animationBridge, assetRegistry, scene, frameAlloc);
+}
+
+void WorldRenderBridge::BuildScene(const RenderSnapshot& snapshot,
+                                   const RuntimeOptions& options,
+                                   const WorldAnimationBridge* animationBridge,
+                                   eyelib::api::AssetRegistry* assetRegistry,
+                                   eyelib::api::RenderScene& scene,
+                                   api::FrameAllocator* frameAlloc) {
     (void)options;
-    scene.opaque.clear();
-    scene.transparent.clear();
-    scene.pointLights.clear();
-    scene.spotLights.clear();
+    const auto& renderables = snapshot.renderables;
+    const auto& meshRenderers = snapshot.meshRenderers;
+    const auto& cameras = snapshot.cameras;
+    const auto& lights = snapshot.lights;
+    auto getTransform = [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); };
 
-    const auto obs = world.GetObservation();
-
-    const auto renderables = obs.GetRenderablesView();
+    // Count pass: opaque (renderables + mesh renderers), point lights, spot lights
+    size_t opaqueCount = 0;
     for (const auto& entry : renderables) {
         const auto& renderable = entry.component;
-        if (!renderable.visible) {
-            continue;
+        if (!renderable.visible) continue;
+        std::string meshId = renderable.meshAssetId;
+        if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
+            meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
+        if (ResolveAssetPath(meshId, options.assetRoots).empty()) continue;
+        auto modelEntry = LoadModelEntry(ResolveAssetPath(meshId, options.assetRoots));
+        if (!modelEntry.mesh) continue;
+        opaqueCount++;
+    }
+    for (const auto& entry : meshRenderers) {
+        const auto& renderer = entry.component;
+        if (!renderer.visible || renderer.meshAssetId.empty()) continue;
+        if (ResolveAssetPath(renderer.meshAssetId, options.assetRoots).empty()) continue;
+        if (!LoadModelEntry(ResolveAssetPath(renderer.meshAssetId, options.assetRoots)).mesh) continue;
+        opaqueCount++;
+    }
+    size_t pointLightCount = 0;
+    size_t spotLightCount = 0;
+    for (const auto& entry : lights) {
+        const auto& light = entry.component;
+        if (light.type == eyelib::world::components::Light::Type::Point) pointLightCount++;
+        else if (light.type == eyelib::world::components::Light::Type::Spot) spotLightCount++;
+    }
 
+    eyelib::api::Drawable* opaquePtr = nullptr;
+    eyelib::api::render::PointLight* pointLightsPtr = nullptr;
+    eyelib::api::render::SpotLight* spotLightsPtr = nullptr;
+    if (frameAlloc) {
+        opaquePtr = frameAlloc->AllocateArray<eyelib::api::Drawable>(opaqueCount);
+        pointLightsPtr = frameAlloc->AllocateArray<eyelib::api::render::PointLight>(pointLightCount);
+        spotLightsPtr = frameAlloc->AllocateArray<eyelib::api::render::SpotLight>(spotLightCount);
+        scene.opaque = opaquePtr;
+        scene.opaqueCount = opaqueCount;
+        scene.transparent = nullptr;
+        scene.transparentCount = 0;
+        scene.pointLights = pointLightsPtr;
+        scene.pointLightCount = pointLightCount;
+        scene.spotLights = spotLightsPtr;
+        scene.spotLightCount = spotLightCount;
+    } else {
+        scene.opaqueStorage.clear();
+        scene.opaqueStorage.reserve(opaqueCount);
+        scene.pointLightsStorage.clear();
+        scene.pointLightsStorage.reserve(pointLightCount);
+        scene.spotLightsStorage.clear();
+        scene.spotLightsStorage.reserve(spotLightCount);
+    }
+
+    size_t opaqueIdx = 0;
+    for (const auto& entry : renderables) {
+        const auto& renderable = entry.component;
+        if (!renderable.visible) continue;
         std::string meshId = renderable.meshAssetId;
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
         const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
-        if (meshResolved.empty()) {
-            continue;
-        }
-
+        if (meshResolved.empty()) continue;
         auto modelEntry = LoadModelEntry(meshResolved);
-        if (!modelEntry.mesh) {
-            continue;
-        }
+        if (!modelEntry.mesh) continue;
 
         eyelib::api::Drawable drawable;
         drawable.mesh = modelEntry.mesh;
@@ -288,16 +390,14 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                 }
             }
         }
-        if (const auto transform = obs.GetTransform(entry.entity)) {
+        if (const auto transform = getTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
         if (drawable.material) {
             const std::vector<eyelib::math::Mat4>* bones = nullptr;
             if (animationBridge) {
                 bones = animationBridge->GetBoneMatrices(entry.entity);
-                if (bones && bones->empty()) {
-                    bones = nullptr;
-                }
+                if (bones && bones->empty()) bones = nullptr;
             }
             if (!bones && !modelEntry.bindPoseMatrices.empty()) {
                 bones = &modelEntry.bindPoseMatrices;
@@ -320,23 +420,22 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (drawable.material) {
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
-        scene.opaque.push_back(drawable);
+        if (frameAlloc) {
+            new (opaquePtr + opaqueIdx) eyelib::api::Drawable(drawable);
+            opaqueIdx++;
+        } else {
+            scene.opaqueStorage.push_back(drawable);
+        }
     }
 
-    const auto meshRenderers = obs.GetMeshRenderersView();
     for (const auto& entry : meshRenderers) {
         const auto& renderer = entry.component;
-        if (!renderer.visible || renderer.meshAssetId.empty()) {
-            continue;
-        }
+        if (!renderer.visible || renderer.meshAssetId.empty()) continue;
         const std::string meshResolved = ResolveAssetPath(renderer.meshAssetId, options.assetRoots);
-        if (meshResolved.empty()) {
-            continue;
-        }
+        if (meshResolved.empty()) continue;
         auto modelEntry = LoadModelEntry(meshResolved);
-        if (!modelEntry.mesh) {
-            continue;
-        }
+        if (!modelEntry.mesh) continue;
+
         eyelib::api::Drawable drawable;
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
@@ -348,16 +447,14 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
                 }
             }
         }
-        if (const auto transform = obs.GetTransform(entry.entity)) {
+        if (const auto transform = getTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
         }
         if (drawable.material) {
             const std::vector<eyelib::math::Mat4>* bones = nullptr;
             if (animationBridge) {
                 bones = animationBridge->GetBoneMatrices(entry.entity);
-                if (bones && bones->empty()) {
-                    bones = nullptr;
-                }
+                if (bones && bones->empty()) bones = nullptr;
             }
             if (!bones && !modelEntry.bindPoseMatrices.empty()) {
                 bones = &modelEntry.bindPoseMatrices;
@@ -380,10 +477,21 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (drawable.material) {
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
-        scene.opaque.push_back(drawable);
+        if (frameAlloc) {
+            new (opaquePtr + opaqueIdx) eyelib::api::Drawable(drawable);
+            opaqueIdx++;
+        } else {
+            scene.opaqueStorage.push_back(drawable);
+        }
     }
 
-    const auto cameras = obs.GetCamerasView();
+    if (!frameAlloc) {
+        scene.opaque = scene.opaqueStorage.empty() ? nullptr : scene.opaqueStorage.data();
+        scene.opaqueCount = scene.opaqueStorage.size();
+        scene.transparent = nullptr;
+        scene.transparentCount = 0;
+    }
+
     bool cameraFound = false;
     eyelib::world::components::Camera cameraComponent{};
     eyelib::world::components::Transform cameraTransform{};
@@ -391,7 +499,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         if (!cameraFound || entry.component.isPrimary) {
             cameraFound = true;
             cameraComponent = entry.component;
-            if (const auto transform = obs.GetTransform(entry.entity)) {
+            if (const auto transform = getTransform(entry.entity)) {
                 cameraTransform = *transform;
             }
             if (entry.component.isPrimary) {
@@ -435,11 +543,12 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
         scene.camera.viewPos = {0.0f, 2.0f, 5.0f};
     }
 
-    const auto lights = obs.GetLightsView();
     bool directionalSet = false;
+    size_t pointIdx = 0;
+    size_t spotIdx = 0;
     for (const auto& entry : lights) {
         const auto& light = entry.component;
-        const auto transform = obs.GetTransform(entry.entity);
+        const auto transform = getTransform(entry.entity);
 
         if (light.type == eyelib::world::components::Light::Type::Directional && !directionalSet) {
             auto direction = eyelib::math::Vec3(0.5f, -1.0f, 0.2f);
@@ -459,7 +568,11 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
             point.color = light.color;
             point.intensity = light.intensity;
             point.radius = light.range;
-            scene.pointLights.push_back(point);
+            if (frameAlloc && pointLightsPtr) {
+                pointLightsPtr[pointIdx++] = point;
+            } else {
+                scene.pointLightsStorage.push_back(point);
+            }
         } else if (light.type == eyelib::world::components::Light::Type::Spot) {
             eyelib::api::render::SpotLight spot{};
             if (transform) {
@@ -471,8 +584,18 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
             spot.range = light.range;
             spot.innerConeCos = std::cos(DegreesToRadians(light.innerConeAngle));
             spot.outerConeCos = std::cos(DegreesToRadians(light.outerConeAngle));
-            scene.spotLights.push_back(spot);
+            if (frameAlloc && spotLightsPtr) {
+                spotLightsPtr[spotIdx++] = spot;
+            } else {
+                scene.spotLightsStorage.push_back(spot);
+            }
         }
+    }
+    if (!frameAlloc) {
+        scene.pointLights = scene.pointLightsStorage.empty() ? nullptr : scene.pointLightsStorage.data();
+        scene.pointLightCount = scene.pointLightsStorage.size();
+        scene.spotLights = scene.spotLightsStorage.empty() ? nullptr : scene.spotLightsStorage.data();
+        scene.spotLightCount = scene.spotLightsStorage.size();
     }
 }
 
@@ -511,6 +634,22 @@ bool WorldRenderBridge::RenderSceneOnly(const eyelib::api::RenderScene& scene, u
     m_pipeline.Render(scene);
     m_pipeline.BlitToScreen();
     return true;
+}
+
+void WorldRenderBridge::Finish() {
+    m_pipeline.Finish();
+}
+
+void* WorldRenderBridge::InsertFrameFence() {
+    return m_pipeline.InsertFrameFence();
+}
+
+void WorldRenderBridge::WaitFence(void* fence) {
+    m_pipeline.WaitFence(fence);
+}
+
+void WorldRenderBridge::WaitAndDestroyFence(void* fence) {
+    m_pipeline.WaitAndDestroyFence(fence);
 }
 
 } // namespace openeye::player

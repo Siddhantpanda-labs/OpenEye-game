@@ -196,30 +196,42 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     assert(!m_rendering && "Resize may only be called at frame boundary, before Render().");
 #endif
     if (width == 0 || height == 0) return;
-    if (width == m_width && height == m_height) return;
-    m_width = width;
-    m_height = height;
-    if (m_gbuffer) m_gbuffer->Resize(width, height);
+    m_windowWidth = width;
+    m_windowHeight = height;
+    // Fixed aspect (16:9) so the scene never stretches. Cover: render size chosen so the visible crop fills the window.
+    const float aspectW = 16.0f;
+    const float aspectH = 9.0f;
+    float scale = static_cast<float>(width) / aspectW;
+    float scaleH = static_cast<float>(height) / aspectH;
+    if (scaleH > scale) scale = scaleH;
+    uint32_t renderW = static_cast<uint32_t>(aspectW * scale);
+    uint32_t renderH = static_cast<uint32_t>(aspectH * scale);
+    if (renderW == 0) renderW = 1;
+    if (renderH == 0) renderH = 1;
+    if (renderW == m_width && renderH == m_height) return;
+    m_width = renderW;
+    m_height = renderH;
+    if (m_gbuffer) m_gbuffer->Resize(renderW, renderH);
     if (m_prevFrameDepthRT) {
         m_device->DestroyRenderTarget(m_prevFrameDepthRT);
         m_prevFrameDepthRT = nullptr;
         m_havePrevDepth = false;
     }
-    if (m_device && width > 0 && height > 0) {
+    if (m_device && renderW > 0 && renderH > 0) {
         std::vector<rhi::RHITextureFormat> noColor;
-        m_prevFrameDepthRT = m_device->CreateRenderTarget(width, height, noColor, rhi::RHITextureFormat::Depth24, 1);
+        m_prevFrameDepthRT = m_device->CreateRenderTarget(renderW, renderH, noColor, rhi::RHITextureFormat::Depth24, 1);
     }
     DestroyHDRFramebuffer();
     CreateHDRFramebuffer();
-    if (m_frameGraph) m_frameGraph->SetFrameSize(width, height);
+    if (m_frameGraph) m_frameGraph->SetFrameSize(renderW, renderH);
     if (m_clusteredLightGrid) {
-        m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Will be updated per-frame with actual camera
+        m_clusteredLightGrid->Initialize(renderW, renderH, 0.1f, 1000.0f);  // Will be updated per-frame with actual camera
     }
     if (m_postProcessor) {
-        m_postProcessor->Resize(width, height);
+        m_postProcessor->Resize(renderW, renderH);
     }
     rhi::ICommandList* cmd = m_device ? m_device->GetImmediateCommandList() : nullptr;
-    if (cmd) cmd->SetViewport(0, 0, width, height);
+    if (cmd) cmd->SetViewport(0, 0, renderW, renderH);
 }
 
 void RenderPipeline::SetFrameSize(unsigned w, unsigned h) {
@@ -460,10 +472,13 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
+#if 0
     core::Log::Info("RenderForward: executing");
+#endif
 
     const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
-    if (m_shadowMap && cmd) {
+    const bool useShadows = (m_shadowMap != nullptr && view.GetLight().castShadows);
+    if (useShadows && cmd) {
         rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
         if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
     }
@@ -505,7 +520,7 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
             sh->SetFloat("u_LightIntensity", light.intensity);
             sh->SetVec3("u_Ambient", light.ambient);
             sh->SetFloat("u_Exposure", light.exposure);
-            if (m_shadowMap) {
+            if (useShadows) {
                 sh->SetInt("u_ShadowMap", kShadowMapUnit);
                 sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
                 sh->SetFloat("u_ShadowBias", 0.005f);
@@ -561,9 +576,11 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
         }
     });
 
+#if 0
     core::Log::InfoF("RenderForward: drew %zu opaque, skipped %zu (no shader)", forwardDrawCount, forwardSkipNoShader);
+#endif
 
-    if (m_shadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
+    if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
 
     m_scratchTransparent.clear();
     view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
@@ -854,12 +871,20 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
     cmd->Begin();
 
     const CameraView cam = view.GetCamera();
+    size_t opaqueCount = 0;
+    view.ForEachOpaqueDrawable([&](const Drawable&) { ++opaqueCount; });
+#if 0
+    static size_t s_prevOpaqueCount = static_cast<size_t>(-1);
+    if (opaqueCount != s_prevOpaqueCount) {
+        core::Log::InfoF("RenderPipeline::Render: opaque=%zu (change)", opaqueCount);
+        s_prevOpaqueCount = opaqueCount;
+    }
+#endif
     static bool s_loggedScene = false;
     if (!s_loggedScene) {
-        size_t opaqueCount = 0, transparentCount = 0;
-        view.ForEachOpaqueDrawable([&](const Drawable&) { ++opaqueCount; });
+        size_t transparentCount = 0;
         view.ForEachTransparentDrawable([&](const Drawable&) { ++transparentCount; });
-        core::Log::InfoF("RenderPipeline::Render: opaque=%zu transparent=%zu camera valid=%d",
+        core::Log::InfoF("RenderPipeline::Render: first frame opaque=%zu transparent=%zu camera valid=%d",
                          opaqueCount, transparentCount, (cam.viewPos.x != 0 || cam.viewPos.y != 0 || cam.viewPos.z != 0));
         s_loggedScene = true;
     }
@@ -869,7 +894,7 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
         BuildAndExecuteFrameGraph(view);
         break;
     case PipelineMode::Forward:
-        if (m_shadowMap && m_shadowPass) {
+        if (m_shadowMap && m_shadowPass && view.GetLight().castShadows) {
             m_shadowPass->Render(*m_shadowMap, GetRHICommandList(),
                 [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                 view.GetLight().direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
@@ -921,20 +946,38 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
 #endif
 }
 
+void RenderPipeline::Finish() {
+    if (m_device) m_device->Finish();
+}
+
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
-    // Clear swap chain to a known background (Diligent/Vulkan don't clear it elsewhere; avoids white/garbage)
+    // Blit scene with cover: fill full window, preserve aspect by cropping (no clear-color bars).
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd) {
         rhi::ClearValue bg = {};
         bg.color[0] = 0.12f; bg.color[1] = 0.12f; bg.color[2] = 0.15f; bg.color[3] = 1.f;
         cmd->ClearDefaultFramebuffer(bg);
     }
-    if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
-        m_device->BlitToDefaultFramebuffer(m_postProcessor->GetOutputRenderTargetRHI());
+    rhi::IRenderTarget* blitSource = nullptr;
+    if (m_mode != PipelineMode::Forward && m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
+        blitSource = m_postProcessor->GetOutputRenderTargetRHI();
     } else if (m_hdrRenderTarget) {
-        m_device->BlitToDefaultFramebuffer(m_hdrRenderTarget);
+        blitSource = m_hdrRenderTarget;
     }
+    if (blitSource && m_windowWidth > 0 && m_windowHeight > 0) {
+        m_device->BlitToDefaultFramebufferLetterbox(blitSource, m_windowWidth, m_windowHeight);
+    } else if (blitSource) {
+        m_device->BlitToDefaultFramebuffer(blitSource);
+    }
+#if 0
+    static uint32_t s_blitFrameCount = 0;
+    if (++s_blitFrameCount % 60 == 0 && blitSource) {
+        core::Log::InfoF("BlitToScreen: source=%s size=%ux%u pipelineSize=%ux%u",
+                         (blitSource == m_hdrRenderTarget ? "HDR" : "post"),
+                         blitSource->GetWidth(), blitSource->GetHeight(), m_width, m_height);
+    }
+#endif
     m_device->Present();
 }
 

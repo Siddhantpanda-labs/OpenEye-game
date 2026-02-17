@@ -79,7 +79,9 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
     bool skinnedValid = m_depthSkinnedShader && m_depthSkinnedShader->IsValid();
     rhi::IPipeline* pipe = m_depthShader ? m_depthShader->GetPipelineRHI() : nullptr;
     bool programValid = (!pipe || pipe->HasValidProgram());
+#if 0
     core::Log::InfoF("ShadowPass: depth shader valid=%d skinned shader valid=%d pipeline program valid=%d", depthValid ? 1 : 0, skinnedValid ? 1 : 0, programValid ? 1 : 0);
+#endif
     if (!depthValid) {
         core::Log::Info("ShadowPass: skipped (depth shader invalid or missing)");
         return;
@@ -88,7 +90,9 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
         core::Log::Info("ShadowPass: skipped (no valid backend program)");
         return;
     }
+#if 0
     core::Log::Info("ShadowPass: executing");
+#endif
 
     shadowMap.UpdateMatrices(lightDir, view, projection, cameraPos, nearPlane, farPlane);
     shadowMap.BindForShadowPass(cmd);

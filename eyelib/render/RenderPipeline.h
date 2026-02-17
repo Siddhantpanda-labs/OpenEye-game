@@ -58,6 +58,8 @@ public:
     /** Render from a read-only view (zero-copy when view wraps API scene). */
     void Render(const IRenderSceneView& view);
     void BlitToScreen();
+    /** Wait for GPU to finish all submitted work (e.g. before swap to avoid flicker). */
+    void Finish();
     /** Returns true when the pipeline has a valid render target to present. */
     bool HasValidOutput() const;
 
@@ -150,7 +152,8 @@ private:
     rhi::IBuffer* m_spotLightBuffer = nullptr;
     rhi::IBuffer* m_lightIndexBuffer = nullptr;
 
-    uint32_t m_width = 0, m_height = 0;
+    uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
+    uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit
     PipelineMode m_mode = PipelineMode::Deferred;
     PrePostCallback m_prePostCallback;
     

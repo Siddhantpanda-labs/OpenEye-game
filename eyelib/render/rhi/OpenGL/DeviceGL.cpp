@@ -34,12 +34,20 @@ DeviceGL::~DeviceGL() {
 
 void DeviceGL::QueryCapabilities() {
     m_caps = RHICapabilities{};
-    const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-    if (!ext) return;
-    auto has = [&ext](const char* name) {
-        std::string s(ext);
+    // Core profile: glGetString(GL_EXTENSIONS) is invalid (GL_INVALID_ENUM). Use glGetStringi (3.0+).
+    std::string extList;
+    GLint numExt = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &numExt);
+    for (GLint i = 0; i < numExt; ++i) {
+        const char* e = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(i)));
+        if (e) {
+            if (!extList.empty()) extList += ' ';
+            extList += e;
+        }
+    }
+    auto has = [&extList](const char* name) {
         std::string n(name);
-        return s.find(n) != std::string::npos;
+        return extList.find(n) != std::string::npos;
     };
     m_caps.supportsBindless = has("GL_ARB_bindless_texture");
     m_caps.supportsCompute = has("GL_ARB_compute_shader");
@@ -690,7 +698,11 @@ int DeviceGL::GetMaxSamples(int requestedSamples) {
 }
 
 void DeviceGL::Present() {
-    // Swap buffers is typically called by platform/window; no-op here or call glFinish.
+    // Swap buffers is typically called by platform/window; no-op here.
+}
+
+void DeviceGL::Finish() {
+    glFinish();
 }
 
 void DeviceGL::BlitToDefaultFramebuffer(IRenderTarget* src) {
@@ -706,6 +718,35 @@ void DeviceGL::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBlitFramebuffer(0, 0, static_cast<GLint>(width), static_cast<GLint>(height),
                       0, 0, static_cast<GLint>(width), static_cast<GLint>(height),
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void DeviceGL::BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) {
+    if (!src || windowWidth == 0 || windowHeight == 0) return;
+    const uint32_t srcW = src->GetWidth();
+    const uint32_t srcH = src->GetHeight();
+    if (srcW == 0 || srcH == 0) return;
+    // Cover mode: fill full window, preserve scene aspect by cropping (no clear-color bars).
+    float scale = static_cast<float>(windowWidth) / static_cast<float>(srcW);
+    float scaleH = static_cast<float>(windowHeight) / static_cast<float>(srcH);
+    if (scaleH > scale) scale = scaleH;
+    float srcVisibleW = static_cast<float>(windowWidth) / scale;
+    float srcVisibleH = static_cast<float>(windowHeight) / scale;
+    srcVisibleW = std::min(srcVisibleW, static_cast<float>(srcW));
+    srcVisibleH = std::min(srcVisibleH, static_cast<float>(srcH));
+    GLint srcX = static_cast<GLint>((static_cast<float>(srcW) - srcVisibleW) * 0.5f);
+    GLint srcY = static_cast<GLint>((static_cast<float>(srcH) - srcVisibleH) * 0.5f);
+    if (srcX < 0) srcX = 0;
+    if (srcY < 0) srcY = 0;
+    GLint srcR = std::min(srcX + static_cast<GLint>(srcVisibleW), static_cast<GLint>(srcW));
+    GLint srcB = std::min(srcY + static_cast<GLint>(srcVisibleH), static_cast<GLint>(srcH));
+    auto* r = static_cast<RenderTargetGL*>(src);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(srcX, srcY, srcR, srcB,
+                      0, 0, static_cast<GLint>(windowWidth), static_cast<GLint>(windowHeight),
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);

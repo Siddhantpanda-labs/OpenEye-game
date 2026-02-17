@@ -7,6 +7,13 @@
 
 namespace openeye::player {
 
+/**
+ * When false: render runs on the main thread (BuildScene then RenderSceneOnly then present inline).
+ * When true:  render runs on a dedicated thread; main thread submits via RenderFrameSync.
+ * Set to true once threading/flicker is resolved to regain CPU overlap and smoother frame pacing.
+ */
+constexpr bool kUseRenderThread = false;
+
 enum class TimeMode {
     Realtime,
     Fixed,

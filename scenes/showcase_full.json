@@ -73,7 +73,7 @@
           "data": {
             "type": 0,
             "color": [1.0, 1.0, 1.0],
-            "intensity": 0.0,
+            "intensity": 1.0,
             "range": 20.0,
             "innerCone": 15.0,
             "outerCone": 30.0,

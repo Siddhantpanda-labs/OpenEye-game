@@ -309,6 +309,7 @@ endif()
 # --------------------------------------
 if(OPENEYE_BUILD_PLAYER)
     add_subdirectory(app/player)
+    add_subdirectory(app/test_forward_skinned)
 endif()
 
 # --------------------------------------

@@ -63,7 +63,10 @@ void ShadowMap::UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& vie
     (void)proj;
     glm::vec3 dir(lightDir.x, lightDir.y, lightDir.z);
     float len = glm::length(dir);
-    if (len < 1e-6f) len = 1.f;
+    if (len < 1e-6f) {
+        dir = glm::vec3(0.5f, -1.f, 0.2f);
+        len = glm::length(dir);
+    }
     dir /= len;
     glm::vec3 center(cameraPos.x, cameraPos.y, cameraPos.z);
     const float lightDistance = 80.f;

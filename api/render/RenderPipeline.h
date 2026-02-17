@@ -40,10 +40,19 @@ public:
     /** Render scene. */
     void Render(const RenderScene& scene);
     void BlitToScreen();
+    /** Wait for GPU to finish (call before swap to reduce flicker). */
+    void Finish();
     bool HasValidOutput() const;
 
     /** Opaque device handle for creating RHI resources (e.g. RenderTarget). Null if not initialized. */
     void* GetDevice() const;
+
+    /** Insert a GPU fence after current command stream. Call before Finish() so fence is after all draws. Returns opaque fence (null if unsupported). */
+    void* InsertFrameFence();
+    /** Wait for fence (no destroy). Call before SwapBuffers so present happens after GPU completes. No-op if fence is null. */
+    void WaitFence(void* fence);
+    /** Wait for fence then destroy it. Call after SwapBuffers before reusing frame slot. No-op if fence is null. */
+    void WaitAndDestroyFence(void* fence);
 
 private:
     class Impl;

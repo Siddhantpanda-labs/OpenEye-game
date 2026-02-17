@@ -937,6 +937,12 @@ void DeviceDiligent::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, u
     (void)height;
 }
 
+void DeviceDiligent::BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) {
+    (void)windowWidth;
+    (void)windowHeight;
+    BlitToDefaultFramebuffer(src);
+}
+
 void DeviceDiligent::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
     (void)src;
     (void)dst;

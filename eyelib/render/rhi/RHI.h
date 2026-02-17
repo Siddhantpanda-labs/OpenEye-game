@@ -110,10 +110,14 @@ struct IDevice {
     virtual ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) = 0;
 
     virtual void Present() = 0;
+    /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */
+    virtual void Finish() {}
     /** Blit color from given render target to the default framebuffer (e.g. for present). */
     virtual void BlitToDefaultFramebuffer(IRenderTarget* src) = 0;
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to default framebuffer. */
     virtual void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) = 0;
+    /** Clear default framebuffer then blit src into a centered rect that preserves aspect ratio (letterbox). windowWidth/Height = output size. */
+    virtual void BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) = 0;
     /** Blit from src to dst (full size). colorOnly: true = color bit, false = color + depth. */
     virtual void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) = 0;
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to RHI render target. */
