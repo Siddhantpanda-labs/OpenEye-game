@@ -5,34 +5,60 @@ namespace api {
 namespace world {
 
 Observation::Observation(const ::eyelib::world::World& world)
-    : m_observation(world.GetView()) {}
+    : m_observation(std::in_place, world.GetView())
+    , m_snapshot(nullptr) {}
+
+Observation::Observation(const World::RenderSnapshot& snapshot)
+    : m_observation(std::nullopt)
+    , m_snapshot(&snapshot) {}
 
 std::vector<::eyelib::world::EntityId> Observation::GetEntities() const {
-    return m_observation.GetEntities();
+    if (m_snapshot) {
+        std::vector<::eyelib::world::EntityId> out;
+        out.reserve(m_snapshot->transformCache.size());
+        for (const auto& [e, t] : m_snapshot->transformCache) {
+            (void)t;
+            out.push_back(e);
+        }
+        return out;
+    }
+    return m_observation->GetEntities();
 }
 
 std::optional<std::string> Observation::GetEntityName(::eyelib::world::EntityId entity) const {
-    return m_observation.GetEntityName(entity);
+    if (m_snapshot) return std::nullopt;
+    return m_observation->GetEntityName(entity);
 }
 
 std::optional<eyelib::math::Transform> Observation::GetTransform(::eyelib::world::EntityId entity) const {
-    return m_observation.GetTransform(entity);
+    if (m_snapshot) {
+        auto it = m_snapshot->transformCache.find(entity);
+        if (it != m_snapshot->transformCache.end())
+            return eyelib::math::Transform{ it->second.position, it->second.rotation, it->second.scale };
+        return std::nullopt;
+    }
+    return m_observation->GetTransform(entity);
 }
 
 std::vector<std::string> Observation::GetComponentNames(::eyelib::world::EntityId entity) const {
-    return m_observation.GetComponentNames(entity);
+    if (m_snapshot) return {};
+    return m_observation->GetComponentNames(entity);
 }
 
 std::vector<::eyelib::world::EntityId> Observation::GetRegionsContainingPoint(const eyelib::math::Vec3& point) const {
-    return m_observation.GetRegionsContainingPoint(point);
+    if (m_snapshot) return {};
+    return m_observation->GetRegionsContainingPoint(point);
 }
 
 std::optional<::eyelib::world::EntityId> Observation::GetHighestPriorityRegion(const eyelib::math::Vec3& point) const {
-    return m_observation.GetHighestPriorityRegion(point);
+    if (m_snapshot) return std::nullopt;
+    return m_observation->GetHighestPriorityRegion(point);
 }
 
 std::span<const World::TransformEntry> Observation::GetTransformsView() const {
-    const auto raw = m_observation.GetTransformsView();
+    if (m_snapshot)
+        return std::span<const World::TransformEntry>(m_snapshot->transforms);
+    const auto raw = m_observation->GetTransformsView();
     m_transformBuffer.clear();
     m_transformBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -42,11 +68,20 @@ std::span<const World::TransformEntry> Observation::GetTransformsView() const {
 }
 
 ::eyelib::world::WorldObservation::TransformSoAView Observation::GetTransformSoAView() const {
-    return m_observation.GetTransformSoAView();
+    if (m_snapshot) {
+        return {
+            std::span<const ::eyelib::world::EntityId>(m_snapshot->transformEntityIds),
+            std::span<const ::eyelib::math::Vec3>(m_snapshot->transformPositions),
+            std::span<const ::eyelib::math::Quat>(m_snapshot->transformRotations),
+            std::span<const ::eyelib::math::Vec3>(m_snapshot->transformScales),
+        };
+    }
+    return m_observation->GetTransformSoAView();
 }
 
 std::span<const World::RenderableEntry> Observation::GetRenderablesView() const {
-    const auto raw = m_observation.GetRenderablesView();
+    if (m_snapshot) return std::span<const World::RenderableEntry>(m_snapshot->renderables);
+    const auto raw = m_observation->GetRenderablesView();
     m_renderableBuffer.clear();
     m_renderableBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -56,7 +91,8 @@ std::span<const World::RenderableEntry> Observation::GetRenderablesView() const 
 }
 
 std::span<const World::MeshRendererEntry> Observation::GetMeshRenderersView() const {
-    const auto raw = m_observation.GetMeshRenderersView();
+    if (m_snapshot) return std::span<const World::MeshRendererEntry>(m_snapshot->meshRenderers);
+    const auto raw = m_observation->GetMeshRenderersView();
     m_meshRendererBuffer.clear();
     m_meshRendererBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -66,7 +102,8 @@ std::span<const World::MeshRendererEntry> Observation::GetMeshRenderersView() co
 }
 
 std::span<const World::CameraEntry> Observation::GetCamerasView() const {
-    const auto raw = m_observation.GetCamerasView();
+    if (m_snapshot) return std::span<const World::CameraEntry>(m_snapshot->cameras);
+    const auto raw = m_observation->GetCamerasView();
     m_cameraBuffer.clear();
     m_cameraBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -76,7 +113,8 @@ std::span<const World::CameraEntry> Observation::GetCamerasView() const {
 }
 
 std::span<const World::LightEntry> Observation::GetLightsView() const {
-    const auto raw = m_observation.GetLightsView();
+    if (m_snapshot) return std::span<const World::LightEntry>(m_snapshot->lights);
+    const auto raw = m_observation->GetLightsView();
     m_lightBuffer.clear();
     m_lightBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -86,7 +124,8 @@ std::span<const World::LightEntry> Observation::GetLightsView() const {
 }
 
 std::span<const World::RigidBodyEntry> Observation::GetRigidBodiesView() const {
-    const auto raw = m_observation.GetRigidBodiesView();
+    if (m_snapshot) return std::span<const World::RigidBodyEntry>(m_snapshot->rigidBodies);
+    const auto raw = m_observation->GetRigidBodiesView();
     m_rigidBodyBuffer.clear();
     m_rigidBodyBuffer.reserve(raw.size());
     for (const auto& p : raw) {
@@ -96,7 +135,8 @@ std::span<const World::RigidBodyEntry> Observation::GetRigidBodiesView() const {
 }
 
 std::span<const World::ColliderEntry> Observation::GetCollidersView() const {
-    const auto raw = m_observation.GetCollidersView();
+    if (m_snapshot) return std::span<const World::ColliderEntry>(m_snapshot->colliders);
+    const auto raw = m_observation->GetCollidersView();
     m_colliderBuffer.clear();
     m_colliderBuffer.reserve(raw.size());
     for (const auto& p : raw) {

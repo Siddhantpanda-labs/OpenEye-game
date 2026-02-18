@@ -16,6 +16,8 @@ namespace world {
 class Observation {
 public:
     explicit Observation(const ::eyelib::world::World& world);
+    /** View over an already-captured frame snapshot. No refill; all GetXxxView() return spans over the snapshot. Use when World::GetFrameSnapshot() is set. */
+    explicit Observation(const World::RenderSnapshot& snapshot);
 
     std::vector<::eyelib::world::EntityId> GetEntities() const;
     std::optional<std::string> GetEntityName(::eyelib::world::EntityId entity) const;
@@ -38,7 +40,8 @@ public:
     std::span<const World::ColliderEntry> GetCollidersView() const;
 
 private:
-    ::eyelib::world::WorldObservation m_observation;
+    std::optional<::eyelib::world::WorldObservation> m_observation;
+    const World::RenderSnapshot* m_snapshot = nullptr;
     mutable std::vector<World::TransformEntry> m_transformBuffer;
     mutable std::vector<World::RenderableEntry> m_renderableBuffer;
     mutable std::vector<World::MeshRendererEntry> m_meshRendererBuffer;

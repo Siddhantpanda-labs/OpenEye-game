@@ -7,29 +7,18 @@
 #include "api/render/All.h"
 #include "api/world/All.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace openeye::player {
 
 class WorldAnimationBridge;
 
-/** Immutable copy of world state needed to build a render scene. Build from World once per frame, then call BuildScene(snapshot, ...) so the render path never reads live world. */
-struct RenderSnapshot {
-    std::vector<eyelib::api::world::World::RenderableEntry> renderables;
-    std::vector<eyelib::api::world::World::MeshRendererEntry> meshRenderers;
-    std::vector<eyelib::api::world::World::CameraEntry> cameras;
-    std::vector<eyelib::api::world::World::LightEntry> lights;
-    std::unordered_map<eyelib::world::EntityId, eyelib::world::components::Transform, eyelib::world::EntityIdHash> transformCache;
-
-    std::optional<eyelib::world::components::Transform> GetTransform(eyelib::world::EntityId entity) const;
-};
-
-/** Game-thread only: capture a snapshot of the world for rendering. Use with BuildScene(snapshot, ...). */
-RenderSnapshot CreateRenderSnapshot(const eyelib::api::world::World& world);
+/** Use World::CaptureRenderSnapshot(snapshot) once per frame, then BuildScene(snapshot, ...). Snapshot type is eyelib::api::world::World::RenderSnapshot. */
 
 class WorldRenderBridge {
 public:
@@ -39,7 +28,7 @@ public:
     void Shutdown();
 
     /** Full render path (BuildScene + pipeline). Use only when render runs on same thread as game. */
-    void Render(const RuntimeOptions& options, const eyelib::api::world::World& world,
+    void Render(const RuntimeOptions& options, eyelib::api::world::World& world,
                 const WorldAnimationBridge* animationBridge,
                 eyelib::api::AssetRegistry* assetRegistry,
                 uint32_t width, uint32_t height);
@@ -61,21 +50,21 @@ public:
     void WaitAndDestroyFence(void* fence);
 
     /** Game-thread only: fill scene from world + animation. Used with RenderFrameSync when using a render thread. */
-    void BuildScene(const eyelib::api::world::World& world, const RuntimeOptions& options,
+    void BuildScene(eyelib::api::world::World& world, const RuntimeOptions& options,
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
                     api::FrameAllocator* frameAlloc = nullptr);
 
-    /** Game-thread only: fill scene from a snapshot (observation). Use this to avoid reading live world during build. */
+    /** Game-thread only: fill scene from a snapshot (observation). Observation may be a view over a frame snapshot. */
     void BuildScene(const eyelib::api::world::Observation& obs, const RuntimeOptions& options,
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
                     api::FrameAllocator* frameAlloc = nullptr);
 
-    /** Game-thread only: fill scene from a formal snapshot. Preferred when using a render thread: CreateRenderSnapshot(world) then BuildScene(snapshot, ...). */
-    void BuildScene(const RenderSnapshot& snapshot, const RuntimeOptions& options,
+    /** Game-thread only: fill scene from the frame snapshot. One capture per frame (World::CaptureRenderSnapshot), then call this. */
+    void BuildScene(const eyelib::api::world::World::RenderSnapshot& snapshot, const RuntimeOptions& options,
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
@@ -103,6 +92,18 @@ private:
                                                            eyelib::api::AssetRegistry* registry);
     ModelEntry LoadModelEntry(const std::string& path);
 
+    void BuildSceneFromViews(
+        std::span<const eyelib::api::world::World::RenderableEntry> renderables,
+        std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
+        std::span<const eyelib::api::world::World::CameraEntry> cameras,
+        std::span<const eyelib::api::world::World::LightEntry> lights,
+        std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
+        const RuntimeOptions& options,
+        const WorldAnimationBridge* animationBridge,
+        eyelib::api::AssetRegistry* assetRegistry,
+        eyelib::api::RenderScene& scene,
+        api::FrameAllocator* frameAlloc);
+
     eyelib::api::Renderer m_renderer;
     eyelib::api::RenderPipeline m_pipeline;
     bool m_ready = false;
@@ -114,6 +115,7 @@ private:
     std::shared_ptr<eyelib::api::Shader> m_skinnedShader;
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, ModelEntry> m_modelCache;
+    eyelib::api::world::World::RenderSnapshot m_frameSnapshot;
 };
 
 } // namespace openeye::player

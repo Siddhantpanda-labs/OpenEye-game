@@ -471,6 +471,7 @@ int RunPlayer(int argc, char** argv) {
                    &frameSync, &renderBridge, &overlay, &assetRegistry, &framePacer](float deltaSeconds) {
         if (!options.headless && !options.vsync)
             framePacer.WaitForNextFrame();
+        world.SetFrameSnapshot(nullptr);
         if (!options.headless) {
             if (shaderWatcher) shaderWatcher->Tick();
             window.PollEvents();

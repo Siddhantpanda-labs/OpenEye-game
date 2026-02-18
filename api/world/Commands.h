@@ -18,6 +18,10 @@ CommandPtr CreateEntity(const std::string& name = "");
 CommandPtr DestroyEntity(::eyelib::world::EntityId entity);
 CommandPtr ReparentEntity(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent);
 CommandPtr SetName(::eyelib::world::EntityId entity, const std::string& name);
+CommandPtr AddTag(::eyelib::world::EntityId entity, const std::string& tag);
+CommandPtr RemoveTag(::eyelib::world::EntityId entity, const std::string& tag);
+CommandPtr SetMetadata(::eyelib::world::EntityId entity, const std::string& name, uint32_t flags = 0);
+CommandPtr ClearMetadata(::eyelib::world::EntityId entity);
 CommandPtr CreateRegion(const ::eyelib::world::components::Region& region, const std::string& name = "Region");
 CommandPtr SetRegionData(::eyelib::world::EntityId entity, const ::eyelib::world::components::Region& region);
 CommandPtr AttachRegionRules(::eyelib::world::EntityId entity, const std::vector<std::string>& ruleIds);
@@ -33,6 +37,8 @@ template<typename T>
 CommandPtr RemoveComponent(::eyelib::world::EntityId entity) {
     return std::make_unique<::eyelib::world::RemoveComponentCommand<T>>(entity);
 }
+
+CommandPtr SetTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& value);
 
 template<typename T>
 CommandPtr SetComponentData(::eyelib::world::EntityId entity, const T& value) {

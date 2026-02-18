@@ -5,7 +5,10 @@
 #include "eyelib/world/EntityRegistry.h"
 #include "eyelib/world/WorldGraph/Hierarchy.h"
 #include "eyelib/world/WorldGraph/Metadata.h"
+#include "eyelib/world/WorldGraph/Tags.h"
 #include "eyelib/world/Events/WorldEvents.h"
+#include "eyelib/world/ComponentStorage/TransformStore.h"
+#include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Region.h"
 #include "eyelib/world/components/SystemBindings.h"
 
@@ -92,6 +95,10 @@ public:
 
     bool Apply(WorldState& state) override {
         m_prevParent = state.GraphHierarchy().GetParent(m_child);
+        if (m_parent == InvalidEntity) {
+            state.GraphHierarchy().RemoveParent(m_child);
+            return true;
+        }
         return state.GraphHierarchy().SetParent(m_child, m_parent);
     }
 
@@ -112,6 +119,143 @@ private:
     EntityId m_child;
     EntityId m_parent;
     std::optional<EntityId> m_prevParent;
+};
+
+class AddTagCommand final : public Command {
+public:
+    AddTagCommand(EntityId entity, std::string tag)
+        : m_entity(entity), m_tag(std::move(tag)) {}
+
+    bool Apply(WorldState& state) override {
+        if (m_tag.empty()) return false;
+        state.GraphTags().Add(m_entity, m_tag);
+        return true;
+    }
+
+    bool Revert(WorldState& state) override {
+        state.GraphTags().Remove(m_entity, m_tag);
+        return true;
+    }
+
+    std::string GetName() const override { return "AddTag"; }
+    EntityId GetEntity() const { return m_entity; }
+    const std::string& GetTag() const { return m_tag; }
+
+private:
+    EntityId m_entity;
+    std::string m_tag;
+};
+
+class RemoveTagCommand final : public Command {
+public:
+    RemoveTagCommand(EntityId entity, std::string tag)
+        : m_entity(entity), m_tag(std::move(tag)) {}
+
+    bool Apply(WorldState& state) override {
+        state.GraphTags().Remove(m_entity, m_tag);
+        return true;
+    }
+
+    bool Revert(WorldState& /*state*/) override {
+        return false;
+    }
+
+    std::string GetName() const override { return "RemoveTag"; }
+    EntityId GetEntity() const { return m_entity; }
+    const std::string& GetTag() const { return m_tag; }
+
+private:
+    EntityId m_entity;
+    std::string m_tag;
+};
+
+class SetMetadataCommand final : public Command {
+public:
+    SetMetadataCommand(EntityId entity, std::string name, uint32_t flags)
+        : m_entity(entity), m_name(std::move(name)), m_flags(flags) {}
+
+    bool Apply(WorldState& state) override {
+        m_prev = state.GraphMetadata().Get(m_entity);
+        MetadataEntry entry;
+        entry.name = m_name;
+        entry.flags = m_flags;
+        state.GraphMetadata().Set(m_entity, entry);
+        return true;
+    }
+
+    bool Revert(WorldState& state) override {
+        if (m_prev.has_value()) {
+            state.GraphMetadata().Set(m_entity, *m_prev);
+        } else {
+            state.GraphMetadata().Remove(m_entity);
+        }
+        return true;
+    }
+
+    std::string GetName() const override { return "SetMetadata"; }
+    EntityId GetEntity() const { return m_entity; }
+    const std::string& GetNameValue() const { return m_name; }
+    uint32_t GetFlags() const { return m_flags; }
+
+private:
+    EntityId m_entity;
+    std::string m_name;
+    uint32_t m_flags;
+    std::optional<MetadataEntry> m_prev;
+};
+
+class ClearMetadataCommand final : public Command {
+public:
+    explicit ClearMetadataCommand(EntityId entity) : m_entity(entity) {}
+
+    bool Apply(WorldState& state) override {
+        m_prev = state.GraphMetadata().Get(m_entity);
+        state.GraphMetadata().Remove(m_entity);
+        return true;
+    }
+
+    bool Revert(WorldState& state) override {
+        if (m_prev.has_value()) {
+            state.GraphMetadata().Set(m_entity, *m_prev);
+            return true;
+        }
+        return true;
+    }
+
+    std::string GetName() const override { return "ClearMetadata"; }
+    EntityId GetEntity() const { return m_entity; }
+
+private:
+    EntityId m_entity;
+    std::optional<MetadataEntry> m_prev;
+};
+
+class SetTransformCommand final : public Command {
+public:
+    SetTransformCommand(EntityId entity, const components::Transform& value)
+        : m_entity(entity), m_value(value) {}
+
+    bool Apply(WorldState& state) override {
+        auto& store = state.GetTransformStore();
+        if (auto* ref = store.TryGet(m_entity)) {
+            *ref = m_value;
+            return true;
+        }
+        store.Add(m_entity, m_value);
+        return true;
+    }
+
+    bool Revert(WorldState& /*state*/) override {
+        return false;
+    }
+
+    std::string GetName() const override { return "SetTransform"; }
+    EntityId GetEntity() const { return m_entity; }
+    const components::Transform& GetValue() const { return m_value; }
+
+private:
+    EntityId m_entity;
+    components::Transform m_value;
 };
 
 class SetNameCommand final : public Command {

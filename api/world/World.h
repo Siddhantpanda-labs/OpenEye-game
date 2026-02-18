@@ -16,10 +16,14 @@
 #include "eyelib/world/components/AABB.h"
 #include "eyelib/world/components/SystemBindings.h"
 #include "eyelib/world/components/ActiveSystems.h"
+#include "eyelib/world/EntityId.h"
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace eyelib {
@@ -37,6 +41,12 @@ public:
     World& operator=(const World&) = delete;
 
     void SubmitCommand(std::unique_ptr<::eyelib::world::Command> command);
+    /** Enqueue and apply one command immediately. When the command is CreateEntity and it succeeds, \a createdEntity is set. */
+    struct ApplySyncResult {
+        bool success = false;
+        std::optional<::eyelib::world::EntityId> createdEntity;
+    };
+    ApplySyncResult ApplyCommandSync(std::unique_ptr<::eyelib::world::Command> command);
     void ApplyPendingCommands();
     void ApplyTransaction(::eyelib::world::Transaction&& transaction);
     void Update();
@@ -144,6 +154,30 @@ public:
         ::eyelib::world::components::Collider component;
     };
 
+    /** Immutable frame snapshot: one capture per frame. Filled by CaptureRenderSnapshot(); read-only after that. */
+    struct RenderSnapshot {
+        std::vector<RenderableEntry> renderables;
+        std::vector<MeshRendererEntry> meshRenderers;
+        std::vector<CameraEntry> cameras;
+        std::vector<LightEntry> lights;
+        std::vector<RigidBodyEntry> rigidBodies;
+        std::vector<ColliderEntry> colliders;
+        std::unordered_map<::eyelib::world::EntityId, ::eyelib::world::components::Transform, ::eyelib::world::EntityIdHash> transformCache;
+        std::vector<TransformEntry> transforms;
+        std::vector<::eyelib::world::EntityId> transformEntityIds;
+        std::vector<::eyelib::math::Vec3> transformPositions;
+        std::vector<::eyelib::math::Quat> transformRotations;
+        std::vector<::eyelib::math::Vec3> transformScales;
+
+        std::optional<::eyelib::world::components::Transform> GetTransform(::eyelib::world::EntityId entity) const;
+    };
+
+    /** One capture per frame: fills \a out from world state (one pass). Call once per frame; then use \a out for BuildScene and set as frame snapshot so GetObservation() returns a view over it. */
+    void CaptureRenderSnapshot(RenderSnapshot& out) const;
+    /** Set the current frame snapshot. GetObservation() will return a view over it until cleared. Call at frame start after CaptureRenderSnapshot; clear at frame end. */
+    void SetFrameSnapshot(const RenderSnapshot* snapshot);
+    const RenderSnapshot* GetFrameSnapshot() const { return m_frameSnapshot; }
+
     struct AnimatorEntry {
         ::eyelib::world::EntityId entity;
         ::eyelib::world::components::Animator component;
@@ -231,6 +265,7 @@ public:
 private:
     class Impl;
     Impl* m_impl = nullptr;
+    const RenderSnapshot* m_frameSnapshot = nullptr;
 };
 
 } // namespace world

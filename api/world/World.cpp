@@ -1,6 +1,7 @@
 #include "World.h"
 #include "Observation.h"
 #include "Serialization.h"
+#include "Commands.h"
 
 #include "eyelib/world/Commands/CommandTypes.h"
 
@@ -45,6 +46,17 @@ void World::SubmitCommand(std::unique_ptr<::eyelib::world::Command> command) {
         return;
     }
     m_impl->world.SubmitCommand(std::move(command));
+}
+
+World::ApplySyncResult World::ApplyCommandSync(std::unique_ptr<::eyelib::world::Command> command) {
+    ApplySyncResult out{};
+    if (!m_impl) {
+        return out;
+    }
+    auto r = m_impl->world.ApplyCommandSync(std::move(command));
+    out.success = r.success;
+    out.createdEntity = r.createdEntity;
+    return out;
 }
 
 void World::ApplyPendingCommands() {
@@ -156,64 +168,29 @@ void World::SetReplayDelta(float seconds) {
     if (!m_impl) {
         return ::eyelib::world::InvalidEntity;
     }
-    auto& state = m_impl->world.GetState();
-    auto entity = state.Entities().Create();
-    if (!name.empty()) {
-        ::eyelib::world::MetadataEntry entry;
-        entry.name = name;
-        state.GraphMetadata().Set(entity, entry);
-    }
-    return entity;
+    auto r = ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    return (r.success && r.createdEntity) ? *r.createdEntity : ::eyelib::world::InvalidEntity;
 }
 
 bool World::DestroyEntity(::eyelib::world::EntityId entity) {
     if (!m_impl) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return false;
-    }
-    const auto& allTags = state.GraphTags().All();
-    auto tagIt = allTags.find(entity);
-    if (tagIt != allTags.end()) {
-        std::vector<std::string> tags(tagIt->second.begin(), tagIt->second.end());
-        for (const auto& tag : tags) {
-            state.GraphTags().Remove(entity, tag);
-        }
-    }
-    state.GraphMetadata().Remove(entity);
-    state.GraphHierarchy().RemoveParent(entity);
-    state.Entities().Destroy(entity);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::DestroyEntity(entity)).success;
 }
 
 bool World::SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent) {
     if (!m_impl) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(child)) {
-        return false;
-    }
-    if (parent == ::eyelib::world::InvalidEntity) {
-        state.GraphHierarchy().RemoveParent(child);
-        return true;
-    }
-    if (!state.Entities().IsAlive(parent)) {
-        return false;
-    }
-    if (state.GraphHierarchy().WouldCreateCycle(child, parent)) {
-        return false;
-    }
-    return state.GraphHierarchy().SetParent(child, parent);
+    return ApplyCommandSync(eyelib::api::world::ReparentEntity(child, parent)).success;
 }
 
 void World::ClearParent(::eyelib::world::EntityId child) {
     if (!m_impl) {
         return;
     }
-    m_impl->world.GetState().GraphHierarchy().RemoveParent(child);
+    ApplyCommandSync(eyelib::api::world::ReparentEntity(child, ::eyelib::world::InvalidEntity));
 }
 
 ::eyelib::world::EntityId World::GetParent(::eyelib::world::EntityId child) const {
@@ -267,22 +244,16 @@ void World::AddTag(::eyelib::world::EntityId entity, const std::string& tag) {
     if (!m_impl || tag.empty()) {
         return;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return;
-    }
-    state.GraphTags().Add(entity, tag);
+    SubmitCommand(eyelib::api::world::AddTag(entity, tag));
+    ApplyPendingCommands();
 }
 
 void World::RemoveTag(::eyelib::world::EntityId entity, const std::string& tag) {
     if (!m_impl || tag.empty()) {
         return;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return;
-    }
-    state.GraphTags().Remove(entity, tag);
+    SubmitCommand(eyelib::api::world::RemoveTag(entity, tag));
+    ApplyPendingCommands();
 }
 
 bool World::HasTag(::eyelib::world::EntityId entity, const std::string& tag) const {
@@ -361,14 +332,8 @@ bool World::SetMetadata(::eyelib::world::EntityId entity, const std::string& nam
     if (!m_impl) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return false;
-    }
-    ::eyelib::world::MetadataEntry entry;
-    entry.name = name;
-    entry.flags = flags;
-    state.GraphMetadata().Set(entity, entry);
+    SubmitCommand(eyelib::api::world::SetMetadata(entity, name, flags));
+    ApplyPendingCommands();
     return true;
 }
 
@@ -393,11 +358,8 @@ bool World::ClearMetadata(::eyelib::world::EntityId entity) {
     if (!m_impl) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return false;
-    }
-    state.GraphMetadata().Remove(entity);
+    SubmitCommand(eyelib::api::world::ClearMetadata(entity));
+    ApplyPendingCommands();
     return true;
 }
 
@@ -421,14 +383,7 @@ bool World::SetEntityName(::eyelib::world::EntityId entity, const std::string& n
     if (!m_impl) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    if (!state.Entities().IsAlive(entity)) {
-        return false;
-    }
-    auto entry = state.GraphMetadata().Get(entity).value_or(::eyelib::world::MetadataEntry{});
-    entry.name = name;
-    state.GraphMetadata().Set(entity, entry);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetName(entity, name)).success;
 }
 
 ::eyelib::world::EntityId World::FindEntityByName(const std::string& name) const {
@@ -623,22 +578,12 @@ bool World::SetComponentJson(::eyelib::world::EntityId entity,
     if (!m_impl || componentName.empty()) {
         return false;
     }
-    auto& state = m_impl->world.GetState();
-    const auto* desc = ::eyelib::world::ComponentSerializer::Get().GetDescriptorByName(componentName);
-    if (!desc) {
-        return false;
-    }
-    auto data = nlohmann::json::parse(json, nullptr, false);
+    nlohmann::json data = nlohmann::json::parse(json, nullptr, false);
     if (data.is_discarded()) {
         return false;
     }
-    auto* store = state.FindComponentStore(desc->typeKey);
-    if (!store) {
-        auto created = desc->createStore();
-        store = created.get();
-        state.RegisterComponentStore(desc->typeKey, std::move(created));
-    }
-    desc->deserializeOne(*store, entity, data);
+    SubmitCommand(std::make_unique<::eyelib::world::SetComponentDataByNameCommand>(entity, componentName, std::move(data)));
+    ApplyPendingCommands();
     return true;
 }
 
@@ -957,13 +902,7 @@ bool World::SetTransform(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().GetTransformStore();
-    auto* entry = store.TryGet(entity);
-    if (!entry) {
-        return false;
-    }
-    *entry = transform;
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetTransform(entity, transform)).success;
 }
 
 bool World::SetCamera(::eyelib::world::EntityId entity,
@@ -971,13 +910,7 @@ bool World::SetCamera(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Camera>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = camera;
-        return true;
-    }
-    store.Add(entity, camera);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, camera)).success;
 }
 
 bool World::SetLight(::eyelib::world::EntityId entity,
@@ -985,13 +918,7 @@ bool World::SetLight(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Light>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = light;
-        return true;
-    }
-    store.Add(entity, light);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, light)).success;
 }
 
 bool World::SetRenderable(::eyelib::world::EntityId entity,
@@ -999,13 +926,7 @@ bool World::SetRenderable(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Renderable>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = renderable;
-        return true;
-    }
-    store.Add(entity, renderable);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, renderable)).success;
 }
 
 bool World::SetMeshRenderer(::eyelib::world::EntityId entity,
@@ -1013,13 +934,7 @@ bool World::SetMeshRenderer(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::MeshRenderer>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = renderer;
-        return true;
-    }
-    store.Add(entity, renderer);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, renderer)).success;
 }
 
 bool World::SetCollider(::eyelib::world::EntityId entity,
@@ -1027,13 +942,7 @@ bool World::SetCollider(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Collider>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = collider;
-        return true;
-    }
-    store.Add(entity, collider);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, collider)).success;
 }
 
 bool World::SetScript(::eyelib::world::EntityId entity,
@@ -1041,13 +950,7 @@ bool World::SetScript(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Script>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = script;
-        return true;
-    }
-    store.Add(entity, script);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, script)).success;
 }
 
 bool World::SetRigidBody(::eyelib::world::EntityId entity,
@@ -1055,13 +958,7 @@ bool World::SetRigidBody(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::RigidBody>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = rigidBody;
-        return true;
-    }
-    store.Add(entity, rigidBody);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, rigidBody)).success;
 }
 
 bool World::SetAnimator(::eyelib::world::EntityId entity,
@@ -1069,13 +966,7 @@ bool World::SetAnimator(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Animator>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = animator;
-        return true;
-    }
-    store.Add(entity, animator);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, animator)).success;
 }
 
 bool World::SetName(::eyelib::world::EntityId entity,
@@ -1083,13 +974,7 @@ bool World::SetName(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Name>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = name;
-        return true;
-    }
-    store.Add(entity, name);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, name)).success;
 }
 
 bool World::SetRegion(::eyelib::world::EntityId entity,
@@ -1097,13 +982,7 @@ bool World::SetRegion(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::Region>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = region;
-        return true;
-    }
-    store.Add(entity, region);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetRegionData(entity, region)).success;
 }
 
 bool World::SetRegionMembership(::eyelib::world::EntityId entity,
@@ -1111,13 +990,7 @@ bool World::SetRegionMembership(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::RegionMembership>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = membership;
-        return true;
-    }
-    store.Add(entity, membership);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, membership)).success;
 }
 
 bool World::SetAABB(::eyelib::world::EntityId entity,
@@ -1125,13 +998,7 @@ bool World::SetAABB(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::AABB>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = aabb;
-        return true;
-    }
-    store.Add(entity, aabb);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, aabb)).success;
 }
 
 bool World::SetSystemBindings(::eyelib::world::EntityId entity,
@@ -1139,13 +1006,7 @@ bool World::SetSystemBindings(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::SystemBindings>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = bindings;
-        return true;
-    }
-    store.Add(entity, bindings);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, bindings)).success;
 }
 
 bool World::SetActiveSystems(::eyelib::world::EntityId entity,
@@ -1153,20 +1014,14 @@ bool World::SetActiveSystems(::eyelib::world::EntityId entity,
     if (!m_impl) {
         return false;
     }
-    auto& store = m_impl->world.GetState().Components<::eyelib::world::components::ActiveSystems>();
-    if (auto* existing = store.TryGet(entity)) {
-        *existing = systems;
-        return true;
-    }
-    store.Add(entity, systems);
-    return true;
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, systems)).success;
 }
 
 bool World::LoadScene(const std::string& path) {
     if (!m_impl) {
         return false;
     }
-    return m_impl->world.ApplyCommandSync(std::make_unique<::eyelib::world::LoadSceneCommand>(path));
+    return m_impl->world.ApplyCommandSync(std::make_unique<::eyelib::world::LoadSceneCommand>(path)).success;
 }
 
 size_t World::GetEntityCount() const {
@@ -1176,9 +1031,85 @@ size_t World::GetEntityCount() const {
     return m_impl->world.GetState().Entities().GetAliveEntities().size();
 }
 
+void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
+    out.renderables.clear();
+    out.meshRenderers.clear();
+    out.cameras.clear();
+    out.lights.clear();
+    out.rigidBodies.clear();
+    out.colliders.clear();
+    out.transformCache.clear();
+    out.transforms.clear();
+    out.transformEntityIds.clear();
+    out.transformPositions.clear();
+    out.transformRotations.clear();
+    out.transformScales.clear();
+    if (!m_impl) return;
+    const auto& state = m_impl->world.GetState();
+    const auto& transformStore = state.GetTransformStore();
+    const size_t transformCount = transformStore.Size();
+    out.transforms.reserve(transformCount);
+    out.transformEntityIds.reserve(transformCount);
+    out.transformPositions.reserve(transformCount);
+    out.transformRotations.reserve(transformCount);
+    out.transformScales.reserve(transformCount);
+    for (const auto& [entity, ref] : transformStore.All()) {
+        const auto t = static_cast<::eyelib::world::components::Transform>(ref);
+        out.transformCache[entity] = t;
+        out.transforms.push_back({ entity, t });
+        out.transformEntityIds.push_back(entity);
+        out.transformPositions.push_back(ref.Position());
+        out.transformRotations.push_back(ref.Rotation());
+        out.transformScales.push_back(ref.Scale());
+    }
+    const auto& renderableStore = state.Components<::eyelib::world::components::Renderable>().All();
+    out.renderables.reserve(renderableStore.size());
+    for (const auto& [entity, comp] : renderableStore) {
+        out.renderables.push_back({ entity, comp });
+    }
+    const auto& meshRendererStore = state.Components<::eyelib::world::components::MeshRenderer>().All();
+    out.meshRenderers.reserve(meshRendererStore.size());
+    for (const auto& [entity, comp] : meshRendererStore) {
+        out.meshRenderers.push_back({ entity, comp });
+    }
+    const auto& cameraStore = state.Components<::eyelib::world::components::Camera>().All();
+    out.cameras.reserve(cameraStore.size());
+    for (const auto& [entity, comp] : cameraStore) {
+        out.cameras.push_back({ entity, comp });
+    }
+    const auto& lightStore = state.Components<::eyelib::world::components::Light>().All();
+    out.lights.reserve(lightStore.size());
+    for (const auto& [entity, comp] : lightStore) {
+        out.lights.push_back({ entity, comp });
+    }
+    const auto& rigidBodyStore = state.Components<::eyelib::world::components::RigidBody>().All();
+    out.rigidBodies.reserve(rigidBodyStore.size());
+    for (const auto& [entity, comp] : rigidBodyStore) {
+        out.rigidBodies.push_back({ entity, comp });
+    }
+    const auto& colliderStore = state.Components<::eyelib::world::components::Collider>().All();
+    out.colliders.reserve(colliderStore.size());
+    for (const auto& [entity, comp] : colliderStore) {
+        out.colliders.push_back({ entity, comp });
+    }
+}
+
+void World::SetFrameSnapshot(const RenderSnapshot* snapshot) {
+    m_frameSnapshot = snapshot;
+}
+
+std::optional<::eyelib::world::components::Transform> World::RenderSnapshot::GetTransform(::eyelib::world::EntityId entity) const {
+    auto it = transformCache.find(entity);
+    if (it != transformCache.end()) return it->second;
+    return std::nullopt;
+}
+
 Observation World::GetObservation() const {
     if (!m_impl) {
         return Observation(::eyelib::world::World());
+    }
+    if (m_frameSnapshot) {
+        return Observation(*m_frameSnapshot);
     }
     return Observation(m_impl->world);
 }

@@ -10,9 +10,15 @@
 #include "scheduler/WorldScheduler.h"
 
 #include <memory>
+#include <optional>
 
 namespace eyelib {
 namespace world {
+
+struct ApplySyncResult {
+    bool success = false;
+    std::optional<EntityId> createdEntity;
+};
 
 class World {
 public:
@@ -26,8 +32,8 @@ public:
     const WorldState& GetState() const;
 
     void SubmitCommand(std::unique_ptr<Command> command);
-    /** Enqueues the command and immediately applies all pending commands. Returns true if all applied commands succeeded. */
-    bool ApplyCommandSync(std::unique_ptr<Command> command);
+    /** Enqueues the command and immediately applies all pending commands. When the single command is CreateEntityCommand and it succeeded, createdEntity is set. */
+    ApplySyncResult ApplyCommandSync(std::unique_ptr<Command> command);
     bool ApplyPendingCommands();
     void ApplyTransaction(Transaction&& transaction);
     void Update();

@@ -20,6 +20,26 @@ CommandPtr SetName(::eyelib::world::EntityId entity, const std::string& name) {
     return std::make_unique<::eyelib::world::SetNameCommand>(entity, name);
 }
 
+CommandPtr AddTag(::eyelib::world::EntityId entity, const std::string& tag) {
+    return std::make_unique<::eyelib::world::AddTagCommand>(entity, tag);
+}
+
+CommandPtr RemoveTag(::eyelib::world::EntityId entity, const std::string& tag) {
+    return std::make_unique<::eyelib::world::RemoveTagCommand>(entity, tag);
+}
+
+CommandPtr SetMetadata(::eyelib::world::EntityId entity, const std::string& name, uint32_t flags) {
+    return std::make_unique<::eyelib::world::SetMetadataCommand>(entity, name, flags);
+}
+
+CommandPtr SetTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& value) {
+    return std::make_unique<::eyelib::world::SetTransformCommand>(entity, value);
+}
+
+CommandPtr ClearMetadata(::eyelib::world::EntityId entity) {
+    return std::make_unique<::eyelib::world::ClearMetadataCommand>(entity);
+}
+
 CommandPtr CreateRegion(const ::eyelib::world::components::Region& region, const std::string& name) {
     return std::make_unique<::eyelib::world::CreateRegionCommand>(region, name);
 }

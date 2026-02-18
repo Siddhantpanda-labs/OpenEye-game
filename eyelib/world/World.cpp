@@ -25,11 +25,57 @@ void World::SubmitCommand(std::unique_ptr<Command> command) {
     m_buffer.Enqueue(std::move(command));
 }
 
-bool World::ApplyCommandSync(std::unique_ptr<Command> command) {
-    if (command) {
-        m_buffer.Enqueue(std::move(command));
+ApplySyncResult World::ApplyCommandSync(std::unique_ptr<Command> command) {
+    ApplySyncResult result{};
+    if (!command) {
+        result.success = ApplyPendingCommands();
+        return result;
     }
-    return ApplyPendingCommands();
+    m_buffer.Enqueue(std::move(command));
+    auto commands = m_buffer.TakeAll();
+    bool allOk = true;
+    for (auto& cmd : commands) {
+        if (!cmd) continue;
+        if (!m_validator.Validate(m_state, *cmd)) {
+            allOk = false;
+            continue;
+        }
+        if (cmd->Apply(m_state)) {
+            if (const auto* create = dynamic_cast<const CreateEntityCommand*>(cmd.get())) {
+                if (create->GetEntity().has_value()) {
+                    m_events.Emit(WorldEvent{ WorldEventType::EntityCreated, *create->GetEntity() });
+                    if (commands.size() == 1u) {
+                        result.createdEntity = *create->GetEntity();
+                    }
+                }
+            } else if (const auto* createRegion = dynamic_cast<const CreateRegionCommand*>(cmd.get())) {
+                if (createRegion->GetEntity().has_value()) {
+                    m_events.Emit(WorldEvent{ WorldEventType::EntityCreated, *createRegion->GetEntity() });
+                    m_events.Emit(WorldEvent{ WorldEventType::ComponentAdded, *createRegion->GetEntity() });
+                }
+            } else if (const auto* destroy = dynamic_cast<const DestroyEntityCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::EntityDestroyed, destroy->GetEntity() });
+            } else if (const auto* reparent = dynamic_cast<const ReparentEntityCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::Reparented, reparent->GetChild() });
+            } else if (const auto* setName = dynamic_cast<const SetNameCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, setName->GetEntity() });
+            } else if (const auto* setRegion = dynamic_cast<const SetRegionDataCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, setRegion->GetEntity() });
+            } else if (const auto* attachRules = dynamic_cast<const AttachRegionRulesCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, attachRules->GetEntity() });
+            } else if (const auto* enableSystem = dynamic_cast<const EnableSystemInRegionCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, enableSystem->GetEntity() });
+            } else if (const auto* setTransform = dynamic_cast<const SetTransformCommand*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, setTransform->GetEntity() });
+            } else if (const auto* comp = dynamic_cast<const ComponentCommandBase*>(cmd.get())) {
+                m_events.Emit(WorldEvent{ comp->GetComponentEventType(), comp->GetEntity() });
+            }
+        } else {
+            allOk = false;
+        }
+    }
+    result.success = allOk;
+    return result;
 }
 
 bool World::ApplyPendingCommands() {
@@ -65,6 +111,8 @@ bool World::ApplyPendingCommands() {
                 m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, attachRules->GetEntity() });
             } else if (const auto* enableSystem = dynamic_cast<const EnableSystemInRegionCommand*>(command.get())) {
                 m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, enableSystem->GetEntity() });
+            } else if (const auto* setTransform = dynamic_cast<const SetTransformCommand*>(command.get())) {
+                m_events.Emit(WorldEvent{ WorldEventType::ComponentChanged, setTransform->GetEntity() });
             } else if (const auto* comp = dynamic_cast<const ComponentCommandBase*>(command.get())) {
                 m_events.Emit(WorldEvent{ comp->GetComponentEventType(), comp->GetEntity() });
             }

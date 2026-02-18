@@ -243,52 +243,15 @@ std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
     return registry->GetMaterial(materialId);
 }
 
-namespace {
-
-RenderSnapshot CreateRenderSnapshotFromObservation(const eyelib::api::world::Observation& obs) {
-    RenderSnapshot s;
-    const auto r = obs.GetRenderablesView();
-    s.renderables.assign(r.begin(), r.end());
-    const auto m = obs.GetMeshRenderersView();
-    s.meshRenderers.assign(m.begin(), m.end());
-    const auto c = obs.GetCamerasView();
-    s.cameras.assign(c.begin(), c.end());
-    const auto l = obs.GetLightsView();
-    s.lights.assign(l.begin(), l.end());
-    for (const auto& e : s.renderables) {
-        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
-    }
-    for (const auto& e : s.meshRenderers) {
-        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
-    }
-    for (const auto& e : s.cameras) {
-        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
-    }
-    for (const auto& e : s.lights) {
-        if (auto t = obs.GetTransform(e.entity)) s.transformCache[e.entity] = *t;
-    }
-    return s;
-}
-
-} // namespace
-
-std::optional<eyelib::world::components::Transform> RenderSnapshot::GetTransform(eyelib::world::EntityId entity) const {
-    auto it = transformCache.find(entity);
-    if (it != transformCache.end()) return it->second;
-    return std::nullopt;
-}
-
-RenderSnapshot CreateRenderSnapshot(const eyelib::api::world::World& world) {
-    return CreateRenderSnapshotFromObservation(world.GetObservation());
-}
-
-void WorldRenderBridge::BuildScene(const eyelib::api::world::World& world,
+void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    const RuntimeOptions& options,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    BuildScene(CreateRenderSnapshot(world), options, animationBridge, assetRegistry, scene, frameAlloc);
+    world.CaptureRenderSnapshot(m_frameSnapshot);
+    world.SetFrameSnapshot(&m_frameSnapshot);
+    BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
@@ -297,22 +260,37 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    BuildScene(CreateRenderSnapshotFromObservation(obs), options, animationBridge, assetRegistry, scene, frameAlloc);
+    const auto renderables = obs.GetRenderablesView();
+    const auto meshRenderers = obs.GetMeshRenderersView();
+    const auto cameras = obs.GetCamerasView();
+    const auto lights = obs.GetLightsView();
+    auto getTransform = [&](eyelib::world::EntityId id) { return obs.GetTransform(id); };
+    BuildSceneFromViews(renderables, meshRenderers, cameras, lights, getTransform, options, animationBridge, assetRegistry, scene, frameAlloc);
 }
 
-void WorldRenderBridge::BuildScene(const RenderSnapshot& snapshot,
+void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapshot& snapshot,
                                    const RuntimeOptions& options,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    (void)options;
-    const auto& renderables = snapshot.renderables;
-    const auto& meshRenderers = snapshot.meshRenderers;
-    const auto& cameras = snapshot.cameras;
-    const auto& lights = snapshot.lights;
-    auto getTransform = [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); };
+    BuildSceneFromViews(snapshot.renderables, snapshot.meshRenderers, snapshot.cameras, snapshot.lights,
+                        [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); },
+                        options, animationBridge, assetRegistry, scene, frameAlloc);
+}
 
+void WorldRenderBridge::BuildSceneFromViews(
+    std::span<const eyelib::api::world::World::RenderableEntry> renderables,
+    std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
+    std::span<const eyelib::api::world::World::CameraEntry> cameras,
+    std::span<const eyelib::api::world::World::LightEntry> lights,
+    std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
+    const RuntimeOptions& options,
+    const WorldAnimationBridge* animationBridge,
+    eyelib::api::AssetRegistry* assetRegistry,
+    eyelib::api::RenderScene& scene,
+    api::FrameAllocator* frameAlloc) {
+    (void)options;
     // Count pass: opaque (renderables + mesh renderers), point lights, spot lights
     size_t opaqueCount = 0;
     for (const auto& entry : renderables) {
@@ -599,7 +577,7 @@ void WorldRenderBridge::BuildScene(const RenderSnapshot& snapshot,
     }
 }
 
-void WorldRenderBridge::Render(const RuntimeOptions& options, const eyelib::api::world::World& world,
+void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world::World& world,
                                const WorldAnimationBridge* animationBridge,
                                eyelib::api::AssetRegistry* assetRegistry,
                                uint32_t width, uint32_t height) {

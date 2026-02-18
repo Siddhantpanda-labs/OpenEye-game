@@ -1,14 +1,20 @@
 {
   "version": 1,
   "registry": {
-    "generations": [0, 0, 0],
+    "generations": [0, 0, 0, 0, 0, 0, 0, 0, 0],
     "freeList": []
   },
   "graph": {
     "metadata": [
       { "entity": { "index": 0, "generation": 0 }, "name": "MainCamera", "flags": 0 },
       { "entity": { "index": 1, "generation": 0 }, "name": "MainLight", "flags": 0 },
-      { "entity": { "index": 2, "generation": 0 }, "name": "Cube", "flags": 0 }
+      { "entity": { "index": 2, "generation": 0 }, "name": "PointLightLeft", "flags": 0 },
+      { "entity": { "index": 3, "generation": 0 }, "name": "PointLightRight", "flags": 0 },
+      { "entity": { "index": 4, "generation": 0 }, "name": "SpotLight", "flags": 0 },
+      { "entity": { "index": 5, "generation": 0 }, "name": "Cube", "flags": 0 },
+      { "entity": { "index": 6, "generation": 0 }, "name": "CobbleStones", "flags": 0 },
+      { "entity": { "index": 7, "generation": 0 }, "name": "Eyeball", "flags": 0 },
+      { "entity": { "index": 8, "generation": 0 }, "name": "Spaceship", "flags": 0 }
     ],
     "hierarchy": [],
     "tags": []
@@ -19,7 +25,13 @@
       "items": [
         { "entity": { "index": 0, "generation": 0 }, "data": "MainCamera" },
         { "entity": { "index": 1, "generation": 0 }, "data": "MainLight" },
-        { "entity": { "index": 2, "generation": 0 }, "data": "Cube" }
+        { "entity": { "index": 2, "generation": 0 }, "data": "PointLightLeft" },
+        { "entity": { "index": 3, "generation": 0 }, "data": "PointLightRight" },
+        { "entity": { "index": 4, "generation": 0 }, "data": "SpotLight" },
+        { "entity": { "index": 5, "generation": 0 }, "data": "Cube" },
+        { "entity": { "index": 6, "generation": 0 }, "data": "CobbleStones" },
+        { "entity": { "index": 7, "generation": 0 }, "data": "Eyeball" },
+        { "entity": { "index": 8, "generation": 0 }, "data": "Spaceship" }
       ]
     },
     "Transform": {
@@ -27,7 +39,13 @@
       "items": [
         { "entity": { "index": 0, "generation": 0 }, "data": { "position": [0.0, 2.0, 10.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
         { "entity": { "index": 1, "generation": 0 }, "data": { "position": [2.0, 4.0, 2.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
-        { "entity": { "index": 2, "generation": 0 }, "data": { "position": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } }
+        { "entity": { "index": 2, "generation": 0 }, "data": { "position": [-2.0, 0.0, 3.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
+        { "entity": { "index": 3, "generation": 0 }, "data": { "position": [3.0, 2.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
+        { "entity": { "index": 4, "generation": 0 }, "data": { "position": [0.0, 1.0, 2.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
+        { "entity": { "index": 5, "generation": 0 }, "data": { "position": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.5, 1.5, 1.5] } },
+        { "entity": { "index": 6, "generation": 0 }, "data": { "position": [-2.5, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.02, 0.02, 0.02] } },
+        { "entity": { "index": 7, "generation": 0 }, "data": { "position": [2.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } },
+        { "entity": { "index": 8, "generation": 0 }, "data": { "position": [0.0, 0.5, -2.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] } }
       ]
     },
     "Camera": {
@@ -55,11 +73,47 @@
           "data": {
             "type": 0,
             "color": [1.0, 1.0, 1.0],
-            "intensity": 3.0,
+            "intensity": 1.0,
             "range": 20.0,
             "innerCone": 15.0,
             "outerCone": 30.0,
             "castShadows": true
+          }
+        },
+        {
+          "entity": { "index": 2, "generation": 0 },
+          "data": {
+            "type": 1,
+            "color": [0.0, 0.0, 1.0],
+            "intensity": 5.0,
+            "range": 12.0,
+            "innerCone": 15.0,
+            "outerCone": 30.0,
+            "castShadows": true
+          }
+        },
+        {
+          "entity": { "index": 3, "generation": 0 },
+          "data": {
+            "type": 1,
+            "color": [1.0, 0.0, 0.0],
+            "intensity": 5.0,
+            "range": 12.0,
+            "innerCone": 15.0,
+            "outerCone": 30.0,
+            "castShadows": false
+          }
+        },
+        {
+          "entity": { "index": 4, "generation": 0 },
+          "data": {
+            "type": 2,
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 15.0,
+            "range": 8.0,
+            "innerCone": 10.0,
+            "outerCone": 25.0,
+            "castShadows": false
           }
         }
       ]
@@ -68,9 +122,39 @@
       "version": 1,
       "items": [
         {
-          "entity": { "index": 2, "generation": 0 },
+          "entity": { "index": 5, "generation": 0 },
           "data": {
-            "meshAssetId": "models/cube.obj",
+            "meshAssetId": "models/it.glb",
+            "materialAssetId": "",
+            "visible": true,
+            "activeLOD": 0,
+            "lodMeshAssetIds": []
+          }
+        },
+        {
+          "entity": { "index": 6, "generation": 0 },
+          "data": {
+            "meshAssetId": "models/animation/Running.fbx",
+            "materialAssetId": "",
+            "visible": true,
+            "activeLOD": 0,
+            "lodMeshAssetIds": []
+          }
+        },
+        {
+          "entity": { "index": 7, "generation": 0 },
+          "data": {
+            "meshAssetId": "models/it.glb",
+            "materialAssetId": "",
+            "visible": true,
+            "activeLOD": 0,
+            "lodMeshAssetIds": []
+          }
+        },
+        {
+          "entity": { "index": 8, "generation": 0 },
+          "data": {
+            "meshAssetId": "models/Spaceship.obj",
             "materialAssetId": "materials/solid_red.mat",
             "visible": true,
             "activeLOD": 0,

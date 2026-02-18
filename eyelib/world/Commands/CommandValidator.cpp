@@ -41,10 +41,28 @@ bool CommandValidator::Validate(const WorldState& state, const Command& command)
         if (!state.Entities().IsAlive(reparent->GetChild())) {
             return false;
         }
+        if (reparent->GetParent() == InvalidEntity) {
+            return true;
+        }
         if (!state.Entities().IsAlive(reparent->GetParent())) {
             return false;
         }
         return !state.GraphHierarchy().WouldCreateCycle(reparent->GetChild(), reparent->GetParent());
+    }
+    if (const auto* addTag = dynamic_cast<const AddTagCommand*>(&command)) {
+        return !addTag->GetTag().empty() && state.Entities().IsAlive(addTag->GetEntity());
+    }
+    if (const auto* removeTag = dynamic_cast<const RemoveTagCommand*>(&command)) {
+        return state.Entities().IsAlive(removeTag->GetEntity());
+    }
+    if (const auto* setMeta = dynamic_cast<const SetMetadataCommand*>(&command)) {
+        return state.Entities().IsAlive(setMeta->GetEntity());
+    }
+    if (const auto* clearMeta = dynamic_cast<const ClearMetadataCommand*>(&command)) {
+        return state.Entities().IsAlive(clearMeta->GetEntity());
+    }
+    if (const auto* setTransform = dynamic_cast<const SetTransformCommand*>(&command)) {
+        return state.Entities().IsAlive(setTransform->GetEntity());
     }
     return true;
 }
