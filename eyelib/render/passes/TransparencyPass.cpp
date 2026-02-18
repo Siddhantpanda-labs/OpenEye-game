@@ -4,6 +4,7 @@
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/math/TransformUtils.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -51,6 +52,7 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         cmd->SetDepthTest(true);
     }
 
+    core::SetGLDrawDebugLabel("TransparencyPass");
     for (const auto& e : sorted) {
         const auto& d = transparent[e.idx];
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;

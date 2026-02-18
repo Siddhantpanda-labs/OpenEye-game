@@ -31,6 +31,22 @@ Remaining work to reach AAA-level render module (per `Complete_rendermodule_plan
 
 **Status key:** ☐ Not started | ◐ In progress | ☑ Done. Update this table as work completes.
 
+### 1.1 Current work & open problem (GPU Cull / GL 1282)
+
+**How far we've come**
+
+- **GL 1282 (GL_INVALID_OPERATION — "Wrong component type or count")** was reported in the GPU Cull compute pass when using the frame graph (Deferred/Forward), at the point we bound SSBO slot 1 (draw list).
+- **Root cause identified:** We were binding a buffer to SSBO slot 1 at execute time without checking whether the linked program actually had an active block at that slot. If `DrawListIn` was optimized out or missing, binding to slot 1 is invalid; the driver was correct to flag it.
+- **Fixes applied:**
+  1. **Program-interface invariant:** Only bind SSBO slot 1 when the compute pipeline has an active `DrawListIn` block. RHI: `IDevice::ComputePipelineHasStorageBlock(pipeline, "DrawListIn")` (default `true`); OpenGL: `glGetProgramResourceIndex(..., GL_SHADER_STORAGE_BLOCK, "DrawListIn")`; **GpuCullPass::Execute** binds slot 1 only when `hasDrawListBlock && useDrawList && effectiveCount > 0`. Never bind to a resource slot that does not exist in the linked program.
+  2. **Pipeline creation log:** At compute pipeline create, log a warning when `DrawListIn` is missing so we have an audit trail.
+  3. **Earlier hardening (already in place):** View-proj for the cull shader is provided via a UBO (binding 3) instead of a mat4 uniform; single combined buffer holds both indirect region and draw-list region, bound at slot 0 and slot 1 with different offsets to avoid a second buffer object.
+
+**Current faced problem**
+
+- **Status:** Invariant is now enforced at execution time. If GL 1282 disappears, the bug was binding to a non-existent slot and the fix is complete. If 1282 persists after this change, next steps are: verify actual block binding index (`glGetProgramResourceiv` GL_BUFFER_BINDING), try two separate buffers (no aliasing), and/or treat as driver-specific and consider a targeted workaround (e.g. separate buffers, driver-version check, or filtering that specific error for that GPU only after proof).
+- **Lesson:** Enforce program-interface invariants at execution time; do not assume a block exists because the shader source declares it (optimizer may remove it).
+
 ---
 
 ## 8. Adoption Plan (Full Complete & Generic)
@@ -124,6 +140,7 @@ RHI and OpenGL backend already expose **bindless**, **indirect draw**, and **GPU
 - **Updated:** “What’s done” (§1); Removed completed-phase content; plan focuses on **Current Enhancement Plan** (§1) and strategic evaluation.
 - **Updated:** Added **§8 Adoption Plan** (Phase A GPU-driven consumer, Phase B bindless, Phase C unified); added **E8**, **E9**; refreshed §7.
 - **Updated:** E8 marked done; §7 LEVEL 4/7 marked done; §8 A3/A4 marked done, C3 done; C1 in progress.
+- **Updated:** Added §1.1 Current work & open problem (GPU Cull / GL 1282): progress (UBO view-proj, single combined buffer, program-interface invariant — only bind SSBO slot 1 when DrawListIn exists; ComputePipelineHasStorageBlock; log at pipeline create); current status and next steps if 1282 persists.
 
 ---
 

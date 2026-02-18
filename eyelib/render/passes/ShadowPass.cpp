@@ -4,6 +4,7 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 
@@ -107,6 +108,7 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
 
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
+    core::SetGLDrawDebugLabel("ShadowPass");
     feedDrawables([this, &shadowMap, cmd, lightMatrix](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;

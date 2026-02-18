@@ -136,9 +136,6 @@ public:
 private:
     void CreateFramebuffers();
     void DestroyFramebuffers();
-    void CreateFullscreenQuad();
-    void DestroyFullscreenQuad();
-    void DrawFullscreenQuad(rhi::ICommandList* cmd);
     rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
     void LoadShaders();
 
@@ -147,10 +144,6 @@ private:
     // Descriptor set for single-texture passes (Phase 3: layout-driven binding)
     rhi::IPipelineLayout* m_singleTexLayout = nullptr;
     rhi::IDescriptorSet* m_singleTexSet = nullptr;
-
-    // Fullscreen quad for post passes (vec2 pos + vec2 uv, matches post shaders)
-    rhi::IBuffer* m_fullscreenVBO = nullptr;
-    rhi::IBuffer* m_fullscreenIBO = nullptr;
 
     // Ping-pong render targets for multi-pass effects
     rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};

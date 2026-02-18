@@ -28,12 +28,12 @@ class Shader;
 class TextureCube;
 class FullscreenQuad;
 
-/** Forward: direct draw. Deferred: GBuffer + lighting pass. ForwardPlus: tiled forward (many lights per tile). */
+/** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Post). ForwardPlus: tiled forward (many lights), legacy path. */
 enum class PipelineMode { Forward, Deferred, ForwardPlus };
 
 /**
- * Orchestrates render passes. AddPass/SetOrder for extensibility;
- * Render(scene) runs Shadow -> GBuffer -> Lighting -> Transparency (deferred).
+ * Orchestrates render passes via a frame graph for Forward and Deferred.
+ * Render(view) dispatches by mode: Deferred -> BuildAndExecuteFrameGraph; Forward -> BuildAndExecuteForwardFrameGraph; ForwardPlus -> RenderForwardPlus (legacy).
  */
 class RenderPipeline {
 public:
@@ -92,13 +92,20 @@ private:
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
     void BuildAndExecuteFrameGraph(const IRenderSceneView& view);
+    /** Forward mode: frame graph with GPU Cull, Shadow, Forward Opaque, Transparency, Post. */
+    void BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view);
     void RenderForward(const IRenderSceneView& view);
+    /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
+    void RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view);
     void RenderForwardPlus(const IRenderSceneView& view);
     void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
     void EnsureSkyboxShader();
     /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);
+
+    /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
+    uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
 
     std::unique_ptr<rhi::IDevice> m_device;
     std::unique_ptr<GBuffer> m_gbuffer;
@@ -123,7 +130,6 @@ private:
     bool m_useGpuDrivenGBuffer = false;
 
     /** A2: Draw list for GpuCullPass (scene-fed); max 256 entries. */
-    rhi::IBuffer* m_gpuCullDrawListBuffer = nullptr;
     /** Per-draw transforms for GPU-driven path (same order as draw list). */
     rhi::IBuffer* m_gpuCullTransformBuffer = nullptr;
     /** Scratch for building draw list each frame (A2). */

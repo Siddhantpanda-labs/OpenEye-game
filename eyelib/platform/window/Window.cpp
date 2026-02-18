@@ -1,5 +1,6 @@
 #include "platform/window/Window.h"
 
+#include "core/GLDrawDebugLabel.h"
 #include "core/Log.h"
 #include "platform/input/Input.h"
 
@@ -57,7 +58,13 @@ void APIENTRY GLDebugCallback(GLenum source, GLenum type, GLuint id, GLenum seve
     }
 
     if (type == GL_DEBUG_TYPE_ERROR || severity == GL_DEBUG_SEVERITY_HIGH) {
-        eyelib::core::Log::ErrorF("OpenGL Debug [%s] (ID: %u): %s", severityStr, id, message);
+        if (id == 1282) {
+            const char* drawLabel = eyelib::core::GetGLDrawDebugLabel();
+            eyelib::core::Log::ErrorF("OpenGL Debug [%s] (ID: %u): %s [current draw: %s]",
+                severityStr, id, message, (drawLabel && *drawLabel) ? drawLabel : "(none)");
+        } else {
+            eyelib::core::Log::ErrorF("OpenGL Debug [%s] (ID: %u): %s", severityStr, id, message);
+        }
     } else if (severity == GL_DEBUG_SEVERITY_MEDIUM) {
         eyelib::core::Log::WarnF("OpenGL Debug [%s] (ID: %u): %s", severityStr, id, message);
     } else {

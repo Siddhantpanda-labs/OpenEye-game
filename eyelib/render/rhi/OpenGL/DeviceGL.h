@@ -47,6 +47,8 @@ struct DeviceGL : IDevice {
     bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
     void DestroyPipeline(IPipeline* pipeline) override;
+    void EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) override;
+    bool ComputePipelineHasStorageBlock(IPipeline* pipeline, const char* blockName) override;
 
     IRenderTarget* CreateRenderTarget(uint32_t width, uint32_t height,
                                       const std::vector<RHITextureFormat>& colorFormats,
@@ -79,10 +81,17 @@ struct DeviceGL : IDevice {
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
 
+    /** Lazy-create and return the shared fullscreen quad VBO/IBO used by DrawFullscreenQuad. */
+    void EnsureFullscreenQuad();
+    IBuffer* GetFullscreenQuadVBO() const { return m_fullscreenQuadVBO; }
+    IBuffer* GetFullscreenQuadIBO() const { return m_fullscreenQuadIBO; }
+
 private:
     void QueryCapabilities();
     RHICapabilities m_caps;
     std::unique_ptr<CommandListGL> m_immediateCommandList;
+    IBuffer* m_fullscreenQuadVBO = nullptr;
+    IBuffer* m_fullscreenQuadIBO = nullptr;
 };
 
 } // namespace rhi

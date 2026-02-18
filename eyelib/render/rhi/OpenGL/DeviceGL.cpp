@@ -29,7 +29,28 @@ DeviceGL::DeviceGL() : m_caps{} {
 }
 
 DeviceGL::~DeviceGL() {
+    if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
+    if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
     m_immediateCommandList.reset();
+}
+
+void DeviceGL::EnsureFullscreenQuad() {
+    if (m_fullscreenQuadVBO && m_fullscreenQuadIBO) return;
+    const float vertices[] = {
+        -1.f, -1.f, 0.f, 0.f,
+         1.f, -1.f, 1.f, 0.f,
+         1.f,  1.f, 1.f, 1.f,
+        -1.f,  1.f, 0.f, 1.f,
+    };
+    const uint16_t indices[] = { 0, 1, 2, 2, 3, 0 };
+    BufferDesc vboDesc;
+    vboDesc.sizeInBytes = sizeof(vertices);
+    vboDesc.usage = BufferUsage::Vertex;
+    m_fullscreenQuadVBO = CreateBuffer(vboDesc, vertices);
+    BufferDesc iboDesc;
+    iboDesc.sizeInBytes = sizeof(indices);
+    iboDesc.usage = BufferUsage::Index;
+    m_fullscreenQuadIBO = CreateBuffer(iboDesc, indices);
 }
 
 void DeviceGL::QueryCapabilities() {
@@ -503,6 +524,20 @@ IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
         return nullptr;
     }
 
+    // Explicitly set SSBO block bindings so driver interface matches (avoids GL 1282 at bind time).
+    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "IndirectOut");
+    if (idx0 == GL_INVALID_INDEX) {
+        core::Log::Warn("RHI OpenGL: compute program has no SSBO block 'IndirectOut' (optimized out or missing); GL 1282 may occur at bind.");
+    } else {
+        glShaderStorageBlockBinding(program, idx0, 0);
+    }
+    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "DrawListIn");
+    if (idx1 == GL_INVALID_INDEX) {
+        core::Log::Warn("RHI OpenGL: compute program has no SSBO block 'DrawListIn' (optimized out or missing); do not bind slot 1 to avoid GL 1282.");
+    } else {
+        glShaderStorageBlockBinding(program, idx1, 1);
+    }
+
     auto* p = new PipelineGL();
     p->m_program = program;
     return p;
@@ -515,6 +550,27 @@ void DeviceGL::DestroyPipeline(IPipeline* pipeline) {
         p->m_program = 0;
     }
     delete p;
+}
+
+void DeviceGL::EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) {
+    if (!pipeline) return;
+    auto* p = static_cast<PipelineGL*>(pipeline);
+    if (!p->m_program) return;
+    GLuint program = p->m_program;
+    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "IndirectOut");
+    if (idx0 != GL_INVALID_INDEX)
+        glShaderStorageBlockBinding(program, idx0, 0);
+    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "DrawListIn");
+    if (idx1 != GL_INVALID_INDEX)
+        glShaderStorageBlockBinding(program, idx1, 1);
+}
+
+bool DeviceGL::ComputePipelineHasStorageBlock(IPipeline* pipeline, const char* blockName) {
+    if (!pipeline || !blockName) return false;
+    auto* p = static_cast<PipelineGL*>(pipeline);
+    if (!p->m_program) return false;
+    GLuint idx = glGetProgramResourceIndex(p->m_program, GL_SHADER_STORAGE_BLOCK, blockName);
+    return (idx != GL_INVALID_INDEX);
 }
 
 IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,

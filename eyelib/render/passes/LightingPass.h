@@ -35,12 +35,8 @@ public:
 
 private:
     void EnsureDefaultShader();
-    void EnsureFullscreenQuad();
-    void DrawFullscreenQuad(rhi::ICommandList* cmd);
 
     std::shared_ptr<Shader> m_lightingShader;
-    rhi::IBuffer* m_fullscreenVBO = nullptr;
-    rhi::IBuffer* m_fullscreenIBO = nullptr;
     rhi::IDevice* m_device = nullptr;
 };
 

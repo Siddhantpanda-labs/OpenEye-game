@@ -89,6 +89,8 @@ public:
     rhi::IBuffer* GetIndexBufferRHI() const { return m_indexBufferRHI; }
     rhi::IndexType GetRHIIndexType() const;
     static rhi::VertexLayout GetVertexLayoutRHI();
+    /** Fullscreen quad (vec2 pos + vec2 uv). For skybox, post-process, lighting fullscreen. */
+    static rhi::VertexLayout GetFullscreenQuadVertexLayoutRHI();
 
     /** Set device to use for UploadToGPU() without device, Bind(), Draw(). */
     void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }

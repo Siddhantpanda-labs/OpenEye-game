@@ -6,6 +6,7 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <cstdint>
@@ -63,23 +64,12 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
                                   const math::Mat4& prevView,
                                   const math::Mat4& prevProjection) {
     EnsureDefaultShader();
-    bool shaderValid = m_geometryShader && m_geometryShader->IsValid();
-    rhi::IPipeline* pipe = m_geometryShader ? m_geometryShader->GetPipelineRHI() : nullptr;
-    bool programValid = (!pipe || pipe->HasValidProgram());
-    core::Log::InfoF("GBufferPass: geometry shader valid=%d pipeline program valid=%d", shaderValid ? 1 : 0, programValid ? 1 : 0);
-    if (!shaderValid) {
-        core::Log::Info("GBufferPass: skipped (geometry shader invalid or missing)");
-        return;
-    }
-    if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("GBufferPass: skipped (no valid backend program)");
-        return;
-    }
-    core::Log::Info("GBufferPass: executing");
+    if (!m_geometryShader || !m_geometryShader->IsValid()) return;
+    rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
 
     m_currentGBuffer = &gbuffer;
     gbuffer.BindForGeometryPass(cmd);
-    core::Log::Info("GBufferPass: BindForGeometryPass done");
 
     m_geometryShader->Bind();
     m_geometryShader->SetMat4("u_View", view);
@@ -97,6 +87,7 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
     if (useBindless && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
+    core::SetGLDrawDebugLabel("GBufferPass");
     feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection, useBindless](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
@@ -194,16 +185,13 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         d.mesh->Unbind();
     });
 
-    core::Log::Info("GBufferPass: drew, unbinding");
     m_geometryShader->Unbind();
     gbuffer.Unbind(cmd);
     m_currentGBuffer = nullptr;
-    // Unbind material texture units so Lighting pass only sees GBuffer bindings
     if (cmd) {
         for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
         cmd->SetCullFace(true);
     }
-    core::Log::Info("GBufferPass: done");
 }
 
 void GBufferPass::RenderIndirect(GBuffer& gbuffer,
@@ -242,6 +230,7 @@ void GBufferPass::RenderIndirect(GBuffer& gbuffer,
         cmd->SetCullFace(false);
     }
 
+    core::SetGLDrawDebugLabel("GBufferPass indirect");
     cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
     cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
     cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
@@ -294,6 +283,7 @@ void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
         cmd->BindStorageBuffer(perDrawTransformBuffer, 4, 0, transformCount * 64u);
     }
 
+    core::SetGLDrawDebugLabel("GBufferPass indirect per-draw");
     cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
     cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
     cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);

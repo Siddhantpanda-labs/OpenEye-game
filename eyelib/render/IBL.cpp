@@ -1,8 +1,8 @@
 #include "eyelib/render/IBL.h"
 #include "eyelib/render/rhi/RHIContext.h"
-#include "eyelib/render/FullscreenQuad.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -77,17 +77,17 @@ std::shared_ptr<Shader> CreatePrefilterShader(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreateBRDFShader(rhi::IDevice* device) {
     const char* vert = R"(
-#version 450 core
-layout(location = 0) in vec3 a_Position;
-layout(location = 2) in vec2 a_TexCoord;
+#version 460 core
+layout(location = 0) in vec2 a_Position;
+layout(location = 1) in vec2 a_TexCoord;
 out vec2 v_TexCoord;
 void main() {
     v_TexCoord = a_TexCoord;
-    gl_Position = vec4(a_Position.xy, 0.0, 1.0);
+    gl_Position = vec4(a_Position, 0.0, 1.0);
 }
 )";
     const char* frag = R"(
-#version 450 core
+#version 460 core
 in vec2 v_TexCoord;
 layout(location = 0) out vec4 FragColor;
 
@@ -169,7 +169,7 @@ void main() {
 }
 )";
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList))
+    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList))
         return nullptr;
     return shader;
 }
@@ -191,6 +191,7 @@ IBL::~IBL() {
 }
 
 bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, uint32_t prefilterRes) {
+    core::SetGLDrawDebugLabel("IBL");
     if (!environmentCubemap) {
         core::Log::ErrorF("IBL::Initialize: Invalid environment cubemap");
         return false;
@@ -282,6 +283,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         irradianceShader->SetMat4("u_View", captureViews[face]);
         irradianceShader->SetMat4("u_Projection", captureProjection);
         cmd->BindTexture(m_environmentRHI, 0);
+        core::SetGLDrawDebugLabel("IBL irradiance");
         cubeMesh->Draw();
         irradianceShader->Unbind();
         m_deviceRHI->DestroyRenderTarget(rt);
@@ -309,6 +311,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             prefilterShader->SetMat4("u_View", captureViews[face]);
             prefilterShader->SetMat4("u_Projection", captureProjection);
             cmd->BindTexture(m_environmentRHI, 0);
+            core::SetGLDrawDebugLabel("IBL prefilter");
             cubeMesh->Draw();
             prefilterShader->Unbind();
             m_deviceRHI->DestroyRenderTarget(rt);
@@ -326,10 +329,9 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetDepthTest(false);
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
-            brdfShader->Bind();
-            static FullscreenQuad quad;
-            quad.Render();
-            brdfShader->Unbind();
+            core::SetGLDrawDebugLabel("IBL BRDF");
+            if (brdfShader->GetPipelineRHI())
+                cmd->DrawFullscreenQuad(brdfShader->GetPipelineRHI());
             m_deviceRHI->DestroyRenderTarget(rt);
         }
     }

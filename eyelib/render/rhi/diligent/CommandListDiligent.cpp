@@ -341,6 +341,18 @@ void CommandListDiligent::BindVertexBuffer(IBuffer* buffer, uint32_t binding, ui
     m_currentVertexOffset = offset;
 }
 
+void CommandListDiligent::DrawFullscreenQuad(IPipeline* pipeline) {
+    if (!pipeline || !m_device) return;
+    m_device->EnsureFullscreenQuad();
+    IBuffer* vbo = m_device->GetFullscreenQuadVBO();
+    IBuffer* ibo = m_device->GetFullscreenQuadIBO();
+    if (!vbo || !ibo) return;
+    BindPipeline(pipeline);
+    BindVertexBuffer(vbo, 0, 0);
+    BindIndexBuffer(ibo, IndexType::UInt16, 0);
+    DrawIndexed(6, 0, 0);
+}
+
 void CommandListDiligent::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) {
     m_currentIndexBuffer = buffer;
     m_currentIndexType = indexType;
@@ -394,6 +406,12 @@ void CommandListDiligent::SetUniformInt(const char* name, int value) {
     }
 #endif
     (void)value;
+}
+
+void CommandListDiligent::SetUniformUint(const char* name, uint32_t value) {
+    (void)name;
+    (void)value;
+    // Diligent path does not run GpuCullPass; no-op for interface compliance.
 }
 
 void CommandListDiligent::SetUniformFloat(const char* name, float value) {

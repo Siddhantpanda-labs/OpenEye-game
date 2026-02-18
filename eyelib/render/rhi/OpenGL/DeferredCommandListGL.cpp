@@ -79,6 +79,9 @@ void DeferredCommandListGL::BindPipeline(IPipeline* pipeline) {
 void DeferredCommandListGL::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
     Record([buffer, binding, offset](ICommandList* c) { c->BindVertexBuffer(buffer, binding, offset); });
 }
+void DeferredCommandListGL::DrawFullscreenQuad(IPipeline* pipeline) {
+    Record([pipeline](ICommandList* c) { c->DrawFullscreenQuad(pipeline); });
+}
 void DeferredCommandListGL::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) {
     Record([buffer, indexType, offset](ICommandList* c) { c->BindIndexBuffer(buffer, indexType, offset); });
 }
@@ -113,6 +116,10 @@ void DeferredCommandListGL::SetPushConstants(uint32_t offset, uint32_t size, con
 void DeferredCommandListGL::SetUniformInt(const char* name, int value) {
     std::string n(name ? name : "");
     Record([n, value](ICommandList* c) { c->SetUniformInt(n.c_str(), value); });
+}
+void DeferredCommandListGL::SetUniformUint(const char* name, uint32_t value) {
+    std::string n(name ? name : "");
+    Record([n, value](ICommandList* c) { c->SetUniformUint(n.c_str(), value); });
 }
 void DeferredCommandListGL::SetUniformFloat(const char* name, float value) {
     std::string n(name ? name : "");

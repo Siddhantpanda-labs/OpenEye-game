@@ -103,7 +103,7 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
         m_renderer.Shutdown();
         return false;
     }
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Deferred);
     m_width = width;
     m_height = height;
     m_ready = true;

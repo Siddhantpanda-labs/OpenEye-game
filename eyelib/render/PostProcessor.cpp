@@ -4,6 +4,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 
 namespace eyelib {
@@ -28,42 +29,7 @@ PostProcessor::~PostProcessor() {
 }
 
 void PostProcessor::Shutdown() {
-    DestroyFullscreenQuad();
     DestroyFramebuffers();
-}
-
-void PostProcessor::DestroyFullscreenQuad() {
-    if (!m_deviceRHI) return;
-    if (m_fullscreenVBO) { m_deviceRHI->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
-    if (m_fullscreenIBO) { m_deviceRHI->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
-}
-
-void PostProcessor::CreateFullscreenQuad() {
-    if (!m_deviceRHI) return;
-    DestroyFullscreenQuad();
-    // Fullscreen quad: vec2 pos (location 0) + vec2 uv (location 1), matches post shaders
-    const float vertices[] = {
-        -1.f, -1.f, 0.f, 0.f,
-         1.f, -1.f, 1.f, 0.f,
-         1.f,  1.f, 1.f, 1.f,
-        -1.f,  1.f, 0.f, 1.f,
-    };
-    const uint16_t indices[] = { 0, 1, 2, 2, 3, 0 };
-    rhi::BufferDesc vboDesc;
-    vboDesc.sizeInBytes = sizeof(vertices);
-    vboDesc.usage = rhi::BufferUsage::Vertex;
-    m_fullscreenVBO = m_deviceRHI->CreateBuffer(vboDesc, vertices);
-    rhi::BufferDesc iboDesc;
-    iboDesc.sizeInBytes = sizeof(indices);
-    iboDesc.usage = rhi::BufferUsage::Index;
-    m_fullscreenIBO = m_deviceRHI->CreateBuffer(iboDesc, indices);
-}
-
-void PostProcessor::DrawFullscreenQuad(rhi::ICommandList* cmd) {
-    if (!cmd || !m_fullscreenVBO || !m_fullscreenIBO) return;
-    cmd->BindVertexBuffer(m_fullscreenVBO, 0);
-    cmd->BindIndexBuffer(m_fullscreenIBO, rhi::IndexType::UInt16);
-    cmd->DrawIndexed(6, 0, 0);
 }
 
 void PostProcessor::DestroyFramebuffers() {
@@ -93,11 +59,6 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
     core::Log::Info("PostProcessor::Initialize: loading shaders");
     LoadShaders();
     core::Log::Info("PostProcessor::Initialize: creating fullscreen quad");
-    CreateFullscreenQuad();
-    if (!m_fullscreenVBO || !m_fullscreenIBO) {
-        core::Log::Error("PostProcessor::Initialize: CreateFullscreenQuad failed (VBO or IBO null)");
-        return false;
-    }
     core::Log::Info("PostProcessor::Initialize: creating framebuffers");
     CreateFramebuffers();
     // Pipeline layout + descriptor set for single-texture passes (Phase 3)
@@ -289,7 +250,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             m_ssaoBlendShader->SetInt("u_SSAO", 1);
             cmd->BindTexture(toneMappedTexture, 0);
             cmd->BindTexture(ssaoTexture, 1);
-            DrawFullscreenQuad(cmd);
+            if (m_ssaoBlendShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_ssaoBlendShader->GetPipelineRHI()); }
             m_ssaoBlendShader->Unbind();
             toneMappedTexture = GetOutputTextureRHI();
         }
@@ -313,7 +274,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
             cmd->BindTexture(toneMappedTexture, 0);
             cmd->BindTexture(bloomTexture, 1);
-            DrawFullscreenQuad(cmd);
+            if (m_bloomCompositeShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_bloomCompositeShader->GetPipelineRHI()); }
             m_bloomCompositeShader->Unbind();
             toneMappedTexture = GetOutputTextureRHI();
         }
@@ -381,7 +342,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
 
     cmd->BindTexture(hdrTexture, 0);
-    DrawFullscreenQuad(cmd);
+    if (m_toneMappingShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_toneMappingShader->GetPipelineRHI()); }
     m_lastOutputValid = true;
     m_toneMappingShader->Unbind();
     return GetOutputTextureRHI();
@@ -404,7 +365,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_bloomExtractShader->SetInt("u_HDRTexture", 0);
     m_bloomExtractShader->SetFloat("u_Threshold", threshold);
     cmd->BindTexture(hdrTexture, 0);
-    DrawFullscreenQuad(cmd);
+    if (m_bloomExtractShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_bloomExtractShader->GetPipelineRHI()); }
     m_bloomExtractShader->Unbind();
     rhi::BarrierTextureForShaderRead(cmd, GetColorTexture(m_bloomExtractRT));
     return GetColorTexture(m_bloomExtractRT);
@@ -437,7 +398,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         m_bloomBlurShader->SetBool("u_Horizontal", horizontal);
         m_bloomBlurShader->SetInt("u_Texture", 0);
         cmd->BindTexture(currentTexture, 0);
-        DrawFullscreenQuad(cmd);
+        if (m_bloomBlurShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_bloomBlurShader->GetPipelineRHI()); }
         currentTexture = GetColorTexture(rt);
         horizontal = !horizontal;
     }
@@ -471,7 +432,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         m_blurShader->SetBool("u_Horizontal", horizontal);
         m_blurShader->SetInt("u_Texture", 0);
         cmd->BindTexture(currentTexture, 0);
-        DrawFullscreenQuad(cmd);
+        if (m_blurShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_blurShader->GetPipelineRHI()); }
         currentTexture = GetColorTexture(rt);
         horizontal = !horizontal;
     }
@@ -497,7 +458,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_chromaticAberrationShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_chromaticAberrationShader->SetFloat("u_Intensity", intensity);
     cmd->BindTexture(texture, 0);
-    DrawFullscreenQuad(cmd);
+    if (m_chromaticAberrationShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_chromaticAberrationShader->GetPipelineRHI()); }
     m_chromaticAberrationShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -523,7 +484,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     } else {
         cmd->BindTexture(texture, 0);
     }
-    DrawFullscreenQuad(cmd);
+    if (m_fxaaShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_fxaaShader->GetPipelineRHI()); }
     m_fxaaShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -552,7 +513,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
     cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
     cmd->BindTexture(gbuffer.GetDepthTextureRHI(), 2);
-    DrawFullscreenQuad(cmd);
+    if (m_ssaoShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_ssaoShader->GetPipelineRHI()); }
     m_ssaoShader->Unbind();
     return GetColorTexture(m_ssaoRT);
 }
@@ -593,7 +554,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->BindTexture(gbuffer.GetAlbedoTextureRHI(), 2);
     cmd->BindTexture(sceneTexture, 3);
     if (skyboxTexture) cmd->BindTexture(skyboxTexture, 4);
-    DrawFullscreenQuad(cmd);
+    if (m_ssrShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_ssrShader->GetPipelineRHI()); }
     m_ssrShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -619,7 +580,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_motionBlurShader->SetInt("u_Samples", settings.motionBlurSamples);
     cmd->BindTexture(texture, 0);
     cmd->BindTexture(velocityTexture, 1);
-    DrawFullscreenQuad(cmd);
+    if (m_motionBlurShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_motionBlurShader->GetPipelineRHI()); }
     m_motionBlurShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -642,7 +603,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_vignetteShader->SetFloat("u_Radius", settings.vignetteRadius);
     m_vignetteShader->SetFloat("u_Softness", settings.vignetteSoftness);
     cmd->BindTexture(texture, 0);
-    DrawFullscreenQuad(cmd);
+    if (m_vignetteShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_vignetteShader->GetPipelineRHI()); }
     m_vignetteShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -664,7 +625,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_filmGrainShader->SetFloat("u_Intensity", settings.filmGrainIntensity);
     m_filmGrainShader->SetFloat("u_Time", time);
     cmd->BindTexture(texture, 0);
-    DrawFullscreenQuad(cmd);
+    if (m_filmGrainShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_filmGrainShader->GetPipelineRHI()); }
     m_filmGrainShader->Unbind();
     return GetOutputTextureRHI();
 }
@@ -690,7 +651,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
             m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
             cmd->BindTexture(hdrTex, 0);
-            DrawFullscreenQuad(cmd);
+            if (m_toneMappingShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_toneMappingShader->GetPipelineRHI()); }
             m_toneMappingShader->Unbind();
             m_lastOutputValid = true;
         },
@@ -710,7 +671,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             m_fxaaShader->SetInt("u_Texture", 0);
             m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(res.width), static_cast<float>(res.height)));
             cmd->BindTexture(toneMappedTex, 0);
-            DrawFullscreenQuad(cmd);
+            if (m_fxaaShader->GetPipelineRHI()) { core::SetGLDrawDebugLabel("PostProcessor"); cmd->DrawFullscreenQuad(m_fxaaShader->GetPipelineRHI()); }
             m_fxaaShader->Unbind();
         },
         { toneMappedOutput }, { finalOutput }, true);

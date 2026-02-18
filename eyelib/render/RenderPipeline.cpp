@@ -20,13 +20,22 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/TextureCube.h"
-#include "eyelib/render/FullscreenQuad.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+
+namespace {
+constexpr bool kPostProcessEnabled = true;
+// Pass isolation for GL 1282: set to 0..5 then rebuild and run; increase until the error appears to find the bad pass.
+// 0=GpuCull, 1=Shadow, 2=GBuffer+CopyDepth, 3=Lighting, 4=Transparency, 5=Post. 99=all (runs Skybox + debug draw too).
+// When limit < 99, Skybox and debug draw are skipped. With limit=0 you should only see the one "(none)" error from IBL before the loop.
+constexpr int kRenderPassLimit = 99;  // 0..5 = isolate passes for debugging; 99 = all.
+constexpr bool kGpuCullPassEnabled = true;  // Set true to run GPU Cull compute pass; false disables it (draw list still built for GBuffer/forward).
+} // namespace
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cassert>
@@ -71,7 +80,6 @@ void RenderPipeline::Shutdown() {
     if (m_device) {
         if (m_bindlessHeap) { m_device->DestroyBindlessHeap(m_bindlessHeap); m_bindlessHeap = nullptr; }
         m_bindlessHandleCache.clear();
-        if (m_gpuCullDrawListBuffer) { m_device->DestroyBuffer(m_gpuCullDrawListBuffer); m_gpuCullDrawListBuffer = nullptr; }
         if (m_gpuCullTransformBuffer) { m_device->DestroyBuffer(m_gpuCullTransformBuffer); m_gpuCullTransformBuffer = nullptr; }
         if (m_prevFrameDepthRT) { m_device->DestroyRenderTarget(m_prevFrameDepthRT); m_prevFrameDepthRT = nullptr; }
         if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
@@ -121,14 +129,10 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_lightCullPass->SetDevice(m_device.get());
     if (m_lightCullPass->IsSupported())
         m_lightCullPass->Initialize();
-    // A2: Draw list buffer for GpuCullPass (scene-fed); max entries match cull pass limit.
+    // A2: Transform buffer for GPU cull path; draw list is now inside GpuCullPass combined buffer.
     constexpr uint32_t kMaxGpuCullDraws = 256;
     if (m_device && m_gpuCullPass->IsSupported()) {
         rhi::BufferDesc bd;
-        bd.sizeInBytes = kMaxGpuCullDraws * sizeof(GpuCullDrawEntry);
-        bd.usage = rhi::BufferUsage::Storage;
-        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        m_gpuCullDrawListBuffer = m_device->CreateBuffer(bd, nullptr);
         bd.sizeInBytes = kMaxGpuCullDraws * sizeof(math::Mat4);
         bd.usage = rhi::BufferUsage::Storage;
         bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
@@ -276,6 +280,60 @@ rhi::BindlessHandle RenderPipeline::GetOrAllocateBindlessHandle(rhi::ITexture* t
     return h;
 }
 
+uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam) {
+    constexpr uint32_t kMaxGpuCullDraws = 256;
+    m_scratchGpuCullDrawList.clear();
+    m_scratchGpuCullTransforms.clear();
+    m_gpuCullSingleMesh = true;
+    m_gpuCullRepresentativeMesh.reset();
+    Mesh* firstMeshPtr = nullptr;
+    view.ForEachOpaqueDrawable([this, &firstMeshPtr](const Drawable& d) {
+        if (!d.mesh || !d.mesh->IsValid() || m_scratchGpuCullDrawList.size() >= kMaxGpuCullDraws) return;
+        if (!firstMeshPtr) {
+            firstMeshPtr = d.mesh.get();
+            m_gpuCullRepresentativeMesh = d.mesh;
+        } else if (d.mesh.get() != firstMeshPtr) {
+            m_gpuCullSingleMesh = false;
+        }
+        math::AABB localAABB = d.mesh->GetAABB();
+        if (!localAABB.IsValid()) return;
+        math::AABB worldAABB = localAABB.Transform(d.transform);
+        GpuCullDrawEntry e = {};
+        e.aabbMin[0] = worldAABB.min.x; e.aabbMin[1] = worldAABB.min.y; e.aabbMin[2] = worldAABB.min.z;
+        e.aabbMax[0] = worldAABB.max.x; e.aabbMax[1] = worldAABB.max.y; e.aabbMax[2] = worldAABB.max.z;
+        const size_t indexCount = d.mesh->GetIndexCount();
+        e.indexCount = static_cast<uint32_t>(indexCount);
+        e.instanceCount = 1u;
+        e.firstIndex = 0u;
+        e.baseVertex = 0;
+        e.baseInstance = 0u;
+        m_scratchGpuCullDrawList.push_back(e);
+        m_scratchGpuCullTransforms.push_back(d.transform);
+    });
+    if (m_scratchGpuCullDrawList.empty()) m_gpuCullSingleMesh = false;
+    const uint32_t gpuCullDrawListCount = static_cast<uint32_t>(m_scratchGpuCullDrawList.size());
+
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
+        m_gpuCullPass->SetDevice(m_device.get());
+        if (gpuCullDrawListCount > 0) {
+            m_gpuCullPass->SetDrawList(m_scratchGpuCullDrawList.data(), gpuCullDrawListCount);
+            if (m_gpuCullTransformBuffer && m_scratchGpuCullTransforms.size() >= gpuCullDrawListCount) {
+                const size_t transformSize = gpuCullDrawListCount * sizeof(math::Mat4);
+                m_gpuCullTransformBuffer->Update(m_scratchGpuCullTransforms.data(), 0, transformSize);
+            }
+            const math::Mat4 viewProj = cam.projection * cam.view;
+            m_gpuCullPass->SetViewProj(&viewProj[0][0]);
+        } else {
+            m_gpuCullPass->SetDrawList(nullptr, 0);
+        }
+        if (m_havePrevDepth && m_prevFrameDepthRT && m_prevFrameDepthRT->GetDepthTexture())
+            m_gpuCullPass->SetOcclusionDepth(m_prevFrameDepthRT->GetDepthTexture(), m_width, m_height);
+        else
+            m_gpuCullPass->SetOcclusionDepth(nullptr, 0, 0);
+    }
+    return gpuCullDrawListCount;
+}
+
 void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount) {
     if (!m_gbufferPass || !m_gbuffer) return;
     const bool useIndirectQuad = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported()
@@ -333,64 +391,11 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
     rhi::ICommandList* cmd = GetRHICommandList();
 
-    // A2: Build draw list from scene for GpuCullPass (frustum cull input).
-    constexpr uint32_t kMaxGpuCullDraws = 256;
-    m_scratchGpuCullDrawList.clear();
-    m_scratchGpuCullTransforms.clear();
-    m_gpuCullSingleMesh = true;
-    m_gpuCullRepresentativeMesh.reset();
-    Mesh* firstMeshPtr = nullptr;
-    view.ForEachOpaqueDrawable([this, &firstMeshPtr](const Drawable& d) {
-        if (!d.mesh || !d.mesh->IsValid() || m_scratchGpuCullDrawList.size() >= kMaxGpuCullDraws) return;
-        if (!firstMeshPtr) {
-            firstMeshPtr = d.mesh.get();
-            m_gpuCullRepresentativeMesh = d.mesh;
-        } else if (d.mesh.get() != firstMeshPtr) {
-            m_gpuCullSingleMesh = false;
-        }
-        math::AABB localAABB = d.mesh->GetAABB();
-        if (!localAABB.IsValid()) return;
-        math::AABB worldAABB = localAABB.Transform(d.transform);
-        GpuCullDrawEntry e = {};
-        e.aabbMin[0] = worldAABB.min.x;
-        e.aabbMin[1] = worldAABB.min.y;
-        e.aabbMin[2] = worldAABB.min.z;
-        e.aabbMax[0] = worldAABB.max.x;
-        e.aabbMax[1] = worldAABB.max.y;
-        e.aabbMax[2] = worldAABB.max.z;
-        const size_t indexCount = d.mesh->GetIndexCount();
-        e.indexCount = static_cast<uint32_t>(indexCount);
-        e.instanceCount = 1u;
-        e.firstIndex = 0u;
-        e.baseVertex = 0;
-        e.baseInstance = 0u;
-        m_scratchGpuCullDrawList.push_back(e);
-        m_scratchGpuCullTransforms.push_back(d.transform);
-    });
-    if (m_scratchGpuCullDrawList.empty()) m_gpuCullSingleMesh = false;
-    const uint32_t gpuCullDrawListCount = static_cast<uint32_t>(m_scratchGpuCullDrawList.size());
-
-    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
-        m_gpuCullPass->SetDevice(m_device.get());
-        if (gpuCullDrawListCount > 0 && m_gpuCullDrawListBuffer) {
-            const size_t uploadSize = gpuCullDrawListCount * sizeof(GpuCullDrawEntry);
-            m_gpuCullDrawListBuffer->Update(m_scratchGpuCullDrawList.data(), 0, uploadSize);
-            if (m_gpuCullTransformBuffer && m_scratchGpuCullTransforms.size() >= gpuCullDrawListCount) {
-                const size_t transformSize = gpuCullDrawListCount * sizeof(math::Mat4);
-                m_gpuCullTransformBuffer->Update(m_scratchGpuCullTransforms.data(), 0, transformSize);
-            }
-            m_gpuCullPass->SetDrawList(m_gpuCullDrawListBuffer, gpuCullDrawListCount);
-            const math::Mat4 viewProj = cam.projection * cam.view;
-            m_gpuCullPass->SetViewProj(&viewProj[0][0]);
-        } else {
-            m_gpuCullPass->SetDrawList(nullptr, 0);
-        }
-        if (m_havePrevDepth && m_prevFrameDepthRT && m_prevFrameDepthRT->GetDepthTexture())
-            m_gpuCullPass->SetOcclusionDepth(m_prevFrameDepthRT->GetDepthTexture(), m_width, m_height);
-        else
-            m_gpuCullPass->SetOcclusionDepth(nullptr, 0, 0);
+    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
+    if (kGpuCullPassEnabled && m_gpuCullPass && m_gpuCullPass->IsSupported()) {
         m_frameGraph->AddPass("GPU Cull",
             [this, cmd](const FGPassResources&) {
+                if (kRenderPassLimit < 0) return;
                 if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
             },
             {}, {}, true);
@@ -399,6 +404,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
             [this, &view, &light, &cam, cmd](const FGPassResources&) {
+                if (kRenderPassLimit < 1) return;
                 m_shadowPass->Render(*m_shadowMap, cmd,
                     [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                     light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
@@ -408,12 +414,14 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     m_frameGraph->AddPass("GBuffer",
         [this, &view, &cam, cmd, gpuCullDrawListCount](const FGPassResources&) {
+            if (kRenderPassLimit < 2) return;
             RenderOpaqueGeometryToGBuffer(cmd, view, cam, gpuCullDrawListCount);
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
 
     m_frameGraph->AddPass("Copy depth for occlusion",
         [this](const FGPassResources&) {
+            if (kRenderPassLimit < 2) return;
             if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
                 m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
             m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
@@ -425,6 +433,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
         [this, &view, &cam, cmd, clearBlack](const FGPassResources&) {
+            if (kRenderPassLimit < 3) return;
             if (cmd && m_hdrRenderTarget)
                 rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
             ShadowMap* shadowMapForLighting = view.GetLight().castShadows ? m_shadowMap.get() : nullptr;
@@ -435,6 +444,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     m_frameGraph->AddPass("Transparency",
         [this, &view, &cam, cmd](const FGPassResources&) {
+            if (kRenderPassLimit < 4) return;
             if (m_device && m_hdrRenderTarget)
                 m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
             if (cmd && m_hdrRenderTarget) {
@@ -447,7 +457,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
         },
         {}, { hdrColor }, true);
 
-    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
+    if (kRenderPassLimit >= 5 && kPostProcessEnabled && m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
         rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
         rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
         if (postToneMappedTex && postOutputTex) {
@@ -462,6 +472,179 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     m_frameGraph->Execute(GetRHICommandList());
 }
 
+void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view) {
+    if (!m_frameGraph || !m_shadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
+    m_frameGraph->Clear();
+    m_frameGraph->SetFrameSize(m_width, m_height);
+
+    const CameraView cam = view.GetCamera();
+    const LightParams light = view.GetLight();
+
+    m_scratchPointLights.clear();
+    m_scratchSpotLights.clear();
+    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
+    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
+
+    rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
+    auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+    rhi::ICommandList* cmd = GetRHICommandList();
+
+    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
+    if (kGpuCullPassEnabled && m_gpuCullPass && m_gpuCullPass->IsSupported()) {
+        m_frameGraph->AddPass("GPU Cull",
+            [this, cmd](const FGPassResources&) {
+                if (kRenderPassLimit < 0) return;
+                if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
+            },
+            {}, {}, true);
+    }
+
+    if (light.castShadows) {
+        m_frameGraph->AddPass("Shadow",
+            [this, &view, &light, &cam, cmd](const FGPassResources&) {
+                if (kRenderPassLimit < 1) return;
+                m_shadowPass->Render(*m_shadowMap, cmd,
+                    [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
+                    light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
+            },
+            {}, { shadowTex }, true);
+    }
+
+    rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+    m_frameGraph->AddPass("Forward Opaque",
+        [this, &view, cmd, clearFwd](const FGPassResources&) {
+            if (kRenderPassLimit < 2) return;
+            if (cmd && m_hdrRenderTarget)
+                rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+            if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
+            RenderForwardOpaque(cmd, view);
+        },
+        {}, { hdrColor }, true);
+
+    m_frameGraph->AddPass("Copy depth for occlusion",
+        [this](const FGPassResources&) {
+            if (kRenderPassLimit < 2) return;
+            if (m_prevFrameDepthRT && m_hdrRenderTarget)
+                m_device->BlitDepthOnly(m_hdrRenderTarget, m_prevFrameDepthRT);
+            m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+        },
+        { hdrColor }, {}, true);
+
+    m_frameGraph->AddPass("Transparency",
+        [this, &view, &cam, cmd](const FGPassResources&) {
+            if (kRenderPassLimit < 4) return;
+            if (cmd && m_hdrRenderTarget) {
+                cmd->SetRenderTarget(m_hdrRenderTarget);
+                cmd->SetViewport(0, 0, m_width, m_height);
+            }
+            m_scratchTransparent.clear();
+            view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
+            TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+        },
+        {}, { hdrColor }, true);
+
+    if (kRenderPassLimit >= 5 && kPostProcessEnabled && m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
+        rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
+        rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
+        if (postToneMappedTex && postOutputTex) {
+            auto postToneMapped = m_frameGraph->ImportTextureRHI("PostToneMapped", postToneMappedTex, m_width, m_height);
+            auto postOutput = m_frameGraph->ImportTextureRHI("PostOutput", postOutputTex, m_width, m_height);
+            PostProcessor::Settings settings;
+            m_postProcessor->AddPostPassesToFrameGraph(m_frameGraph.get(), hdrColor, postToneMapped, postOutput, settings, cmd);
+        }
+    }
+
+    m_frameGraph->Compile();
+    m_frameGraph->Execute(GetRHICommandList());
+}
+
+void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view) {
+    const CameraView cam = view.GetCamera();
+    const LightParams light = view.GetLight();
+    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
+    const bool useShadows = (m_shadowMap != nullptr && light.castShadows);
+    if (useShadows && cmd) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
+    }
+
+    const int kMaxPointLights = 8;
+    const int kMaxSpotLights = 4;
+    const int numPoint = static_cast<int>(std::min(m_scratchPointLights.size(), size_t(kMaxPointLights)));
+    const int numSpot = static_cast<int>(std::min(m_scratchSpotLights.size(), size_t(kMaxSpotLights)));
+
+    core::SetGLDrawDebugLabel("Forward");
+    view.ForEachOpaqueDrawable([&](const Drawable& d) {
+        if (!d.mesh || !d.material) return;
+        if (d.materialInstance) {
+            d.materialInstance->Bind();
+        } else {
+            d.material->Bind();
+        }
+        Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
+        if (!sh) return;
+        sh->SetMat4("u_Model", d.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+        sh->SetMat4("u_View", cam.view);
+        sh->SetMat4("u_Projection", cam.projection);
+        sh->SetVec3("u_ViewPos", cam.viewPos);
+        sh->SetVec3("u_LightDir", light.direction);
+        sh->SetVec3("u_LightColor", light.color);
+        sh->SetFloat("u_LightIntensity", light.intensity);
+        sh->SetVec3("u_Ambient", light.ambient);
+        sh->SetFloat("u_Exposure", light.exposure);
+        if (useShadows) {
+            sh->SetInt("u_ShadowMap", kShadowMapUnit);
+            sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
+            sh->SetFloat("u_ShadowBias", 0.005f);
+            sh->SetInt("u_UseShadows", 1);
+        } else {
+            sh->SetInt("u_UseShadows", 0);
+        }
+        const math::Mat4* bonePtr = d.bones;
+        size_t boneCount = d.boneCount;
+        if ((!bonePtr || boneCount == 0) && d.materialInstance) {
+            d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        } else if (!bonePtr || boneCount == 0) {
+            d.material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        }
+        if (bonePtr && boneCount > 0) {
+            boneCount = std::min(boneCount, kMaxBones);
+            sh->SetMat4Array("u_Bones", bonePtr, boneCount);
+        }
+        sh->SetInt("u_PointLightCount", numPoint);
+        for (int i = 0; i < numPoint; ++i) {
+            const auto& p = m_scratchPointLights[static_cast<size_t>(i)];
+            sh->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
+            sh->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
+            sh->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
+            sh->SetFloat("u_PointLightRadius[" + std::to_string(i) + "]", p.radius);
+        }
+        sh->SetInt("u_SpotLightCount", numSpot);
+        for (int i = 0; i < numSpot; ++i) {
+            const auto& s = m_scratchSpotLights[static_cast<size_t>(i)];
+            sh->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
+            sh->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
+            sh->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
+            sh->SetFloat("u_SpotLightIntensity[" + std::to_string(i) + "]", s.intensity);
+            sh->SetFloat("u_SpotLightRange[" + std::to_string(i) + "]", s.range);
+            sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
+            sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
+        }
+        d.mesh->Bind();
+        d.mesh->Draw();
+        d.mesh->Unbind();
+        sh->Unbind();
+    });
+
+    if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
+}
+
 void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
@@ -472,116 +655,14 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
-#if 0
-    core::Log::Info("RenderForward: executing");
-#endif
-
-    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
-    const bool useShadows = (m_shadowMap != nullptr && view.GetLight().castShadows);
-    if (useShadows && cmd) {
-        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
-        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
-    }
-
     m_scratchPointLights.clear();
     m_scratchSpotLights.clear();
     view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
     view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
-    const int kMaxPointLights = 8;
-    const int kMaxSpotLights = 4;
-    const int numPoint = static_cast<int>(std::min(m_scratchPointLights.size(), size_t(kMaxPointLights)));
-    const int numSpot = static_cast<int>(std::min(m_scratchSpotLights.size(), size_t(kMaxSpotLights)));
+
+    RenderForwardOpaque(cmd, view);
 
     const CameraView cam = view.GetCamera();
-    const LightParams light = view.GetLight();
-
-    size_t forwardDrawCount = 0;
-    size_t forwardSkipNoShader = 0;
-    view.ForEachOpaqueDrawable([&](const Drawable& d) {
-        if (!d.mesh || !d.material) return;
-        if (d.materialInstance) {
-            d.materialInstance->Bind();
-        } else {
-            d.material->Bind();
-        }
-        Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
-        if (!sh) {
-            forwardSkipNoShader++;
-            return;
-        }
-        {
-            sh->SetMat4("u_Model", d.transform);
-            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
-            sh->SetMat4("u_View", cam.view);
-            sh->SetMat4("u_Projection", cam.projection);
-            sh->SetVec3("u_ViewPos", cam.viewPos);
-            sh->SetVec3("u_LightDir", light.direction);
-            sh->SetVec3("u_LightColor", light.color);
-            sh->SetFloat("u_LightIntensity", light.intensity);
-            sh->SetVec3("u_Ambient", light.ambient);
-            sh->SetFloat("u_Exposure", light.exposure);
-            if (useShadows) {
-                sh->SetInt("u_ShadowMap", kShadowMapUnit);
-                sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
-                sh->SetFloat("u_ShadowBias", 0.005f);
-                sh->SetInt("u_UseShadows", 1);
-            } else {
-                sh->SetInt("u_UseShadows", 0);
-            }
-            const math::Mat4* bonePtr = d.bones;
-            size_t boneCount = d.boneCount;
-            if ((!bonePtr || boneCount == 0) && d.materialInstance) {
-                d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
-                    if (name == "u_Bones" && values && count > 0) {
-                        bonePtr = values;
-                        boneCount = count;
-                    }
-                });
-            } else if (!bonePtr || boneCount == 0) {
-                d.material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
-                    if (name == "u_Bones" && values && count > 0) {
-                        bonePtr = values;
-                        boneCount = count;
-                    }
-                });
-            }
-            if (bonePtr && boneCount > 0) {
-                boneCount = std::min(boneCount, kMaxBones);
-                sh->SetMat4Array("u_Bones", bonePtr, boneCount);
-            }
-            sh->SetInt("u_PointLightCount", numPoint);
-            for (int i = 0; i < numPoint; ++i) {
-                const auto& p = m_scratchPointLights[static_cast<size_t>(i)];
-                sh->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
-                sh->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
-                sh->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
-                sh->SetFloat("u_PointLightRadius[" + std::to_string(i) + "]", p.radius);
-            }
-            sh->SetInt("u_SpotLightCount", numSpot);
-            for (int i = 0; i < numSpot; ++i) {
-                const auto& s = m_scratchSpotLights[static_cast<size_t>(i)];
-                sh->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
-                sh->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
-                sh->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
-                sh->SetFloat("u_SpotLightIntensity[" + std::to_string(i) + "]", s.intensity);
-                sh->SetFloat("u_SpotLightRange[" + std::to_string(i) + "]", s.range);
-                sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
-                sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
-            }
-        d.mesh->Bind();
-        d.mesh->Draw();
-        d.mesh->Unbind();
-        sh->Unbind();
-        forwardDrawCount++;
-        }
-    });
-
-#if 0
-    core::Log::InfoF("RenderForward: drew %zu opaque, skipped %zu (no shader)", forwardDrawCount, forwardSkipNoShader);
-#endif
-
-    if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
-
     m_scratchTransparent.clear();
     view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
     TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
@@ -746,6 +827,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     bool commonSetNonSkinned = false;
     bool commonSetSkinned = false;
 
+    core::SetGLDrawDebugLabel("ForwardPlus");
     view.ForEachOpaqueDrawable([&](const Drawable& d) {
         if (!d.mesh) return;
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
@@ -863,50 +945,31 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
     EnsureResources(m_width, m_height);
     if (!m_hdrRenderTarget || !m_gbuffer) return;
 
+    core::SetGLDrawDebugLabel("Render");
     rhi::ICommandList* cmd = GetRHICommandList();
     if (!cmd) return;  // No command list available
 #ifndef NDEBUG
     m_rendering = true;
 #endif
     cmd->Begin();
+    // STEP — Prove async GL 1282: flush so any pending error from previous frame is reported here.
+    if (m_device) m_device->Finish();
 
     const CameraView cam = view.GetCamera();
-    size_t opaqueCount = 0;
-    view.ForEachOpaqueDrawable([&](const Drawable&) { ++opaqueCount; });
-#if 0
-    static size_t s_prevOpaqueCount = static_cast<size_t>(-1);
-    if (opaqueCount != s_prevOpaqueCount) {
-        core::Log::InfoF("RenderPipeline::Render: opaque=%zu (change)", opaqueCount);
-        s_prevOpaqueCount = opaqueCount;
-    }
-#endif
-    static bool s_loggedScene = false;
-    if (!s_loggedScene) {
-        size_t transparentCount = 0;
-        view.ForEachTransparentDrawable([&](const Drawable&) { ++transparentCount; });
-        core::Log::InfoF("RenderPipeline::Render: first frame opaque=%zu transparent=%zu camera valid=%d",
-                         opaqueCount, transparentCount, (cam.viewPos.x != 0 || cam.viewPos.y != 0 || cam.viewPos.z != 0));
-        s_loggedScene = true;
-    }
-
     switch (m_mode) {
     case PipelineMode::Deferred:
         BuildAndExecuteFrameGraph(view);
         break;
     case PipelineMode::Forward:
-        if (m_shadowMap && m_shadowPass && view.GetLight().castShadows) {
-            m_shadowPass->Render(*m_shadowMap, GetRHICommandList(),
-                [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-                view.GetLight().direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
-        }
-        RenderForward(view);
+        BuildAndExecuteForwardFrameGraph(view);
         break;
     case PipelineMode::ForwardPlus:
         RenderForwardPlus(view);
         break;
     }
 
-    if (view.GetSkybox()) {
+    // Skip skybox during pass isolation (limit < 99) so (none) errors can be attributed to frame passes or IBL.
+    if (kRenderPassLimit >= 99 && view.GetSkybox()) {
         const bool useGbufferDepth = (m_mode == PipelineMode::Deferred);
         RenderSkybox(view, useGbufferDepth);
     }
@@ -917,12 +980,12 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
             m_prePostCallback(m_hdrRenderTarget, m_width, m_height, *sceneForCb);
     }
 
-    if (eyelib::debug::GetPresets().debugDrawEnabled.load()) {
+    if (kRenderPassLimit >= 99 && eyelib::debug::GetPresets().debugDrawEnabled.load()) {
         rhi::IRenderTarget* target = m_hdrRenderTarget;
         DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
     
-    if (m_postProcessor && m_mode != PipelineMode::Deferred) {
+    if (kPostProcessEnabled && m_postProcessor && m_mode == PipelineMode::ForwardPlus) {
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);
@@ -952,6 +1015,7 @@ void RenderPipeline::Finish() {
 
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
+    core::SetGLDrawDebugLabel("BlitToScreen");
     // Blit scene with cover: fill full window, preserve aspect by cropping (no clear-color bars).
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd) {
@@ -960,7 +1024,7 @@ void RenderPipeline::BlitToScreen() {
         cmd->ClearDefaultFramebuffer(bg);
     }
     rhi::IRenderTarget* blitSource = nullptr;
-    if (m_mode != PipelineMode::Forward && m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
+    if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
         blitSource = m_postProcessor->GetOutputRenderTargetRHI();
     } else if (m_hdrRenderTarget) {
         blitSource = m_hdrRenderTarget;
@@ -989,7 +1053,7 @@ void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
     if (!m_device) return;
     m_skyboxShader = std::make_shared<Shader>();
-    m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetVertexLayoutRHI());
+    m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI());
 }
 
 void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth) {
@@ -1015,8 +1079,10 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     m_skyboxShader->SetInt("u_Skybox", 0);
     skybox->Bind(0);
 
-    static FullscreenQuad quad;
-    quad.Render();
+    core::SetGLDrawDebugLabel("Skybox");
+    rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
+    if (pipe && cmdSky)
+        cmdSky->DrawFullscreenQuad(pipe);
 
     m_skyboxShader->Unbind();
     if (cmdSky) { cmdSky->SetDepthWrite(true); cmdSky->SetDepthFuncLess(true); cmdSky->SetCullFace(true); cmdSky->SetRenderTarget(nullptr); }

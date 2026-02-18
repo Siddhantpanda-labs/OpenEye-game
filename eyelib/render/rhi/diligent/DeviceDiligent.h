@@ -94,6 +94,11 @@ struct DeviceDiligent : IDevice {
 
     void EnsureBlitResources();
 
+    /** For DrawFullscreenQuad: ensure blit/fullscreen quad VB/IB exist; return them. */
+    void EnsureFullscreenQuad() { EnsureBlitResources(); }
+    IBuffer* GetFullscreenQuadVBO() const { return m_blitVB; }
+    IBuffer* GetFullscreenQuadIBO() const { return m_blitIB; }
+
 private:
     RHICapabilities m_caps{};
     std::unique_ptr<CommandListDiligent> m_immediateCommandList;

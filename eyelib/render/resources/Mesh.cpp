@@ -263,6 +263,18 @@ rhi::VertexLayout Mesh::GetVertexLayoutRHI() {
     return layout;
 }
 
+rhi::VertexLayout Mesh::GetFullscreenQuadVertexLayoutRHI() {
+    using namespace rhi;
+    VertexLayout layout;
+    // FullscreenQuad uses Mesh with Vertex; we use position.xy (vec2) and uv (vec2).
+    layout.strideInBytes = static_cast<uint32_t>(sizeof(Vertex));
+    layout.attributes = {
+        {0, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, position))},
+        {1, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, uv))},
+    };
+    return layout;
+}
+
 void Mesh::Bind() const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;

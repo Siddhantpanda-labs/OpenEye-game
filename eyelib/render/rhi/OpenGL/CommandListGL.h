@@ -41,6 +41,7 @@ struct CommandListGL : ICommandList {
     void BindPipeline(IPipeline* pipeline) override;
     void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) override;
     void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) override;
+    void DrawFullscreenQuad(IPipeline* pipeline) override;
     void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) override;
@@ -52,6 +53,7 @@ struct CommandListGL : ICommandList {
     void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
 
     void SetUniformInt(const char* name, int value) override;
+    void SetUniformUint(const char* name, uint32_t value) override;
     void SetUniformFloat(const char* name, float value) override;
     void SetUniformVec2(const char* name, const float* data) override;
     void SetUniformVec3(const char* name, const float* data) override;

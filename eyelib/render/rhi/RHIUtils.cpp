@@ -21,8 +21,7 @@ void ClearAndSetRenderTargetWithViewport(ICommandList* cmd, IRenderTarget* rt,
 
 void DrawFullscreenQuad(ICommandList* cmd, IPipeline* pipeline) {
     if (!cmd || !pipeline) return;
-    cmd->BindPipeline(pipeline);
-    cmd->Draw(3, 0);  // triangle (vertex ID 0,1,2 in vertex shader)
+    cmd->DrawFullscreenQuad(pipeline);
 }
 
 void BarrierTextureForShaderRead(ICommandList* cmd, ITexture* texture) {

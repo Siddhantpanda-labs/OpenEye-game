@@ -3,6 +3,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 
@@ -23,60 +24,19 @@ rhi::VertexLayout GetFullscreenVertexLayout() {
 
 LightingPass::LightingPass() = default;
 
-LightingPass::~LightingPass() {
-    if (m_device) {
-        if (m_fullscreenVBO) { m_device->DestroyBuffer(m_fullscreenVBO); m_fullscreenVBO = nullptr; }
-        if (m_fullscreenIBO) { m_device->DestroyBuffer(m_fullscreenIBO); m_fullscreenIBO = nullptr; }
-    }
-}
-
-void LightingPass::EnsureFullscreenQuad() {
-    if (!m_device || m_fullscreenVBO) return;
-    rhi::IDevice* device = m_device;
-    const float vertices[] = {
-        -1.f, -1.f, 0.f, 0.f,
-         1.f, -1.f, 1.f, 0.f,
-         1.f,  1.f, 1.f, 1.f,
-        -1.f,  1.f, 0.f, 1.f,
-    };
-    const uint16_t indices[] = { 0, 1, 2, 2, 3, 0 };
-    rhi::BufferDesc vboDesc;
-    vboDesc.sizeInBytes = sizeof(vertices);
-    vboDesc.usage = rhi::BufferUsage::Vertex;
-    m_fullscreenVBO = device->CreateBuffer(vboDesc, vertices);
-    rhi::BufferDesc iboDesc;
-    iboDesc.sizeInBytes = sizeof(indices);
-    iboDesc.usage = rhi::BufferUsage::Index;
-    m_fullscreenIBO = device->CreateBuffer(iboDesc, indices);
-}
-
-void LightingPass::DrawFullscreenQuad(rhi::ICommandList* cmd) {
-    if (!cmd || !m_fullscreenVBO || !m_fullscreenIBO) return;
-    cmd->BindVertexBuffer(m_fullscreenVBO, 0);
-    cmd->BindIndexBuffer(m_fullscreenIBO, rhi::IndexType::UInt16);
-    cmd->DrawIndexed(6, 0, 0);
-}
+LightingPass::~LightingPass() = default;
 
 void LightingPass::EnsureDefaultShader() {
-    core::Log::Info("LightingPass::EnsureDefaultShader: entry");
-    if (m_lightingShader && m_lightingShader->IsValid()) {
-        core::Log::Info("LightingPass::EnsureDefaultShader: already valid, return");
-        return;
-    }
+    if (m_lightingShader && m_lightingShader->IsValid()) return;
     if (!m_device) return;
     rhi::IDevice* device = m_device;
-    core::Log::InfoF("LightingPass::EnsureDefaultShader: device=%p", static_cast<void*>(device));
     if (!device) return;
     m_lightingShader = std::make_shared<Shader>();
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
-    core::Log::Info("LightingPass::EnsureDefaultShader: before Load(passes/deferred/lighting)");
     if (!m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout)) {
-        core::Log::Warn("LightingPass::EnsureDefaultShader: Load failed");
+        core::Log::Warn("LightingPass: deferred lighting shader load failed");
         return;
     }
-    core::Log::Info("LightingPass::EnsureDefaultShader: after Load, before EnsureFullscreenQuad");
-    EnsureFullscreenQuad();
-    core::Log::Info("LightingPass::EnsureDefaultShader: done");
 }
 
 void LightingPass::SetLightingShader(std::shared_ptr<Shader> shader) {
@@ -98,30 +58,16 @@ void LightingPass::Render(GBuffer& gbuffer,
     (void)view;
     (void)projection;
     EnsureDefaultShader();
-    bool shaderValid = m_lightingShader && m_lightingShader->IsValid();
-    rhi::IPipeline* pipe = m_lightingShader ? m_lightingShader->GetPipelineRHI() : nullptr;
-    bool programValid = (!pipe || pipe->HasValidProgram());
-    core::Log::InfoF("LightingPass: lighting shader valid=%d pipeline program valid=%d", shaderValid ? 1 : 0, programValid ? 1 : 0);
-    if (!shaderValid) {
-        core::Log::Info("LightingPass: skipped (lighting shader invalid or missing)");
-        return;
-    }
-    if (pipe && !pipe->HasValidProgram()) {
-        core::Log::Info("LightingPass: skipped (no valid backend program)");
-        return;
-    }
-    core::Log::Info("LightingPass: executing");
+    if (!m_lightingShader || !m_lightingShader->IsValid()) return;
+    rhi::IPipeline* pipe = m_lightingShader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
 
-    core::Log::Info("LightingPass: before BindForLightingPass");
     gbuffer.BindForLightingPass(cmd);
-    core::Log::Info("LightingPass: after BindForLightingPass, before Bind");
     m_lightingShader->Bind();
-    core::Log::Info("LightingPass: after Bind, before SetInt 0-3");
     m_lightingShader->SetInt("u_Position", 0);
     m_lightingShader->SetInt("u_Normal", 1);
     m_lightingShader->SetInt("u_Albedo", 2);
     m_lightingShader->SetInt("u_PBR", 3);
-    core::Log::Info("LightingPass: after SetInt 0-3, before shadow");
     if (shadowMap) {
         if (cmd) {
             rhi::ITexture* shadowTex = shadowMap->GetDepthTextureRHI();
@@ -132,7 +78,6 @@ void LightingPass::Render(GBuffer& gbuffer,
     }
     m_lightingShader->SetInt("u_ShadowMap", 5);
     m_lightingShader->SetInt("u_UseShadows", shadowMap ? 1 : 0);
-    core::Log::Info("LightingPass: after shadow, before view/light params");
     m_lightingShader->SetVec3("u_ViewPos", viewPos);
     m_lightingShader->SetVec3("u_LightDir", light.direction);
     m_lightingShader->SetVec3("u_LightColor", light.color);
@@ -140,7 +85,6 @@ void LightingPass::Render(GBuffer& gbuffer,
     m_lightingShader->SetVec3("u_Ambient", light.ambient);
     m_lightingShader->SetFloat("u_Exposure", light.exposure);
 
-    core::Log::Info("LightingPass: before point lights");
     const int numPoint = pointLights ? static_cast<int>(std::min(pointLights->size(), size_t(kMaxPointLights))) : 0;
     m_lightingShader->SetInt("u_PointLightCount", numPoint);
     for (int i = 0; i < numPoint; ++i) {
@@ -164,18 +108,18 @@ void LightingPass::Render(GBuffer& gbuffer,
         m_lightingShader->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
     }
 
-    core::Log::Info("LightingPass: before DrawFullscreenQuad");
     if (cmd) {
         cmd->SetDepthTest(false);
         cmd->SetBlend(false);
     }
-    DrawFullscreenQuad(cmd);
-    core::Log::Info("LightingPass: after DrawFullscreenQuad");
+    if (cmd && m_lightingShader->GetPipelineRHI()) {
+        core::SetGLDrawDebugLabel("LightingPass");
+        cmd->DrawFullscreenQuad(m_lightingShader->GetPipelineRHI());
+    }
     if (cmd) cmd->SetDepthTest(true);
 
     if (shadowMap && cmd) cmd->UnbindTexture(5);
     m_lightingShader->Unbind();
-    core::Log::Info("LightingPass: done");
 }
 
 } // namespace render

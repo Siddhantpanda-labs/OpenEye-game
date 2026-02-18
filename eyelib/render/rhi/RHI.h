@@ -80,6 +80,10 @@ struct IDevice {
     virtual bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) = 0;
     virtual IPipeline* CreateComputePipeline(void* computeShader) = 0;
     virtual void DestroyPipeline(IPipeline* pipeline) = 0;
+    /** OpenGL: set SSBO block bindings on the pipeline's program (e.g. IndirectOut->0, DrawListIn->1). No-op on other backends. Call before first use to avoid interface mismatch (GL 1282). */
+    virtual void EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) {}
+    /** Returns true if the compute pipeline has an active SSBO block with the given name. Only bind to a slot when this returns true to avoid GL 1282 (binding to non-existent slot). Default: true. */
+    virtual bool ComputePipelineHasStorageBlock(IPipeline* pipeline, const char* blockName) { (void)pipeline; (void)blockName; return true; }
 
     virtual IRenderTarget* CreateRenderTarget(uint32_t width, uint32_t height,
                                               const std::vector<RHITextureFormat>& colorFormats,
@@ -157,6 +161,9 @@ struct ICommandList {
     virtual void BindPipeline(IPipeline* pipeline) = 0;
     virtual void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0) = 0;
     virtual void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset = 0) = 0;
+
+    /** Draw a fullscreen quad (3 verts or 6 indices) with the given pipeline. Uses device-owned fullscreen VB/IB; pipeline's vertex shader must use layout(location=0) vec2 position, layout(location=1) vec2 texCoord. Single unified path for post, lighting, IBL BRDF, etc. */
+    virtual void DrawFullscreenQuad(IPipeline* pipeline) = 0;
     virtual void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     virtual void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     /** Bind buffer for atomic counter access (ARB_shader_atomic_counters). Gated by supportsAtomicCounters. */
@@ -172,6 +179,7 @@ struct ICommandList {
     virtual void SetPushConstants(uint32_t offset, uint32_t size, const void* data) = 0;
 
     virtual void SetUniformInt(const char* name, int value) = 0;
+    virtual void SetUniformUint(const char* name, uint32_t value) = 0;
     virtual void SetUniformFloat(const char* name, float value) = 0;
     virtual void SetUniformVec2(const char* name, const float* data) = 0;
     virtual void SetUniformVec3(const char* name, const float* data) = 0;
