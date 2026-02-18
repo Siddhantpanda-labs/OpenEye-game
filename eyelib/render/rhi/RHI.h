@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace eyelib {
@@ -36,6 +37,8 @@ struct IDevice {
     virtual const char* GetShaderBackendName() const = 0;
     virtual const char* GetShaderVertexExtension() const = 0;
     virtual const char* GetShaderFragmentExtension() const = 0;
+    /** Resolve logical shader path (e.g. passes/gpu_cull/cull_indirect_with_drawlist) to backend-specific asset path. Returns true and sets outPath on success. Used for compute and other single-file shaders. */
+    virtual bool ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) { (void)logicalName; (void)stage; (void)outPath; return false; }
 
     /** Allocate a command list for recording. Begin/End/record on it, then SubmitCommandList(list).
      *  RHI is designed for Vulkan-style create/record/submit. OpenGL backend: CreateCommandList() returns
@@ -202,7 +205,13 @@ struct ICommandList {
     virtual void MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) = 0;
     /** Multi-draw indirect (indexed). Index buffer must be bound. Gated by supportsMultiDrawIndirect. */
     virtual void MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) = 0;
+    /** Multi-draw indirect (arrays) with draw count read from countBuffer at countBufferOffset (one uint32_t). Gated by supportsMultiDrawIndirectCount. */
+    virtual void MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) = 0;
+    /** Multi-draw indirect (indexed) with draw count from countBuffer. Index buffer must be bound. Gated by supportsMultiDrawIndirectCount. */
+    virtual void MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) = 0;
     virtual void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
+    /** Dispatch compute with group counts read from indirectBuffer at offset (DispatchIndirectCommand). Same pipeline requirements as Dispatch. Gated by supportsCompute. */
+    virtual void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) = 0;
 
     virtual void BeginQuery(IQueryPool* pool, uint32_t index) = 0;
     virtual void EndQuery(IQueryPool* pool, uint32_t index) = 0;
@@ -291,10 +300,21 @@ struct IDescriptorSet {
 
 // ---- Pipeline ----
 
+/** Compute pipeline SSBO block presence (e.g. cull shader: IndirectOut at 0, DrawListIn at 1). Set at pipeline create; default false. */
+struct ComputeBlockPresence {
+    bool hasIndirectOut = false;
+    bool hasDrawListIn = false;
+};
+
 struct IPipeline {
     virtual ~IPipeline() = default;
     /** False when pipeline was created but has no valid backend program. */
     virtual bool HasValidProgram() const { return true; }
+    /** Compute only: which storage blocks exist. Default both false; backends set at CreateComputePipeline. */
+    virtual void GetComputeBlockPresence(ComputeBlockPresence& out) const {
+        out.hasIndirectOut = false;
+        out.hasDrawListIn = false;
+    }
 };
 
 // ---- Render target ----

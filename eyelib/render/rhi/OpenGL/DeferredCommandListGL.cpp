@@ -188,8 +188,21 @@ void DeferredCommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, si
         c->MultiDrawIndexedIndirect(indirectBuffer, offset, drawCount, stride);
     });
 }
+void DeferredCommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    Record([indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride](ICommandList* c) {
+        c->MultiDrawArraysIndirectCount(indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride);
+    });
+}
+void DeferredCommandListGL::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    Record([indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride](ICommandList* c) {
+        c->MultiDrawIndexedIndirectCount(indirectBuffer, indirectOffset, countBuffer, countBufferOffset, maxDrawCount, stride);
+    });
+}
 void DeferredCommandListGL::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
     Record([groupCountX, groupCountY, groupCountZ](ICommandList* c) { c->Dispatch(groupCountX, groupCountY, groupCountZ); });
+}
+void DeferredCommandListGL::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
+    Record([indirectBuffer, offset](ICommandList* c) { c->DispatchIndirect(indirectBuffer, offset); });
 }
 
 void DeferredCommandListGL::BeginQuery(IQueryPool* pool, uint32_t index) {

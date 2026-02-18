@@ -20,7 +20,6 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/TextureCube.h"
-#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -28,14 +27,6 @@
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 
-namespace {
-constexpr bool kPostProcessEnabled = true;
-// Pass isolation for GL 1282: set to 0..5 then rebuild and run; increase until the error appears to find the bad pass.
-// 0=GpuCull, 1=Shadow, 2=GBuffer+CopyDepth, 3=Lighting, 4=Transparency, 5=Post. 99=all (runs Skybox + debug draw too).
-// When limit < 99, Skybox and debug draw are skipped. With limit=0 you should only see the one "(none)" error from IBL before the loop.
-constexpr int kRenderPassLimit = 99;  // 0..5 = isolate passes for debugging; 99 = all.
-constexpr bool kGpuCullPassEnabled = true;  // Set true to run GPU Cull compute pass; false disables it (draw list still built for GBuffer/forward).
-} // namespace
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cassert>
@@ -392,10 +383,9 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     rhi::ICommandList* cmd = GetRHICommandList();
 
     const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    if (kGpuCullPassEnabled && m_gpuCullPass && m_gpuCullPass->IsSupported()) {
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
         m_frameGraph->AddPass("GPU Cull",
             [this, cmd](const FGPassResources&) {
-                if (kRenderPassLimit < 0) return;
                 if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
             },
             {}, {}, true);
@@ -404,7 +394,6 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
             [this, &view, &light, &cam, cmd](const FGPassResources&) {
-                if (kRenderPassLimit < 1) return;
                 m_shadowPass->Render(*m_shadowMap, cmd,
                     [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                     light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
@@ -414,14 +403,12 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     m_frameGraph->AddPass("GBuffer",
         [this, &view, &cam, cmd, gpuCullDrawListCount](const FGPassResources&) {
-            if (kRenderPassLimit < 2) return;
             RenderOpaqueGeometryToGBuffer(cmd, view, cam, gpuCullDrawListCount);
         },
         {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
 
     m_frameGraph->AddPass("Copy depth for occlusion",
         [this](const FGPassResources&) {
-            if (kRenderPassLimit < 2) return;
             if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
                 m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
             m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
@@ -433,7 +420,6 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
     m_frameGraph->AddPass("Lighting",
         [this, &view, &cam, cmd, clearBlack](const FGPassResources&) {
-            if (kRenderPassLimit < 3) return;
             if (cmd && m_hdrRenderTarget)
                 rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
             ShadowMap* shadowMapForLighting = view.GetLight().castShadows ? m_shadowMap.get() : nullptr;
@@ -444,7 +430,6 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     m_frameGraph->AddPass("Transparency",
         [this, &view, &cam, cmd](const FGPassResources&) {
-            if (kRenderPassLimit < 4) return;
             if (m_device && m_hdrRenderTarget)
                 m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
             if (cmd && m_hdrRenderTarget) {
@@ -457,7 +442,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
         },
         {}, { hdrColor }, true);
 
-    if (kRenderPassLimit >= 5 && kPostProcessEnabled && m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
+    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
         rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
         rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
         if (postToneMappedTex && postOutputTex) {
@@ -491,10 +476,9 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
     rhi::ICommandList* cmd = GetRHICommandList();
 
     const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    if (kGpuCullPassEnabled && m_gpuCullPass && m_gpuCullPass->IsSupported()) {
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
         m_frameGraph->AddPass("GPU Cull",
             [this, cmd](const FGPassResources&) {
-                if (kRenderPassLimit < 0) return;
                 if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
             },
             {}, {}, true);
@@ -503,7 +487,6 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
     if (light.castShadows) {
         m_frameGraph->AddPass("Shadow",
             [this, &view, &light, &cam, cmd](const FGPassResources&) {
-                if (kRenderPassLimit < 1) return;
                 m_shadowPass->Render(*m_shadowMap, cmd,
                     [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                     light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
@@ -514,7 +497,6 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
     rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
     m_frameGraph->AddPass("Forward Opaque",
         [this, &view, cmd, clearFwd](const FGPassResources&) {
-            if (kRenderPassLimit < 2) return;
             if (cmd && m_hdrRenderTarget)
                 rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
             if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
@@ -524,7 +506,6 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
 
     m_frameGraph->AddPass("Copy depth for occlusion",
         [this](const FGPassResources&) {
-            if (kRenderPassLimit < 2) return;
             if (m_prevFrameDepthRT && m_hdrRenderTarget)
                 m_device->BlitDepthOnly(m_hdrRenderTarget, m_prevFrameDepthRT);
             m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
@@ -533,7 +514,6 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
 
     m_frameGraph->AddPass("Transparency",
         [this, &view, &cam, cmd](const FGPassResources&) {
-            if (kRenderPassLimit < 4) return;
             if (cmd && m_hdrRenderTarget) {
                 cmd->SetRenderTarget(m_hdrRenderTarget);
                 cmd->SetViewport(0, 0, m_width, m_height);
@@ -544,7 +524,7 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
         },
         {}, { hdrColor }, true);
 
-    if (kRenderPassLimit >= 5 && kPostProcessEnabled && m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
+    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
         rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
         rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
         if (postToneMappedTex && postOutputTex) {
@@ -574,7 +554,6 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
     const int numPoint = static_cast<int>(std::min(m_scratchPointLights.size(), size_t(kMaxPointLights)));
     const int numSpot = static_cast<int>(std::min(m_scratchSpotLights.size(), size_t(kMaxSpotLights)));
 
-    core::SetGLDrawDebugLabel("Forward");
     view.ForEachOpaqueDrawable([&](const Drawable& d) {
         if (!d.mesh || !d.material) return;
         if (d.materialInstance) {
@@ -827,7 +806,6 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     bool commonSetNonSkinned = false;
     bool commonSetSkinned = false;
 
-    core::SetGLDrawDebugLabel("ForwardPlus");
     view.ForEachOpaqueDrawable([&](const Drawable& d) {
         if (!d.mesh) return;
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
@@ -945,7 +923,6 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
     EnsureResources(m_width, m_height);
     if (!m_hdrRenderTarget || !m_gbuffer) return;
 
-    core::SetGLDrawDebugLabel("Render");
     rhi::ICommandList* cmd = GetRHICommandList();
     if (!cmd) return;  // No command list available
 #ifndef NDEBUG
@@ -968,8 +945,7 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
         break;
     }
 
-    // Skip skybox during pass isolation (limit < 99) so (none) errors can be attributed to frame passes or IBL.
-    if (kRenderPassLimit >= 99 && view.GetSkybox()) {
+    if (view.GetSkybox()) {
         const bool useGbufferDepth = (m_mode == PipelineMode::Deferred);
         RenderSkybox(view, useGbufferDepth);
     }
@@ -980,12 +956,12 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
             m_prePostCallback(m_hdrRenderTarget, m_width, m_height, *sceneForCb);
     }
 
-    if (kRenderPassLimit >= 99 && eyelib::debug::GetPresets().debugDrawEnabled.load()) {
+    if (eyelib::debug::GetPresets().debugDrawEnabled.load()) {
         rhi::IRenderTarget* target = m_hdrRenderTarget;
         DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
     
-    if (kPostProcessEnabled && m_postProcessor && m_mode == PipelineMode::ForwardPlus) {
+    if (m_postProcessor && m_mode == PipelineMode::ForwardPlus) {
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);
@@ -1015,7 +991,6 @@ void RenderPipeline::Finish() {
 
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
-    core::SetGLDrawDebugLabel("BlitToScreen");
     // Blit scene with cover: fill full window, preserve aspect by cropping (no clear-color bars).
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd) {
@@ -1079,7 +1054,6 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     m_skyboxShader->SetInt("u_Skybox", 0);
     skybox->Bind(0);
 
-    core::SetGLDrawDebugLabel("Skybox");
     rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
     if (pipe && cmdSky)
         cmdSky->DrawFullscreenQuad(pipe);

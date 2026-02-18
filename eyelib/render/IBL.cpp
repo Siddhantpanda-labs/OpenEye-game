@@ -2,7 +2,6 @@
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
-#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -191,7 +190,6 @@ IBL::~IBL() {
 }
 
 bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, uint32_t prefilterRes) {
-    core::SetGLDrawDebugLabel("IBL");
     if (!environmentCubemap) {
         core::Log::ErrorF("IBL::Initialize: Invalid environment cubemap");
         return false;
@@ -283,7 +281,6 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         irradianceShader->SetMat4("u_View", captureViews[face]);
         irradianceShader->SetMat4("u_Projection", captureProjection);
         cmd->BindTexture(m_environmentRHI, 0);
-        core::SetGLDrawDebugLabel("IBL irradiance");
         cubeMesh->Draw();
         irradianceShader->Unbind();
         m_deviceRHI->DestroyRenderTarget(rt);
@@ -311,7 +308,6 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             prefilterShader->SetMat4("u_View", captureViews[face]);
             prefilterShader->SetMat4("u_Projection", captureProjection);
             cmd->BindTexture(m_environmentRHI, 0);
-            core::SetGLDrawDebugLabel("IBL prefilter");
             cubeMesh->Draw();
             prefilterShader->Unbind();
             m_deviceRHI->DestroyRenderTarget(rt);
@@ -329,7 +325,6 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetDepthTest(false);
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
-            core::SetGLDrawDebugLabel("IBL BRDF");
             if (brdfShader->GetPipelineRHI())
                 cmd->DrawFullscreenQuad(brdfShader->GetPipelineRHI());
             m_deviceRHI->DestroyRenderTarget(rt);

@@ -269,6 +269,13 @@ struct DrawIndexedIndirectCommand {
     uint32_t baseInstance = 0;
 };
 
+/** Layout matches GL DispatchIndirectCommand / Vulkan VkDispatchIndirectCommand. Used for DispatchIndirect. */
+struct DispatchIndirectCommand {
+    uint32_t numGroupsX = 0;
+    uint32_t numGroupsY = 0;
+    uint32_t numGroupsZ = 0;
+};
+
 // ---- Query ----
 
 enum class QueryType {
@@ -288,6 +295,7 @@ struct RHICapabilities {
     bool supportsBindless = false;           ///< Bindless textures/buffers (e.g. ARB_bindless_texture, descriptor indexing)
     bool supportsCompute = false;            ///< Compute shaders / Dispatch
     bool supportsMultiDrawIndirect = false;  ///< Multi-draw indirect (glMultiDrawArraysIndirect etc.)
+    bool supportsMultiDrawIndirectCount = false;  ///< Multi-draw indirect with count from buffer (GL_ARB_indirect_parameters; GPU-written draw count)
     bool supportsAsyncCompute = false;      ///< Async compute queue (Vulkan-style)
     bool supportsRayTracing = false;         ///< Ray tracing (optional; future)
     bool supportsTessellation = false;       ///< Tessellation control/eval shaders (OpenGL 4.0+)

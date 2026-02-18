@@ -9,7 +9,7 @@ namespace eyelib {
 namespace render {
 
 /**
- * Per-draw entry for GPU cull input. Layout must match cull_indirect.comp DrawEntry.
+ * Per-draw entry for GPU cull input. Layout must match cull_indirect_with_drawlist.comp DrawEntry.
  * AABB in world space; compute derives frustum from view-proj and culls.
  * Shader uses scalars (not vec3) for AABB to avoid std430 vec3 alignment ambiguity; 52 bytes.
  */
@@ -29,7 +29,7 @@ static_assert(sizeof(GpuCullDrawEntry) == 52, "GpuCullDrawEntry layout must matc
 /**
  * GPU culling pass: runs a compute shader that writes DrawIndexedIndirectCommand(s)
  * into a buffer. Use with MultiDrawIndexedIndirect in a subsequent pass.
- * E4 / A1: Optional draw list input + frustum cull; fallback: one fixed draw (legacy).
+ * E4 / A1: Two variants — with draw list (frustum cull) or no draw list (single quad).
  */
 class GpuCullPass {
 public:
@@ -67,11 +67,13 @@ private:
     void EnsureResources();
 
     rhi::IDevice* m_device = nullptr;
-    /** Combined buffer: [0, kIndirectRegionSize) = indirect commands (compute output), [kIndirectRegionSize, end) = draw list (CPU upload). Single buffer bound at slot 0 and 1 to avoid GL 1282 on some drivers. */
+    /** Combined buffer: [0, kIndirectRegionSize) = indirect commands (compute output), [kIndirectRegionSize, end) = draw list (CPU upload). Bound at SSBO slots 0 and 1. */
     rhi::IBuffer* m_indirectBuffer = nullptr;
-    rhi::IShader* m_computeShader = nullptr;
-    rhi::IPipeline* m_computePipeline = nullptr;
-    rhi::IBuffer* m_viewProjUBO = nullptr;  // UBO for u_ViewProj (avoids GL 1282 from SetUniformMat4 on compute)
+    rhi::IShader* m_computeShaderWithDrawList = nullptr;
+    rhi::IPipeline* m_computePipelineWithDrawList = nullptr;
+    rhi::IShader* m_computeShaderNoDrawList = nullptr;
+    rhi::IPipeline* m_computePipelineNoDrawList = nullptr;
+    rhi::IBuffer* m_viewProjUBO = nullptr;  // View-projection for compute (UBO for pipeline compatibility)
     uint32_t m_drawCount = 1;
     uint32_t m_effectiveDrawCount = 1;  // actual count written (clamped to kMaxIndirectDraws)
     float m_viewProj[16] = {};

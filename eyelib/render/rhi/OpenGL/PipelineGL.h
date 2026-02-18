@@ -16,6 +16,9 @@ struct PipelineGL : IPipeline {
     BlendState m_blend;
     DepthStencilState m_depthStencil;
     RasterState m_raster;
+    ComputeBlockPresence m_computeBlockPresence{};  // set for compute pipelines at create
+
+    void GetComputeBlockPresence(ComputeBlockPresence& out) const override;
 };
 
 } // namespace rhi

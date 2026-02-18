@@ -538,12 +538,47 @@ void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t off
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 }
 
+void CommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount) return;
+    glBindVertexArray(m_vao);
+    auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
+    auto* cntBuf = static_cast<BufferGL*>(countBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);
+    glBindBuffer(GL_PARAMETER_BUFFER_ARB, cntBuf->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    glMultiDrawArraysIndirectCountARB(mode, reinterpret_cast<const void*>(indirectOffset), static_cast<GLintptr>(countBufferOffset), static_cast<GLsizei>(maxDrawCount), static_cast<GLsizei>(stride));
+    glBindBuffer(GL_PARAMETER_BUFFER_ARB, 0);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
+void CommandListGL::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount) return;
+    glBindVertexArray(m_vao);
+    auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
+    auto* cntBuf = static_cast<BufferGL*>(countBuffer);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);
+    glBindBuffer(GL_PARAMETER_BUFFER_ARB, cntBuf->m_handle);
+    GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
+    GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
+    glMultiDrawElementsIndirectCountARB(mode, idxType, reinterpret_cast<const void*>(indirectOffset), static_cast<GLintptr>(countBufferOffset), static_cast<GLsizei>(maxDrawCount), static_cast<GLsizei>(stride));
+    glBindBuffer(GL_PARAMETER_BUFFER_ARB, 0);
+    glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+}
+
 void CommandListGL::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
     // glDispatchCompute(0, y, z) is GL_INVALID_OPERATION; clamp to at least 1 per dimension.
     const GLuint x = (groupCountX > 0u) ? groupCountX : 1u;
     const GLuint y = (groupCountY > 0u) ? groupCountY : 1u;
     const GLuint z = (groupCountZ > 0u) ? groupCountZ : 1u;
     glDispatchCompute(x, y, z);
+}
+
+void CommandListGL::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!indirectBuffer || !m_device->GetCapabilities().supportsCompute) return;
+    auto* b = static_cast<BufferGL*>(indirectBuffer);
+    glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, b->m_handle);
+    glDispatchComputeIndirect(static_cast<GLintptr>(offset));
+    glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
 }
 
 void CommandListGL::BeginQuery(IQueryPool* pool, uint32_t index) {

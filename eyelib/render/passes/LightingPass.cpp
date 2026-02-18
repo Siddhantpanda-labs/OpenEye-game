@@ -3,7 +3,6 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHITypes.h"
-#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 
@@ -112,10 +111,8 @@ void LightingPass::Render(GBuffer& gbuffer,
         cmd->SetDepthTest(false);
         cmd->SetBlend(false);
     }
-    if (cmd && m_lightingShader->GetPipelineRHI()) {
-        core::SetGLDrawDebugLabel("LightingPass");
+    if (cmd && m_lightingShader->GetPipelineRHI())
         cmd->DrawFullscreenQuad(m_lightingShader->GetPipelineRHI());
-    }
     if (cmd) cmd->SetDepthTest(true);
 
     if (shadowMap && cmd) cmd->UnbindTexture(5);

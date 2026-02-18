@@ -11,6 +11,7 @@
 #include "eyelib/render/rhi/OpenGL/RenderTargetGL.h"
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
+#include "eyelib/render/GpuCullBlockNames.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -73,6 +74,7 @@ void DeviceGL::QueryCapabilities() {
     m_caps.supportsBindless = has("GL_ARB_bindless_texture");
     m_caps.supportsCompute = has("GL_ARB_compute_shader");
     m_caps.supportsMultiDrawIndirect = has("GL_ARB_multi_draw_indirect");
+    m_caps.supportsMultiDrawIndirectCount = has("GL_ARB_indirect_parameters");
     m_caps.supportsAsyncCompute = false;  // OpenGL has no async compute queue
     m_caps.supportsRayTracing = false;
     m_caps.supportsTessellation = has("GL_ARB_tessellation_shader");
@@ -99,6 +101,18 @@ const char* DeviceGL::GetShaderVertexExtension() const {
 
 const char* DeviceGL::GetShaderFragmentExtension() const {
     return ".frag";
+}
+
+bool DeviceGL::ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) {
+    if (!logicalName || logicalName[0] == '\0') return false;
+    if (stage != ShaderStage::Compute) return false;
+    std::string baseDir = "assets/shaders/opengl/";
+    outPath = baseDir + logicalName + ".comp";
+    std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
+    if (!exeDir.empty() && eyelib::platform::filesystem::FileExists(exeDir + outPath)) {
+        outPath = exeDir + outPath;
+    }
+    return true;
 }
 
 ICommandList* DeviceGL::CreateCommandList() {
@@ -524,22 +538,24 @@ IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
         return nullptr;
     }
 
-    // Explicitly set SSBO block bindings so driver interface matches (avoids GL 1282 at bind time).
-    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "IndirectOut");
+    // Explicitly set SSBO block bindings so driver interface matches.
+    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockIndirectOut);
     if (idx0 == GL_INVALID_INDEX) {
-        core::Log::Warn("RHI OpenGL: compute program has no SSBO block 'IndirectOut' (optimized out or missing); GL 1282 may occur at bind.");
+        core::Log::WarnF("RHI OpenGL: compute program has no SSBO block '%s' (optimized out or missing).", kGpuCullBlockIndirectOut);
     } else {
         glShaderStorageBlockBinding(program, idx0, 0);
     }
-    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "DrawListIn");
+    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockDrawListIn);
     if (idx1 == GL_INVALID_INDEX) {
-        core::Log::Warn("RHI OpenGL: compute program has no SSBO block 'DrawListIn' (optimized out or missing); do not bind slot 1 to avoid GL 1282.");
+        core::Log::WarnF("RHI OpenGL: compute program has no SSBO block '%s' (optimized out or missing); do not bind slot 1.", kGpuCullBlockDrawListIn);
     } else {
         glShaderStorageBlockBinding(program, idx1, 1);
     }
 
     auto* p = new PipelineGL();
     p->m_program = program;
+    p->m_computeBlockPresence.hasIndirectOut = (idx0 != GL_INVALID_INDEX);
+    p->m_computeBlockPresence.hasDrawListIn = (idx1 != GL_INVALID_INDEX);
     return p;
 }
 
@@ -557,10 +573,10 @@ void DeviceGL::EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) {
     auto* p = static_cast<PipelineGL*>(pipeline);
     if (!p->m_program) return;
     GLuint program = p->m_program;
-    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "IndirectOut");
+    GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockIndirectOut);
     if (idx0 != GL_INVALID_INDEX)
         glShaderStorageBlockBinding(program, idx0, 0);
-    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, "DrawListIn");
+    GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockDrawListIn);
     if (idx1 != GL_INVALID_INDEX)
         glShaderStorageBlockBinding(program, idx1, 1);
 }

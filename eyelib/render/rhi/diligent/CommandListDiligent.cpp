@@ -556,7 +556,14 @@ void CommandListDiligent::DrawArraysIndirect(IBuffer* indirectBuffer, size_t off
 void CommandListDiligent::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
 void CommandListDiligent::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
 void CommandListDiligent::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
+void CommandListDiligent::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride;
+}
+void CommandListDiligent::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride;
+}
 void CommandListDiligent::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) { (void)groupCountX; (void)groupCountY; (void)groupCountZ; }
+void CommandListDiligent::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
 
 void CommandListDiligent::BeginQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
 void CommandListDiligent::EndQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }

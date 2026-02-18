@@ -17,6 +17,7 @@ struct DeviceGL : IDevice {
     const char* GetShaderBackendName() const override;
     const char* GetShaderVertexExtension() const override;
     const char* GetShaderFragmentExtension() const override;
+    bool ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) override;
 
     ICommandList* CreateCommandList() override;
     void DestroyCommandList(ICommandList* list) override;

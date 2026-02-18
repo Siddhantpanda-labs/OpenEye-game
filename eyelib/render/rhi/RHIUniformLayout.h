@@ -62,6 +62,9 @@ namespace PassBindings {
  * GPU culling flow: (1) Dispatch compute to fill indirect buffer with draw commands. (2) BarrierBufferForIndirectDraw(cmd, indirectBuffer).
  * (3) BindPipeline(graphics), BindVertexBuffer, BindIndexBuffer, then MultiDrawIndexedIndirect(indirectBuffer, offset, drawCount, stride).
  *
+ * DispatchIndirect: Dispatch compute with group counts from a buffer (DispatchIndirectCommand at offset). Same barrier as above when buffer was written by compute.
+ * MultiDraw*IndirectCount: Like MultiDraw*Indirect but draw count is read from countBuffer at countBufferOffset (one uint32_t). Gated by supportsMultiDrawIndirectCount (GL_ARB_indirect_parameters). Use when the GPU writes the draw count (e.g. cull pass writes count then draw).
+ *
  * Bindless: When GetCapabilities().supportsBindless is true, CreateBindlessHeap() can return a heap (skeleton currently returns nullptr).
  * Use AllocateTextureHandle/AllocateBufferHandle to get BindlessHandle values for shaders; BindBindlessHeap(cmd, heap) before draw.
  */

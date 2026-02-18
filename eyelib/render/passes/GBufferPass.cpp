@@ -6,7 +6,6 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHIContext.h"
-#include "eyelib/core/GLDrawDebugLabel.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <cstdint>
@@ -87,7 +86,6 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
     if (useBindless && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
-    core::SetGLDrawDebugLabel("GBufferPass");
     feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection, useBindless](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
@@ -230,7 +228,6 @@ void GBufferPass::RenderIndirect(GBuffer& gbuffer,
         cmd->SetCullFace(false);
     }
 
-    core::SetGLDrawDebugLabel("GBufferPass indirect");
     cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
     cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
     cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
@@ -283,7 +280,6 @@ void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
         cmd->BindStorageBuffer(perDrawTransformBuffer, 4, 0, transformCount * 64u);
     }
 
-    core::SetGLDrawDebugLabel("GBufferPass indirect per-draw");
     cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
     cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
     cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);

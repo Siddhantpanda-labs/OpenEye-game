@@ -1,7 +1,7 @@
 #version 460 core
-// A1: Reads optional draw list (AABB + DrawIndexedIndirectCommand per entry), frustum culls,
-//     writes one indirect command per input (visible = full command, culled = instanceCount 0).
-//     Without draw list: legacy single quad draw (binding 1 unused).
+// With-draw-list variant: reads draw list (AABB + draw params), frustum culls,
+// writes one indirect command per input (visible = full command, culled = instanceCount 0).
+// Used only when a draw list is present; no single-quad path in this shader.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -35,7 +35,6 @@ layout(std430, binding = 1) readonly buffer DrawListIn {
     DrawEntry drawList[];
 };
 
-// View-proj in UBO to avoid driver GL 1282 when setting mat4 uniform on compute.
 layout(std140, binding = 3) uniform ViewProjBlock {
     mat4 u_ViewProj;
 };
@@ -92,19 +91,6 @@ bool notOccluded(vec3 aabbMin, vec3 aabbMax) {
 
 void main() {
     uint id = gl_GlobalInvocationID.x;
-
-    if (u_NumDraws == 0u) {
-        // Legacy: write one quad draw at slot 0
-        if (id == 0u) {
-            outCommands[0].indexCount = 6u;
-            outCommands[0].instanceCount = 1u;
-            outCommands[0].firstIndex = 0u;
-            outCommands[0].baseVertex = 0;
-            outCommands[0].baseInstance = 0u;
-        }
-        return;
-    }
-
     if (id >= u_NumDraws)
         return;
 

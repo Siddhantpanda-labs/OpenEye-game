@@ -65,7 +65,10 @@ struct CommandListDiligent : ICommandList {
     void DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) override;
     void MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
     void MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
+    void MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) override;
+    void MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) override;
     void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+    void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) override;
 
     void BeginQuery(IQueryPool* pool, uint32_t index) override;
     void EndQuery(IQueryPool* pool, uint32_t index) override;
