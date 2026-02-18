@@ -2,6 +2,8 @@
 
 #include "Commands/CommandTypes.h"
 #include "Events/WorldEvents.h"
+#include "eyelib/world/components/SystemBindings.h"
+#include <unordered_set>
 
 namespace eyelib {
 namespace world {
@@ -11,6 +13,7 @@ World::World() {
     m_scheduler.SetFixedTimestep(1.0f / 60.0f);
     m_scheduler.AddStep("mutation", "core", 0, [this](float /*dt*/) { ApplyPendingCommands(); });
     m_scheduler.AddStep("region", "core", 10, [this](float /*dt*/) { m_regionSystem.Update(m_state); });
+    m_events.SetEventLog(&m_eventLog, [this]() { return m_simulationTime; });
 }
 World::~World() = default;
 
@@ -174,6 +177,7 @@ void World::Update() {
 }
 
 void World::Update(float deltaSeconds) {
+    m_simulationTime += deltaSeconds;
     m_scheduler.Run(deltaSeconds);
 }
 
@@ -197,6 +201,33 @@ const TransactionManager& World::Transactions() const { return m_transactions; }
 
 EventDispatcher& World::Events() { return m_events; }
 const EventDispatcher& World::Events() const { return m_events; }
+
+std::vector<EventLogEntry> World::GetEventsSince(uint64_t sinceSequenceId) const {
+    return m_eventLog.GetEventsSince(sinceSequenceId);
+}
+
+std::vector<EventLogEntry> World::GetEventsSinceTime(double sinceTime) const {
+    return m_eventLog.GetEventsSinceTime(sinceTime);
+}
+
+std::vector<std::string> World::GetSystemList() const {
+    std::unordered_set<std::string> seen;
+    const auto& store = m_state.Components<components::SystemBindings>();
+    for (const auto& [entity, bindings] : store.All()) {
+        (void)entity;
+        for (const auto& name : bindings.enabledSystems) {
+            seen.insert(name);
+        }
+    }
+    return std::vector<std::string>(seen.begin(), seen.end());
+}
+
+std::vector<std::string> World::GetRegionEnabledSystems(EntityId regionEntityId) const {
+    const auto& store = m_state.Components<components::SystemBindings>();
+    const auto* bindings = store.TryGet(regionEntityId);
+    if (!bindings) return {};
+    return bindings->enabledSystems;
+}
 
 } // namespace world
 } // namespace eyelib

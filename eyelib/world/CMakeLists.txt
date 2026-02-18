@@ -30,6 +30,8 @@ set(EYELIB_WORLD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Transactions/TransactionManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Transactions/TransactionManager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Events/WorldEvents.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Events/EventLog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Events/EventLog.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Events/EventDispatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Events/EventDispatcher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Serialization/WorldSerializer.cpp

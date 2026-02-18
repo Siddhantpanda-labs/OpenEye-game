@@ -8,6 +8,8 @@
 namespace eyelib {
 namespace world {
 
+class EventLog;
+
 class EventDispatcher {
 public:
     using Handler = std::function<void(const WorldEvent&)>;
@@ -18,9 +20,14 @@ public:
 
     void Emit(const WorldEvent& event);
 
+    /** When set, every Emit also appends to the log with getTime() as the event time. */
+    void SetEventLog(EventLog* log, std::function<double()> getTime);
+
 private:
     HandlerId m_nextId = 1;
     std::unordered_map<HandlerId, Handler> m_listeners;
+    EventLog* m_eventLog = nullptr;
+    std::function<double()> m_getTime;
 };
 
 } // namespace world

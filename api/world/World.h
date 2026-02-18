@@ -17,6 +17,7 @@
 #include "eyelib/world/components/SystemBindings.h"
 #include "eyelib/world/components/ActiveSystems.h"
 #include "eyelib/world/EntityId.h"
+#include "eyelib/world/Events/EventLog.h"
 
 #include <cstdint>
 #include <memory>
@@ -65,6 +66,18 @@ public:
     void SetTimeMode(::eyelib::world::WorldScheduler::TimeMode mode);
     ::eyelib::world::WorldScheduler::TimeMode GetTimeMode() const;
     void SetReplayDelta(float seconds);
+
+    /** Simulation time (seconds), advanced each Update(deltaSeconds). For event timestamps and AI observation. */
+    double GetSimulationTime() const;
+    /** Events with sequenceId > sinceSequenceId. Use 0 for all events in the log. */
+    std::vector<::eyelib::world::EventLogEntry> GetEventsSince(uint64_t sinceSequenceId) const;
+    /** Events with time > sinceTime. */
+    std::vector<::eyelib::world::EventLogEntry> GetEventsSinceTime(double sinceTime) const;
+
+    /** All unique system names that appear in any region's SystemBindings. For AI/system introspection. */
+    std::vector<std::string> GetSystemList() const;
+    /** Enabled system names for a region entity (that has SystemBindings). Empty if entity has no SystemBindings. */
+    std::vector<std::string> GetRegionEnabledSystems(::eyelib::world::EntityId regionEntityId) const;
 
     ::eyelib::world::EntityId CreateEntity(const std::string& name = "");
     bool DestroyEntity(::eyelib::world::EntityId entity);

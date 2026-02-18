@@ -164,6 +164,41 @@ void World::SetReplayDelta(float seconds) {
     m_impl->world.Scheduler().SetReplayDelta(seconds);
 }
 
+double World::GetSimulationTime() const {
+    if (!m_impl) {
+        return 0.0;
+    }
+    return m_impl->world.GetSimulationTime();
+}
+
+std::vector<::eyelib::world::EventLogEntry> World::GetEventsSince(uint64_t sinceSequenceId) const {
+    if (!m_impl) {
+        return {};
+    }
+    return m_impl->world.GetEventsSince(sinceSequenceId);
+}
+
+std::vector<::eyelib::world::EventLogEntry> World::GetEventsSinceTime(double sinceTime) const {
+    if (!m_impl) {
+        return {};
+    }
+    return m_impl->world.GetEventsSinceTime(sinceTime);
+}
+
+std::vector<std::string> World::GetSystemList() const {
+    if (!m_impl) {
+        return {};
+    }
+    return m_impl->world.GetSystemList();
+}
+
+std::vector<std::string> World::GetRegionEnabledSystems(::eyelib::world::EntityId regionEntityId) const {
+    if (!m_impl) {
+        return {};
+    }
+    return m_impl->world.GetRegionEnabledSystems(regionEntityId);
+}
+
 ::eyelib::world::EntityId World::CreateEntity(const std::string& name) {
     if (!m_impl) {
         return ::eyelib::world::InvalidEntity;
