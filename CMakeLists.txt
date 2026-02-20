@@ -292,8 +292,16 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(api/scripting)
 endif()
 
-set(OPENEYE_BUILD_EDITOR OFF CACHE BOOL "Build development editor" FORCE)
-set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game" FORCE)
+# Editor and game default OFF for now; set ON to build
+set(OPENEYE_BUILD_EDITOR OFF CACHE BOOL "Build development editor")
+set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game")
+
+# --------------------------------------
+# Editor Application (api client only)
+# --------------------------------------
+if(OPENEYE_BUILD_EDITOR)
+    add_subdirectory(app/editor)
+endif()
 
 # --------------------------------------
 # Game Application (Final Runtime)

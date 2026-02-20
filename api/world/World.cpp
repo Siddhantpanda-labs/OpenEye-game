@@ -1059,6 +1059,14 @@ bool World::LoadScene(const std::string& path) {
     return m_impl->world.ApplyCommandSync(std::make_unique<::eyelib::world::LoadSceneCommand>(path)).success;
 }
 
+bool World::SaveScene(const std::string& path) const {
+    if (!m_impl) {
+        return false;
+    }
+    Serializer serializer;
+    return serializer.Save(m_impl->world.GetState(), path);
+}
+
 size_t World::GetEntityCount() const {
     if (!m_impl) {
         return 0;

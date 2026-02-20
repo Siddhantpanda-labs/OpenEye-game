@@ -269,6 +269,8 @@ public:
                           const ::eyelib::world::components::ActiveSystems& systems);
 
     bool LoadScene(const std::string& path);
+    /** Save current world state to JSON scene file. Returns false on write error. */
+    bool SaveScene(const std::string& path) const;
     size_t GetEntityCount() const;
 
     Observation GetObservation() const;

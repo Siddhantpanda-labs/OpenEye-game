@@ -115,6 +115,13 @@ RHI and OpenGL backend already expose **bindless**, **indirect draw**, and **GPU
 - **Do not** refactor PostProcessor into full graph-driven effects until frame graph enhancements are stable; it can follow E3.
 - **Do not** remove `GetDefaultDevice()` abruptly; reduce usage over time.
 - **Vulkan:** Not in scope; OpenGL-only backend.
+- Procedural/
+    Noise/
+    TerrainGenerator/
+    BiomeSystem/
+    ScatterSystem/
+    RuleEvaluator/
+    ChunkGenerator/
 
 ---
 
