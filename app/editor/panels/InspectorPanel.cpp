@@ -50,9 +50,9 @@ void ShowTransformComponent(eyelib::api::world::World& world, EntityId entity) {
     getVec3("scale", scale, 3);
 
     bool changed = false;
-    if (ImGui::InputFloat3("Position", pos)) changed = true;
-    if (ImGui::InputFloat4("Rotation (w,x,y,z)", rot)) changed = true;
-    if (ImGui::InputFloat3("Scale", scale)) changed = true;
+    if (ImGui::DragFloat3("Position", pos, 0.01f)) changed = true;
+    if (ImGui::DragFloat4("Rotation (w,x,y,z)", rot, 0.01f)) changed = true;
+    if (ImGui::DragFloat3("Scale", scale, 0.01f)) changed = true;
 
     if (changed) {
         nlohmann::json newJ;

@@ -124,6 +124,10 @@ Early phases focus on **core, platform, world, assets, math, render** so the edi
 - Editor camera controls (orbit/pan); optional gizmo (translate/rotate/scale) using ImGuizmo.
 - **Tests:** render (pipeline, camera, meshes, materials, lights).
 
+**Phase 4a (done):** Viewport panel with content region, placeholder background, and `EditorCamera` in context (distance, yaw, pitch, focus, fov). Ready for wiring render path. Player remains independent.
+
+**Phase 4b (done):** Render world to texture: GetOutputColorTextureNativeHandle(); EditorSceneBuilder (snapshot → RenderScene). Pipeline + AssetRegistry init; each frame: build scene, resize pipeline, Render(scene), display texture. No shared builder; editor-only “BuildRenderSceneFromWorld” using API only, then scene view renders world from `editorCamera` to a `RenderTarget`.
+
 ### Phase 5: Asset and resource integration
 
 - Asset roots configuration; resolve mesh/material references from world to assets.

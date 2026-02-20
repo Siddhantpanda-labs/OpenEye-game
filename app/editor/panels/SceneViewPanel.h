@@ -1,8 +1,13 @@
 #pragma once
 
-namespace openeye::editor::panels {
+namespace openeye::editor {
 
-/** Dockable scene view panel: viewport (Phase 4). */
-void ShowSceneViewPanel();
+struct EditorContext;
 
-} // namespace openeye::editor::panels
+namespace panels {
+
+/** Dockable scene view panel: viewport (Phase 4). Uses context.editorCamera; placeholder until render-to-texture is wired. */
+void ShowSceneViewPanel(EditorContext* ctx);
+
+} // namespace panels
+} // namespace openeye::editor

@@ -23,11 +23,11 @@ Executable: `build/bin/Debug/OpenEyeEditor.exe`
   - `StatusPanel` — Scene path and entity count.
   - `HierarchyPanel` — Entity tree, selection, Create Entity / Create Child, Delete, Rename (Phase 2).
   - `InspectorPanel` — Lists components for selected entity; typed edit for Name and Transform; generic JSON + Apply for others (Phase 3).
-  - `SceneViewPanel` — Viewport (Phase 4 placeholder).
+  - `SceneViewPanel` — Viewport (Phase 4a: panel + EditorCamera; Phase 4b = render to texture).
 
-## Phase 3 (current)
+## Phase 4a (current)
 
-- Inspector: GetComponentNames → list; Name (InputText), Transform (position/rotation/scale), others as raw JSON with Apply. All via GetComponentJson/SetComponentJson.
+- Scene view: dockable panel with viewport-sized area, placeholder, and `EditorContext.editorCamera` (distance, yaw, pitch, focus, fov). Phase 4b will wire render-to-texture and shared scene builder (player stays independent).
 
 ## Plan
 

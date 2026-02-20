@@ -62,6 +62,20 @@ void* RenderPipeline::GetDevice() const {
     return m_impl->pipeline ? m_impl->pipeline->GetRHIDevice() : nullptr;
 }
 
+void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
+    if (!m_impl->pipeline) return nullptr;
+    ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetHDRColorTextureRHI();
+    return tex ? tex->GetNativeTexture() : nullptr;
+}
+
+void RenderPipeline::RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height) {
+    if (!m_impl->pipeline) return;
+    ::eyelib::render::rhi::ICommandList* cmd = m_impl->pipeline->GetRHICommandList();
+    if (!cmd) return;
+    cmd->SetRenderTarget(nullptr);
+    cmd->SetViewport(0, 0, width, height);
+}
+
 void* RenderPipeline::InsertFrameFence() {
     if (!m_impl->pipeline) return nullptr;
     auto* cmd = m_impl->pipeline->GetRHICommandList();

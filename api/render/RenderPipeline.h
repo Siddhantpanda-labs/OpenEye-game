@@ -47,6 +47,12 @@ public:
     /** Opaque device handle for creating RHI resources (e.g. RenderTarget). Null if not initialized. */
     void* GetDevice() const;
 
+    /** Native texture handle of pipeline output (after Render). For ImGui: use as ImTextureID. OpenGL: texture ID; null if not ready. */
+    void* GetOutputColorTextureNativeHandle() const;
+
+    /** Restore default framebuffer (0) and viewport. Call after Render() when not calling BlitToScreen() (e.g. editor scene view) so subsequent drawing (e.g. ImGui) targets the window. */
+    void RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height);
+
     /** Insert a GPU fence after current command stream. Call before Finish() so fence is after all draws. Returns opaque fence (null if unsupported). */
     void* InsertFrameFence();
     /** Wait for fence (no destroy). Call before SwapBuffers so present happens after GPU completes. No-op if fence is null. */

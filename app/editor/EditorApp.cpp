@@ -7,8 +7,11 @@
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
 
+#include "api/assets/All.h"
 #include "api/core/All.h"
 #include "api/platform/All.h"
+#include "api/render/All.h"
+#include "eyelib/render/RenderBackend.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -123,7 +126,19 @@ int RunEditor(int argc, char** argv) {
         return 3;
     }
 
+    eyelib::api::Renderer sceneViewRenderer;
+    eyelib::api::RenderPipeline sceneViewPipeline;
+    if (!sceneViewRenderer.Initialize() || !sceneViewPipeline.Initialize(window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
+        std::fprintf(stderr, "Editor: Scene view pipeline init failed (scene view will show placeholder).\n");
+    } else {
+        sceneViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    }
+    eyelib::api::AssetRegistry assetRegistry;
+
     openeye::editor::EditorContext ctx;
+    ctx.sceneViewPipeline = &sceneViewPipeline;
+    ctx.assetRegistry = &assetRegistry;
+    ctx.assetRoots = { "assets" };
 
     while (!window.ShouldClose()) {
         window.PollEvents();
@@ -142,9 +157,14 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowStatusPanel(&ctx);
         openeye::editor::panels::ShowHierarchyPanel(&ctx);
         openeye::editor::panels::ShowInspectorPanel(&ctx);
-        openeye::editor::panels::ShowSceneViewPanel();
+        openeye::editor::panels::ShowSceneViewPanel(&ctx);
 
         ImGui::Render();
+        // Restore default framebuffer and full-window viewport so ImGui draws to the window.
+        // The scene view pipeline leaves its FBO and a small viewport bound.
+        if (ctx.sceneViewPipeline)
+            ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(
+                static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         window.SwapBuffers();
     }
