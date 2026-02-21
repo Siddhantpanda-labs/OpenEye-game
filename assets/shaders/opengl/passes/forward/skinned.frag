@@ -199,8 +199,8 @@ void main() {
     float lightVis = 1.0 - shadow;
     vec3 Lo = (kD * albedoColor / PI + specular) * u_LightColor * u_LightIntensity * NdotL * lightVis;
 
-    // Ambient lighting
-    vec3 ambient = u_Ambient * albedoColor * ao;
+    // Ambient lighting (metallic modulates so metals stay dark; matches deferred/forward lit)
+    vec3 ambient = albedoColor * (1.0 - metallic) * u_Ambient * ao;
 
     vec3 color = ambient + Lo;
 
@@ -216,16 +216,13 @@ void main() {
     }
 
     color = (color + emission) * u_Exposure;
-    
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(lum), color, 1.15);
+    color = clamp(color, vec3(0.0), vec3(10.0));
+
     // HDR tonemapping (ACES fitted)
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
-    
-    // Gamma correction
     color = pow(color, vec3(1.0/2.2));
-    
-    // Vibrancy: stronger saturation boost so colors pop
-    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = mix(vec3(lum), color, 1.3);
     color = clamp(color, vec3(0.0), vec3(1.0));
     
     FragColor = vec4(color, 1.0);

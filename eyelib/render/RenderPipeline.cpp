@@ -59,6 +59,12 @@ void RenderPipeline::Shutdown() {
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
     m_forwardPlusSkinnedShader.reset();
+    m_outlinePostShader.reset();
+    m_entityIdShader.reset();
+    if (m_device) {
+        if (m_outlineCompositeTemp) { m_device->DestroyRenderTarget(m_outlineCompositeTemp); m_outlineCompositeTemp = nullptr; }
+        if (m_entityIdRenderTarget) { m_device->DestroyRenderTarget(m_entityIdRenderTarget); m_entityIdRenderTarget = nullptr; }
+    }
     m_clusteredLightGrid.reset();
     m_frameGraph.reset();
     m_lightingPass.reset();
@@ -246,13 +252,35 @@ void RenderPipeline::CreateHDRFramebuffer() {
     m_hdrRenderTarget = m_device->CreateRenderTarget(
         static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height),
         colorFormats, rhi::RHITextureFormat::Depth24, 1);
+    if (m_hdrRenderTarget) {
+        rhi::ITexture* depthTex = m_hdrRenderTarget->GetDepthTexture();
+        if (depthTex) {
+            std::vector<rhi::RHITextureFormat> idColor = { rhi::RHITextureFormat::R32UI };
+            m_entityIdRenderTarget = m_device->CreateRenderTargetWithSharedDepth(
+                m_width, m_height, idColor, depthTex, 1);
+        }
+        std::vector<rhi::RHITextureFormat> copyColor = { rhi::RHITextureFormat::RGBA16F };
+        m_outlineCompositeTemp = m_device->CreateRenderTarget(
+            static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height),
+            copyColor, rhi::RHITextureFormat::Depth24, 1);
+    }
 }
 
 void RenderPipeline::DestroyHDRFramebuffer() {
     // Caller must ensure this is only called at frame boundary (e.g. from Resize), not while a frame is in flight.
-    if (m_device && m_hdrRenderTarget) {
-        m_device->DestroyRenderTarget(m_hdrRenderTarget);
-        m_hdrRenderTarget = nullptr;
+    if (m_device) {
+        if (m_outlineCompositeTemp) {
+            m_device->DestroyRenderTarget(m_outlineCompositeTemp);
+            m_outlineCompositeTemp = nullptr;
+        }
+        if (m_entityIdRenderTarget) {
+            m_device->DestroyRenderTarget(m_entityIdRenderTarget);
+            m_entityIdRenderTarget = nullptr;
+        }
+        if (m_hdrRenderTarget) {
+            m_device->DestroyRenderTarget(m_hdrRenderTarget);
+            m_hdrRenderTarget = nullptr;
+        }
     }
 }
 
@@ -923,7 +951,7 @@ void RenderPipeline::Render(const RenderScene& scene) {
     Render(view);
 }
 
-void RenderPipeline::Render(const IRenderSceneView& view) {
+void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
     if (!m_hdrRenderTarget || !m_gbuffer) return;
@@ -948,6 +976,14 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
     case PipelineMode::ForwardPlus:
         RenderForwardPlus(view);
         break;
+    }
+
+    // EntityID pass: same depth as opaque, write R32UI for picking (editor). Run only when entity IDs provided and count matches.
+    if (entityIdsForOpaque && m_entityIdRenderTarget) {
+        size_t opaqueCount = 0;
+        view.ForEachOpaqueDrawable([&opaqueCount](const Drawable&) { ++opaqueCount; });
+        if (opaqueCount == entityIdsForOpaque->size())
+            RenderEntityIDPass(view, *entityIdsForOpaque);
     }
 
     // Draw skybox to HDR with depth LEQUAL (behind geometry). When post is used, the frame-graph Skybox pass already filled HDR; we only draw after the graph when output is HDR (no post).
@@ -1112,6 +1148,117 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
 
 void RenderPipeline::RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride) {
     RenderSkyboxImpl(view.GetCamera(), view.GetSkybox(), useGbufferDepth, targetOverride);
+}
+
+void RenderPipeline::EnsureOutlinePostShader() {
+    if (m_outlinePostShader && m_outlinePostShader->IsValid()) return;
+    if (!m_device) return;
+    m_outlinePostShader = std::make_shared<Shader>();
+    rhi::DepthStencilState postDepth;
+    postDepth.depthTest = false;
+    postDepth.depthWrite = false;
+    if (!m_outlinePostShader->Load(m_device.get(), "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth)) {
+        core::Log::WarnF("Outline post shader failed to load (passes/outline_post/outline_post). Run from project root or ensure assets/shaders/opengl/ is available.");
+        return;
+    }
+}
+
+void RenderPipeline::EnsureEntityIdShader() {
+    if (m_entityIdShader && m_entityIdShader->IsValid()) return;
+    if (!m_device) return;
+    m_entityIdShader = std::make_shared<Shader>();
+    if (!m_entityIdShader->Load(m_device.get(), "passes/entityid/entityid", Mesh::GetVertexLayoutRHI())) {
+        core::Log::WarnF("EntityID shader failed to load (passes/entityid/entityid). Run from project root or ensure assets/shaders/opengl/ is available.");
+        return;
+    }
+}
+
+void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque) {
+    if (!m_entityIdRenderTarget || entityIdsForOpaque.empty()) return;
+    EnsureEntityIdShader();
+    if (!m_entityIdShader || !m_entityIdShader->IsValid()) return;
+
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;
+
+    const CameraView cam = view.GetCamera();
+    cmd->SetRenderTarget(m_entityIdRenderTarget);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(true);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(true);
+
+    rhi::ClearValue clearId = {};
+    clearId.colorUint = 0u;
+    cmd->ClearRenderTarget(m_entityIdRenderTarget, clearId);
+
+    m_entityIdShader->Bind();
+    m_entityIdShader->SetMat4("u_View", cam.view);
+    m_entityIdShader->SetMat4("u_Projection", cam.projection);
+
+    size_t index = 0;
+    view.ForEachOpaqueDrawable([&](const Drawable& d) {
+        if (!d.mesh || index >= entityIdsForOpaque.size()) { ++index; return; }
+        uint32_t id = entityIdsForOpaque[index++];
+        m_entityIdShader->SetUint("u_EntityID", id);
+        m_entityIdShader->SetMat4("u_Model", d.transform);
+        d.mesh->Bind();
+        d.mesh->Draw();
+        d.mesh->Unbind();
+    });
+
+    m_entityIdShader->Unbind();
+    cmd->SetDepthWrite(true);
+    cmd->SetRenderTarget(nullptr);
+}
+
+void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r, float g, float b) {
+    if (selectedPackedId == 0 || !m_hdrRenderTarget || !m_entityIdRenderTarget || !m_outlineCompositeTemp || !m_device) return;
+    EnsureOutlinePostShader();
+    if (!m_outlinePostShader || !m_outlinePostShader->IsValid()) return;
+
+    m_device->Blit(m_hdrRenderTarget, m_outlineCompositeTemp, true);
+
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;
+
+    cmd->SetRenderTarget(m_hdrRenderTarget);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+
+    m_outlinePostShader->Bind();
+    rhi::ITexture* sceneTex = m_outlineCompositeTemp->GetColorTexture(0);
+    rhi::ITexture* idTex = m_entityIdRenderTarget->GetColorTexture(0);
+    if (sceneTex) cmd->BindTexture(sceneTex, 0);
+    if (idTex) cmd->BindTexture(idTex, 1);
+    m_outlinePostShader->SetUint("u_SelectedID", selectedPackedId);
+    m_outlinePostShader->SetVec3("u_OutlineColor", math::Vec3(r, g, b));
+    const float invW = m_width > 0 ? 1.0f / static_cast<float>(m_width) : 0.0f;
+    const float invH = m_height > 0 ? 1.0f / static_cast<float>(m_height) : 0.0f;
+    m_outlinePostShader->SetVec2("u_InvSize", math::Vec2(invW, invH));
+
+    rhi::IPipeline* pipe = m_outlinePostShader->GetPipelineRHI();
+    if (pipe) cmd->DrawFullscreenQuad(pipe);
+
+    m_outlinePostShader->Unbind();
+    cmd->SetDepthTest(true);
+    cmd->SetDepthWrite(true);
+    cmd->SetCullFace(true);
+    cmd->SetRenderTarget(nullptr);
+}
+
+void RenderPipeline::ReloadShaders() {
+    if (m_skyboxShader) m_skyboxShader->Reload();
+    if (m_outlinePostShader) m_outlinePostShader->Reload();
+    if (m_entityIdShader) m_entityIdShader->Reload();
+    if (m_forwardPlusShader) m_forwardPlusShader->Reload();
+    if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Reload();
+    if (m_gbufferPass) m_gbufferPass->ReloadShaders();
+    if (m_shadowPass) m_shadowPass->ReloadShaders();
+    if (m_lightingPass) m_lightingPass->ReloadShaders();
+    if (m_postProcessor) m_postProcessor->ReloadShaders();
 }
 
 GBuffer* RenderPipeline::GetGBuffer() { return m_gbuffer.get(); }

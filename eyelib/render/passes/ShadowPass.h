@@ -46,6 +46,9 @@ public:
 
     ShadowMap* GetShadowMap() { return m_currentShadowMap; }
 
+    /** Reload depth shaders (for hot-reload when shader files change). */
+    void ReloadShaders();
+
 private:
     void EnsureDefaultShader();
     void EnsureSkinnedShader();

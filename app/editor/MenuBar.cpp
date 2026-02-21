@@ -1,5 +1,6 @@
 #include "MenuBar.h"
 #include "EditorContext.h"
+#include "EditorSceneBuilder.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -23,12 +24,15 @@ static void RunOpenModal(EditorContext& ctx) {
     ImGui::Text("Scene path (relative or absolute):");
     ImGui::SetNextItemWidth(400.0f);
     ImGui::InputText("##openpath", ctx.pathBuffer, sizeof(ctx.pathBuffer));
-    if (ImGui::Button("Open", ImVec2(120, 0))) {
-        if (ctx.world.LoadScene(ctx.pathBuffer)) {
-            ctx.scenePath = ctx.pathBuffer;
-            ImGui::CloseCurrentPopup();
+        if (ImGui::Button("Open", ImVec2(120, 0))) {
+            if (ctx.world.LoadScene(ctx.pathBuffer)) {
+                ctx.scenePath = ctx.pathBuffer;
+                if (ctx.assetRegistry) {
+                    EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
+                }
+                ImGui::CloseCurrentPopup();
+            }
         }
-    }
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(120, 0))) {
         ImGui::CloseCurrentPopup();

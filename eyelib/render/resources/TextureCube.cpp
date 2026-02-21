@@ -96,7 +96,6 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
         stbi_image_free(decoded);
     }
 
-    (void)isSRGB;
     (void)generateMipmaps;
     rhi::IDevice* device = GetDevice();
     if (!device) return false;
@@ -114,7 +113,10 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
     desc.width = static_cast<uint32_t>(w);
     desc.height = static_cast<uint32_t>(h);
     desc.depthOrArrayLayers = 6;
-    desc.format = Texture2D::TextureFormatToRHI(fmt);
+    if (isSRGB && (fmt == TextureFormat::RGB8 || fmt == TextureFormat::RGBA8))
+        desc.format = (fmt == TextureFormat::RGB8) ? rhi::RHITextureFormat::RGB8_SRGB : rhi::RHITextureFormat::RGBA8_SRGB;
+    else
+        desc.format = Texture2D::TextureFormatToRHI(fmt);
     desc.usage = rhi::TextureUsage::ShaderResource;
     m_textureRHI = device->CreateTexture(desc, m_cpuData.data());
     if (!m_textureRHI) return false;

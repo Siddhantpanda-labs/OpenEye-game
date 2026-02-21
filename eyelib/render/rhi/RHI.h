@@ -93,6 +93,11 @@ struct IDevice {
                                               const std::vector<RHITextureFormat>& colorFormats,
                                               RHITextureFormat depthFormat,
                                               uint32_t samples = 1) = 0;
+    /** Create render target with color attachment(s) and shared depth (e.g. entity ID pass reusing main depth). sharedDepthTexture must outlive the RT. */
+    virtual IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
+                                                             const std::vector<RHITextureFormat>& colorFormats,
+                                                             ITexture* sharedDepthTexture,
+                                                             uint32_t samples = 1) = 0;
     /** Create render target from existing texture (face for cubemap, mip level). */
     virtual IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) = 0;
     virtual void DestroyRenderTarget(IRenderTarget* rt) = 0;
@@ -132,6 +137,8 @@ struct IDevice {
     virtual void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) = 0;
     /** Blit only depth from src to dst (e.g. GBuffer depth to HDR RT for transparency). Backend may no-op if not supported. */
     virtual void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) = 0;
+    /** Read one pixel from RT's color attachment 0 (must be R32UI). (x,y) in RT coordinates, origin bottom-left. Call after frame is done (e.g. Finish). */
+    virtual bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) = 0;
     /** Wait for fence (CPU blocks until GPU has passed the fence). timeoutMs: 0 = no wait, UINT64_MAX = wait forever. Returns true if signalled. */
     virtual bool WaitFence(IFence* fence, uint64_t timeoutMs) = 0;
     virtual void DestroyFence(IFence* fence) = 0;

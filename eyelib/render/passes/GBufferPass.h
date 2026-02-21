@@ -81,6 +81,9 @@ public:
 
     GBuffer* GetGBuffer() { return m_currentGBuffer; }
 
+    /** Reload geometry shader (for hot-reload when shader files change). */
+    void ReloadShaders();
+
 private:
     void EnsureDefaultShader();
     void RenderDrawables(GBuffer& gbuffer,

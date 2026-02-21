@@ -206,6 +206,22 @@ void main() {
     m_ssaoBlendShader->BuildFromSource(m_deviceRHI, ssaoBlendVert, ssaoBlendFrag, fullscreenLayout);
 }
 
+void PostProcessor::ReloadShaders() {
+    if (!m_deviceRHI) return;
+    if (m_toneMappingShader) m_toneMappingShader->Reload();
+    if (m_bloomExtractShader) m_bloomExtractShader->Reload();
+    if (m_bloomBlurShader) m_bloomBlurShader->Reload();
+    if (m_bloomCompositeShader) m_bloomCompositeShader->Reload();
+    if (m_blurShader) m_blurShader->Reload();
+    if (m_chromaticAberrationShader) m_chromaticAberrationShader->Reload();
+    if (m_fxaaShader) m_fxaaShader->Reload();
+    if (m_ssaoShader) m_ssaoShader->Reload();
+    if (m_ssrShader) m_ssrShader->Reload();
+    if (m_motionBlurShader) m_motionBlurShader->Reload();
+    if (m_vignetteShader) m_vignetteShader->Reload();
+    if (m_filmGrainShader) m_filmGrainShader->Reload();
+}
+
 rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
                                                   const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                                                   const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,

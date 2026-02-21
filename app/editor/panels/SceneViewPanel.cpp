@@ -14,19 +14,32 @@
 #include <json.hpp>
 #include <cmath>
 #include <cstring>
-#include <limits>
 
 namespace openeye::editor::panels {
 
 namespace {
 const float kPitchMin = -1.55f;  // just below -pi/2 to avoid flip
 const float kPitchMax =  1.55f;
-const float kPickAabbHalf = 0.5f;  // AABB half-size for picking (position +/- this)
 
 using EntityId = ::eyelib::world::EntityId;
 using Vec3 = eyelib::math::Vec3;
 using Mat4 = eyelib::math::Mat4;
 using Quat = eyelib::math::Quat;
+
+constexpr uint32_t kEntityIdIndexBits = 20u;
+constexpr uint32_t kEntityIdIndexMask = (1u << kEntityIdIndexBits) - 1u;
+constexpr uint32_t kEntityIdGenBits = 12u;
+
+inline uint32_t PackEntityId(EntityId e) {
+    return (e.index & kEntityIdIndexMask) | ((e.generation & ((1u << kEntityIdGenBits) - 1u)) << kEntityIdIndexBits);
+}
+inline EntityId UnpackEntityId(uint32_t id) {
+    if (id == 0u) return ::eyelib::world::InvalidEntity;
+    EntityId e;
+    e.index = id & kEntityIdIndexMask;
+    e.generation = (id >> kEntityIdIndexBits) & ((1u << kEntityIdGenBits) - 1u);
+    return e;
+}
 
 void BuildViewProjection(const EditorCamera& cam, float viewportW, float viewportH,
                          Mat4& outView, Mat4& outProj) {
@@ -39,69 +52,6 @@ void BuildViewProjection(const EditorCamera& cam, float viewportW, float viewpor
     Vec3 forward(cy * st, sy, -cy * ct);
     Vec3 target = position + forward;
     outView = eyelib::math::LookAt(position, target, Vec3(0.f, 1.f, 0.f));
-}
-
-// Ray-AABB intersection; returns t (>= 0) to hit, or negative if miss.
-float RayAABB(const Vec3& rayOrigin, const Vec3& rayDir,
-              const Vec3& aabbMin, const Vec3& aabbMax) {
-    const float eps = 1e-7f;
-    float tmin = -std::numeric_limits<float>::infinity();
-    float tmax = std::numeric_limits<float>::infinity();
-    for (int i = 0; i < 3; ++i) {
-        if (std::fabs(rayDir[i]) < eps) {
-            if (rayOrigin[i] < aabbMin[i] || rayOrigin[i] > aabbMax[i]) return -1.f;
-            continue;
-        }
-        float invD = 1.f / rayDir[i];
-        float t0 = (aabbMin[i] - rayOrigin[i]) * invD;
-        float t1 = (aabbMax[i] - rayOrigin[i]) * invD;
-        if (invD < 0.f) std::swap(t0, t1);
-        tmin = std::max(tmin, t0);
-        tmax = std::min(tmax, t1);
-        if (tmin > tmax) return -1.f;
-    }
-    if (tmax < 0.f) return -1.f;
-    return tmin >= 0.f ? tmin : tmax;
-}
-
-void PickEntityFromViewport(EditorContext* ctx,
-                            const eyelib::api::world::World::RenderSnapshot& snapshot,
-                            ImVec2 viewPos, ImVec2 viewSize, const EditorCamera& cam) {
-    ImVec2 mouse = ImGui::GetIO().MousePos;
-    if (mouse.x < viewPos.x || mouse.x > viewPos.x + viewSize.x ||
-        mouse.y < viewPos.y || mouse.y > viewPos.y + viewSize.y)
-        return;
-    Mat4 view, proj;
-    BuildViewProjection(cam, viewSize.x, viewSize.y, view, proj);
-    Mat4 invViewProj = glm::inverse(proj * view);
-    float ndcX = (mouse.x - viewPos.x) / viewSize.x * 2.f - 1.f;
-    float ndcY = 1.f - (mouse.y - viewPos.y) / viewSize.y * 2.f;
-    glm::vec4 farNDC(ndcX, ndcY, 1.f, 1.f);
-    glm::vec4 farW = invViewProj * farNDC;
-    farW /= farW.w;
-    Vec3 rayOrigin(cam.position[0], cam.position[1], cam.position[2]);
-    Vec3 rayEnd(farW.x, farW.y, farW.z);
-    Vec3 rayDir = glm::normalize(rayEnd - rayOrigin);
-
-    EntityId best = ::eyelib::world::InvalidEntity;
-    float bestT = std::numeric_limits<float>::max();
-
-    auto testEntity = [&](EntityId eid) {
-        auto opt = snapshot.GetTransform(eid);
-        if (!opt) return;
-        Vec3 p(opt->position.x, opt->position.y, opt->position.z);
-        Vec3 mn = p - Vec3(kPickAabbHalf);
-        Vec3 mx = p + Vec3(kPickAabbHalf);
-        float t = RayAABB(rayOrigin, rayDir, mn, mx);
-        if (t >= 0.f && t < bestT) {
-            bestT = t;
-            best = eid;
-        }
-    };
-    for (const auto& e : snapshot.renderables) { if (e.component.visible) testEntity(e.entity); }
-    for (const auto& e : snapshot.meshRenderers) { if (e.component.visible) testEntity(e.entity); }
-
-    ctx->selectedEntity = best;
 }
 }
 
@@ -166,14 +116,20 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         if (canRender)
             ctx->world.CaptureRenderSnapshot(snapshot);
 
+        std::vector<EntityId> drawableToEntity;
+        std::vector<uint32_t> entityIdsForOpaque;
         size_t drawableCount = 0;
         if (canRender) {
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
-            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry);
+            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, &drawableToEntity);
             drawableCount = scene.opaqueCount;
+            for (EntityId e : drawableToEntity)
+                entityIdsForOpaque.push_back(PackEntityId(e));
             ctx->sceneViewPipeline->Resize(w, h);
-            ctx->sceneViewPipeline->Render(scene);
+            ctx->sceneViewPipeline->Render(scene, entityIdsForOpaque.empty() ? nullptr : &entityIdsForOpaque);
+            if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
+                ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);
             void* texId = ctx->sceneViewPipeline->GetOutputColorTextureNativeHandle();
             if (texId && ctx->sceneViewPipeline->HasValidOutput()) {
                 ImGui::GetWindowDrawList()->AddImage(texId, pos, ImVec2(pos.x + size.x, pos.y + size.y),
@@ -195,12 +151,28 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 IM_COL32(180, 180, 180, 255), label);
         }
 
-        // Picking: left-click in viewport (not when using gizmo) selects entity
+        // Picking: left-click in viewport (not when using gizmo) — read entity ID from GPU buffer
         if (viewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGuizmo::IsUsing()) {
-            if (canRender)
-                PickEntityFromViewport(ctx, snapshot, pos, size, ctx->editorCamera);
-            else
+            if (canRender && !entityIdsForOpaque.empty()) {
+                ImVec2 mouse = ImGui::GetIO().MousePos;
+                float px = mouse.x - pos.x;
+                float py = mouse.y - pos.y;
+                if (px >= 0.f && px < size.x && py >= 0.f && py < size.y) {
+                    uint32_t pxu = static_cast<uint32_t>(px);
+                    uint32_t pyu = static_cast<uint32_t>(py);
+                    if (pxu >= w) pxu = w > 0u ? w - 1u : 0u;
+                    if (pyu >= h) pyu = h > 0u ? h - 1u : 0u;
+                    uint32_t rtY = (h > 0u) ? (h - 1u - pyu) : 0u;
+                    ctx->sceneViewPipeline->Finish();
+                    uint32_t id = 0;
+                    if (ctx->sceneViewPipeline->ReadPixelEntityId(pxu, rtY, &id))
+                        ctx->selectedEntity = UnpackEntityId(id);
+                    else
+                        ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+                }
+            } else {
                 ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+            }
         }
 
         // Gizmo for selected entity

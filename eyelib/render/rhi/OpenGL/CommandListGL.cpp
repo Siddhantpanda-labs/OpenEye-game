@@ -65,8 +65,13 @@ void CommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     if (!rt) return;
     SetRenderTarget(rt);
     auto* r = static_cast<RenderTargetGL*>(rt);
-    if (r->GetColorTexture(0))
-        glClearBufferfv(GL_COLOR, 0, clear.color);
+    ITexture* color0 = r->GetColorTexture(0);
+    if (color0) {
+        if (color0->GetFormat() == RHITextureFormat::R32UI)
+            glClearBufferuiv(GL_COLOR, 0, &clear.colorUint);
+        else
+            glClearBufferfv(GL_COLOR, 0, clear.color);
+    }
     if (r->GetDepthTexture()) {
         glDepthMask(GL_TRUE);
         glClearBufferfv(GL_DEPTH, 0, &clear.depth);

@@ -11,6 +11,7 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
+#include "eyelib/assets/ShaderWatcher.h"
 #include "eyelib/render/RenderBackend.h"
 
 #include <imgui.h>
@@ -134,6 +135,42 @@ int RunEditor(int argc, char** argv) {
     } else {
         sceneViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     }
+
+    std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
+    {
+        std::string exePath = eyelib::api::platform::filesystem::GetExecutablePath();
+        std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(exePath);
+        std::string runtimeAssets = exeDir.empty()
+            ? eyelib::api::platform::filesystem::GetAbsolutePath("assets")
+            : eyelib::api::platform::filesystem::NormalizePath(
+                exeDir + (exeDir.back() == '/' || exeDir.back() == '\\' ? "" : "/") + "assets");
+        std::string sourceAssets;
+        const std::vector<std::string> candidates = {
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../../../../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("../assets"),
+            eyelib::api::platform::filesystem::GetAbsolutePath("assets"),
+            runtimeAssets
+        };
+        for (const auto& candidate : candidates) {
+            std::string shadersDir = candidate;
+            if (!shadersDir.empty() && shadersDir.back() != '/' && shadersDir.back() != '\\')
+                shadersDir += "/shaders";
+            else
+                shadersDir += "shaders";
+            if (eyelib::api::platform::filesystem::FileExists(shadersDir)) {
+                sourceAssets = candidate;
+                break;
+            }
+        }
+        if (sourceAssets.empty()) sourceAssets = runtimeAssets;
+        shaderWatcher->SetSourceAssetsDir(sourceAssets);
+        shaderWatcher->SetRuntimeAssetsDir(runtimeAssets);
+        eyelib::api::core::Log::InfoF("Editor ShaderWatcher source: %s", sourceAssets.c_str());
+        eyelib::api::core::Log::InfoF("Editor ShaderWatcher runtime: %s", runtimeAssets.c_str());
+    }
+
     eyelib::api::AssetRegistry assetRegistry;
 
     openeye::editor::EditorContext ctx;
@@ -160,6 +197,12 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowHierarchyPanel(&ctx);
         openeye::editor::panels::ShowInspectorPanel(&ctx);
         openeye::editor::panels::ShowSceneViewPanel(&ctx);
+
+        if (shaderWatcher && ctx.sceneViewPipeline) {
+            int copied = shaderWatcher->Tick();
+            if (copied > 0)
+                ctx.sceneViewPipeline->ReloadShaders();
+        }
 
         ImGui::Render();
         // Restore default framebuffer and full-window viewport so ImGui draws to the window.

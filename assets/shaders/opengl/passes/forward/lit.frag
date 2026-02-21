@@ -95,7 +95,7 @@ void main() {
     float shadow = shadowFactor(v_Position);
     float lightVis = 1.0 - shadow;
     vec3 diffuse = u_Albedo * u_LightColor * u_LightIntensity * NdotL * lightVis;
-    vec3 ambient = u_Albedo * u_Ambient;
+    vec3 ambient = u_Albedo * (1.0 - u_Metallic) * u_Ambient;
     vec3 color = ambient + diffuse + u_Emission;
 
     float roughness = max(u_Roughness, 0.04);
@@ -111,5 +111,8 @@ void main() {
     }
 
     color *= u_Exposure;
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = mix(vec3(lum), color, 1.15);
+    color = clamp(color, vec3(0.0), vec3(10.0));
     FragColor = vec4(color, u_Alpha);
 }

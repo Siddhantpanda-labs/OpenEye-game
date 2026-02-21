@@ -133,6 +133,9 @@ public:
     void AddPostPassesToFrameGraph(class FrameGraph* fg, int hdrInput, int toneMappedOutput, int finalOutput,
                                   const Settings& settings, rhi::ICommandList* cmd);
 
+    /** Reload all shaders that were loaded by name (for hot-reload when files change). */
+    void ReloadShaders();
+
 private:
     void CreateFramebuffers();
     void DestroyFramebuffers();

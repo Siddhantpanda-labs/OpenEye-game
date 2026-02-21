@@ -33,8 +33,11 @@ unsigned int TextureFormatToGLInternal(RHITextureFormat format) {
         case RHITextureFormat::RG8: return GL_RG8;
         case RHITextureFormat::RGB8: return GL_RGB8;
         case RHITextureFormat::RGBA8: return GL_RGBA8;
+        case RHITextureFormat::RGB8_SRGB: return GL_SRGB8;
+        case RHITextureFormat::RGBA8_SRGB: return GL_SRGB8_ALPHA8;
         case RHITextureFormat::RGB16F: return GL_RGB16F;
         case RHITextureFormat::RGBA16F: return GL_RGBA16F;
+        case RHITextureFormat::R32UI: return GL_R32UI;
         case RHITextureFormat::Depth24: return GL_DEPTH_COMPONENT24;
         case RHITextureFormat::Depth24Stencil8: return GL_DEPTH24_STENCIL8;
         case RHITextureFormat::None: return GL_RGBA8;
@@ -46,10 +49,13 @@ unsigned int TextureFormatToGLFormat(RHITextureFormat format) {
     switch (format) {
         case RHITextureFormat::R8: return GL_RED;
         case RHITextureFormat::RG8: return GL_RG;
-        case RHITextureFormat::RGB8: return GL_RGB;
-        case RHITextureFormat::RGBA8: return GL_RGBA;
+        case RHITextureFormat::RGB8:
+        case RHITextureFormat::RGB8_SRGB: return GL_RGB;
+        case RHITextureFormat::RGBA8:
+        case RHITextureFormat::RGBA8_SRGB: return GL_RGBA;
         case RHITextureFormat::RGB16F: return GL_RGB;
         case RHITextureFormat::RGBA16F: return GL_RGBA;
+        case RHITextureFormat::R32UI: return GL_RED_INTEGER;
         case RHITextureFormat::Depth24: return GL_DEPTH_COMPONENT;
         case RHITextureFormat::Depth24Stencil8: return GL_DEPTH_STENCIL;
         case RHITextureFormat::None: return GL_RGBA;
@@ -63,10 +69,13 @@ unsigned int TextureFormatToGLDataType(RHITextureFormat format) {
         case RHITextureFormat::RG8:
         case RHITextureFormat::RGB8:
         case RHITextureFormat::RGBA8:
+        case RHITextureFormat::RGB8_SRGB:
+        case RHITextureFormat::RGBA8_SRGB:
             return GL_UNSIGNED_BYTE;
         case RHITextureFormat::RGB16F:
         case RHITextureFormat::RGBA16F:
             return GL_FLOAT;
+        case RHITextureFormat::R32UI: return GL_UNSIGNED_INT;
         case RHITextureFormat::Depth24: return GL_UNSIGNED_INT;
         case RHITextureFormat::Depth24Stencil8: return GL_UNSIGNED_INT_24_8;
         default: return GL_UNSIGNED_BYTE;

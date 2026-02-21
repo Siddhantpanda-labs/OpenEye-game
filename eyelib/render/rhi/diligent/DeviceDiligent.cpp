@@ -8,6 +8,7 @@
 #include "eyelib/render/rhi/diligent/RenderTargetDiligent.h"
 #include "eyelib/render/rhi/diligent/QueryPoolDiligent.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
@@ -390,6 +391,12 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         return nullptr;
     }
 
+    const std::string logicalName = eyelib::render::ShaderPathToLogicalName(shaderName);
+    if (logicalName.empty()) {
+        delete p;
+        return nullptr;
+    }
+
     using namespace Diligent;
     using namespace eyelib::platform::filesystem;
 
@@ -397,12 +404,12 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     std::string baseDir = "assets/shaders/diligent/";
     std::string vshPath, pshPath;
     std::string exeDir = GetDirectory(GetExecutablePath());
-    if (!exeDir.empty() && FileExists(exeDir + baseDir + shaderName + ".vsh")) {
-        vshPath = exeDir + baseDir + shaderName + ".vsh";
-        pshPath = exeDir + baseDir + shaderName + ".psh";
+    if (!exeDir.empty() && FileExists(exeDir + baseDir + logicalName + ".vsh")) {
+        vshPath = exeDir + baseDir + logicalName + ".vsh";
+        pshPath = exeDir + baseDir + logicalName + ".psh";
     } else {
-        vshPath = baseDir + shaderName + ".vsh";
-        pshPath = baseDir + shaderName + ".psh";
+        vshPath = baseDir + logicalName + ".vsh";
+        pshPath = baseDir + logicalName + ".psh";
     }
     if (!FileExists(vshPath) || !FileExists(pshPath)) {
         delete p;
@@ -647,8 +654,11 @@ static Diligent::TEXTURE_FORMAT ToDiligentFormat(RHITextureFormat fmt) {
         case RHITextureFormat::RG8: return TEX_FORMAT_RG8_UNORM;
         case RHITextureFormat::RGB8: return TEX_FORMAT_RGBA8_UNORM;
         case RHITextureFormat::RGBA8: return TEX_FORMAT_RGBA8_UNORM;
+        case RHITextureFormat::RGB8_SRGB: return TEX_FORMAT_RGB8_UNORM_SRGB;
+        case RHITextureFormat::RGBA8_SRGB: return TEX_FORMAT_RGBA8_UNORM_SRGB;
         case RHITextureFormat::RGB16F: return TEX_FORMAT_RGBA16_FLOAT;
         case RHITextureFormat::RGBA16F: return TEX_FORMAT_RGBA16_FLOAT;
+        case RHITextureFormat::R32UI: return TEX_FORMAT_R32_UINT;
         case RHITextureFormat::Depth24: return TEX_FORMAT_D32_FLOAT;
         case RHITextureFormat::Depth24Stencil8: return TEX_FORMAT_D24_UNORM_S8_UINT;
         default: return TEX_FORMAT_RGBA8_UNORM;
@@ -730,6 +740,18 @@ IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t heigh
         }
     }
     return rt;
+}
+
+IRenderTarget* DeviceDiligent::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
+                                                                 const std::vector<RHITextureFormat>& colorFormats,
+                                                                 ITexture* sharedDepthTexture,
+                                                                 uint32_t samples) {
+    (void)width;
+    (void)height;
+    (void)colorFormats;
+    (void)sharedDepthTexture;
+    (void)samples;
+    return nullptr;  // TODO: implement for Diligent when needed (editor uses OpenGL)
 }
 
 IRenderTarget* DeviceDiligent::CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) {
@@ -959,6 +981,14 @@ void DeviceDiligent::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* d
 void DeviceDiligent::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
     (void)src;
     (void)dst;
+}
+
+bool DeviceDiligent::ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) {
+    (void)rt;
+    (void)x;
+    (void)y;
+    (void)outValue;
+    return false;  // TODO: implement for Diligent when needed
 }
 
 } // namespace rhi

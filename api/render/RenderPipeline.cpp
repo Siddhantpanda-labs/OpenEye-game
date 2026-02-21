@@ -118,9 +118,27 @@ RenderPipeline::Mode RenderPipeline::GetMode() const {
            Mode::ForwardPlus;
 }
 
-void RenderPipeline::Render(const RenderScene& scene) {
+void RenderPipeline::Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque) {
     ApiRenderSceneView view(scene);
-    m_impl->pipeline->Render(view);
+    m_impl->pipeline->Render(view, entityIdsForOpaque);
+}
+
+bool RenderPipeline::ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) const {
+    if (!outId) return false;
+    *outId = 0;
+    ::eyelib::render::rhi::IRenderTarget* rt = m_impl->pipeline->GetEntityIdRenderTarget();
+    ::eyelib::render::rhi::IDevice* device = m_impl->pipeline->GetRHIDevice();
+    if (!rt || !device) return false;
+    return device->ReadPixelUint32(rt, x, y, outId);
+}
+
+void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r, float g, float b) {
+    if (selectedPackedId == 0) return;
+    m_impl->pipeline->RenderOutlineFromIdBuffer(selectedPackedId, r, g, b);
+}
+
+void RenderPipeline::ReloadShaders() {
+    m_impl->pipeline->ReloadShaders();
 }
 
 void RenderPipeline::BlitToScreen() {

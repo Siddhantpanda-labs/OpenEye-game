@@ -11,6 +11,7 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#include <cstddef>
 
 namespace eyelib {
 namespace render {
@@ -55,9 +56,15 @@ public:
 
     /** Render scene (ECS or converted from API at the api layer). */
     void Render(const RenderScene& scene);
-    /** Render from a read-only view (zero-copy when view wraps API scene). */
-    void Render(const IRenderSceneView& view);
+    /** Render from a read-only view (zero-copy when view wraps API scene). When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass (same depth as main; for editor picking). */
+    void Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Draw outline from entity ID buffer (post-process). Call after Render(view, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
+    void RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r = 1.0f, float g = 0.5f, float b = 0.0f);
     void BlitToScreen();
+    /** Entity ID render target (R32UI, shared depth with HDR). Null until first use. For ReadPixelUint32 after Render with entity IDs. */
+    rhi::IRenderTarget* GetEntityIdRenderTarget() const { return m_entityIdRenderTarget; }
+    /** Reload all pipeline shaders that were loaded by name (for hot-reload when shader files change). */
+    void ReloadShaders();
     /** Wait for GPU to finish all submitted work (e.g. before swap to avoid flicker). */
     void Finish();
     /** Returns true when the pipeline has a valid render target to present. */
@@ -108,6 +115,9 @@ private:
     void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void EnsureSkyboxShader();
+    void EnsureOutlinePostShader();
+    void EnsureEntityIdShader();
+    void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque);
     /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);
 
@@ -129,6 +139,10 @@ private:
     std::shared_ptr<Shader> m_forwardPlusShader;
     std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
     std::shared_ptr<Shader> m_skyboxShader;
+    std::shared_ptr<Shader> m_outlinePostShader;
+    std::shared_ptr<Shader> m_entityIdShader;
+    rhi::IRenderTarget* m_entityIdRenderTarget = nullptr;
+    rhi::IRenderTarget* m_outlineCompositeTemp = nullptr;
 
     /** Quad mesh for GPU-driven GBuffer path (matches current cull output: 6 indices). */
     std::unique_ptr<Mesh> m_gpuDrivenQuad;

@@ -33,6 +33,9 @@ public:
                 const std::vector<PointLight>* pointLights = nullptr,
                 const std::vector<SpotLight>* spotLights = nullptr);
 
+    /** Reload lighting shader (for hot-reload when shader files change). */
+    void ReloadShaders();
+
 private:
     void EnsureDefaultShader();
 

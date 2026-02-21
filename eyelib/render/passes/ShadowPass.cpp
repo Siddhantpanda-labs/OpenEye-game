@@ -36,6 +36,11 @@ void ShadowPass::SetDepthShader(std::shared_ptr<Shader> shader) {
     m_depthShader = std::move(shader);
 }
 
+void ShadowPass::ReloadShaders() {
+    if (m_depthShader) m_depthShader->Reload();
+    if (m_depthSkinnedShader) m_depthSkinnedShader->Reload();
+}
+
 void ShadowPass::Render(ShadowMap& shadowMap,
                         rhi::ICommandList* cmd,
                         const std::vector<Drawable>& drawables,

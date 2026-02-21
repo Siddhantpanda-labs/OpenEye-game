@@ -31,6 +31,10 @@ void GBufferPass::SetGeometryShader(std::shared_ptr<Shader> shader) {
     m_geometryShader = std::move(shader);
 }
 
+void GBufferPass::ReloadShaders() {
+    if (m_geometryShader) m_geometryShader->Reload();
+}
+
 void GBufferPass::Render(GBuffer& gbuffer,
                          rhi::ICommandList* cmd,
                          const std::vector<Drawable>& drawables,

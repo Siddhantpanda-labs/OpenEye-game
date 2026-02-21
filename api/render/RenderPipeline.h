@@ -4,6 +4,7 @@
 #include "eyelib/render/RenderBackend.h"
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace eyelib {
 namespace api {
@@ -37,8 +38,14 @@ public:
     void SetMode(Mode mode);
     Mode GetMode() const;
 
-    /** Render scene. */
-    void Render(const RenderScene& scene);
+    /** Render scene. When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass for GPU picking. */
+    void Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Read entity ID at pixel (x,y) in render target coordinates, origin bottom-left. Call after Render(scene, ids) and Finish(). Returns true and writes ID to *outId; 0 = no entity. */
+    bool ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) const;
+    /** Draw outline from entity ID buffer. Call after Render(scene, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
+    void RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r = 1.0f, float g = 0.5f, float b = 0.0f);
+    /** Reload all pipeline shaders (for hot-reload when shader files change). */
+    void ReloadShaders();
     void BlitToScreen();
     /** Wait for GPU to finish (call before swap to reduce flicker). */
     void Finish();

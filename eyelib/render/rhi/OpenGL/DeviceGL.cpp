@@ -12,6 +12,7 @@
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
 #include "eyelib/render/GpuCullBlockNames.h"
+#include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -450,10 +451,12 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
 
 IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
     if (!shaderName || !shaderName[0]) return nullptr;
+    const std::string logicalName = ShaderPathToLogicalName(shaderName);
+    if (logicalName.empty()) return nullptr;
     // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag
     std::string baseDir = "assets/shaders/opengl/";
-    std::string vertPath = baseDir + shaderName + ".vert";
-    std::string fragPath = baseDir + shaderName + ".frag";
+    std::string vertPath = baseDir + logicalName + ".vert";
+    std::string fragPath = baseDir + logicalName + ".frag";
     std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
     if (!exeDir.empty() && exeDir.back() != '/' && exeDir.back() != '\\')
         exeDir += "/";
@@ -646,6 +649,57 @@ IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,
     } else if (depthFormat != RHITextureFormat::None) {
         glDrawBuffer(GL_NONE);
         glReadBuffer(GL_NONE);
+    }
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        DestroyRenderTarget(rt);
+        return nullptr;
+    }
+    return rt;
+}
+
+IRenderTarget* DeviceGL::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
+                                                           const std::vector<RHITextureFormat>& colorFormats,
+                                                           ITexture* sharedDepthTexture,
+                                                           uint32_t samples) {
+    if (!sharedDepthTexture || colorFormats.empty()) return nullptr;
+    auto* depthTex = static_cast<TextureGL*>(sharedDepthTexture);
+    if (!depthTex->m_handle) return nullptr;
+
+    auto* rt = new RenderTargetGL();
+    rt->m_width = width;
+    rt->m_height = height;
+    rt->m_ownsTextures = true;
+    rt->m_externalDepthTexture = depthTex;
+
+    glCreateFramebuffers(1, &rt->m_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, rt->m_fbo);
+
+    for (size_t i = 0; i < colorFormats.size(); ++i) {
+        TextureDesc td;
+        td.type = TextureType::Texture2D;
+        td.width = width;
+        td.height = height;
+        td.format = colorFormats[i];
+        td.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+        td.samples = samples;
+        auto* tex = static_cast<TextureGL*>(CreateTexture(td, nullptr));
+        if (!tex) continue;
+        rt->m_colorTextures.emplace_back(tex);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                              static_cast<GLenum>(GL_COLOR_ATTACHMENT0 + static_cast<int>(i)),
+                              GL_TEXTURE_2D, tex->m_handle, 0);
+    }
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTex->m_handle, 0);
+
+    if (!colorFormats.empty()) {
+        std::vector<GLenum> drawBufs(colorFormats.size());
+        for (size_t i = 0; i < colorFormats.size(); ++i)
+            drawBufs[i] = GL_COLOR_ATTACHMENT0 + static_cast<GLenum>(i);
+        glDrawBuffers(static_cast<GLsizei>(drawBufs.size()), drawBufs.data());
     }
 
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -877,6 +931,20 @@ void DeviceGL::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
                       0, 0, static_cast<GLint>(w), static_cast<GLint>(h), GL_DEPTH_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+bool DeviceGL::ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) {
+    if (!rt || !outValue) return false;
+    const uint32_t w = rt->GetWidth();
+    const uint32_t h = rt->GetHeight();
+    if (x >= w || y >= h) return false;
+    auto* r = static_cast<RenderTargetGL*>(rt);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, outValue);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    return true;
 }
 
 } // namespace rhi

@@ -42,6 +42,10 @@ void LightingPass::SetLightingShader(std::shared_ptr<Shader> shader) {
     m_lightingShader = std::move(shader);
 }
 
+void LightingPass::ReloadShaders() {
+    if (m_lightingShader) m_lightingShader->Reload();
+}
+
 static const int kMaxPointLights = 8;
 static const int kMaxSpotLights = 4;
 

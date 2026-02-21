@@ -66,6 +66,10 @@ struct DeviceDiligent : IDevice {
                                       const std::vector<RHITextureFormat>& colorFormats,
                                       RHITextureFormat depthFormat,
                                       uint32_t samples) override;
+    IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
+                                                     const std::vector<RHITextureFormat>& colorFormats,
+                                                     ITexture* sharedDepthTexture,
+                                                     uint32_t samples) override;
     IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) override;
     void DestroyRenderTarget(IRenderTarget* rt) override;
 
@@ -91,6 +95,7 @@ struct DeviceDiligent : IDevice {
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
+    bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) override;
 
     void EnsureBlitResources();
 

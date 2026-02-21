@@ -1,6 +1,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/PipelineCache.h"
 #include "eyelib/core/Log.h"
@@ -46,37 +47,10 @@ bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fr
     return BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList);
 }
 
-namespace {
-// Accepts a vertex shader path (e.g. assets/shaders/opengl/passes/forward/skinned.vert) or logical name (e.g. passes/forward/skinned).
-// Returns logical name (e.g. "passes/forward/skinned") by stripping assets/shaders/, backend segment, and extension.
-std::string LogicalNameFromPath(const std::string& vertexPath) {
-    std::string base = vertexPath;
-    const char* prefix = "assets/shaders/";
-    const size_t prefixLen = 14;
-    bool hadPrefix = (base.size() > prefixLen && base.compare(0, prefixLen, prefix) == 0);
-    if (hadPrefix)
-        base = base.substr(prefixLen);
-    // Only strip first segment (backend name opengl/diligent) when we had the assets/shaders/ prefix
-    if (hadPrefix) {
-        size_t firstSlash = base.find('/');
-        if (firstSlash != std::string::npos)
-            base = base.substr(firstSlash + 1);
-    }
-    auto stripExt = [](std::string& s, const char* ext, size_t len) {
-        if (s.size() >= len && s.compare(s.size() - len, len, ext) == 0) s.resize(s.size() - len);
-    };
-    stripExt(base, ".vert", 5);
-    stripExt(base, ".frag", 5);
-    stripExt(base, ".vsh", 4);
-    stripExt(base, ".psh", 4);
-    return base.empty() ? std::string() : base;
-}
-} // namespace
-
 bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
     rhi::IDevice* device = GetDevice();
     if (device) {
-        std::string logicalName = LogicalNameFromPath(vertexPath);
+        std::string logicalName = ShaderPathToLogicalName(vertexPath);
         if (!logicalName.empty() && Load(device, logicalName, Mesh::GetVertexLayoutRHI()))
             return true;
     }
@@ -276,6 +250,13 @@ void Shader::SetInt(const std::string& name, int value) const {
     if (!device || !m_pipelineRHI) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformInt(name.c_str(), value);
+}
+
+void Shader::SetUint(const std::string& name, uint32_t value) const {
+    rhi::IDevice* device = GetDevice();
+    if (!device || !m_pipelineRHI) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (cmd) cmd->SetUniformUint(name.c_str(), value);
 }
 
 void Shader::SetFloat(const std::string& name, float value) const {

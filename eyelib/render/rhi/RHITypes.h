@@ -59,8 +59,11 @@ enum class RHITextureFormat {
     RG8,
     RGB8,
     RGBA8,
+    RGB8_SRGB,   ///< sRGB decode on sample (for LDR images: JPG/PNG skybox, etc.)
+    RGBA8_SRGB,
     RGB16F,
     RGBA16F,
+    R32UI,  ///< Single-channel unsigned int (e.g. entity ID buffer)
     Depth24,
     Depth24Stencil8,
     None,
@@ -231,6 +234,8 @@ enum class StoreAction {
 
 struct ClearValue {
     float color[4] = {0.f, 0.f, 0.f, 1.f};
+    /** When clearing an integer color RT (e.g. R32UI), use this instead of color[]. */
+    uint32_t colorUint = 0;
     float depth = 1.f;
     uint32_t stencil = 0;
 };
