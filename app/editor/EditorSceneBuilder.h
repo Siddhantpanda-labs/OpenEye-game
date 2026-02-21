@@ -32,9 +32,12 @@ private:
     static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots);
     ModelEntry LoadModelEntry(const std::string& path);
     void EnsureDefaultMaterial();
+    void EnsureDefaultSkybox(const std::vector<std::string>& assetRoots);
 
     std::unordered_map<std::string, ModelEntry> m_modelCache;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;
+    std::shared_ptr<eyelib::api::TextureCube> m_defaultSkybox;
+    bool m_defaultSkyboxAttempted = false;
 };
 
 } // namespace openeye::editor

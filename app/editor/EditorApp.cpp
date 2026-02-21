@@ -16,6 +16,7 @@
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
+#include <ImGuizmo.h>
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
@@ -149,6 +150,7 @@ int RunEditor(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
 
         openeye::editor::ShowMenuBar(ctx);
 

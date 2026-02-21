@@ -28,7 +28,7 @@ class Shader;
 class TextureCube;
 class FullscreenQuad;
 
-/** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Post). ForwardPlus: tiled forward (many lights), legacy path. */
+/** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Skybox, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Skybox, Post). ForwardPlus: tiled forward (many lights), skybox drawn after; legacy path. */
 enum class PipelineMode { Forward, Deferred, ForwardPlus };
 
 /**
@@ -87,6 +87,11 @@ public:
     /** HDR color texture for post-processing (RHI path only; no GL id in this module). */
     rhi::ITexture* GetHDRColorTextureRHI() const;
 
+    /** Render target that will be blitted to screen this frame (post output when valid, else HDR). */
+    rhi::IRenderTarget* GetCurrentFrameOutputRT() const;
+    /** Color texture of the current frame output (for display; same as BlitToScreen source). */
+    rhi::ITexture* GetCurrentFrameOutputColorTextureRHI() const;
+
 private:
     void EnsureResources(uint32_t width, uint32_t height);
     void CreateHDRFramebuffer();
@@ -98,8 +103,10 @@ private:
     /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
     void RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view);
     void RenderForwardPlus(const IRenderSceneView& view);
-    void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth);
-    void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth);
+    /** Skybox as a frame-graph pass: writes to HDR so post reads it. Used by Deferred and Forward. */
+    void AddSkyboxPassToFrameGraph(const IRenderSceneView& view, FGTextureHandle hdrColor, bool useGbufferDepth);
+    void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
+    void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void EnsureSkyboxShader();
     /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);

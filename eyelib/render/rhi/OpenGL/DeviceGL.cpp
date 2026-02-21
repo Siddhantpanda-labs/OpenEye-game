@@ -450,11 +450,13 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
 
 IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) {
     if (!shaderName || !shaderName[0]) return nullptr;
-    // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag (exe dir preferred)
+    // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag
     std::string baseDir = "assets/shaders/opengl/";
     std::string vertPath = baseDir + shaderName + ".vert";
     std::string fragPath = baseDir + shaderName + ".frag";
     std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
+    if (!exeDir.empty() && exeDir.back() != '/' && exeDir.back() != '\\')
+        exeDir += "/";
     if (!exeDir.empty() && eyelib::platform::filesystem::FileExists(exeDir + vertPath)) {
         vertPath = exeDir + vertPath;
         fragPath = exeDir + fragPath;

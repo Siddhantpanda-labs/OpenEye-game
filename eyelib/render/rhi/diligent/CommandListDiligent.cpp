@@ -341,7 +341,8 @@ void CommandListDiligent::BindVertexBuffer(IBuffer* buffer, uint32_t binding, ui
     m_currentVertexOffset = offset;
 }
 
-void CommandListDiligent::DrawFullscreenQuad(IPipeline* pipeline) {
+void CommandListDiligent::DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal) {
+    (void)depthFuncLequal;  // TODO: apply LEQUAL for skybox when needed
     if (!pipeline || !m_device) return;
     m_device->EnsureFullscreenQuad();
     IBuffer* vbo = m_device->GetFullscreenQuadVBO();

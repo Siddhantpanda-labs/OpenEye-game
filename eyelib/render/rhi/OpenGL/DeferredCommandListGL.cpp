@@ -79,8 +79,8 @@ void DeferredCommandListGL::BindPipeline(IPipeline* pipeline) {
 void DeferredCommandListGL::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
     Record([buffer, binding, offset](ICommandList* c) { c->BindVertexBuffer(buffer, binding, offset); });
 }
-void DeferredCommandListGL::DrawFullscreenQuad(IPipeline* pipeline) {
-    Record([pipeline](ICommandList* c) { c->DrawFullscreenQuad(pipeline); });
+void DeferredCommandListGL::DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal) {
+    Record([pipeline, depthFuncLequal](ICommandList* c) { c->DrawFullscreenQuad(pipeline, depthFuncLequal); });
 }
 void DeferredCommandListGL::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) {
     Record([buffer, indexType, offset](ICommandList* c) { c->BindIndexBuffer(buffer, indexType, offset); });

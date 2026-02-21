@@ -165,8 +165,9 @@ struct ICommandList {
     virtual void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0) = 0;
     virtual void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset = 0) = 0;
 
-    /** Draw a fullscreen quad (3 verts or 6 indices) with the given pipeline. Uses device-owned fullscreen VB/IB; pipeline's vertex shader must use layout(location=0) vec2 position, layout(location=1) vec2 texCoord. Single unified path for post, lighting, IBL BRDF, etc. */
-    virtual void DrawFullscreenQuad(IPipeline* pipeline) = 0;
+    /** Draw a fullscreen quad (3 verts or 6 indices) with the given pipeline. Uses device-owned fullscreen VB/IB; pipeline's vertex shader must use layout(location=0) vec2 position, layout(location=1) vec2 texCoord. Single unified path for post, lighting, IBL BRDF, etc.
+     * @param depthFuncLequal when true, use GL_LEQUAL after binding pipeline (for skybox: only pass where depth >= 1.0). */
+    virtual void DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal = false) = 0;
     virtual void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     virtual void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     /** Bind buffer for atomic counter access (ARB_shader_atomic_counters). Gated by supportsAtomicCounters. */

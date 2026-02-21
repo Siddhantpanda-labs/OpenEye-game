@@ -54,7 +54,8 @@ struct SerializationTraits<math::Quat> {
     static nlohmann::json Serialize(const math::Quat& q) { return nlohmann::json::array({ q.w, q.x, q.y, q.z }); }
     static math::Quat Deserialize(const nlohmann::json& j, const math::Quat& fallback = {}) {
         if (!j.is_array() || j.size() != 4) return fallback;
-        return math::Quat(j[0].get<float>(), j[1].get<float>(), j[2].get<float>(), j[3].get<float>());
+        math::Quat q(j[0].get<float>(), j[1].get<float>(), j[2].get<float>(), j[3].get<float>());
+        return glm::normalize(q);  // avoid stretch when rotation was saved as euler-like values
     }
 };
 

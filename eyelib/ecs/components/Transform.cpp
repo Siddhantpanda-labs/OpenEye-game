@@ -12,7 +12,8 @@ namespace components {
 math::Mat4 Transform::GetLocalMatrix() const {
     math::Mat4 transform(1.0f);
     transform = glm::translate(transform, position);
-    transform *= glm::mat4_cast(rotation);
+    math::Quat q = glm::normalize(rotation);  // avoid stretch from non-unit quat
+    transform *= glm::mat4_cast(q);
     transform = glm::scale(transform, scale);
     return transform;
 }

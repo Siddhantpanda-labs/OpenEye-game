@@ -1,6 +1,6 @@
-// Test app: Forward path + skinned model, OpenGL backend only.
-// Same flow as the full player including render thread + RenderFrameSync (to repro flicker).
-// Hardcoded scene (no JSON), no overlay/physics/scripting.
+// Test app: skybox + camera orbit only.
+// Renders the Larnaca Beach skybox; right-drag to rotate the camera.
+// Single-threaded, no scene geometry.
 
 #include "AssetBinding.h"
 #include "PlayerConfig.h"
@@ -10,15 +10,15 @@
 
 #include "api/core/All.h"
 #include "api/platform/All.h"
+#include "api/render/TextureCube.h"
+#include "api/render/RenderScene.h"
 #include "api/world/All.h"
-#include "api/assets/All.h"
+#include "api/math/TransformUtils.h"
 #include "eyelib/render/RenderBackend.h"
-#include "eyelib/world/World.h"
 #include "eyelib/math/Types.h"
 
-#include <chrono>
+#include <cmath>
 #include <cstdio>
-#include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -38,75 +38,124 @@ void AttachConsoleIfNeeded() {
 #endif
 }
 
-std::string GetDefaultAssetRoot() {
+std::string GetAssetRoot() {
     std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(
         eyelib::api::platform::filesystem::GetExecutablePath());
     if (!exeDir.empty() && exeDir.back() != '/' && exeDir.back() != '\\')
         exeDir += "/";
-    std::string candidate = exeDir + "assets";
-    if (eyelib::api::platform::filesystem::FileExists(candidate))
-        return candidate;
-    if (eyelib::api::platform::filesystem::FileExists("assets"))
-        return "assets";
-    return "assets";
+    std::string cand = exeDir + "assets";
+    if (eyelib::api::platform::filesystem::FileExists(cand)) return cand;
+    return eyelib::api::platform::filesystem::FileExists("assets") ? "assets" : "assets";
 }
 
-/** Build minimal scene in-place: camera, directional light, one skinned mesh (Running.fbx). */
-void BuildHardcodedScene(eyelib::api::world::World& world) {
+std::string ResolvePath(const std::string& root, const std::string& id) {
+    if (eyelib::api::platform::filesystem::FileExists(id)) return id;
+    std::string p = root.empty() ? id : (root.back() == '/' || root.back() == '\\' ? root + id : root + "/" + id);
+    return eyelib::api::platform::filesystem::FileExists(p) ? p : "";
+}
+
+/** Load Skybox/LarnacaBeach. Call after render init (GL context current). Returns null if failed. */
+std::shared_ptr<eyelib::api::TextureCube> LoadSkybox(const std::string& assetRoot) {
+    const char* faces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
+    std::string base = "Skybox/LarnacaBeach";
+    std::string paths[6];
+    for (int i = 0; i < 6; ++i) {
+        paths[i] = ResolvePath(assetRoot, base + "/" + faces[i]);
+        if (paths[i].empty()) {
+            eyelib::api::core::Log::WarnF("Skybox face missing: %s/%s", base.c_str(), faces[i]);
+            return nullptr;
+        }
+    }
+    auto tex = std::make_shared<eyelib::api::TextureCube>();
+    if (!tex->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
+        eyelib::api::core::Log::WarnF("Skybox LoadFromFiles failed");
+        return nullptr;
+    }
+    eyelib::api::core::Log::Info("Skybox loaded.");
+    return tex;
+}
+
+struct OrbitState {
+    float yaw = 0.f;
+    float pitch = 0.3f;
+    float distance = 10.f;
+    eyelib::math::Vec3 target{0.f, 2.f, 0.f};
+    static constexpr float sensitivity = 0.004f;
+    static constexpr float pitchMin = -1.4f;
+    static constexpr float pitchMax = 1.4f;
+};
+
+void UpdateOrbit(eyelib::api::world::World& world, ::eyelib::world::EntityId cameraEntity, OrbitState& orbit) {
     using namespace eyelib::world::components;
-    using eyelib::math::Transform;
-    using eyelib::math::Quat;
     using eyelib::math::Vec3;
+    using eyelib::math::Quat;
+    using eyelib::math::Mat4;
+
+    if (eyelib::api::Input::IsMouseButtonPressed(1)) {
+        auto d = eyelib::api::Input::MouseDelta();
+        orbit.yaw += d.x * orbit.sensitivity;
+        orbit.pitch -= d.y * orbit.sensitivity;
+        if (orbit.pitch > orbit.pitchMax) orbit.pitch = orbit.pitchMax;
+        if (orbit.pitch < orbit.pitchMin) orbit.pitch = orbit.pitchMin;
+    }
+
+    float cy = std::cos(orbit.pitch), sy = std::sin(orbit.pitch);
+    float ct = std::cos(orbit.yaw), st = std::sin(orbit.yaw);
+    Vec3 forward(cy * st, sy, -cy * ct);
+    Vec3 position = orbit.target - orbit.distance * forward;
+
+    Mat4 view = eyelib::math::LookAt(position, orbit.target, Vec3(0.f, 1.f, 0.f));
+    Quat rotation = glm::quat_cast(glm::mat3(glm::inverse(view)));
+
+    Transform tr;
+    if (!world.GetTransform(cameraEntity, tr)) return;
+    tr.position = position;
+    tr.rotation = rotation;
+    tr.scale = Vec3(1.f, 1.f, 1.f);
+    world.SetTransform(cameraEntity, tr);
+}
+
+/** Camera + one directional light only (no meshes). */
+void BuildMinimalScene(eyelib::api::world::World& world, ::eyelib::world::EntityId* outCamera) {
+    using namespace eyelib::world::components;
+    using eyelib::math::Vec3;
+    using eyelib::math::Quat;
 
     ::eyelib::world::World* internal = world.GetInternal();
-    if (!internal) return;
+    if (!internal || !outCamera) return;
 
     auto& state = internal->GetState();
     auto& transformStore = state.GetTransformStore();
 
-    // Camera
-    ::eyelib::world::EntityId cameraEntity = world.CreateEntity("MainCamera");
-    Transform cameraTransform;
-    cameraTransform.position = Vec3(0.f, 2.f, 10.f);
-    cameraTransform.rotation = Quat(1.f, 0.f, 0.f, 0.f);
-    cameraTransform.scale = Vec3(1.f, 1.f, 1.f);
-    transformStore.Add(cameraEntity, cameraTransform);
-    Camera cameraComp;
-    cameraComp.isPrimary = true;
-    cameraComp.isPerspective = true;
-    cameraComp.fov = 50.f;
-    cameraComp.aspect = 16.f / 9.f;
-    cameraComp.nearPlane = 0.1f;
-    cameraComp.farPlane = 1000.f;
-    world.SetCamera(cameraEntity, cameraComp);
+    ::eyelib::world::EntityId cam = world.CreateEntity("Camera");
+    *outCamera = cam;
+    Transform camTr;
+    camTr.position = Vec3(0.f, 2.f, 10.f);
+    camTr.rotation = Quat(1.f, 0.f, 0.f, 0.f);
+    camTr.scale = Vec3(1.f, 1.f, 1.f);
+    transformStore.Add(cam, camTr);
+    Camera camComp;
+    camComp.isPrimary = true;
+    camComp.isPerspective = true;
+    camComp.fov = 50.f;
+    camComp.aspect = 16.f / 9.f;
+    camComp.nearPlane = 0.1f;
+    camComp.farPlane = 1000.f;
+    world.SetCamera(cam, camComp);
 
-    // Directional light
-    ::eyelib::world::EntityId lightEntity = world.CreateEntity("MainLight");
-    Transform lightTransform;
-    lightTransform.position = Vec3(2.f, 4.f, 2.f);
-    lightTransform.rotation = Quat(1.f, 0.f, 0.f, 0.f);
-    lightTransform.scale = Vec3(1.f, 1.f, 1.f);
-    transformStore.Add(lightEntity, lightTransform);
+    ::eyelib::world::EntityId lightEnt = world.CreateEntity("Light");
+    Transform lightTr;
+    lightTr.position = Vec3(0.f, 4.f, 0.f);
+    lightTr.rotation = Quat(1.f, 0.f, 0.f, 0.f);
+    lightTr.scale = Vec3(1.f, 1.f, 1.f);
+    transformStore.Add(lightEnt, lightTr);
     Light lightComp;
     lightComp.type = Light::Type::Directional;
-    lightComp.color = Vec3(1.f, 1.0f, 1.0f);
+    lightComp.color = Vec3(1.f, 1.f, 1.f);
     lightComp.intensity = 0.5f;
     lightComp.range = 20.f;
-    lightComp.castShadows = true;
-    world.SetLight(lightEntity, lightComp);
-
-    // Skinned model (same mesh as test_forward_skinned.json)
-    ::eyelib::world::EntityId modelEntity = world.CreateEntity("SkinnedModel");
-    Transform modelTransform;
-    modelTransform.position = Vec3(0.f, 0.f, 0.f);
-    modelTransform.rotation = Quat(1.f, 0.f, 0.f, 0.f);
-    modelTransform.scale = Vec3(0.02f, 0.02f, 0.02f);
-    transformStore.Add(modelEntity, modelTransform);
-    Renderable renderableComp;
-    renderableComp.meshAssetId = "models/animation/Running.fbx";
-    renderableComp.materialAssetId = "";
-    renderableComp.visible = true;
-    world.SetRenderable(modelEntity, renderableComp);
+    lightComp.castShadows = false;
+    world.SetLight(lightEnt, lightComp);
 }
 
 } // namespace
@@ -116,38 +165,36 @@ int main(int argc, char** argv) {
     (void)argv;
     AttachConsoleIfNeeded();
 
-    const std::string assetRoot = GetDefaultAssetRoot();
+    std::string assetRoot = GetAssetRoot();
 
     eyelib::api::core::Engine::Config engineConfig;
     engineConfig.enableLogging = true;
     engineConfig.logFile = "TestForwardSkinned.log";
     engineConfig.headless = false;
-
     if (!eyelib::api::core::Engine::Initialize(engineConfig)) {
         std::fprintf(stderr, "Engine init failed.\n");
         return 4;
     }
 
     eyelib::api::world::World world;
-    BuildHardcodedScene(world);
+    ::eyelib::world::EntityId cameraEntity = ::eyelib::world::InvalidEntity;
+    BuildMinimalScene(world, &cameraEntity);
 
     eyelib::api::Window window;
-    eyelib::api::WindowConfig windowConfig;
-    windowConfig.title = "Test: Forward + Skinned (OpenGL)";
-    windowConfig.width = 1280;
-    windowConfig.height = 720;
-    windowConfig.vsync = true;
-    windowConfig.useNativeApiOnly = false;  // OpenGL context
-
-    if (!window.Initialize(windowConfig)) {
+    eyelib::api::WindowConfig wc;
+    wc.title = "Skybox + Camera (right-drag to rotate)";
+    wc.width = 1280;
+    wc.height = 720;
+    wc.vsync = true;
+    wc.useNativeApiOnly = false;
+    if (!window.Initialize(wc)) {
         eyelib::api::core::Log::Error("Window init failed.");
         eyelib::api::core::Engine::Shutdown();
         return 8;
     }
 
     openeye::player::WorldRenderBridge renderBridge;
-    if (!renderBridge.Initialize(window,
-                                 static_cast<uint32_t>(window.Width()),
+    if (!renderBridge.Initialize(window, static_cast<uint32_t>(window.Width()),
                                  static_cast<uint32_t>(window.Height()),
                                  eyelib::render::RenderBackend::OpenGL)) {
         eyelib::api::core::Log::Error("Render init failed.");
@@ -156,9 +203,13 @@ int main(int argc, char** argv) {
         return 9;
     }
 
+    std::shared_ptr<eyelib::api::TextureCube> skybox = LoadSkybox(assetRoot);
+    if (!skybox) {
+        std::fprintf(stderr, "Skybox load failed. Run from project root or copy assets/ to exe dir.\n");
+    }
+
     eyelib::api::AssetRegistry assetRegistry;
     openeye::player::BindAssets(world, { assetRoot }, assetRegistry, true);
-
     openeye::player::WorldAnimationBridge animationBridge;
     animationBridge.BuildFromWorld(world, assetRegistry);
 
@@ -168,120 +219,42 @@ int main(int argc, char** argv) {
     options.height = window.Height();
 
     openeye::player::RenderFrameSync frameSync;
-
-    // Warmup: one frame on main thread so shaders compile (same as player). Then context moves to render thread.
-    renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
-        frameSync.GetSceneBuffer(0), frameSync.GetFrameAllocator(0));
-    renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(0),
-        static_cast<uint32_t>(window.Width()),
-        static_cast<uint32_t>(window.Height()));
-
     frameSync.SetFenceWaiter([&renderBridge](void* f) { renderBridge.WaitAndDestroyFence(f); });
 
-    std::thread renderThread;
-    if (openeye::player::kUseRenderThread) {
-        renderThread = std::thread([&window, &frameSync, &renderBridge]() {
-            window.MakeContextCurrent();
-            for (;;) {
-                std::optional<openeye::player::RenderFrameSync::AcquiredFrame> frame = frameSync.AcquireFrame();
-                if (!frame) {
-                    break;
-                }
-                window.RefreshFramebufferSize();
-                const int fbWidth = window.Width();
-                const int fbHeight = window.Height();
-                if (fbWidth <= 0 || fbHeight <= 0) {
-                    frameSync.ReleaseFrame(frame->slot, nullptr);
-                    continue;
-                }
-                window.ApplyVsync();
-                const uint32_t w = static_cast<uint32_t>(fbWidth);
-                const uint32_t h = static_cast<uint32_t>(fbHeight);
-                renderBridge.ApplyResize(w, h);
-                const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
-                void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
-                if (rendered) {
-                    renderBridge.Finish();
-                    if (gpuFence) {
-                        renderBridge.WaitFence(gpuFence);
-                    } else {
-                        renderBridge.Finish();
-                    }
-                    renderBridge.Finish();
-                    window.SwapBuffers();
-                }
-                frameSync.ReleaseFrame(frame->slot, gpuFence);
-            }
-        });
-    }
+    OrbitState orbit;
+    bool firstFrame = true;
 
-    openeye::player::OverlaySnapshot emptyOverlay;
-    auto prevTime = std::chrono::steady_clock::now();
-    bool firstFrameDone = false;
-    while (true) {
-        if (firstFrameDone && window.ShouldClose()) {
-            break;
-        }
+    while (!window.ShouldClose()) {
         window.PollEvents();
 
-        auto now = std::chrono::steady_clock::now();
-        float delta = std::chrono::duration<float>(now - prevTime).count();
-        prevTime = now;
-        if (delta <= 0.f || delta > 0.5f)
-            delta = 1.f / 60.f;
+        if (cameraEntity != ::eyelib::world::InvalidEntity)
+            UpdateOrbit(world, cameraEntity, orbit);
 
-        animationBridge.Update(delta);
+        int slot = frameSync.GetFillSlot();
+        if (slot < 0) break;
 
-        const int slot = frameSync.GetFillSlot();
-        if (slot < 0) {
-            break;
-        }
         renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
-            frameSync.GetSceneBuffer(slot), frameSync.GetFrameAllocator(slot));
-        const int w = window.Width();
-        const int h = window.Height();
+                                frameSync.GetSceneBuffer(slot), frameSync.GetFrameAllocator(slot));
 
-        if (openeye::player::kUseRenderThread) {
-            frameSync.SubmitFrame(slot,
-                static_cast<uint32_t>(w > 0 ? w : 1),
-                static_cast<uint32_t>(h > 0 ? h : 1),
-                emptyOverlay);
-        } else {
-            // Single-threaded: run render and present inline (same ordering as render thread).
-            window.RefreshFramebufferSize();
-            const int fbWidth = window.Width();
-            const int fbHeight = window.Height();
-            if (fbWidth > 0 && fbHeight > 0) {
-                window.ApplyVsync();
-                const uint32_t rw = static_cast<uint32_t>(fbWidth);
-                const uint32_t rh = static_cast<uint32_t>(fbHeight);
-                renderBridge.ApplyResize(rw, rh);
-                const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(slot), rw, rh);
-                void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
-                if (rendered) {
-                    renderBridge.Finish();
-                    if (gpuFence) {
-                        renderBridge.WaitFence(gpuFence);
-                    } else {
-                        renderBridge.Finish();
-                    }
-                    renderBridge.Finish();
-                    window.SwapBuffers();
-                }
-                frameSync.ReleaseFrame(slot, gpuFence);
-            } else {
-                frameSync.ReleaseFrame(slot, nullptr);
-            }
+        eyelib::api::RenderScene& scene = frameSync.GetSceneBuffer(slot);
+        scene.skybox = skybox;
+
+        window.RefreshFramebufferSize();
+        int w = window.Width();
+        int h = window.Height();
+        if (w > 0 && h > 0) {
+            window.ApplyVsync();
+            renderBridge.ApplyResize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+            renderBridge.RenderSceneOnly(scene, static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+            renderBridge.Finish();
+            window.SwapBuffers();
         }
-        firstFrameDone = true;
+        frameSync.ReleaseFrame(slot, nullptr);
+
+        eyelib::api::Input::Update();
+        firstFrame = false;
     }
 
-    if (openeye::player::kUseRenderThread) {
-        frameSync.SignalShutdown();
-        renderThread.join();
-    }
-
-    window.MakeContextCurrent();
     renderBridge.Shutdown();
     window.Shutdown();
     eyelib::api::core::Engine::Shutdown();

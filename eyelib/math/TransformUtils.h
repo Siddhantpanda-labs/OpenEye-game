@@ -12,7 +12,8 @@ namespace math {
 
 inline Mat4 Compose(const Vec3& position, const Quat& rotation, const Vec3& scale) {
     Mat4 t = glm::translate(Mat4(1.0f), position);
-    t = t * glm::mat4_cast(rotation);
+    Quat q = glm::normalize(rotation);  // avoid stretch from non-unit quat (e.g. euler mistaken as quat)
+    t = t * glm::mat4_cast(q);
     t = glm::scale(t, scale);
     return t;
 }

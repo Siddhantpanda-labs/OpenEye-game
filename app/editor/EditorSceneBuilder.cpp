@@ -8,6 +8,7 @@
 #include "api/render/Material.h"
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
+#include "api/render/TextureCube.h"
 
 #include <cmath>
 #include <exception>
@@ -101,6 +102,33 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(const std::str
     return entry;
 }
 
+void EditorSceneBuilder::EnsureDefaultSkybox(const std::vector<std::string>& assetRoots) {
+    if (m_defaultSkyboxAttempted) return;
+    m_defaultSkyboxAttempted = true;
+
+    const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
+    const std::string base = "Skybox/Citadella";
+    // envmap_miramar: +X=rt, -X=lf, +Y=up, -Y=dn, +Z=bk, -Z=ft (px, nx, py, ny, pz, nz)
+    // const char* kFaces[] = { "miramar_rt.tga", "miramar_lf.tga", "miramar_up.tga", "miramar_dn.tga", "miramar_bk.tga", "miramar_ft.tga" };
+    // const std::string base = "Skybox/envmap_miramar";
+    std::string paths[6];
+    for (int i = 0; i < 6; ++i) {
+        std::string id = base + "/" + kFaces[i];
+        paths[i] = ResolveAssetPath(id, assetRoots);
+        if (paths[i].empty()) {
+            eyelib::api::core::Log::WarnF("EditorSceneBuilder: default skybox face missing: %s", id.c_str());
+            return;
+        }
+    }
+
+    auto skybox = std::make_shared<eyelib::api::TextureCube>();
+    if (!skybox->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
+        eyelib::api::core::Log::WarnF("EditorSceneBuilder: failed to load default skybox %s", base.c_str());
+        return;
+    }
+    m_defaultSkybox = std::move(skybox);
+}
+
 void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               const eyelib::api::world::World::RenderSnapshot& snapshot,
                               const EditorCamera& editorCamera,
@@ -119,7 +147,9 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.color = eyelib::math::Vec3(1.0f, 0.95f, 0.9f);
     scene.light.intensity = 3.0f;
     scene.light.castShadows = false;
-    scene.skybox = nullptr;
+
+    EnsureDefaultSkybox(assetRoots);
+    scene.skybox = m_defaultSkybox;
 
     auto getTransform = [&](::eyelib::world::EntityId id) { return snapshot.GetTransform(id); };
 

@@ -64,7 +64,7 @@ void* RenderPipeline::GetDevice() const {
 
 void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
     if (!m_impl->pipeline) return nullptr;
-    ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetHDRColorTextureRHI();
+    ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetCurrentFrameOutputColorTextureRHI();
     return tex ? tex->GetNativeTexture() : nullptr;
 }
 

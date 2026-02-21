@@ -442,6 +442,8 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
         },
         {}, { hdrColor }, true);
 
+    AddSkyboxPassToFrameGraph(view, hdrColor, true);
+
     if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
         rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
         rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
@@ -523,6 +525,8 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
             TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
         },
         {}, { hdrColor }, true);
+
+    AddSkyboxPassToFrameGraph(view, hdrColor, false);
 
     if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
         rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
@@ -945,9 +949,10 @@ void RenderPipeline::Render(const IRenderSceneView& view) {
         break;
     }
 
-    if (view.GetSkybox()) {
+    // Draw skybox to HDR with depth LEQUAL (behind geometry). When post is used, the frame-graph Skybox pass already filled HDR; we only draw after the graph when output is HDR (no post).
+    if (view.GetSkybox() && GetCurrentFrameOutputRT() == m_hdrRenderTarget) {
         const bool useGbufferDepth = (m_mode == PipelineMode::Deferred);
-        RenderSkybox(view, useGbufferDepth);
+        RenderSkybox(view, useGbufferDepth, m_hdrRenderTarget);
     }
 
     if (m_prePostCallback) {
@@ -989,6 +994,17 @@ void RenderPipeline::Finish() {
     if (m_device) m_device->Finish();
 }
 
+rhi::IRenderTarget* RenderPipeline::GetCurrentFrameOutputRT() const {
+    if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame())
+        return m_postProcessor->GetOutputRenderTargetRHI();
+    return m_hdrRenderTarget;
+}
+
+rhi::ITexture* RenderPipeline::GetCurrentFrameOutputColorTextureRHI() const {
+    rhi::IRenderTarget* rt = GetCurrentFrameOutputRT();
+    return rt ? rt->GetColorTexture(0) : nullptr;
+}
+
 void RenderPipeline::BlitToScreen() {
     if (!m_device) return;
     // Blit scene with cover: fill full window, preserve aspect by cropping (no clear-color bars).
@@ -998,12 +1014,7 @@ void RenderPipeline::BlitToScreen() {
         bg.color[0] = 0.12f; bg.color[1] = 0.12f; bg.color[2] = 0.15f; bg.color[3] = 1.f;
         cmd->ClearDefaultFramebuffer(bg);
     }
-    rhi::IRenderTarget* blitSource = nullptr;
-    if (m_postProcessor && m_postProcessor->GetOutputRenderTargetRHI() && m_postProcessor->HasValidOutputFrame()) {
-        blitSource = m_postProcessor->GetOutputRenderTargetRHI();
-    } else if (m_hdrRenderTarget) {
-        blitSource = m_hdrRenderTarget;
-    }
+    rhi::IRenderTarget* blitSource = GetCurrentFrameOutputRT();
     if (blitSource && m_windowWidth > 0 && m_windowHeight > 0) {
         m_device->BlitToDefaultFramebufferLetterbox(blitSource, m_windowWidth, m_windowHeight);
     } else if (blitSource) {
@@ -1028,25 +1039,57 @@ void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
     if (!m_device) return;
     m_skyboxShader = std::make_shared<Shader>();
-    m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI());
+    if (!m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI())) {
+        core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
+        return;
+    }
+    if (!m_skyboxShader->IsValid()) {
+        core::Log::Warn("Skybox shader invalid after load.");
+        return;
+    }
 }
 
-void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth) {
-    if (!skybox || !skybox->IsValid()) return;
-    EnsureSkyboxShader();
-    if (!m_skyboxShader || !m_skyboxShader->IsValid()) return;
+void RenderPipeline::AddSkyboxPassToFrameGraph(const IRenderSceneView& view, FGTextureHandle hdrColor, bool useGbufferDepth) {
+    if (!view.GetSkybox()) return;
+    m_frameGraph->AddPass("Skybox",
+        [this, &view, useGbufferDepth](const FGPassResources&) {
+            RenderSkybox(view, useGbufferDepth);
+        },
+        {}, { hdrColor }, true);
+}
 
+void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth, rhi::IRenderTarget* targetOverride) {
+    if (!skybox || !skybox->IsValid()) {
+        static bool logged = false;
+        if (!logged) { core::Log::WarnF("RenderSkybox: skipped (no skybox or texture invalid)"); logged = true; }
+        return;
+    }
+    EnsureSkyboxShader();
+    if (!m_skyboxShader || !m_skyboxShader->IsValid()) {
+        static bool logged = false;
+        if (!logged) { core::Log::WarnF("RenderSkybox: skipped (skybox shader not loaded)"); logged = true; }
+        return;
+    }
+
+    rhi::IRenderTarget* rt = targetOverride ? targetOverride : m_hdrRenderTarget;
     rhi::ICommandList* cmdSky = GetRHICommandList();
-    if (cmdSky && m_hdrRenderTarget) {
-        cmdSky->SetRenderTarget(m_hdrRenderTarget);
+    if (cmdSky && rt) {
+        cmdSky->SetRenderTarget(rt);
         cmdSky->SetViewport(0, 0, m_width, m_height);
     }
-    if (useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
+    if (rt == m_hdrRenderTarget && useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
         m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
-    if (cmdSky && m_hdrRenderTarget)
-        cmdSky->SetRenderTarget(m_hdrRenderTarget);
+    if (cmdSky && rt)
+        cmdSky->SetRenderTarget(rt);
 
-    if (cmdSky) { cmdSky->SetDepthTest(true); cmdSky->SetDepthFuncLess(false); cmdSky->SetDepthWrite(false); cmdSky->SetCullFace(false); }
+    // Use depth test LEQUAL so skybox only fills background (depth 1.0); geometry stays in front.
+    const bool drawToHDR = (rt == m_hdrRenderTarget);
+    if (cmdSky) {
+        cmdSky->SetDepthTest(drawToHDR);
+        if (drawToHDR) cmdSky->SetDepthFuncLess(false);  // LEQUAL: pass where depth >= 1.0
+        cmdSky->SetDepthWrite(false);
+        cmdSky->SetCullFace(false);
+    }
 
     m_skyboxShader->Bind();
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
@@ -1055,15 +1098,22 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     skybox->Bind(0);
 
     rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
+    const bool useDepthLequal = drawToHDR;  // only pass where depth >= 1.0 so skybox stays behind geometry
     if (pipe && cmdSky)
-        cmdSky->DrawFullscreenQuad(pipe);
+        cmdSky->DrawFullscreenQuad(pipe, useDepthLequal);
 
     m_skyboxShader->Unbind();
-    if (cmdSky) { cmdSky->SetDepthWrite(true); cmdSky->SetDepthFuncLess(true); cmdSky->SetCullFace(true); cmdSky->SetRenderTarget(nullptr); }
+    if (cmdSky) {
+        cmdSky->SetDepthTest(true);
+        cmdSky->SetDepthWrite(true);
+        cmdSky->SetDepthFuncLess(true);
+        cmdSky->SetCullFace(true);
+        cmdSky->SetRenderTarget(nullptr);
+    }
 }
 
-void RenderPipeline::RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth) {
-    RenderSkyboxImpl(view.GetCamera(), view.GetSkybox(), useGbufferDepth);
+void RenderPipeline::RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride) {
+    RenderSkyboxImpl(view.GetCamera(), view.GetSkybox(), useGbufferDepth, targetOverride);
 }
 
 GBuffer* RenderPipeline::GetGBuffer() { return m_gbuffer.get(); }
