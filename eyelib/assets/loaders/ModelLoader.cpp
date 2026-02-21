@@ -16,7 +16,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
+#include <optional>
 #include <unordered_map>
 
 namespace eyelib {
@@ -423,148 +425,154 @@ std::shared_ptr<render::Mesh> BuildMesh(const aiMesh* ai,
     return mesh;
 }
 
-// Generic texture loader for any texture type
-std::shared_ptr<render::Texture2D> LoadTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir,
-    aiTextureType type, bool sRGB = true) {
-    if (!scene || materialIndex >= scene->mNumMaterials) return nullptr;
-    const aiMaterial* mat = scene->mMaterials[materialIndex];
-    aiString path;
-    if (mat->GetTextureCount(type) == 0 ||
-        mat->GetTexture(type, 0, &path) != aiReturn_SUCCESS) {
-        return nullptr;
+// ---- Deterministic texture resolution (no CWD dependency) ----
+static std::string StripFileProtocol(const std::string& raw) {
+    std::string s = raw;
+    if (s.rfind("file:///", 0) == 0) s = s.substr(8);
+    else if (s.rfind("file://", 0) == 0) s = s.substr(7);
+    return s;
+}
+
+std::optional<std::filesystem::path> ResolveTexture(
+    const std::string& rawPath,
+    const std::filesystem::path& baseDir) {
+    std::string cleaned = StripFileProtocol(rawPath);
+    if (cleaned.empty()) return std::nullopt;
+    if (cleaned[0] == '*') return std::nullopt; // embedded; caller handles
+
+    std::filesystem::path p(cleaned);
+    std::vector<std::filesystem::path> candidates;
+
+    if (p.is_absolute())
+        candidates.push_back(p);
+
+    candidates.push_back(baseDir / p);
+    candidates.push_back(baseDir / p.filename());
+
+    std::filesystem::path parent = baseDir.parent_path();
+    if (!parent.empty()) {
+        candidates.push_back(parent / p);
+        candidates.push_back(parent / p.filename());
+        candidates.push_back(parent / "texture" / p.filename());
+        candidates.push_back(parent / "textures" / p.filename());
+        candidates.push_back(parent / "images" / p.filename());
     }
 
-    std::string texPath = path.C_Str();
-    if (texPath.empty()) return nullptr;
+    for (const auto& c : candidates) {
+        if (std::filesystem::exists(c))
+            return c;
+    }
+    return std::nullopt;
+}
 
-    // 1) Embedded textures (FBX can embed or use "*0" style references)
-    const aiTexture* embedded = nullptr;
-    if (!texPath.empty() && texPath[0] == '*') {
-        const std::string indexStr = texPath.substr(1);
-        char* endPtr = nullptr;
-        const long index = std::strtol(indexStr.c_str(), &endPtr, 10);
-        if (endPtr != indexStr.c_str() && index >= 0 && static_cast<unsigned>(index) < scene->mNumTextures) {
-            embedded = scene->mTextures[static_cast<unsigned>(index)];
+static std::shared_ptr<render::Texture2D> LoadTextureFromEmbedded(
+    const aiTexture* embedded, bool isSRGB) {
+    if (!embedded) return nullptr;
+    auto tex = std::make_shared<render::Texture2D>();
+    if (embedded->mHeight == 0) {
+        if (tex->LoadFromMemory(reinterpret_cast<const uint8_t*>(embedded->pcData),
+                               static_cast<size_t>(embedded->mWidth), isSRGB, true))
+            return tex;
+    } else {
+        const int width = static_cast<int>(embedded->mWidth);
+        const int height = static_cast<int>(embedded->mHeight);
+        const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
+        std::vector<uint8_t> rgba(count * 4);
+        const aiTexel* src = embedded->pcData;
+        for (size_t i = 0; i < count; ++i) {
+            rgba[i * 4 + 0] = src[i].r;
+            rgba[i * 4 + 1] = src[i].g;
+            rgba[i * 4 + 2] = src[i].b;
+            rgba[i * 4 + 3] = src[i].a;
         }
-    } else if (scene->mNumTextures > 0) {
-        embedded = scene->GetEmbeddedTexture(texPath.c_str());
-    }
-
-    if (embedded) {
-        auto tex = std::make_shared<render::Texture2D>();
-        if (embedded->mHeight == 0) {
-            // Compressed image data (PNG/JPG); mWidth is data size in bytes.
-            if (tex->LoadFromMemory(reinterpret_cast<const uint8_t*>(embedded->pcData),
-                                    static_cast<size_t>(embedded->mWidth),
-                                    sRGB, true)) {
-                return tex;
-            }
-        } else {
-            // Raw BGRA8888 pixels.
-            const int width = static_cast<int>(embedded->mWidth);
-            const int height = static_cast<int>(embedded->mHeight);
-            const size_t count = static_cast<size_t>(width) * static_cast<size_t>(height);
-            std::vector<uint8_t> rgba;
-            rgba.resize(count * 4);
-            const aiTexel* src = embedded->pcData;
-            for (size_t i = 0; i < count; ++i) {
-                rgba[i * 4 + 0] = src[i].r;
-                rgba[i * 4 + 1] = src[i].g;
-                rgba[i * 4 + 2] = src[i].b;
-                rgba[i * 4 + 3] = src[i].a;
-            }
-            if (tex->Create(width, height, render::TextureFormat::RGBA8, rgba.data())) {
-                tex->GenerateMipmaps();
-                return tex;
-            }
-        }
-    }
-
-    // 2) External file resolution with fallback search paths
-    std::vector<std::string> candidates;
-    if (platform::filesystem::FileExists(texPath)) {
-        candidates.push_back(texPath);
-    }
-
-    if (!baseDir.empty()) {
-        candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + texPath));
-        const std::string filename = platform::filesystem::GetFilename(texPath);
-        candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + filename));
-        const char* subdirs[] = {"fbm", "textures", "maps", "tex", "images", "img"};
-        for (const char* subdir : subdirs) {
-            candidates.push_back(platform::filesystem::NormalizePath(baseDir + "/" + subdir + "/" + filename));
-        }
-    }
-
-    for (const auto& candidate : candidates) {
-        if (!platform::filesystem::FileExists(candidate)) continue;
-        auto tex = std::make_shared<render::Texture2D>();
-        if (tex->LoadFromFile(candidate, sRGB, true)) {
+        if (tex->Create(width, height, render::TextureFormat::RGBA8, rgba.data())) {
+            tex->GenerateMipmaps();
             return tex;
         }
     }
-
     return nullptr;
 }
 
-// Convenience wrappers for specific texture types
-std::shared_ptr<render::Texture2D> LoadAlbedoTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
-    // Try BASE_COLOR first (glTF), then DIFFUSE (FBX)
-    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_BASE_COLOR, true);
-    if (tex) return tex;
-    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_DIFFUSE, true);
+static std::shared_ptr<render::Texture2D> LoadOneTexture(
+    const std::string& rawPath,
+    const std::filesystem::path& baseDir,
+    const aiScene* scene,
+    bool isSRGB) {
+    if (rawPath.empty()) return nullptr;
+
+    // 1) Explicit *N reference (embedded by index)
+    if (rawPath[0] == '*') {
+        int index = -1;
+        try {
+            index = std::stoi(rawPath.substr(1));
+        } catch (...) {}
+        if (index >= 0 && scene && scene->mNumTextures > 0 &&
+            static_cast<unsigned>(index) < scene->mNumTextures)
+            return LoadTextureFromEmbedded(scene->mTextures[static_cast<unsigned>(index)], isSRGB);
+        const aiTexture* emb = scene->GetEmbeddedTexture(rawPath.c_str());
+        if (emb) return LoadTextureFromEmbedded(emb, isSRGB);
+        core::Log::WarnF("ModelLoader: texture not found (file or embedded): %s", rawPath.c_str());
+        return nullptr;
+    }
+
+    // 2) File resolution (model folder + parent asset root + texture/images subdirs)
+    auto resolved = ResolveTexture(rawPath, baseDir);
+    if (resolved) {
+        auto tex = std::make_shared<render::Texture2D>();
+        if (tex->LoadFromFile(resolved->string(), isSRGB, true))
+            return tex;
+    }
+
+    // 3) Final fallback: named embedded texture (e.g. FBX embedded by filename)
+    if (scene) {
+        const aiTexture* embedded = scene->GetEmbeddedTexture(rawPath.c_str());
+        if (embedded)
+            return LoadTextureFromEmbedded(embedded, isSRGB);
+    }
+
+    core::Log::WarnF("ModelLoader: texture not found (file or embedded): %s", rawPath.c_str());
+    return nullptr;
 }
 
-std::shared_ptr<render::Texture2D> LoadNormalTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
-    // Try NORMALS first, then HEIGHT (sometimes used as normal)
-    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_NORMALS, false);
-    if (tex) return tex;
-    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_HEIGHT, false);
+static std::shared_ptr<render::Texture2D> LoadFirstAvailable(
+    const aiMaterial* material,
+    const std::vector<aiTextureType>& types,
+    const std::filesystem::path& baseDir,
+    const aiScene* scene,
+    bool isSRGB) {
+    for (aiTextureType type : types) {
+        if (material->GetTextureCount(type) == 0) continue;
+        aiString path;
+        if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS) continue;
+        auto tex = LoadOneTexture(path.C_Str(), baseDir, scene, isSRGB);
+        if (tex) return tex;
+    }
+    return nullptr;
 }
 
-std::shared_ptr<render::Texture2D> LoadMetallicRoughnessTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
-    // glTF uses UNKNOWN for metallic-roughness (combined texture)
-    // Try METALNESS and ROUGHNESS separately first
-    auto metallicTex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_METALNESS, false);
-    auto roughnessTex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_DIFFUSE_ROUGHNESS, false);
-    
-    // For glTF, metallic-roughness is often in UNKNOWN slot
-    // We'll check by texture name pattern
-    if (!scene || materialIndex >= scene->mNumMaterials) return nullptr;
-    const aiMaterial* mat = scene->mMaterials[materialIndex];
-    
-    // Check all texture types for metallic-roughness by name
-    for (int texType = 1; texType < AI_TEXTURE_TYPE_MAX; ++texType) {
-        if (mat->GetTextureCount(static_cast<aiTextureType>(texType)) > 0) {
-            aiString texPath;
-            if (mat->GetTexture(static_cast<aiTextureType>(texType), 0, &texPath) == aiReturn_SUCCESS) {
-                std::string pathStr = texPath.C_Str();
-                std::transform(pathStr.begin(), pathStr.end(), pathStr.begin(), ::tolower);
-                if (pathStr.find("metallicroughness") != std::string::npos ||
-                    (pathStr.find("metallic") != std::string::npos && pathStr.find("roughness") != std::string::npos)) {
-                    return LoadTexture(scene, materialIndex, baseDir, static_cast<aiTextureType>(texType), false);
-                }
-            }
+// glTF combined metallic-roughness texture (by name)
+static std::shared_ptr<render::Texture2D> LoadMetallicRoughnessTexture(
+    const aiMaterial* material,
+    const std::filesystem::path& baseDir,
+    const aiScene* scene) {
+    auto tex = LoadFirstAvailable(material,
+        { aiTextureType_METALNESS, aiTextureType_DIFFUSE_ROUGHNESS },
+        baseDir, scene, false);
+    if (tex) return tex;
+    for (int t = 1; t < AI_TEXTURE_TYPE_MAX; ++t) {
+        aiTextureType type = static_cast<aiTextureType>(t);
+        if (material->GetTextureCount(type) == 0) continue;
+        aiString path;
+        if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS) continue;
+        std::string s = path.C_Str();
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        if ((s.find("metallicroughness") != std::string::npos) ||
+            (s.find("metallic") != std::string::npos && s.find("roughness") != std::string::npos)) {
+            tex = LoadOneTexture(path.C_Str(), baseDir, scene, false);
+            if (tex) return tex;
         }
     }
-    
     return nullptr;
-}
-
-std::shared_ptr<render::Texture2D> LoadAOTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
-    auto tex = LoadTexture(scene, materialIndex, baseDir, aiTextureType_AMBIENT_OCCLUSION, false);
-    if (tex) return tex;
-    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_LIGHTMAP, false);
-}
-
-std::shared_ptr<render::Texture2D> LoadEmissiveTexture(
-    const aiScene* scene, unsigned materialIndex, const std::string& baseDir) {
-    return LoadTexture(scene, materialIndex, baseDir, aiTextureType_EMISSIVE, true);
 }
 
 struct MaterialUVInfo {
@@ -601,16 +609,27 @@ MaterialUVInfo GetMaterialUVInfo(const aiMaterial* mat, aiTextureType type) {
 LoadedModel ModelLoader::LoadModel(const std::string& path) {
     LoadedModel result;
 
+    std::filesystem::path absoluteModelPath = std::filesystem::absolute(path);
+    std::filesystem::path baseDir = absoluteModelPath.parent_path();
+    const std::string pathForGltfCheck = absoluteModelPath.string();
+
     Assimp::Importer importer;
-    unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
-    if (!IsGLTF(path)) {
+    unsigned flags =
+        aiProcess_Triangulate |
+        aiProcess_GenSmoothNormals |
+        aiProcess_CalcTangentSpace |
+        aiProcess_ImproveCacheLocality |
+        aiProcess_RemoveRedundantMaterials |
+        aiProcess_SortByPType |
+        aiProcess_LimitBoneWeights;
+    if (!IsGLTF(pathForGltfCheck)) {
         flags |= aiProcess_FlipUVs;
         flags |= aiProcess_JoinIdenticalVertices;
     }
 
-    const aiScene* scene = importer.ReadFile(path, flags);
+    const aiScene* scene = importer.ReadFile(absoluteModelPath.string(), flags);
     if (!scene || !scene->mRootNode) {
-        core::Log::WarnF("ModelLoader: failed to load %s", path.c_str());
+        core::Log::WarnF("ModelLoader: failed to load %s", absoluteModelPath.string().c_str());
         return result;
     }
 
@@ -635,16 +654,14 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     // Build animation clips (will be empty for static models)
     auto clips = BuildClips(scene, *result.skeleton);
     result.clip = clips.empty() ? nullptr : clips.front();
-
-    const std::string baseDir = platform::filesystem::GetDirectory(path);
     std::shared_ptr<render::Shader> skinnedShader = std::make_shared<render::Shader>();
     skinnedShader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned");
 
-    // Default textures for materials without textures
+    // Default textures for materials without textures (gray albedo avoids "white FBX" syndrome)
     auto defaultAlbedo = std::make_shared<render::Texture2D>();
     {
-        const uint8_t white[4] = {255, 255, 255, 255};
-        defaultAlbedo->Create(1, 1, render::TextureFormat::RGBA8, white);
+        const uint8_t gray[4] = {128, 128, 128, 255};
+        defaultAlbedo->Create(1, 1, render::TextureFormat::RGBA8, gray);
     }
     auto defaultNormal = std::make_shared<render::Texture2D>();
     {
@@ -668,120 +685,84 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     }
 
     const size_t materialCount = scene->mNumMaterials;
-    std::vector<std::shared_ptr<render::Texture2D>> albedos;
-    albedos.resize(materialCount);
-    for (unsigned i = 0; i < materialCount; ++i) {
-        auto albedo = LoadAlbedoTexture(scene, i, baseDir);
-        albedos[i] = albedo ? albedo : defaultAlbedo;
-    }
-
-    // According to advise.md: Materials must be transform-agnostic
-    // Build bind pose matrices (shared for all materials)
     const std::vector<math::Mat4> bindPoseMatrices = BuildBindPoseMatrices(*result.skeleton);
-    
-    const bool isGltf = IsGLTF(path);
-    
-    // Load PBR textures
-    std::vector<std::shared_ptr<render::Texture2D>> normals, metallicRoughness, ao, emissive;
-    normals.resize(materialCount);
-    metallicRoughness.resize(materialCount);
-    ao.resize(materialCount);
-    emissive.resize(materialCount);
-    
-    for (unsigned i = 0; i < materialCount; ++i) {
-        normals[i] = LoadNormalTexture(scene, i, baseDir);
-        metallicRoughness[i] = LoadMetallicRoughnessTexture(scene, i, baseDir);
-        ao[i] = LoadAOTexture(scene, i, baseDir);
-        emissive[i] = LoadEmissiveTexture(scene, i, baseDir);
-    }
-    
+    const bool isGltf = IsGLTF(pathForGltfCheck);
+
     result.materials.resize(materialCount);
     for (unsigned i = 0; i < materialCount; ++i) {
         const aiMaterial* aiMat = scene->mMaterials[i];
         auto mat = std::make_shared<render::Material>();
         mat->SetShader(skinnedShader);
-        
-        // Albedo texture (always set, has default)
-        mat->SetAlbedoTexture(albedos[i]);
-        
-        // PBR textures (set defaults if missing, set flags)
-        if (normals[i]) {
-            mat->SetNormalTexture(normals[i]);
-            mat->SetFloat("u_HasNormalTexture", 1.0f);
-        } else {
-            mat->SetNormalTexture(defaultNormal);
-            mat->SetFloat("u_HasNormalTexture", 0.0f);
-        }
-        if (metallicRoughness[i]) {
-            mat->SetMetallicRoughnessTexture(metallicRoughness[i]);
-            mat->SetFloat("u_HasMetallicRoughnessTexture", 1.0f);
-        } else {
-            mat->SetMetallicRoughnessTexture(defaultMetallicRoughness);
-            mat->SetFloat("u_HasMetallicRoughnessTexture", 0.0f);
-        }
-        if (ao[i]) {
-            mat->SetAOTexture(ao[i]);
-            mat->SetFloat("u_HasAOTexture", 1.0f);
-        } else {
-            mat->SetAOTexture(defaultAO);
-            mat->SetFloat("u_HasAOTexture", 0.0f);
-        }
-        if (emissive[i]) {
-            mat->SetEmissiveTexture(emissive[i]);
-            mat->SetFloat("u_HasEmissiveTexture", 1.0f);
-        } else {
-            mat->SetEmissiveTexture(defaultEmissive);
-            mat->SetFloat("u_HasEmissiveTexture", 0.0f);
-        }
-        
-        // Load PBR material properties
-        aiColor3D color;
-        if (aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, color) == aiReturn_SUCCESS) {
-            mat->SetAlbedo(math::Vec3(color.r, color.g, color.b));
-        }
-        
+
+        // Format-agnostic texture loading (try types in order)
+        std::shared_ptr<render::Texture2D> albedo = LoadFirstAvailable(aiMat,
+            { aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE }, baseDir, scene, true);
+        mat->SetAlbedoTexture(albedo ? albedo : defaultAlbedo);
+
+        std::shared_ptr<render::Texture2D> normalTex = LoadFirstAvailable(aiMat,
+            { aiTextureType_NORMALS, aiTextureType_HEIGHT }, baseDir, scene, false);
+        mat->SetNormalTexture(normalTex ? normalTex : defaultNormal);
+        mat->SetFloat("u_HasNormalTexture", normalTex ? 1.0f : 0.0f);
+
+        std::shared_ptr<render::Texture2D> mrTex = LoadMetallicRoughnessTexture(aiMat, baseDir, scene);
+        mat->SetMetallicRoughnessTexture(mrTex ? mrTex : defaultMetallicRoughness);
+        mat->SetFloat("u_HasMetallicRoughnessTexture", mrTex ? 1.0f : 0.0f);
+
+        std::shared_ptr<render::Texture2D> aoTex = LoadFirstAvailable(aiMat,
+            { aiTextureType_AMBIENT_OCCLUSION, aiTextureType_LIGHTMAP }, baseDir, scene, false);
+        mat->SetAOTexture(aoTex ? aoTex : defaultAO);
+        mat->SetFloat("u_HasAOTexture", aoTex ? 1.0f : 0.0f);
+
+        std::shared_ptr<render::Texture2D> emissiveTex = LoadFirstAvailable(aiMat,
+            { aiTextureType_EMISSIVE }, baseDir, scene, true);
+        mat->SetEmissiveTexture(emissiveTex ? emissiveTex : defaultEmissive);
+        mat->SetFloat("u_HasEmissiveTexture", emissiveTex ? 1.0f : 0.0f);
+
+        // Base color factor: glTF first (AI_MATKEY_BASE_COLOR), then legacy (COLOR_DIFFUSE)
+        aiColor4D color4;
+        aiColor3D color3;
+        if (aiMat->Get(AI_MATKEY_BASE_COLOR, color4) == aiReturn_SUCCESS)
+            mat->SetAlbedo(math::Vec3(color4.r, color4.g, color4.b));
+        else if (aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, color3) == aiReturn_SUCCESS)
+            mat->SetAlbedo(math::Vec3(color3.r, color3.g, color3.b));
+
         float metallic = 0.0f;
-        if (aiMat->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == aiReturn_SUCCESS) {
-            mat->SetMetallic(metallic);
-        }
-        
         float roughness = 0.5f;
-        if (aiMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == aiReturn_SUCCESS) {
-            mat->SetRoughness(roughness);
+        aiMat->Get(AI_MATKEY_METALLIC_FACTOR, metallic);
+        aiMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness);
+        if (roughness >= 0.99f) {
+            float shininess = 0.0f;
+            if (aiMat->Get(AI_MATKEY_SHININESS, shininess) == aiReturn_SUCCESS && shininess > 0.0f) {
+                roughness = glm::clamp(std::sqrt(2.0f / (shininess + 2.0f)), 0.04f, 1.0f);
+                metallic = 0.0f;
+            }
         }
-        
-        if (aiMat->Get(AI_MATKEY_COLOR_EMISSIVE, color) == aiReturn_SUCCESS) {
-            mat->SetEmission(math::Vec3(color.r, color.g, color.b));
-        }
-        
-        float ao = 1.0f;
-        // AO is typically in a texture, but some formats may have it as a material property
-        // For now, default to 1.0 (no occlusion)
-        mat->SetAO(ao);
-        
-        // glTF UV transform support (KHR_texture_transform) for base color.
+        mat->SetMetallic(metallic);
+        mat->SetRoughness(roughness);
+
+        if (aiMat->Get(AI_MATKEY_COLOR_EMISSIVE, color3) == aiReturn_SUCCESS)
+            mat->SetEmission(math::Vec3(color3.r, color3.g, color3.b));
+        mat->SetAO(1.0f);
+
         MaterialUVInfo uvInfo = GetMaterialUVInfo(aiMat, aiTextureType_BASE_COLOR);
-        if (aiMat->GetTextureCount(aiTextureType_BASE_COLOR) == 0) {
-            // Fall back to diffuse slot if base color isn't used.
+        if (aiMat->GetTextureCount(aiTextureType_BASE_COLOR) == 0)
             uvInfo = GetMaterialUVInfo(aiMat, aiTextureType_DIFFUSE);
-        }
-        if (uvInfo.uvIndex > 1) {
-            core::Log::WarnF("ModelLoader: material %u uses texCoord %d (only UV0/UV1 supported)",
-                             i, uvInfo.uvIndex);
-        }
+        if (uvInfo.uvIndex > 1)
+            core::Log::WarnF("ModelLoader: material %u uses texCoord %d (only UV0/UV1 supported)", i, uvInfo.uvIndex);
         mat->SetVec4("u_UVTransform", uvInfo.transform);
         mat->SetFloat("u_UVRotation", uvInfo.rotation);
         mat->SetFloat("u_TexCoordIndex", uvInfo.uvIndex == 1 ? 1.0f : 0.0f);
         mat->SetFloat("u_FlipV", isGltf ? 1.0f : 0.0f);
-        
-        // Set PBR uniforms
+
         mat->SetFloat("u_Metallic", mat->GetMetallic());
         mat->SetFloat("u_Roughness", mat->GetRoughness());
         mat->SetVec3("u_Emission", mat->GetEmission());
         mat->SetFloat("u_AO", mat->GetAO());
-        
-        // According to advise.md: bindPoseMatrices always exists (at least root bone)
         mat->SetMat4Array("u_Bones", bindPoseMatrices);
+
+        if (!albedo && mat->GetAlbedo() == math::Vec3(1.0f, 1.0f, 1.0f))
+            core::Log::WarnF("ModelLoader: material %u has no albedo texture and default white factor.", i);
+
         result.materials[i] = mat;
     }
 

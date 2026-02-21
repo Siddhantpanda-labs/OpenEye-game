@@ -73,7 +73,7 @@
           "data": {
             "type": 0,
             "color": [1.0, 1.0, 1.0],
-            "intensity": 0.0,
+            "intensity": 1.0,
             "range": 20.0,
             "innerCone": 15.0,
             "outerCone": 30.0,
@@ -85,7 +85,7 @@
           "data": {
             "type": 1,
             "color": [0.0, 0.0, 1.0],
-            "intensity": 5.0,
+            "intensity": 0.0,
             "range": 12.0,
             "innerCone": 15.0,
             "outerCone": 30.0,
@@ -97,7 +97,7 @@
           "data": {
             "type": 1,
             "color": [1.0, 0.0, 0.0],
-            "intensity": 5.0,
+            "intensity": 0.0,
             "range": 12.0,
             "innerCone": 15.0,
             "outerCone": 30.0,
@@ -109,7 +109,7 @@
           "data": {
             "type": 2,
             "color": [1.0, 1.0, 1.0],
-            "intensity": 15.0,
+            "intensity": 0.0,
             "range": 8.0,
             "innerCone": 10.0,
             "outerCone": 25.0,
@@ -134,7 +134,7 @@
         {
           "entity": { "index": 6, "generation": 0 },
           "data": {
-            "meshAssetId": "models/Great Sword Slash/Great Sword Slash.dae",
+            "meshAssetId": "models/animation/Running.fbx",
             "materialAssetId": "",
             "visible": true,
             "activeLOD": 0,
@@ -144,7 +144,7 @@
         {
           "entity": { "index": 7, "generation": 0 },
           "data": {
-            "meshAssetId": "models/it.glb",
+            "meshAssetId": "models/dess_holiday/scene.gltf",
             "materialAssetId": "",
             "visible": true,
             "activeLOD": 0,

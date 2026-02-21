@@ -21,6 +21,8 @@ static size_t BytesPerPixel(TextureFormat f) {
         case TextureFormat::RG8: return 2;
         case TextureFormat::RGB8: return 3;
         case TextureFormat::RGBA8: return 4;
+        case TextureFormat::RGB8_SRGB: return 3;
+        case TextureFormat::RGBA8_SRGB: return 4;
         case TextureFormat::RGB16F: return 6;
         case TextureFormat::RGBA16F: return 8;
         case TextureFormat::Depth24: return 4;
@@ -50,6 +52,8 @@ rhi::RHITextureFormat Texture2D::TextureFormatToRHI(TextureFormat f) {
         case TextureFormat::RG8: return rhi::RHITextureFormat::RG8;
         case TextureFormat::RGB8: return rhi::RHITextureFormat::RGB8;
         case TextureFormat::RGBA8: return rhi::RHITextureFormat::RGBA8;
+        case TextureFormat::RGB8_SRGB: return rhi::RHITextureFormat::RGB8_SRGB;
+        case TextureFormat::RGBA8_SRGB: return rhi::RHITextureFormat::RGBA8_SRGB;
         case TextureFormat::RGB16F: return rhi::RHITextureFormat::RGB16F;
         case TextureFormat::RGBA16F: return rhi::RHITextureFormat::RGBA16F;
         case TextureFormat::Depth24: return rhi::RHITextureFormat::Depth24;
@@ -65,6 +69,8 @@ static TextureFormat RHIFormatToTextureFormat(rhi::RHITextureFormat f) {
         case rhi::RHITextureFormat::RG8: return TextureFormat::RG8;
         case rhi::RHITextureFormat::RGB8: return TextureFormat::RGB8;
         case rhi::RHITextureFormat::RGBA8: return TextureFormat::RGBA8;
+        case rhi::RHITextureFormat::RGB8_SRGB: return TextureFormat::RGB8_SRGB;
+        case rhi::RHITextureFormat::RGBA8_SRGB: return TextureFormat::RGBA8_SRGB;
         case rhi::RHITextureFormat::RGB16F: return TextureFormat::RGB16F;
         case rhi::RHITextureFormat::RGBA16F: return TextureFormat::RGBA16F;
         case rhi::RHITextureFormat::Depth24: return TextureFormat::Depth24;
@@ -182,10 +188,9 @@ bool Texture2D::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bo
     TextureFormat fmt = TextureFormat::RGBA8;
     if (ch == 1) fmt = TextureFormat::R8;
     else if (ch == 2) fmt = TextureFormat::RG8;
-    else if (ch == 3) fmt = TextureFormat::RGB8;
+    else if (ch == 3) fmt = isSRGB ? TextureFormat::RGB8_SRGB : TextureFormat::RGB8;
+    else if (ch == 4) fmt = isSRGB ? TextureFormat::RGBA8_SRGB : TextureFormat::RGBA8;
 
-    (void)isSRGB;
-    (void)generateMipmaps;
     if (!Create(device, w, h, fmt, decoded)) {
         stbi_image_free(decoded);
         return false;
