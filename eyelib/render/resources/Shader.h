@@ -26,9 +26,13 @@ public:
     /** Load by logical name; backend resolves paths/format (Option 2: backend-owned shader loading). */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
              rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList);
+    /** Load with custom depth/stencil state (e.g. skybox with DepthCompare::LessEqual). */
+    bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+             rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride);
     /** E5.2: Load with keyword defines (e.g. {"SKINNED","SHADOWS"}). Source is loaded and #define KEY 1 prepended per keyword, then compiled. */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-             rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords);
+             rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
+             const rhi::DepthStencilState* depthStencilOverride = nullptr);
     /** E5.4: Re-run last Load(name, layout, topology, keywords). Returns true if reload succeeded. No-op if never loaded by name. */
     bool Reload();
     /** RHI path: build pipeline from source with given vertex layout. */

@@ -23,6 +23,7 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
@@ -1039,7 +1040,11 @@ void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
     if (!m_device) return;
     m_skyboxShader = std::make_shared<Shader>();
-    if (!m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI())) {
+    rhi::DepthStencilState skyboxDepth;
+    skyboxDepth.depthTest = true;
+    skyboxDepth.depthWrite = false;
+    skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
+    if (!m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth)) {
         core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
@@ -1082,14 +1087,8 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     if (cmdSky && rt)
         cmdSky->SetRenderTarget(rt);
 
-    // Use depth test LEQUAL so skybox only fills background (depth 1.0); geometry stays in front.
-    const bool drawToHDR = (rt == m_hdrRenderTarget);
-    if (cmdSky) {
-        cmdSky->SetDepthTest(drawToHDR);
-        if (drawToHDR) cmdSky->SetDepthFuncLess(false);  // LEQUAL: pass where depth >= 1.0
-        cmdSky->SetDepthWrite(false);
+    if (cmdSky)
         cmdSky->SetCullFace(false);
-    }
 
     m_skyboxShader->Bind();
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
@@ -1098,9 +1097,8 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     skybox->Bind(0);
 
     rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
-    const bool useDepthLequal = drawToHDR;  // only pass where depth >= 1.0 so skybox stays behind geometry
     if (pipe && cmdSky)
-        cmdSky->DrawFullscreenQuad(pipe, useDepthLequal);
+        cmdSky->DrawFullscreenQuad(pipe);
 
     m_skyboxShader->Unbind();
     if (cmdSky) {

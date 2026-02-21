@@ -76,7 +76,8 @@ struct IDevice {
 
     virtual IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
     /** Create pipeline from logical shader name. Backend resolves paths/format (e.g. OpenGL: passes/{name}.vert/.frag). */
-    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) = 0;
+    /** When depthStencilOverride is non-null, use it for the pipeline's depth/stencil state (e.g. skybox with DepthCompare::LessEqual). */
+    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr) = 0;
     /** E5.3: Create pipeline from cached binary (format + data from GetPipelineBinary). Returns nullptr if unsupported or invalid. */
     virtual IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) = 0;
     /** E5.3: Retrieve pipeline binary for caching. Returns false if unsupported; outFormat and outData set on success. */
@@ -166,8 +167,8 @@ struct ICommandList {
     virtual void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset = 0) = 0;
 
     /** Draw a fullscreen quad (3 verts or 6 indices) with the given pipeline. Uses device-owned fullscreen VB/IB; pipeline's vertex shader must use layout(location=0) vec2 position, layout(location=1) vec2 texCoord. Single unified path for post, lighting, IBL BRDF, etc.
-     * @param depthFuncLequal when true, use GL_LEQUAL after binding pipeline (for skybox: only pass where depth >= 1.0). */
-    virtual void DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal = false) = 0;
+     */
+    virtual void DrawFullscreenQuad(IPipeline* pipeline) = 0;
     virtual void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     virtual void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0, uint32_t size = 0) = 0;
     /** Bind buffer for atomic counter access (ARB_shader_atomic_counters). Gated by supportsAtomicCounters. */

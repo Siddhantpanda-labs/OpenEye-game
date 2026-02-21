@@ -202,7 +202,13 @@ static void ApplyBlend(const BlendState& b) {
 static void ApplyDepthStencil(const DepthStencilState& d) {
     if (d.depthTest) {
         glEnable(GL_DEPTH_TEST);
-        glDepthFunc(d.depthCompareLess ? GL_LESS : GL_GREATER);
+        GLenum func = GL_LESS;
+        switch (d.depthCompare) {
+            case DepthCompare::Less:      func = GL_LESS;   break;
+            case DepthCompare::LessEqual:  func = GL_LEQUAL; break;
+            case DepthCompare::Greater:    func = GL_GREATER; break;
+        }
+        glDepthFunc(func);
     } else {
         glDisable(GL_DEPTH_TEST);
     }
@@ -244,15 +250,13 @@ void CommandListGL::BindPipeline(IPipeline* pipeline) {
     ApplyRaster(m_currentPipeline->m_raster);
 }
 
-void CommandListGL::DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal) {
+void CommandListGL::DrawFullscreenQuad(IPipeline* pipeline) {
     if (!pipeline || !m_device) return;
     m_device->EnsureFullscreenQuad();
     IBuffer* vbo = m_device->GetFullscreenQuadVBO();
     IBuffer* ibo = m_device->GetFullscreenQuadIBO();
     if (!vbo || !ibo) return;
     BindPipeline(pipeline);
-    if (depthFuncLequal)
-        glDepthFunc(GL_LEQUAL);
     auto* b = static_cast<BufferGL*>(vbo);
     auto* i = static_cast<BufferGL*>(ibo);
     glBindVertexArray(m_vao);

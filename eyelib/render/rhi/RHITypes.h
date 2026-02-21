@@ -178,10 +178,16 @@ struct BlendState {
     BlendOp alphaOp = BlendOp::Add;
 };
 
+enum class DepthCompare {
+    Less,      // pass when fragment depth < buffer (default for opaque)
+    LessEqual, // pass when fragment depth <= buffer (e.g. skybox at depth 1.0)
+    Greater,
+};
+
 struct DepthStencilState {
     bool depthTest = true;
     bool depthWrite = true;
-    bool depthCompareLess = true;  // true = less, false = greater
+    DepthCompare depthCompare = DepthCompare::Less;
     bool stencilTest = false;
 };
 

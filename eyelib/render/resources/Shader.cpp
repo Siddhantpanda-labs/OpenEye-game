@@ -163,6 +163,11 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     return Load(device, shaderName, layout, topology, {});
 }
 
+bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+                  rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride) {
+    return Load(device, shaderName, layout, topology, {}, depthStencilOverride);
+}
+
 bool Shader::Reload() {
     if (!m_lastLoadByName || m_lastShaderName.empty()) return false;
     rhi::IDevice* device = GetDevice();
@@ -183,7 +188,8 @@ static std::string ApplyDefinesToSource(const std::string& source, const std::ve
 }
 
 bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-                  rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords) {
+                  rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
+                  const rhi::DepthStencilState* depthStencilOverride) {
     if (!device || shaderName.empty()) return false;
     m_lastLoadByName = true;
     m_lastShaderName = shaderName;
@@ -192,7 +198,7 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     m_lastKeywords = keywords;
     if (keywords.empty()) {
         if (m_deviceRHI) Destroy(m_deviceRHI);
-        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology);
+        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology, depthStencilOverride);
         if (!pipe) return false;
         m_pipelineRHI = pipe;
         m_deviceRHI = device;

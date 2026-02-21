@@ -37,7 +37,7 @@ struct CommandListDiligent : ICommandList {
 
     void BindPipeline(IPipeline* pipeline) override;
     void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) override;
-    void DrawFullscreenQuad(IPipeline* pipeline, bool depthFuncLequal = false) override;
+    void DrawFullscreenQuad(IPipeline* pipeline) override;
     void BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) override;
     void BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;
     void BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) override;

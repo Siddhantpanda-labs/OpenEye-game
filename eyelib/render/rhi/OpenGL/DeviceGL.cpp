@@ -448,7 +448,7 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
-IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology) {
+IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
     if (!shaderName || !shaderName[0]) return nullptr;
     // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag
     std::string baseDir = "assets/shaders/opengl/";
@@ -480,8 +480,12 @@ IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, cons
     desc.fragmentShader = fs;
     desc.vertexLayout = layout;
     desc.topology = topology;
-    desc.depthStencil.depthTest = true;
-    desc.depthStencil.depthWrite = true;
+    if (depthStencilOverride) {
+        desc.depthStencil = *depthStencilOverride;
+    } else {
+        desc.depthStencil.depthTest = true;
+        desc.depthStencil.depthWrite = true;
+    }
     IPipeline* pipe = CreateGraphicsPipeline(desc);
     DestroyShader(vs);
     DestroyShader(fs);
