@@ -14,7 +14,6 @@
 #include "ImGuizmo.h"
 
 #include <imgui.h>
-#include <json.hpp>
 #include <cmath>
 #include <cstring>
 
@@ -103,9 +102,10 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         if (size.y < 64.0f) size.y = 64.0f;
 
         ImVec2 pos = ImGui::GetCursorScreenPos();
-        ImGui::InvisibleButton("##sceneviewport", size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-
-        const bool viewportHovered = ImGui::IsItemHovered();
+        // No item over the viewport so ImGuizmo::Manipulate can activate (it requires !IsAnyItemHovered).
+        // Space is reserved by SetCursorScreenPos below; viewport hover = mouse inside viewport rect.
+        const ImVec2 mousePos = ImGui::GetIO().MousePos;
+        const bool viewportHovered = (mousePos.x >= pos.x && mousePos.x < pos.x + size.x && mousePos.y >= pos.y && mousePos.y < pos.y + size.y);
         if (viewportHovered) {
             EditorCamera& cam = ctx->editorCamera;
             ImGuiIO& io = ImGui::GetIO();
@@ -247,11 +247,11 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                     Vec3 posOut, scaleOut;
                     Quat rotOut;
                     eyelib::math::Decompose(*reinterpret_cast<Mat4*>(modelMatrix), posOut, rotOut, scaleOut);
-                    nlohmann::json j;
-                    j["position"] = { posOut.x, posOut.y, posOut.z };
-                    j["rotation"] = { rotOut.w, rotOut.x, rotOut.y, rotOut.z };
-                    j["scale"] = { scaleOut.x, scaleOut.y, scaleOut.z };
-                    ctx->world.SetComponentJson(sel, "Transform", j.dump());
+                    ::eyelib::world::components::Transform trOut;
+                    trOut.position = posOut;
+                    trOut.rotation = rotOut;
+                    trOut.scale = scaleOut;
+                    ctx->world.SetTransform(sel, trOut);
                 }
             }
         }
