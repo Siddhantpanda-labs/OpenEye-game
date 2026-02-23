@@ -238,11 +238,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
                 ImGuizmo::SetRect(pos.x, pos.y, size.x, size.y);
 
-                static ImGuizmo::OPERATION op = ImGuizmo::OPERATION::TRANSLATE;
-                if (ImGui::IsKeyPressed(ImGuiKey_T)) op = ImGuizmo::OPERATION::TRANSLATE;
-                if (ImGui::IsKeyPressed(ImGuiKey_R)) op = ImGuizmo::OPERATION::ROTATE;
-                if (ImGui::IsKeyPressed(ImGuiKey_G)) op = ImGuizmo::OPERATION::SCALE;
-
+                const ImGuizmo::OPERATION op = ImGuizmo::OPERATION::UNIVERSAL;  // translate + rotate + scale in one
                 if (ImGuizmo::Manipulate(&view[0][0], &proj[0][0], op, ImGuizmo::MODE::WORLD, modelMatrix)) {
                     Vec3 posOut, scaleOut;
                     Quat rotOut;
@@ -258,7 +254,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
 
         ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + size.y + ImGui::GetStyle().ItemSpacing.y));
         if (canRender) {
-            ImGui::Text("Drawables: %zu | WASD+QE move, RMB rotate | T/R/G gizmo | Select in Hierarchy", drawableCount);
+            ImGui::Text("Drawables: %zu | WASD+QE move, RMB rotate | Gizmo: drag to translate/rotate/scale | Select in Hierarchy", drawableCount);
             if (drawableCount == 0)
                 ImGui::TextColored(ImVec4(1.f, 0.8f, 0.4f, 1.f), "No mesh renderers in scene. Add Renderable/MeshRenderer and mesh path under assets/.");
         } else {
