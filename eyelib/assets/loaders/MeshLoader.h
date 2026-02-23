@@ -20,11 +20,17 @@ struct DecodedMeshData {
 };
 
 /**
- * @brief Mesh loading via Assimp. OBJ, GLTF, FBX, DAE, etc.
+ * @brief Mesh loading via Assimp (interchange) and canonical .mesh.bin (runtime).
  */
 class MeshLoader {
 public:
     using LoadCallback = std::function<void(AssetId)>;
+
+    /** Import interchange (GLTF/FBX/etc) to canonical .oea. Exports first mesh only. Returns true on success. */
+    static bool ImportToCanonical(const std::string& interchangePath, const std::string& outputPath);
+
+    /** Load from canonical .oea or .mesh.bin (Mesh Pipeline). Returns single mesh or nullptr. */
+    static std::shared_ptr<render::Mesh> LoadFromCanonical(const std::string& path);
 
     /** Load all meshes from file. Supports OBJ, GLTF, FBX, DAE. */
     static std::vector<std::shared_ptr<render::Mesh>> LoadFromFile(const std::string& path);

@@ -1,6 +1,9 @@
 #include "eyelib/assets/loaders/MeshLoader.h"
 
 #include "eyelib/assets/AssetManager.h"
+#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/assets/MeshBinaryFormat.h"
+#include "eyelib/assets/OEAFormat.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/core/job/ThreadPool.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -143,7 +146,53 @@ static std::vector<DecodedMeshData> ImportToDecoded(const aiScene* scene) {
     return out;
 }
 
+static EditableMesh EditableMeshFromDecoded(const DecodedMeshData& d) {
+    EditableMesh em;
+    em.SetVertices(d.vertices);
+    em.SetIndices(d.indices);
+    em.GetSubmeshes().clear();
+    for (const auto& s : d.submeshes)
+        em.AddSubmesh(s.indexOffset, s.indexCount, s.materialIndex);
+    em.SetSkeletonId(AssetId::Invalid());
+    em.ClearDirty();
+    return em;
+}
+
 } // namespace
+
+bool MeshLoader::ImportToCanonical(const std::string& interchangePath, const std::string& outputPath) {
+    Assimp::Importer imp;
+    unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
+    if (!IsGLTF(interchangePath)) {
+        flags |= aiProcess_FlipUVs;
+        flags |= aiProcess_JoinIdenticalVertices;
+    }
+    const aiScene* scene = imp.ReadFile(interchangePath, flags);
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
+        core::Log::ErrorF("MeshLoader::ImportToCanonical: %s - %s", interchangePath.c_str(), imp.GetErrorString());
+        return false;
+    }
+    std::vector<DecodedMeshData> decoded = ImportToDecoded(scene);
+    if (decoded.empty()) {
+        core::Log::ErrorF("MeshLoader::ImportToCanonical: no meshes in %s", interchangePath.c_str());
+        return false;
+    }
+    EditableMesh editable = EditableMeshFromDecoded(decoded[0]);
+    return OEA::WriteMeshToFile(editable, outputPath);
+}
+
+std::shared_ptr<render::Mesh> MeshLoader::LoadFromCanonical(const std::string& path) {
+    EditableMesh editable;
+    if (OEA::ReadMeshFromFile(path, editable)) {
+        // .oea container (type = Mesh)
+    } else if (!MeshBin::ReadFromFile(path, editable)) {
+        return nullptr;
+    }
+    editable.SetEditable(false); // runtime-only: no edit/save
+    auto mesh = std::make_shared<render::Mesh>();
+    editable.BuildRenderMesh(*mesh);
+    return mesh;
+}
 
 std::vector<std::shared_ptr<render::Mesh>> MeshLoader::LoadFromFile(const std::string& path) {
     Assimp::Importer imp;

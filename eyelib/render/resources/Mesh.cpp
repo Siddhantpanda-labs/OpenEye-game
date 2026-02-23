@@ -231,6 +231,48 @@ void Mesh::UploadToGPU(rhi::IDevice* device) {
     if (m_aabbDirty) ComputeAABB();
 }
 
+void Mesh::UploadVertexBufferOnly(rhi::IDevice* device) {
+    rhi::IDevice* d = device ? device : GetDevice();
+    if (!d || m_vertices.empty()) return;
+    if (m_vertexBufferRHI && d != m_deviceRHI) return; /* must use same device as existing buffers */
+    if (m_vertexBufferRHI) {
+        d->DestroyBuffer(m_vertexBufferRHI);
+        m_vertexBufferRHI = nullptr;
+    }
+    rhi::BufferDesc vdesc;
+    vdesc.sizeInBytes = m_vertices.size() * sizeof(Vertex);
+    vdesc.usage = rhi::BufferUsage::Vertex;
+    vdesc.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    rhi::VertexLayout meshLayout = GetVertexLayoutRHI();
+    vdesc.vertexLayout = &meshLayout;
+    m_vertexBufferRHI = d->CreateBuffer(vdesc, m_vertices.data());
+    if (m_vertexBufferRHI) m_deviceRHI = d;
+    if (m_aabbDirty) ComputeAABB();
+}
+
+void Mesh::UploadIndexBufferOnly(rhi::IDevice* device) {
+    rhi::IDevice* d = device ? device : GetDevice();
+    if (!d) return;
+    if (m_indexFormat == IndexFormat::UInt32 && m_indices32.empty()) return;
+    if (m_indexFormat == IndexFormat::UInt16 && m_indices16.empty()) return;
+    if (m_indexBufferRHI && d != m_deviceRHI) return;
+    if (m_indexBufferRHI) {
+        d->DestroyBuffer(m_indexBufferRHI);
+        m_indexBufferRHI = nullptr;
+    }
+    rhi::BufferDesc idesc;
+    idesc.usage = rhi::BufferUsage::Index;
+    idesc.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    if (m_indexFormat == IndexFormat::UInt32) {
+        idesc.sizeInBytes = m_indices32.size() * sizeof(uint32_t);
+        m_indexBufferRHI = d->CreateBuffer(idesc, m_indices32.data());
+    } else {
+        idesc.sizeInBytes = m_indices16.size() * sizeof(uint16_t);
+        m_indexBufferRHI = d->CreateBuffer(idesc, m_indices16.data());
+    }
+    if (m_indexBufferRHI) m_deviceRHI = d;
+}
+
 void Mesh::Destroy() {
     if (m_deviceRHI) Destroy(m_deviceRHI);
 }

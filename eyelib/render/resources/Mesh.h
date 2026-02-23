@@ -53,6 +53,10 @@ public:
     void UploadToGPU();
     /** Upload to RHI buffers (explicit device). */
     void UploadToGPU(rhi::IDevice* device);
+    /** Recreate only the vertex buffer (e.g. after geometry/skin edit). Device must match prior UploadToGPU. */
+    void UploadVertexBufferOnly(rhi::IDevice* device = nullptr);
+    /** Recreate only the index buffer (e.g. after topology edit). Device must match prior UploadToGPU. */
+    void UploadIndexBufferOnly(rhi::IDevice* device = nullptr);
     void Destroy();
     /** Release RHI buffers if they were created via UploadToGPU(device). Call with same device. */
     void Destroy(rhi::IDevice* device);

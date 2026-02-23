@@ -1,12 +1,15 @@
 #include "SceneViewPanel.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "LightGizmoIcons.h"
 #include "PanelCommon.h"
 
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
+
+#include "eyelib/world/components/Light.h"
 
 #include "ImGuizmo.h"
 
@@ -23,6 +26,7 @@ const float kPitchMax =  1.55f;
 
 using EntityId = ::eyelib::world::EntityId;
 using Vec3 = eyelib::math::Vec3;
+using Vec4 = eyelib::math::Vec4;
 using Mat4 = eyelib::math::Mat4;
 using Quat = eyelib::math::Quat;
 
@@ -53,7 +57,38 @@ void BuildViewProjection(const EditorCamera& cam, float viewportW, float viewpor
     Vec3 target = position + forward;
     outView = eyelib::math::LookAt(position, target, Vec3(0.f, 1.f, 0.f));
 }
+
+bool WorldToScreen(const Vec3& world, const Mat4& view, const Mat4& proj,
+                   float viewportX, float viewportY, float viewportW, float viewportH,
+                   float& outScreenX, float& outScreenY) {
+    Vec4 clip = proj * view * Vec4(world.x, world.y, world.z, 1.f);
+    if (clip.w <= 0.f) return false;
+    float ndcX = clip.x / clip.w;
+    float ndcY = clip.y / clip.w;
+    if (ndcX < -1.f || ndcX > 1.f || ndcY < -1.f || ndcY > 1.f) return false;
+    outScreenX = viewportX + (ndcX + 1.f) * 0.5f * viewportW;
+    outScreenY = viewportY + (1.f - (ndcY + 1.f) * 0.5f) * viewportH;
+    return true;
 }
+
+Vec3 DirectionFromTransform(const ::eyelib::world::components::Transform& t) {
+    Mat4 m = eyelib::math::Compose(t.position, t.rotation, t.scale);
+    Vec3 d(-m[2][0], -m[2][1], -m[2][2]);
+    float len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (len > 1e-6f) {
+        d.x /= len; d.y /= len; d.z /= len;
+    } else {
+        d = Vec3(0.f, -1.f, 0.f);
+    }
+    return d;
+}
+
+constexpr float kLightIconSize = 52.f;
+constexpr float kDirectionArrowLength = 2.5f;
+constexpr float kSpotArrowLength = 1.8f;
+constexpr unsigned kOrangeColor = IM_COL32(255, 140, 0, 255);
+constexpr float kArrowThickness = 2.5f;
+} // namespace
 
 void ShowSceneViewPanel(EditorContext* ctx) {
     if (ImGui::Begin("Scene", nullptr, ImGuiWindowFlags_None)) {
@@ -151,27 +186,41 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 IM_COL32(180, 180, 180, 255), label);
         }
 
-        // Picking: left-click in viewport (not when using gizmo) — read entity ID from GPU buffer
-        if (viewportHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGuizmo::IsUsing()) {
-            if (canRender && !entityIdsForOpaque.empty()) {
-                ImVec2 mouse = ImGui::GetIO().MousePos;
-                float px = mouse.x - pos.x;
-                float py = mouse.y - pos.y;
-                if (px >= 0.f && px < size.x && py >= 0.f && py < size.y) {
-                    uint32_t pxu = static_cast<uint32_t>(px);
-                    uint32_t pyu = static_cast<uint32_t>(py);
-                    if (pxu >= w) pxu = w > 0u ? w - 1u : 0u;
-                    if (pyu >= h) pyu = h > 0u ? h - 1u : 0u;
-                    uint32_t rtY = (h > 0u) ? (h - 1u - pyu) : 0u;
-                    ctx->sceneViewPipeline->Finish();
-                    uint32_t id = 0;
-                    if (ctx->sceneViewPipeline->ReadPixelEntityId(pxu, rtY, &id))
-                        ctx->selectedEntity = UnpackEntityId(id);
-                    else
-                        ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+        // Light gizmos: icon + direction arrow only when a light is selected (select via Hierarchy)
+        if (canRender && !snapshot.lights.empty()) {
+            EntityId sel = ctx->selectedEntity;
+            if (sel != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(sel)) {
+                Mat4 view, proj;
+                BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
+                static LightGizmoIcons lightIcons;
+                if (lightIcons.EnsureLoaded()) {
+                    ImDrawList* draw = ImGui::GetWindowDrawList();
+                    const float half = kLightIconSize * 0.5f;
+                    using LT = ::eyelib::world::components::Light::Type;
+                    for (const auto& lightEntry : snapshot.lights) {
+                        if (lightEntry.entity != sel) continue;
+                        auto optTransform = snapshot.GetTransform(lightEntry.entity);
+                        if (!optTransform) continue;
+                        const Vec3 worldPos(optTransform->position.x, optTransform->position.y, optTransform->position.z);
+                        float sx = 0.f, sy = 0.f;
+                        if (!WorldToScreen(worldPos, view, proj, pos.x, pos.y, size.x, size.y, sx, sy)) continue;
+                        uint64_t texId = lightIcons.GetTexture(lightEntry.component.type);
+                        if (texId) {
+                            draw->AddImage(static_cast<ImTextureID>(texId),
+                                ImVec2(sx - half, sy - half), ImVec2(sx + half, sy + half),
+                                ImVec2(0.f, 1.f), ImVec2(1.f, 0.f));
+                        }
+                        if (lightEntry.component.type == LT::Directional || lightEntry.component.type == LT::Spot) {
+                            Vec3 dir = DirectionFromTransform(*optTransform);
+                            float arrowLen = (lightEntry.component.type == LT::Directional) ? kDirectionArrowLength : kSpotArrowLength;
+                            Vec3 endWorld(worldPos.x + dir.x * arrowLen, worldPos.y + dir.y * arrowLen, worldPos.z + dir.z * arrowLen);
+                            float ex = 0.f, ey = 0.f;
+                            if (WorldToScreen(endWorld, view, proj, pos.x, pos.y, size.x, size.y, ex, ey))
+                                draw->AddLine(ImVec2(sx, sy), ImVec2(ex, ey), kOrangeColor, kArrowThickness);
+                        }
+                        break;
+                    }
                 }
-            } else {
-                ctx->selectedEntity = ::eyelib::world::InvalidEntity;
             }
         }
 
@@ -209,7 +258,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
 
         ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + size.y + ImGui::GetStyle().ItemSpacing.y));
         if (canRender) {
-            ImGui::Text("Drawables: %zu | WASD+QE move, RMB rotate | T/R/G gizmo | Click to select", drawableCount);
+            ImGui::Text("Drawables: %zu | WASD+QE move, RMB rotate | T/R/G gizmo | Select in Hierarchy", drawableCount);
             if (drawableCount == 0)
                 ImGui::TextColored(ImVec4(1.f, 0.8f, 0.4f, 1.f), "No mesh renderers in scene. Add Renderable/MeshRenderer and mesh path under assets/.");
         } else {

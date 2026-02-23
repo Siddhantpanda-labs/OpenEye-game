@@ -3,6 +3,12 @@
 set(ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditableMesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditableMesh.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshBinaryFormat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshBinaryFormat.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/OEAFormat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/OEAFormat.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetId.cpp
