@@ -137,6 +137,16 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     m_impl->pipeline->RenderOutlineFromIdBuffer(selectedPackedId, r, g, b);
 }
 
+void RenderPipeline::RenderDebugLines(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines, float r, float g, float b) {
+    m_impl->pipeline->RenderDebugLines(view, proj, lines, r, g, b);
+}
+
+void RenderPipeline::SetPendingDebugLines(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines, float r, float g, float b) {
+    m_impl->pipeline->SetPendingDebugLines(view, proj, lines, r, g, b);
+}
+
 void RenderPipeline::ReloadShaders() {
     m_impl->pipeline->ReloadShaders();
 }

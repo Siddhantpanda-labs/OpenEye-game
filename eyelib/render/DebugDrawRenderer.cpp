@@ -170,6 +170,48 @@ void DebugDrawRenderer::Render(const CameraView& camera, rhi::IRenderTarget* tar
     }
 }
 
+void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
+    if (lines.empty() || width == 0 || height == 0) return;
+    EnsureResources();
+    if (!s_shader || !s_shader->IsValid() || !s_deviceRHI) return;
+    rhi::ICommandList* cmd = s_deviceRHI->GetImmediateCommandList();
+    if (!cmd || !target) return;
+
+    std::vector<LineVertex> vertices;
+    vertices.reserve(lines.size() * 2);
+    for (const auto& l : lines) {
+        vertices.push_back({ l.first, color });
+        vertices.push_back({ l.second, color });
+    }
+    if (!s_vertexBufferRHI || vertices.size() * sizeof(LineVertex) > s_vertexCapacity) {
+        if (s_vertexBufferRHI) s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
+        rhi::BufferDesc desc;
+        desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
+        desc.usage = rhi::BufferUsage::Vertex;
+        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        s_vertexBufferRHI = s_deviceRHI->CreateBuffer(desc);
+        s_vertexCapacity = desc.sizeInBytes;
+    }
+    if (!s_vertexBufferRHI) return;
+    s_vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
+
+    cmd->SetRenderTarget(target);
+    cmd->SetViewport(0, 0, width, height);
+    cmd->SetDepthTest(true);
+    cmd->SetDepthWrite(false);
+    cmd->SetBlend(false);
+    cmd->SetCullFace(false);
+    cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
+    s_shader->Bind();
+    s_shader->SetMat4("u_View", camera.view);
+    s_shader->SetMat4("u_Projection", camera.projection);
+    cmd->BindVertexBuffer(s_vertexBufferRHI, 0);
+    cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
+    cmd->SetPolygonOffsetLine(false, 0.f, 0.f);
+    s_shader->Unbind();
+}
+
 void DebugDrawRenderer::SetTextFontPath(const std::string& path, float pixelHeight) {
     s_fontPath = path;
     s_textSize = pixelHeight;

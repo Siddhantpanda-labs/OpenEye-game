@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <cstddef>
 
@@ -60,6 +61,12 @@ public:
     void Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
     /** Draw outline from entity ID buffer (post-process). Call after Render(view, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
     void RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r = 1.0f, float g = 0.5f, float b = 0.0f);
+    /** Draw world-space debug lines with depth test (occluded by geometry). Draws into HDR. */
+    void RenderDebugLines(const math::Mat4& view, const math::Mat4& proj,
+        const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b);
+    /** Enqueue debug lines to be drawn before post in the next Render(). Use from scene view so lines are in HDR and get tone-mapped. */
+    void SetPendingDebugLines(const math::Mat4& view, const math::Mat4& proj,
+        const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b);
     void BlitToScreen();
     /** Entity ID render target (R32UI, shared depth with HDR). Null until first use. For ReadPixelUint32 after Render with entity IDs. */
     rhi::IRenderTarget* GetEntityIdRenderTarget() const { return m_entityIdRenderTarget; }
@@ -193,6 +200,12 @@ private:
     std::vector<SpotLight> m_scratchSpotLights;
     // Scratch for transparent drawables when using view (sorting requires a list)
     mutable std::vector<Drawable> m_scratchTransparent;
+
+    // Pending debug lines drawn before post (into HDR) so depth test and tone-mapping apply
+    std::vector<std::pair<math::Vec3, math::Vec3>> m_pendingDebugLines;
+    math::Mat4 m_pendingDebugView{1.0f};
+    math::Mat4 m_pendingDebugProj{1.0f};
+    float m_pendingDebugR = 0.f, m_pendingDebugG = 1.f, m_pendingDebugB = 0.47f;
 
 #ifndef NDEBUG
     /** Debug guard: set during Render() to catch invalid Resize() mid-frame. */

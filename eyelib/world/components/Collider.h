@@ -14,6 +14,7 @@ struct Collider {
     };
 
     Type type = Type::Box;
+    math::Vec3 center{0.0f, 0.0f, 0.0f};
     math::Vec3 size{1.0f, 1.0f, 1.0f};
     float radius = 0.5f;
     float height = 1.0f;

@@ -1,9 +1,11 @@
 #pragma once
 
 #include "api/render/RenderScene.h"
+#include "eyelib/math/Types.h"
 #include "eyelib/render/RenderBackend.h"
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace eyelib {
@@ -44,6 +46,12 @@ public:
     bool ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) const;
     /** Draw outline from entity ID buffer. Call after Render(scene, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
     void RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r = 1.0f, float g = 0.5f, float b = 0.0f);
+    /** Draw world-space debug lines with depth test (occluded by mesh). Draws into HDR. */
+    void RenderDebugLines(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+        const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines, float r, float g, float b);
+    /** Enqueue debug lines to be drawn before post in the next Render(). Use from scene view so lines are in HDR and get tone-mapped. */
+    void SetPendingDebugLines(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+        const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines, float r, float g, float b);
     /** Reload all pipeline shaders (for hot-reload when shader files change). */
     void ReloadShaders();
     void BlitToScreen();

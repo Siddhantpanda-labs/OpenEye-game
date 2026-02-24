@@ -55,7 +55,9 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
         }
         if (ImGui::MenuItem("Rename...")) {
             ctx->selectedEntity = entity;
+            ImGui::PushID("Hierarchy");
             ImGui::OpenPopup("Rename Entity");
+            ImGui::PopID();
         }
         if (ImGui::MenuItem("Delete")) {
             world.DestroyEntity(entity);
@@ -75,7 +77,10 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
 }
 
 void RunRenamePopup(EditorContext* ctx) {
-    if (!ImGui::BeginPopup("Rename Entity", ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::PushID("Hierarchy");
+    const bool open = ImGui::BeginPopup("Rename Entity", ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PopID();
+    if (!open) return;
     if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
         ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
@@ -91,7 +96,8 @@ void RunRenamePopup(EditorContext* ctx) {
         }
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::InputText("##rename", renameBuffer, sizeof(renameBuffer));
+    ImGui::PushID("HierarchyRename");
+    ImGui::InputText("##name", renameBuffer, sizeof(renameBuffer));
     if (ImGui::Button("OK", ImVec2(80, 0))) {
         ctx->world.SetEntityName(ctx->selectedEntity, renameBuffer);
         ImGui::CloseCurrentPopup();
@@ -100,6 +106,7 @@ void RunRenamePopup(EditorContext* ctx) {
     if (ImGui::Button("Cancel", ImVec2(80, 0))) {
         ImGui::CloseCurrentPopup();
     }
+    ImGui::PopID();
     ImGui::EndPopup();
 }
 

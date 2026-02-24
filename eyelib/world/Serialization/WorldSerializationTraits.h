@@ -190,6 +190,7 @@ struct SerializationTraits<eyelib::world::components::Collider> {
     static nlohmann::json Serialize(const eyelib::world::components::Collider& v) {
         nlohmann::json j;
         j["type"] = static_cast<int>(v.type);
+        j["center"] = SerializationTraits<eyelib::math::Vec3>::Serialize(v.center);
         j["size"] = SerializationTraits<eyelib::math::Vec3>::Serialize(v.size);
         j["radius"] = v.radius;
         j["height"] = v.height;
@@ -199,6 +200,7 @@ struct SerializationTraits<eyelib::world::components::Collider> {
         auto out = fallback;
         if (!j.is_object()) return out;
         out.type = static_cast<eyelib::world::components::Collider::Type>(j.value("type", 0));
+        out.center = SerializationTraits<eyelib::math::Vec3>::Deserialize(j.value("center", nlohmann::json{}), out.center);
         out.size = SerializationTraits<eyelib::math::Vec3>::Deserialize(j.value("size", nlohmann::json{}), out.size);
         out.radius = j.value("radius", 0.5f);
         out.height = j.value("height", 1.0f);

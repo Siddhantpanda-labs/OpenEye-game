@@ -9,6 +9,7 @@
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 
+#include "eyelib/world/components/Collider.h"
 #include "eyelib/world/components/Light.h"
 
 #include "ImGuizmo.h"
@@ -87,6 +88,64 @@ constexpr float kDirectionArrowLength = 2.5f;
 constexpr float kSpotArrowLength = 1.8f;
 constexpr unsigned kOrangeColor = IM_COL32(255, 140, 0, 255);
 constexpr float kArrowThickness = 2.5f;
+constexpr unsigned kColliderCircleSegments = 24;
+
+Vec3 TransformPoint(const ::eyelib::world::components::Transform& t, const Vec3& local) {
+    Vec3 scaled(t.scale.x * local.x, t.scale.y * local.y, t.scale.z * local.z);
+    return Vec3(t.position.x, t.position.y, t.position.z) + (t.rotation * scaled);
+}
+
+void CollectColliderDebugLines(const eyelib::api::world::World::RenderSnapshot& snapshot,
+    std::vector<std::pair<Vec3, Vec3>>& out) {
+    using CT = ::eyelib::world::components::Collider::Type;
+    for (const auto& entry : snapshot.colliders) {
+        auto optTr = snapshot.GetTransform(entry.entity);
+        if (!optTr) continue;
+        const auto& tr = *optTr;
+        const auto& col = entry.component;
+        if (col.type == CT::Box) {
+            float hx = col.size.x * 0.5f, hy = col.size.y * 0.5f, hz = col.size.z * 0.5f;
+            Vec3 corners[8];
+            for (int i = 0; i < 8; ++i) {
+                float sx = (i & 1) ? hx : -hx, sy = (i & 2) ? hy : -hy, sz = (i & 4) ? hz : -hz;
+                corners[i] = TransformPoint(tr, Vec3(col.center.x + sx, col.center.y + sy, col.center.z + sz));
+            }
+            const int edges[12][2] = {{0,1},{0,2},{0,4},{1,3},{1,5},{2,3},{2,6},{3,7},{4,5},{4,6},{5,7},{6,7}};
+            for (int e = 0; e < 12; ++e) out.push_back({corners[edges[e][0]], corners[edges[e][1]]});
+        } else if (col.type == CT::Sphere) {
+            float r = col.radius;
+            for (int plane = 0; plane < 3; ++plane) {
+                for (unsigned seg = 0; seg < kColliderCircleSegments; ++seg) {
+                    float t0 = 2.f * 3.14159265f * static_cast<float>(seg) / static_cast<float>(kColliderCircleSegments);
+                    float t1 = 2.f * 3.14159265f * static_cast<float>(seg + 1) / static_cast<float>(kColliderCircleSegments);
+                    Vec3 local0, local1;
+                    if (plane == 0) { local0 = Vec3(col.center.x, col.center.y + r * std::cos(t0), col.center.z + r * std::sin(t0)); local1 = Vec3(col.center.x, col.center.y + r * std::cos(t1), col.center.z + r * std::sin(t1)); }
+                    else if (plane == 1) { local0 = Vec3(col.center.x + r * std::cos(t0), col.center.y, col.center.z + r * std::sin(t0)); local1 = Vec3(col.center.x + r * std::cos(t1), col.center.y, col.center.z + r * std::sin(t1)); }
+                    else { local0 = Vec3(col.center.x + r * std::cos(t0), col.center.y + r * std::sin(t0), col.center.z); local1 = Vec3(col.center.x + r * std::cos(t1), col.center.y + r * std::sin(t1), col.center.z); }
+                    out.push_back({TransformPoint(tr, local0), TransformPoint(tr, local1)});
+                }
+            }
+        } else if (col.type == CT::Capsule) {
+            float r = col.radius, halfH = col.height * 0.5f - col.radius;
+            for (unsigned seg = 0; seg < kColliderCircleSegments; ++seg) {
+                float t0 = 2.f * 3.14159265f * static_cast<float>(seg) / static_cast<float>(kColliderCircleSegments);
+                float t1 = 2.f * 3.14159265f * static_cast<float>(seg + 1) / static_cast<float>(kColliderCircleSegments);
+                float c0 = r * std::cos(t0), s0 = r * std::sin(t0), c1 = r * std::cos(t1), s1 = r * std::sin(t1);
+                Vec3 l0(col.center.x + c0, col.center.y + halfH, col.center.z + s0), l1(col.center.x + c1, col.center.y + halfH, col.center.z + s1);
+                Vec3 lb0(col.center.x + c0, col.center.y - halfH, col.center.z + s0), lb1(col.center.x + c1, col.center.y - halfH, col.center.z + s1);
+                out.push_back({TransformPoint(tr, l0), TransformPoint(tr, l1)});
+                out.push_back({TransformPoint(tr, lb0), TransformPoint(tr, lb1)});
+            }
+            for (unsigned k = 0; k < 4; ++k) {
+                float t = 2.f * 3.14159265f * static_cast<float>(k) / 4.f;
+                Vec3 l(col.center.x + r * std::cos(t), col.center.y + halfH, col.center.z + r * std::sin(t));
+                Vec3 lb(col.center.x + r * std::cos(t), col.center.y - halfH, col.center.z + r * std::sin(t));
+                out.push_back({TransformPoint(tr, l), TransformPoint(tr, lb)});
+            }
+        }
+    }
+}
+
 } // namespace
 
 void ShowSceneViewPanel(EditorContext* ctx) {
@@ -162,6 +221,15 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             for (EntityId e : drawableToEntity)
                 entityIdsForOpaque.push_back(PackEntityId(e));
             ctx->sceneViewPipeline->Resize(w, h);
+            if (!snapshot.colliders.empty()) {
+                Mat4 view, proj;
+                BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
+                std::vector<std::pair<Vec3, Vec3>> colliderLines;
+                colliderLines.reserve(snapshot.colliders.size() * 64u);
+                CollectColliderDebugLines(snapshot, colliderLines);
+                if (!colliderLines.empty())
+                    ctx->sceneViewPipeline->SetPendingDebugLines(view, proj, colliderLines, 0.f, 1.f, 0.47f);
+            }
             ctx->sceneViewPipeline->Render(scene, entityIdsForOpaque.empty() ? nullptr : &entityIdsForOpaque);
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
                 ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);

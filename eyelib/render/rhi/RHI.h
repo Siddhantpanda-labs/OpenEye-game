@@ -165,6 +165,8 @@ struct ICommandList {
     virtual void SetCullFrontFace(bool cullFront) = 0;
     /** Enable/disable alpha blending (src_alpha, one_minus_src_alpha). For transparency pass. */
     virtual void SetBlend(bool enable) = 0;
+    /** Polygon offset for lines (GL_POLYGON_OFFSET_LINE + glPolygonOffset). Bias line depth toward camera; use negative factor/units so wireframe wins when co-planar but stays occluded when behind. Other backends may no-op. */
+    virtual void SetPolygonOffsetLine(bool enable, float factor, float units) = 0;
 
     virtual void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) = 0;
     virtual void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) = 0;

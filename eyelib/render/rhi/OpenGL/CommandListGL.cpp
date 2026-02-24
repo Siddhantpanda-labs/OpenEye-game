@@ -127,6 +127,16 @@ void CommandListGL::SetBlend(bool enable) {
     }
 }
 
+void CommandListGL::SetPolygonOffsetLine(bool enable, float factor, float units) {
+    if (enable) {
+        glEnable(GL_POLYGON_OFFSET_LINE);
+        glPolygonOffset(factor, units);
+    } else {
+        glDisable(GL_POLYGON_OFFSET_LINE);
+        glPolygonOffset(0.f, 0.f);
+    }
+}
+
 namespace {
 GLbitfield ResourceStateToMemoryBarrierBuffer(ResourceState fromState, ResourceState toState) {
     (void)fromState;

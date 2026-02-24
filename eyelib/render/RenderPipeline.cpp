@@ -84,6 +84,7 @@ void RenderPipeline::Shutdown() {
         if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
         if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
     }
+    DebugDrawRenderer::SetDevice(nullptr);
     rhi::SetDefaultDevice(nullptr);
     m_device.reset();
     m_width = m_height = 0;
@@ -98,6 +99,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_height = height;
     m_device = std::move(device);
     rhi::SetDefaultDevice(m_device.get());
+    DebugDrawRenderer::SetDevice(m_device.get());
 
     core::Log::Info("RenderPipeline::Initialize: initializing GBuffer");
     m_gbuffer = std::make_unique<GBuffer>();
@@ -473,17 +475,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     AddSkyboxPassToFrameGraph(view, hdrColor, true);
 
-    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
-        rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
-        rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
-        if (postToneMappedTex && postOutputTex) {
-            auto postToneMapped = m_frameGraph->ImportTextureRHI("PostToneMapped", postToneMappedTex, m_width, m_height);
-            auto postOutput = m_frameGraph->ImportTextureRHI("PostOutput", postOutputTex, m_width, m_height);
-            PostProcessor::Settings settings;
-            m_postProcessor->AddPostPassesToFrameGraph(m_frameGraph.get(), hdrColor, postToneMapped, postOutput, settings, cmd);
-        }
-    }
-
+    // Frame graph outputs HDR + depth only. Post runs once after debug (see Render()).
     m_frameGraph->Compile();
     m_frameGraph->Execute(GetRHICommandList());
 }
@@ -557,17 +549,7 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
 
     AddSkyboxPassToFrameGraph(view, hdrColor, false);
 
-    if (m_postProcessor && m_postProcessor->GetPingPongRT(0) && m_postProcessor->GetOutputRenderTargetRHI()) {
-        rhi::ITexture* postToneMappedTex = m_postProcessor->GetPingPongRT(0)->GetColorTexture(0);
-        rhi::ITexture* postOutputTex = m_postProcessor->GetOutputRenderTargetRHI()->GetColorTexture(0);
-        if (postToneMappedTex && postOutputTex) {
-            auto postToneMapped = m_frameGraph->ImportTextureRHI("PostToneMapped", postToneMappedTex, m_width, m_height);
-            auto postOutput = m_frameGraph->ImportTextureRHI("PostOutput", postOutputTex, m_width, m_height);
-            PostProcessor::Settings settings;
-            m_postProcessor->AddPostPassesToFrameGraph(m_frameGraph.get(), hdrColor, postToneMapped, postOutput, settings, cmd);
-        }
-    }
-
+    // Frame graph outputs HDR + depth only. Post runs once after debug (see Render()).
     m_frameGraph->Compile();
     m_frameGraph->Execute(GetRHICommandList());
 }
@@ -1002,8 +984,15 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         rhi::IRenderTarget* target = m_hdrRenderTarget;
         DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
-    
-    if (m_postProcessor && m_mode == PipelineMode::ForwardPlus) {
+
+    if (!m_pendingDebugLines.empty()) {
+        RenderDebugLines(m_pendingDebugView, m_pendingDebugProj, m_pendingDebugLines,
+            m_pendingDebugR, m_pendingDebugG, m_pendingDebugB);
+        m_pendingDebugLines.clear();
+    }
+
+    // Post runs exactly once, after all scene and debug passes. One path for all modes.
+    if (m_postProcessor) {
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);
@@ -1247,6 +1236,28 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     cmd->SetDepthWrite(true);
     cmd->SetCullFace(true);
     cmd->SetRenderTarget(nullptr);
+}
+
+void RenderPipeline::RenderDebugLines(const math::Mat4& view, const math::Mat4& proj,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b) {
+    // Always draw into HDR so depth test runs against scene depth; post then consumes HDR (with lines).
+    rhi::IRenderTarget* rt = m_hdrRenderTarget;
+    if (lines.empty() || !rt || m_width == 0 || m_height == 0) return;
+    CameraView cam;
+    cam.view = view;
+    cam.projection = proj;
+    cam.viewPos = math::Vec3(0, 0, 0);
+    DebugDrawRenderer::RenderLinesWithDepth(cam, rt, m_width, m_height, lines, math::Vec4(r, g, b, 1.f));
+}
+
+void RenderPipeline::SetPendingDebugLines(const math::Mat4& view, const math::Mat4& proj,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b) {
+    m_pendingDebugView = view;
+    m_pendingDebugProj = proj;
+    m_pendingDebugLines = lines;
+    m_pendingDebugR = r;
+    m_pendingDebugG = g;
+    m_pendingDebugB = b;
 }
 
 void RenderPipeline::ReloadShaders() {

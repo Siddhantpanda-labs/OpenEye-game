@@ -31,6 +31,7 @@ struct CommandListDiligent : ICommandList {
     void SetCullFace(bool enable) override;
     void SetCullFrontFace(bool cullFront) override;
     void SetBlend(bool enable) override;
+    void SetPolygonOffsetLine(bool enable, float factor, float units) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
     void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) override;

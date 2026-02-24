@@ -293,6 +293,7 @@ void CommandListDiligent::SetDepthFuncLess(bool less) { (void)less; }
 void CommandListDiligent::SetCullFace(bool enable) { (void)enable; }
 void CommandListDiligent::SetCullFrontFace(bool cullFront) { (void)cullFront; }
 void CommandListDiligent::SetBlend(bool enable) { (void)enable; }
+void CommandListDiligent::SetPolygonOffsetLine(bool enable, float factor, float units) { (void)enable; (void)factor; (void)units; }
 
 void CommandListDiligent::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) { (void)buffer; (void)fromState; (void)toState; }
 

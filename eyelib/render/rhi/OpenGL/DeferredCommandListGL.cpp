@@ -65,6 +65,9 @@ void DeferredCommandListGL::SetCullFrontFace(bool cullFront) {
 void DeferredCommandListGL::SetBlend(bool enable) {
     Record([enable](ICommandList* c) { c->SetBlend(enable); });
 }
+void DeferredCommandListGL::SetPolygonOffsetLine(bool enable, float factor, float units) {
+    Record([enable, factor, units](ICommandList* c) { c->SetPolygonOffsetLine(enable, factor, units); });
+}
 
 void DeferredCommandListGL::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
     Record([buffer, fromState, toState](ICommandList* c) { c->BarrierBuffer(buffer, fromState, toState); });

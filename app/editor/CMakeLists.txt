@@ -4,6 +4,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/LightGizmoIcons.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PhysicsColliderIcons.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
