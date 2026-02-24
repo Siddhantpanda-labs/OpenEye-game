@@ -1,17 +1,13 @@
 # OpenEye Unified Runtime Player
 
-set(PLAYER_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/PlayerApp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/PlayerApp.h
+# Shared game runtime (used by both Player exe and Editor Game view)
+set(GAME_RUNTIME_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/GameRuntime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/GameRuntime.h
     ${CMAKE_CURRENT_SOURCE_DIR}/PlayerConfig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PlayerConfig.h
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetBinding.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.cpp
@@ -30,18 +26,18 @@ set(PLAYER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldScriptingBridge.cpp
 )
 
-add_executable(OpenEyePlayer ${PLAYER_SOURCES})
+add_library(OpenEyeGameRuntime STATIC ${GAME_RUNTIME_SOURCES})
 
-target_include_directories(OpenEyePlayer
-    PRIVATE
+target_include_directories(OpenEyeGameRuntime
+    PUBLIC
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/api
         ${CMAKE_SOURCE_DIR}/thirdparty/nlohmann
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(OpenEyePlayer
-    PRIVATE
+target_link_libraries(OpenEyeGameRuntime
+    PUBLIC
         EyelibCoreAPI
         EyelibPlatformAPI
         EyelibAssetsAPI
@@ -53,3 +49,31 @@ target_link_libraries(OpenEyePlayer
         EyelibScriptingAPI
         OpenEyeImGui
 )
+
+# Player executable (uses game runtime); only when building the player app
+if(OPENEYE_BUILD_PLAYER)
+    set(PLAYER_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/PlayerApp.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/PlayerApp.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.h
+    )
+
+    add_executable(OpenEyePlayer ${PLAYER_SOURCES})
+
+    target_include_directories(OpenEyePlayer
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/api
+            ${CMAKE_SOURCE_DIR}/thirdparty/nlohmann
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    target_link_libraries(OpenEyePlayer
+        PRIVATE
+            OpenEyeGameRuntime
+    )
+endif()

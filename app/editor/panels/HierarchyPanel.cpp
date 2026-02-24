@@ -13,6 +13,17 @@ namespace {
 
 using EntityId = ::eyelib::world::EntityId;
 
+/** Scene display name from scene file path (e.g. "scenes/main.json" -> "main"). */
+std::string GetSceneDisplayName(const std::string& scenePath) {
+    if (scenePath.empty()) return "Scene";
+    std::string name = scenePath;
+    const size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) name = name.substr(slash + 1);
+    const size_t dot = name.rfind('.');
+    if (dot != std::string::npos && dot > 0) name = name.substr(0, dot);
+    return name.empty() ? "Scene" : name;
+}
+
 std::string GetDisplayName(eyelib::api::world::World& world, EntityId id) {
     std::string name;
     if (world.GetEntityName(id, name)) {
@@ -42,6 +53,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
         label.c_str());
 
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        ctx->sceneSelected = false;
         ctx->selectedEntity = entity;
     }
 
@@ -63,6 +75,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
             world.DestroyEntity(entity);
             if (ctx->selectedEntity.index == entity.index && ctx->selectedEntity.generation == entity.generation) {
                 ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+                ctx->sceneSelected = false;
             }
         }
         ImGui::EndPopup();
@@ -127,18 +140,37 @@ void ShowHierarchyPanel(EditorContext* ctx) {
         if (ImGui::Button("Create Entity")) {
             auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity("Entity"));
             if (result.success && result.createdEntity) {
+                ctx->sceneSelected = false;
                 ctx->selectedEntity = *result.createdEntity;
             }
         }
 
         ImGui::Separator();
 
-        const std::vector<EntityId> all = world.GetEntities();
-        for (EntityId entity : all) {
-            if (!world.IsAlive(entity)) continue;
-            if (world.GetParent(entity) != ::eyelib::world::InvalidEntity)
-                continue;  // only roots at top level
-            ShowEntityNode(ctx, entity, 0);
+        // Scene root (name from scene file); selecting it shows skybox in Inspector
+        const std::string sceneName = GetSceneDisplayName(ctx->scenePath);
+        const bool sceneIsSelected = ctx->sceneSelected;
+        ImGuiTreeNodeFlags sceneFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick
+            | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
+        if (sceneIsSelected) sceneFlags |= ImGuiTreeNodeFlags_Selected;
+        const bool sceneOpen = ImGui::TreeNodeEx(
+            (void*)(uintptr_t)0xFFFFFFFFu,
+            sceneFlags,
+            "%s",
+            sceneName.c_str());
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+            ctx->sceneSelected = true;
+            ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+        }
+        if (sceneOpen) {
+            const std::vector<EntityId> all = world.GetEntities();
+            for (EntityId entity : all) {
+                if (!world.IsAlive(entity)) continue;
+                if (world.GetParent(entity) != ::eyelib::world::InvalidEntity)
+                    continue;  // only roots under scene
+                ShowEntityNode(ctx, entity, 0);
+            }
+            ImGui::TreePop();
         }
     }
     ImGui::End();

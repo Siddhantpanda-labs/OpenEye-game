@@ -158,31 +158,25 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(const std::str
     return entry;
 }
 
-void EditorSceneBuilder::EnsureDefaultSkybox(const std::vector<std::string>& assetRoots) {
-    if (m_defaultSkyboxAttempted) return;
-    m_defaultSkyboxAttempted = true;
-
+std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAssetId(const std::string& assetId,
+                                                                                    const std::vector<std::string>& assetRoots) {
+    if (assetId.empty()) return nullptr;
     const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
-    const std::string base = "Skybox/Citadella";
-    // envmap_miramar: +X=rt, -X=lf, +Y=up, -Y=dn, +Z=bk, -Z=ft (px, nx, py, ny, pz, nz)
-    // const char* kFaces[] = { "miramar_rt.tga", "miramar_lf.tga", "miramar_up.tga", "miramar_dn.tga", "miramar_bk.tga", "miramar_ft.tga" };
-    // const std::string base = "Skybox/envmap_miramar";
     std::string paths[6];
     for (int i = 0; i < 6; ++i) {
-        std::string id = base + "/" + kFaces[i];
+        std::string id = assetId + "/" + kFaces[i];
         paths[i] = ResolveAssetPath(id, assetRoots);
         if (paths[i].empty()) {
-            eyelib::api::core::Log::WarnF("EditorSceneBuilder: default skybox face missing: %s", id.c_str());
-            return;
+            eyelib::api::core::Log::WarnF("EditorSceneBuilder: skybox face missing: %s", id.c_str());
+            return nullptr;
         }
     }
-
     auto skybox = std::make_shared<eyelib::api::TextureCube>();
     if (!skybox->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
-        eyelib::api::core::Log::WarnF("EditorSceneBuilder: failed to load default skybox %s", base.c_str());
-        return;
+        eyelib::api::core::Log::WarnF("EditorSceneBuilder: failed to load skybox %s", assetId.c_str());
+        return nullptr;
     }
-    m_defaultSkybox = std::move(skybox);
+    return skybox;
 }
 
 void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
@@ -192,6 +186,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               uint32_t viewportHeight,
                               const std::vector<std::string>& assetRoots,
                               eyelib::api::AssetRegistry* assetRegistry,
+                              const eyelib::api::world::World* world,
                               std::vector<::eyelib::world::EntityId>* outDrawableToEntity) {
     scene.opaqueStorage.clear();
     scene.transparentStorage.clear();
@@ -208,8 +203,22 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.exposure = 1.0f;
     scene.light.castShadows = true;
 
-    EnsureDefaultSkybox(assetRoots);
-    scene.skybox = m_defaultSkybox;
+    scene.skybox.reset();
+    if (world) {
+        const std::string skyboxId = world->GetSkyboxAssetId();
+        if (!skyboxId.empty()) {
+            auto it = m_skyboxCache.find(skyboxId);
+            if (it != m_skyboxCache.end()) {
+                scene.skybox = it->second;
+            } else {
+                auto skybox = LoadSkyboxFromAssetId(skyboxId, assetRoots);
+                if (skybox) {
+                    m_skyboxCache[skyboxId] = skybox;
+                    scene.skybox = std::move(skybox);
+                }
+            }
+        }
+    }
 
     auto getTransform = [&](::eyelib::world::EntityId id) { return snapshot.GetTransform(id); };
 

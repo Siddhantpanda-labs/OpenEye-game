@@ -117,6 +117,9 @@ struct SerializationTraits<eyelib::world::components::RigidBody> {
         nlohmann::json j;
         j["bodyHandle"] = v.bodyHandle;
         j["shapeHandle"] = v.shapeHandle;
+        j["mass"] = v.mass;
+        j["useGravity"] = v.useGravity;
+        j["isKinematic"] = v.isKinematic;
         j["syncTransform"] = v.syncTransform;
         return j;
     }
@@ -125,6 +128,9 @@ struct SerializationTraits<eyelib::world::components::RigidBody> {
         if (!j.is_object()) return out;
         out.bodyHandle = j.value("bodyHandle", 0u);
         out.shapeHandle = j.value("shapeHandle", 0u);
+        out.mass = j.value("mass", 1.0f);
+        out.useGravity = j.value("useGravity", true);
+        out.isKinematic = j.value("isKinematic", false);
         out.syncTransform = j.value("syncTransform", true);
         return out;
     }

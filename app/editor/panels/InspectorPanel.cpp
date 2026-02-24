@@ -1,12 +1,13 @@
 #include "InspectorPanel.h"
 #include "EditorContext.h"
 #include "PanelCommon.h"
-#include "PhysicsColliderIcons.h"
+#include "ui/PhysicsColliderIcons.h"
 
 #include "api/world/All.h"
 #include "api/world/Commands.h"
 
 #include "eyelib/world/components/Collider.h"
+#include "eyelib/world/components/RigidBody.h"
 
 #include <imgui.h>
 #include <json.hpp>
@@ -82,6 +83,27 @@ void ShowColliderComponent(eyelib::api::world::World& world, EntityId entity) {
                 world.SetCollider(entity, c);
         }
     }
+    ImGui::PopID();
+    ImGui::PopID();
+    ImGui::PopID();
+}
+
+void ShowRigidBodyComponent(eyelib::api::world::World& world, EntityId entity) {
+    ::eyelib::world::components::RigidBody rb;
+    if (!world.GetRigidBody(entity, rb)) return;
+    ImGui::PushID("InspectorRigidBody");
+    ImGui::PushID(static_cast<int>(entity.index));
+    ImGui::PushID(static_cast<int>(entity.generation));
+    if (ImGui::DragFloat("Mass", &rb.mass, 0.01f, 0.0f, 10000.0f, "%.3f")) {
+        if (rb.mass < 0.0f) rb.mass = 0.0f;
+        world.SetRigidBody(entity, rb);
+    }
+    if (ImGui::Checkbox("Use Gravity", &rb.useGravity))
+        world.SetRigidBody(entity, rb);
+    if (ImGui::Checkbox("Is Kinematic", &rb.isKinematic))
+        world.SetRigidBody(entity, rb);
+    if (ImGui::Checkbox("Sync Transform", &rb.syncTransform))
+        world.SetRigidBody(entity, rb);
     ImGui::PopID();
     ImGui::PopID();
     ImGui::PopID();
@@ -180,6 +202,11 @@ void ShowComponent(EditorContext* ctx, const std::string& componentName) {
             ShowColliderComponent(world, entity);
         return;
     }
+    if (componentName == "RigidBody") {
+        if (ImGui::CollapsingHeader("RigidBody", ImGuiTreeNodeFlags_DefaultOpen))
+            ShowRigidBodyComponent(world, entity);
+        return;
+    }
 
     ShowGenericComponent(world, entity, componentName, jsonStr);
 }
@@ -195,6 +222,7 @@ void ShowAddComponentPopup(EditorContext* ctx) {
     eyelib::api::world::World& world = ctx->world;
     EntityId entity = ctx->selectedEntity;
     using Collider = ::eyelib::world::components::Collider;
+    using RigidBody = ::eyelib::world::components::RigidBody;
 
     static PhysicsColliderIcons s_icons;
     const bool iconsOk = s_icons.EnsureLoaded();
@@ -233,6 +261,21 @@ void ShowAddComponentPopup(EditorContext* ctx) {
         ImGui::PopID();
         ImGui::TreePop();
     }
+    if (ImGui::TreeNodeEx("RigidBody", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushID("RigidBody");
+        if (iconsOk) {
+            uint64_t texId = s_icons.GetRigidBodyTexture();
+            if (texId)
+                ImGui::Image(static_cast<ImTextureID>(texId), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
+            ImGui::SameLine();
+        }
+        if (ImGui::Selectable("Rigidbody")) {
+            RigidBody rb;
+            world.ApplyCommandSync(eyelib::api::world::AddComponent<RigidBody>(entity, rb));
+        }
+        ImGui::PopID();
+        ImGui::TreePop();
+    }
     ImGui::PopID();
     ImGui::PopID();
 
@@ -245,9 +288,19 @@ void ShowInspectorPanel(EditorContext* ctx) {
     if (ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_None)) {
         if (!ctx) {
             ImGui::TextUnformatted("(No context)");
+        } else if (ctx->sceneSelected) {
+            ImGui::TextUnformatted("Scene");
+            ImGui::Separator();
+            char skyboxBuf[256];
+            std::string skyboxId = ctx->world.GetSkyboxAssetId();
+            std::snprintf(skyboxBuf, sizeof(skyboxBuf), "%.255s", skyboxId.c_str());
+            if (ImGui::InputText("Skybox (e.g. Skybox/Citadella)", skyboxBuf, sizeof(skyboxBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                ctx->world.SetSkyboxAssetId(skyboxBuf[0] ? std::string(skyboxBuf) : std::string());
+            }
         } else if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
-            ImGui::TextUnformatted("Select an entity in Hierarchy.");
+            ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
         } else {
+            ctx->sceneSelected = false;  // ensure entity selection takes precedence if both were set
             std::string name;
             if (ctx->world.GetEntityName(ctx->selectedEntity, name))
                 ImGui::Text("Entity: %s", name.c_str());

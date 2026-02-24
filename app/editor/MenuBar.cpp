@@ -1,6 +1,8 @@
 #include "MenuBar.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "GameRuntime.h"
+#include "eyelib/render/RenderBackend.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -91,6 +93,23 @@ void ShowMenuBar(EditorContext& ctx) {
             } else {
                 std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s", ctx.scenePath.c_str());
             }
+        }
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Game")) {
+        if (ImGui::MenuItem("Play", nullptr, false, !ctx.isPlaying && ctx.window && ctx.assetRegistry)) {
+            ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
+            if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
+                                           *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
+                ctx.isPlaying = true;
+            } else {
+                ctx.gameRuntime.reset();
+            }
+        }
+        if (ImGui::MenuItem("Stop", nullptr, false, ctx.isPlaying)) {
+            ctx.gameRuntimeStopRequested = true;
+            ctx.isPlaying = false;
         }
         ImGui::EndMenu();
     }

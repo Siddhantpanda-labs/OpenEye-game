@@ -2,10 +2,12 @@
 
 #include "api/world/All.h"
 
+#include <memory>
 #include <string>
 #include <vector>
 
-namespace eyelib { namespace api { class RenderPipeline; class AssetRegistry; } }
+namespace eyelib { namespace api { class RenderPipeline; class AssetRegistry; class Window; } }
+namespace openeye { namespace player { class GameRuntime; } }
 
 namespace openeye::editor {
 
@@ -24,11 +26,20 @@ struct EditorCamera {
  * All mutations go through context.world (API only).
  */
 struct EditorContext {
+    EditorContext();
+    ~EditorContext();
+    EditorContext(const EditorContext&) = delete;
+    EditorContext& operator=(const EditorContext&) = delete;
+    EditorContext(EditorContext&&) = default;
+    EditorContext& operator=(EditorContext&&) = default;
     eyelib::api::world::World world;
     std::string scenePath;  // empty if never loaded/saved
 
     /** Selected entity in hierarchy; InvalidEntity when none selected. */
     ::eyelib::world::EntityId selectedEntity = ::eyelib::world::InvalidEntity;
+
+    /** True when the scene root (name from scene file) is selected in hierarchy; then Inspector shows skybox. */
+    bool sceneSelected = false;
 
     /** Camera for scene view (viewport). Independent of game camera. */
     EditorCamera editorCamera;
@@ -37,6 +48,15 @@ struct EditorContext {
     eyelib::api::RenderPipeline* sceneViewPipeline = nullptr;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;
     std::vector<std::string> assetRoots;
+
+    /** Set by EditorApp; used for Game view (Play mode). */
+    eyelib::api::Window* window = nullptr;
+
+    /** Play mode: game runtime drives Game view. Null when not playing. */
+    bool isPlaying = false;
+    std::unique_ptr<openeye::player::GameRuntime> gameRuntime;
+    /** Set when Stop is clicked; runtime is destroyed at start of next frame to avoid GL shutdown mid-frame crash. */
+    bool gameRuntimeStopRequested = false;
 
     enum class Modal { None, Open, SaveAs };
     Modal activeModal = Modal::None;

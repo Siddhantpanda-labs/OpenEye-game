@@ -70,10 +70,10 @@ bool LightGizmoIcons::EnsureLoaded() {
     if (exeDir.empty()) return false;
 
     const char* candidates[] = {
-        "icons",
-        "app/editor/icons",
-        "../../../app/editor/icons",
-        "../../app/editor/icons",
+        "ui/icon",
+        "app/editor/ui/icon",
+        "../../../app/editor/ui/icon",
+        "../../app/editor/ui/icon",
     };
     for (const char* sub : candidates) {
         std::string dir = JoinPath(exeDir, sub);

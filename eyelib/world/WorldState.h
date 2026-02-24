@@ -77,6 +77,10 @@ public:
 
     void Clear();
 
+    /** Scene-level: skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
+    const std::string& GetSkyboxAssetId() const { return m_skyboxAssetId; }
+    void SetSkyboxAssetId(std::string id) { m_skyboxAssetId = std::move(id); }
+
 private:
     std::unique_ptr<EntityRegistry> m_entities;
     std::unique_ptr<Hierarchy> m_hierarchy;
@@ -84,6 +88,7 @@ private:
     std::unique_ptr<Tags> m_tags;
 
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
+    std::string m_skyboxAssetId;
 };
 
 } // namespace world

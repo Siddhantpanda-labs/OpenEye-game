@@ -1,7 +1,7 @@
 #include "SceneViewPanel.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
-#include "LightGizmoIcons.h"
+#include "ui/LightGizmoIcons.h"
 #include "PanelCommon.h"
 
 #include "api/render/RenderPipeline.h"
@@ -216,7 +216,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         if (canRender) {
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
-            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, &drawableToEntity);
+            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, &ctx->world, &drawableToEntity);
             drawableCount = scene.opaqueCount;
             for (EntityId e : drawableToEntity)
                 entityIdsForOpaque.push_back(PackEntityId(e));

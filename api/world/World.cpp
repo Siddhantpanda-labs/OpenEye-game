@@ -1074,6 +1074,17 @@ size_t World::GetEntityCount() const {
     return m_impl->world.GetState().Entities().GetAliveEntities().size();
 }
 
+std::string World::GetSkyboxAssetId() const {
+    if (!m_impl) return {};
+    return m_impl->world.GetState().GetSkyboxAssetId();
+}
+
+void World::SetSkyboxAssetId(const std::string& assetId) {
+    if (m_impl) {
+        m_impl->world.GetState().SetSkyboxAssetId(assetId);
+    }
+}
+
 void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.renderables.clear();
     out.meshRenderers.clear();

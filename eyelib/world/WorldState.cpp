@@ -82,6 +82,7 @@ void WorldState::RegisterComponentStore(size_t typeKey, std::unique_ptr<ICompone
 
 void WorldState::Clear() {
     m_componentStores.clear();
+    m_skyboxAssetId.clear();
     if (m_entities) {
         m_entities->Clear();
     }

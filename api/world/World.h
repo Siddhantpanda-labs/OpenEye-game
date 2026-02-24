@@ -273,6 +273,10 @@ public:
     bool SaveScene(const std::string& path) const;
     size_t GetEntityCount() const;
 
+    /** Scene-level skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
+    std::string GetSkyboxAssetId() const;
+    void SetSkyboxAssetId(const std::string& assetId);
+
     Observation GetObservation() const;
 
     ::eyelib::world::World* GetInternal() const;

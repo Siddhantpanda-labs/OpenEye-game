@@ -47,6 +47,8 @@ public:
 
     static void SetKinematic(PhysicsWorld& world, RigidBodyHandle body, bool kinematic);
     static bool IsKinematic(PhysicsWorld& world, RigidBodyHandle body);
+
+    static void SetGravity(PhysicsWorld& world, RigidBodyHandle body, const eyelib::math::Vec3& gravity);
 };
 
 } // namespace physics

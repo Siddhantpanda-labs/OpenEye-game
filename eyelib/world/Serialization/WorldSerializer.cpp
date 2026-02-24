@@ -98,6 +98,10 @@ nlohmann::json WorldSerializer::Serialize(const WorldState& state) const {
     }
     root["components"] = std::move(components);
 
+    if (!state.GetSkyboxAssetId().empty()) {
+        root["skybox"] = state.GetSkyboxAssetId();
+    }
+
     return root;
 }
 
@@ -180,6 +184,10 @@ bool WorldSerializer::Deserialize(WorldState& state, const nlohmann::json& root)
             }
             desc->deserializeStore(*store, block["items"]);
         }
+    }
+
+    if (root.contains("skybox") && root["skybox"].is_string()) {
+        state.SetSkyboxAssetId(root["skybox"].get<std::string>());
     }
 
     return true;

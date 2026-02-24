@@ -505,6 +505,11 @@ bool PhysicsWorld::IsKinematic(RigidBodyHandle body) const {
     return rb ? (rb->getCollisionFlags() & btCollisionObject::CF_KINEMATIC_OBJECT) != 0 : false;
 }
 
+void PhysicsWorld::SetRigidBodyGravity(RigidBodyHandle body, const math::Vec3& gravity) {
+    btRigidBody* rb = m_impl ? m_impl->getBody(body) : nullptr;
+    if (rb) rb->setGravity(ToBt(gravity));
+}
+
 void PhysicsWorld::SetSolverIterations(int iterations) {
     if (!m_impl || !m_impl->world) return;
     m_impl->solverIterations = iterations;

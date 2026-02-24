@@ -85,7 +85,7 @@ bool WorldPhysicsBridge::BuildBodyForCollider(
         return false;
     }
 
-    const float mass = rigidBody ? 1.0f : 0.0f;
+    const float mass = rigidBody ? rigidBody->component.mass : 0.0f;
     const auto position = transform ? transform->position : eyelib::math::Vec3(0.0f);
     const auto rotation = transform ? transform->rotation : eyelib::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
 
@@ -98,6 +98,11 @@ bool WorldPhysicsBridge::BuildBodyForCollider(
     bool syncTransform = true;
     if (rigidBody) {
         syncTransform = rigidBody->component.syncTransform;
+        eyelib::api::physics::RigidBody::SetKinematic(m_physics, body, rigidBody->component.isKinematic);
+        const eyelib::math::Vec3 gravity = rigidBody->component.useGravity
+            ? m_physics.GetGravity()
+            : eyelib::math::Vec3(0.0f, 0.0f, 0.0f);
+        eyelib::api::physics::RigidBody::SetGravity(m_physics, body, gravity);
         auto updated = rigidBody->component;
         updated.bodyHandle = body;
         updated.shapeHandle = shape;

@@ -106,6 +106,11 @@ bool RigidBody::IsKinematic(PhysicsWorld& world, RigidBodyHandle body) {
     return w ? w->IsKinematic(body) : false;
 }
 
+void RigidBody::SetGravity(PhysicsWorld& world, RigidBodyHandle body, const eyelib::math::Vec3& gravity) {
+    auto* w = world.GetInternal();
+    if (w) w->SetRigidBodyGravity(body, gravity);
+}
+
 } // namespace physics
 } // namespace api
 } // namespace eyelib

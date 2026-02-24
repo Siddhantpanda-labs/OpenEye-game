@@ -117,6 +117,7 @@ void WorldRenderBridge::Shutdown() {
     // Destroy caches and shaders/materials first; their destructors call into the RHI device.
     // Only then shut down the pipeline (which destroys the device).
     m_modelCache.clear();
+    m_skyboxCache.clear();
     m_skinnedMaterials.clear();
     m_defaultMaterial.reset();
     m_defaultShader.reset();
@@ -124,6 +125,10 @@ void WorldRenderBridge::Shutdown() {
     m_pipeline.Shutdown();
     m_renderer.Shutdown();
     m_ready = false;
+}
+
+void* WorldRenderBridge::GetOutputColorTextureNativeHandle() const {
+    return m_ready ? m_pipeline.GetOutputColorTextureNativeHandle() : nullptr;
 }
 
 void WorldRenderBridge::EnsureDefaultMaterial() {
@@ -243,6 +248,31 @@ std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
     return registry->GetMaterial(materialId);
 }
 
+std::shared_ptr<eyelib::api::TextureCube> WorldRenderBridge::GetOrLoadSkybox(const std::string& assetId,
+                                                                             const std::vector<std::string>& assetRoots) {
+    if (assetId.empty()) return nullptr;
+    auto it = m_skyboxCache.find(assetId);
+    if (it != m_skyboxCache.end()) {
+        return it->second;
+    }
+    const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
+    std::string paths[6];
+    for (int i = 0; i < 6; ++i) {
+        paths[i] = ResolveAssetPath(assetId + "/" + kFaces[i], assetRoots);
+        if (paths[i].empty()) {
+            eyelib::api::core::Log::WarnF("WorldRenderBridge: skybox face missing: %s/%s", assetId.c_str(), kFaces[i]);
+            return nullptr;
+        }
+    }
+    auto skybox = std::make_shared<eyelib::api::TextureCube>();
+    if (!skybox->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
+        eyelib::api::core::Log::WarnF("WorldRenderBridge: failed to load skybox %s", assetId.c_str());
+        return nullptr;
+    }
+    m_skyboxCache[assetId] = skybox;
+    return skybox;
+}
+
 void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    const RuntimeOptions& options,
                                    const WorldAnimationBridge* animationBridge,
@@ -252,6 +282,13 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
     world.CaptureRenderSnapshot(m_frameSnapshot);
     world.SetFrameSnapshot(&m_frameSnapshot);
     BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
+
+    const std::string skyboxId = world.GetSkyboxAssetId();
+    if (!skyboxId.empty()) {
+        scene.skybox = GetOrLoadSkybox(skyboxId, options.assetRoots);
+    } else {
+        scene.skybox.reset();
+    }
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,

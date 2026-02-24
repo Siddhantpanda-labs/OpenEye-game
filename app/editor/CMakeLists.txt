@@ -3,8 +3,9 @@
 set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/LightGizmoIcons.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/PhysicsColliderIcons.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorContext.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/LightGizmoIcons.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/PhysicsColliderIcons.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
@@ -12,6 +13,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/HierarchyPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/SceneViewPanel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/GameViewPanel.cpp
 )
 
 add_executable(OpenEyeEditor ${EDITOR_SOURCES})
@@ -23,9 +25,10 @@ target_include_directories(OpenEyeEditor
         ${CMAKE_SOURCE_DIR}/thirdparty/nlohmann
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/panels
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui
 )
 
-# Phase 0: bootstrap. Phase 1: world. Phase 4b: scene view render.
+# Phase 0: bootstrap. Phase 1: world. Phase 4b: scene view render. Game view: OpenEyeGameRuntime.
 target_link_libraries(OpenEyeEditor
     PRIVATE
         EyelibCoreAPI
@@ -36,4 +39,5 @@ target_link_libraries(OpenEyeEditor
         EyelibAnimationAPI
         EyelibMathAPI
         OpenEyeImGui
+        OpenEyeGameRuntime
 )

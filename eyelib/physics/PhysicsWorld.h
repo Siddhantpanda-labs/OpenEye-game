@@ -83,6 +83,7 @@ public:
 
     void SetGravity(const math::Vec3& gravity);
     math::Vec3 GetGravity() const;
+    void SetRigidBodyGravity(RigidBodyHandle body, const math::Vec3& gravity);
 
     void SetSolverIterations(int iterations);
     void SetSolverSubSteps(int subSteps);

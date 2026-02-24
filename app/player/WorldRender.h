@@ -70,6 +70,9 @@ public:
                     eyelib::api::RenderScene& scene,
                     api::FrameAllocator* frameAlloc = nullptr);
 
+    /** Native texture handle of pipeline output (after RenderSceneOnly). For ImGui use as ImTextureID; null if not ready. */
+    void* GetOutputColorTextureNativeHandle() const;
+
 private:
     struct ModelEntry {
         std::shared_ptr<eyelib::api::Mesh> mesh;
@@ -91,6 +94,8 @@ private:
     std::shared_ptr<eyelib::api::Material> ResolveMaterial(const std::string& materialId,
                                                            eyelib::api::AssetRegistry* registry);
     ModelEntry LoadModelEntry(const std::string& path);
+    std::shared_ptr<eyelib::api::TextureCube> GetOrLoadSkybox(const std::string& assetId,
+                                                             const std::vector<std::string>& assetRoots);
 
     void BuildSceneFromViews(
         std::span<const eyelib::api::world::World::RenderableEntry> renderables,
@@ -115,6 +120,7 @@ private:
     std::shared_ptr<eyelib::api::Shader> m_skinnedShader;
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, ModelEntry> m_modelCache;
+    std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;
 };
 

@@ -313,10 +313,12 @@ if(OPENEYE_BUILD_GAME)
 endif()
 
 # --------------------------------------
-# Unified Runtime Player
+# Unified Runtime Player (lib shared with Editor Game view)
 # --------------------------------------
-if(OPENEYE_BUILD_PLAYER)
+if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/player)
+endif()
+if(OPENEYE_BUILD_PLAYER)
     add_subdirectory(app/test_forward_skinned)
 endif()
 

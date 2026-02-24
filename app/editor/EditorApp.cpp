@@ -6,6 +6,8 @@
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
+#include "panels/GameViewPanel.h"
+#include "GameRuntime.h"
 
 #include "api/assets/All.h"
 #include "api/core/All.h"
@@ -177,11 +179,16 @@ int RunEditor(int argc, char** argv) {
     ctx.sceneViewPipeline = &sceneViewPipeline;
     ctx.assetRegistry = &assetRegistry;
     ctx.assetRoots = { "assets" };
+    ctx.window = &window;
 
     while (!window.ShouldClose()) {
         window.PollEvents();
         window.MakeContextCurrent();
         window.RefreshFramebufferSize();
+        if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
+            ctx.gameRuntime.reset();
+            ctx.gameRuntimeStopRequested = false;
+        }
         window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -197,6 +204,7 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowHierarchyPanel(&ctx);
         openeye::editor::panels::ShowInspectorPanel(&ctx);
         openeye::editor::panels::ShowSceneViewPanel(&ctx);
+        openeye::editor::panels::ShowGameViewPanel(&ctx);
 
         if (shaderWatcher && ctx.sceneViewPipeline) {
             int copied = shaderWatcher->Tick();

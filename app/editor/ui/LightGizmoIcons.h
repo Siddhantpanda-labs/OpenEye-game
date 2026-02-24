@@ -7,7 +7,7 @@
 namespace openeye::editor {
 
 /**
- * Loads and caches light gizmo icons (Directional, Point, Spot) for drawing in the scene view.
+ * Loads and caches light gizmo icons from editor/ui/icon for drawing in the scene view.
  * Textures are suitable for ImGui/ImDrawList (ImTextureID = GLuint when using OpenGL).
  */
 class LightGizmoIcons {

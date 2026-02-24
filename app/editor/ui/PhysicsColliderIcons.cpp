@@ -48,6 +48,7 @@ bool PhysicsColliderIcons::TryLoadFromDir(const char* dir) {
     if (!LoadPngToGlTexture(JoinPath(dir, "d_SphereCollider Icon.png").c_str(), &m_sphereTexId)) return false;
     if (!LoadPngToGlTexture(JoinPath(dir, "d_CapsuleCollider Icon.png").c_str(), &m_capsuleTexId)) return false;
     LoadPngToGlTexture(JoinPath(dir, "d_MeshCollider Icon.png").c_str(), &m_meshTexId); // optional
+    LoadPngToGlTexture(JoinPath(dir, "d_RigidbodyIcon.png").c_str(), &m_rigidbodyTexId); // optional
     return true;
 }
 
@@ -60,10 +61,10 @@ bool PhysicsColliderIcons::EnsureLoaded() {
     if (exeDir.empty()) return false;
 
     const char* candidates[] = {
-        "icons/physics",
-        "app/editor/icons/physics",
-        "../../../app/editor/icons/physics",
-        "../../app/editor/icons/physics",
+        "ui/icon/physics",
+        "app/editor/ui/icon/physics",
+        "../../../app/editor/ui/icon/physics",
+        "../../app/editor/ui/icon/physics",
     };
     for (const char* sub : candidates) {
         std::string d = JoinPath(exeDir, sub);
@@ -82,11 +83,16 @@ uint64_t PhysicsColliderIcons::GetTexture(ColliderIconShape shape) const {
     }
 }
 
+uint64_t PhysicsColliderIcons::GetRigidBodyTexture() const {
+    return static_cast<uint64_t>(m_rigidbodyTexId);
+}
+
 void PhysicsColliderIcons::Shutdown() {
     if (m_boxTexId)    { glDeleteTextures(1, &m_boxTexId);    m_boxTexId = 0; }
     if (m_sphereTexId) { glDeleteTextures(1, &m_sphereTexId); m_sphereTexId = 0; }
     if (m_capsuleTexId){ glDeleteTextures(1, &m_capsuleTexId); m_capsuleTexId = 0; }
     if (m_meshTexId)   { glDeleteTextures(1, &m_meshTexId);   m_meshTexId = 0; }
+    if (m_rigidbodyTexId) { glDeleteTextures(1, &m_rigidbodyTexId); m_rigidbodyTexId = 0; }
     m_attempted = false;
 }
 

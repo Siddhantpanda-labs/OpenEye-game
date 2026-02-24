@@ -8,7 +8,7 @@ namespace openeye::editor {
 enum class ColliderIconShape { Box, Sphere, Capsule, Mesh };
 
 /**
- * Loads and caches physics collider icons from editor/icons/physics for Add Component menu.
+ * Loads and caches physics icons (collider shapes + rigidbody) from editor/ui/icon/physics for Add Component menu.
  */
 class PhysicsColliderIcons {
 public:
@@ -16,6 +16,8 @@ public:
     bool EnsureLoaded();
     /** Get texture ID for the given shape (for ImGui::Image). Returns 0 if not loaded. */
     uint64_t GetTexture(ColliderIconShape shape) const;
+    /** Get texture ID for Rigidbody icon. Returns 0 if not loaded. */
+    uint64_t GetRigidBodyTexture() const;
     void Shutdown();
 
 private:
@@ -26,6 +28,7 @@ private:
     uint32_t m_sphereTexId = 0;
     uint32_t m_capsuleTexId = 0;
     uint32_t m_meshTexId = 0;
+    uint32_t m_rigidbodyTexId = 0;
     bool m_attempted = false;
 };
 
