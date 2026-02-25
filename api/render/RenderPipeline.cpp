@@ -147,6 +147,11 @@ void RenderPipeline::SetPendingDebugLines(const eyelib::math::Mat4& view, const 
     m_impl->pipeline->SetPendingDebugLines(view, proj, lines, r, g, b);
 }
 
+void RenderPipeline::SetPendingDebugLinesColored(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+    const std::vector<std::pair<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>, eyelib::math::Vec4>>& linesWithColors) {
+    m_impl->pipeline->SetPendingDebugLinesColored(view, proj, linesWithColors);
+}
+
 void RenderPipeline::ReloadShaders() {
     m_impl->pipeline->ReloadShaders();
 }

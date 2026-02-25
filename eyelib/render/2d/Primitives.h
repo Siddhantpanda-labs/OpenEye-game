@@ -21,6 +21,8 @@ public:
 
     bool Initialize();
     void Shutdown();
+    /** Release static shader cache. Call before destroying the device they were created with. */
+    static void ShutdownStaticResources();
 
     void SetViewProjection(const math::Mat4& view, const math::Mat4& projection);
 

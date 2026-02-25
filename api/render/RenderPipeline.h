@@ -52,6 +52,9 @@ public:
     /** Enqueue debug lines to be drawn before post in the next Render(). Use from scene view so lines are in HDR and get tone-mapped. */
     void SetPendingDebugLines(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
         const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines, float r, float g, float b);
+    /** Enqueue debug lines with per-line color (RGB per line). */
+    void SetPendingDebugLinesColored(const eyelib::math::Mat4& view, const eyelib::math::Mat4& proj,
+        const std::vector<std::pair<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>, eyelib::math::Vec4>>& linesWithColors);
     /** Reload all pipeline shaders (for hot-reload when shader files change). */
     void ReloadShaders();
     void BlitToScreen();

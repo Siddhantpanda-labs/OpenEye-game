@@ -103,16 +103,17 @@ void GameRuntime::Shutdown() {
     }
     m_scripting.reset();
     m_animation.reset();
-    if (m_render) {
-        m_render->Shutdown();
-        m_render.reset();
-    }
+    // Shutdown physics before render so simulation is torn down while device is still valid.
     try {
         if (m_physics) {
             m_physics->Shutdown();
             m_physics.reset();
         }
     } catch (...) {}
+    if (m_render) {
+        m_render->Shutdown();
+        m_render.reset();
+    }
     m_world = nullptr;
     m_assetRegistry = nullptr;
     m_assetRoots.clear();

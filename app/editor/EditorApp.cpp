@@ -1,6 +1,7 @@
 #include "EditorApp.h"
 
 #include "EditorContext.h"
+#include "EditorSceneBuilder.h"
 #include "MenuBar.h"
 #include "panels/StatusPanel.h"
 #include "panels/HierarchyPanel.h"
@@ -15,6 +16,7 @@
 #include "api/render/All.h"
 #include "eyelib/assets/ShaderWatcher.h"
 #include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -186,8 +188,35 @@ int RunEditor(int argc, char** argv) {
         window.MakeContextCurrent();
         window.RefreshFramebufferSize();
         if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
-            ctx.gameRuntime.reset();
+            // Restore default device before teardown so nothing during shutdown sees the game device as default.
+            if (ctx.sceneViewPipeline) {
+                void* dev = ctx.sceneViewPipeline->GetDevice();
+                eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
+            }
+            try {
+                ctx.gameRuntime.reset();
+            } catch (...) {
+                // Ensure we restore the default device even if shutdown throws.
+            }
+            ctx.world.SetFrameSnapshot(nullptr);  // clear dangling pointer so next Play uses live world for GetObservation()
             ctx.gameRuntimeStopRequested = false;
+            if (ctx.sceneViewPipeline) {
+                void* dev = ctx.sceneViewPipeline->GetDevice();
+                eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
+            }
+            // Revert world to pre-Play snapshot so edits during Play are discarded.
+            if (!ctx.playSnapshotPath.empty()) {
+                if (ctx.world.LoadScene(ctx.playSnapshotPath)) {
+                    if (ctx.assetRegistry) {
+                        EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
+                    }
+                    ctx.selectedEntity = ::eyelib::world::InvalidEntity;
+                    ctx.sceneSelected = false;
+                }
+                (void)eyelib::api::platform::filesystem::DeleteFile(ctx.playSnapshotPath);
+                ctx.playSnapshotPath.clear();
+            }
+            eyelib::api::core::Log::Info("Game runtime stopped; default device restored.");
         }
         window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
 

@@ -30,6 +30,10 @@ using Vec4 = eyelib::math::Vec4;
 using Mat4 = eyelib::math::Mat4;
 using Quat = eyelib::math::Quat;
 
+/** Colored line: (segment, RGBA). For SetPendingDebugLinesColored. */
+using ColoredLine = std::pair<std::pair<Vec3, Vec3>, Vec4>;
+using ColoredLines = std::vector<ColoredLine>;
+
 constexpr uint32_t kEntityIdIndexBits = 20u;
 constexpr uint32_t kEntityIdIndexMask = (1u << kEntityIdIndexBits) - 1u;
 constexpr uint32_t kEntityIdGenBits = 12u;
@@ -89,6 +93,40 @@ constexpr float kSpotArrowLength = 1.8f;
 constexpr unsigned kOrangeColor = IM_COL32(255, 140, 0, 255);
 constexpr float kArrowThickness = 2.5f;
 constexpr unsigned kColliderCircleSegments = 24;
+
+/** Snapped grid (XZ at y=0) centered on camera, and XYZ axes at origin. Appends colored lines to \a out. */
+void CollectGridAndAxisLinesColored(const EditorCamera& cam, ColoredLines& out) {
+    const float gridStep = 2.f;
+    const float halfExtent = 50.f;
+    const float axisLen = 4.f;
+
+    // Snap camera XZ to grid so the grid "follows" the camera and new lines appear on the opposite side as you move
+    const float camX = cam.position[0];
+    const float camZ = cam.position[2];
+    const float centerX = std::floor(camX / gridStep + 0.5f) * gridStep;
+    const float centerZ = std::floor(camZ / gridStep + 0.5f) * gridStep;
+    const float xMin = centerX - halfExtent;
+    const float xMax = centerX + halfExtent;
+    const float zMin = centerZ - halfExtent;
+    const float zMax = centerZ + halfExtent;
+
+    const Vec4 gridColor(0.f, 0.f, 0.f, 1.f);  // black
+    const Vec4 axisXColor(1.f, 0.f, 0.f, 1.f); // red
+    const Vec4 axisYColor(0.f, 1.f, 0.f, 1.f); // green
+    const Vec4 axisZColor(0.f, 0.f, 1.f, 1.f); // blue
+
+    // Grid: lines along X (varying Z) and along Z (varying X)
+    for (float z = zMin; z <= zMax; z += gridStep) {
+        out.push_back({ { Vec3(xMin, 0.f, z), Vec3(xMax, 0.f, z) }, gridColor });
+    }
+    for (float x = xMin; x <= xMax; x += gridStep) {
+        out.push_back({ { Vec3(x, 0.f, zMin), Vec3(x, 0.f, zMax) }, gridColor });
+    }
+    // XYZ axes at origin
+    out.push_back({ { Vec3(0.f, 0.f, 0.f), Vec3(axisLen, 0.f, 0.f) }, axisXColor });
+    out.push_back({ { Vec3(0.f, 0.f, 0.f), Vec3(0.f, axisLen, 0.f) }, axisYColor });
+    out.push_back({ { Vec3(0.f, 0.f, 0.f), Vec3(0.f, 0.f, axisLen) }, axisZColor });
+}
 
 Vec3 TransformPoint(const ::eyelib::world::components::Transform& t, const Vec3& local) {
     Vec3 scaled(t.scale.x * local.x, t.scale.y * local.y, t.scale.z * local.z);
@@ -221,14 +259,20 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             for (EntityId e : drawableToEntity)
                 entityIdsForOpaque.push_back(PackEntityId(e));
             ctx->sceneViewPipeline->Resize(w, h);
-            if (!snapshot.colliders.empty()) {
+            {
                 Mat4 view, proj;
                 BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
-                std::vector<std::pair<Vec3, Vec3>> colliderLines;
-                colliderLines.reserve(snapshot.colliders.size() * 64u);
-                CollectColliderDebugLines(snapshot, colliderLines);
-                if (!colliderLines.empty())
-                    ctx->sceneViewPipeline->SetPendingDebugLines(view, proj, colliderLines, 0.f, 1.f, 0.47f);
+                ColoredLines colored;
+                CollectGridAndAxisLinesColored(ctx->editorCamera, colored);
+                if (!snapshot.colliders.empty()) {
+                    std::vector<std::pair<Vec3, Vec3>> colliderLines;
+                    colliderLines.reserve(snapshot.colliders.size() * 64u);
+                    CollectColliderDebugLines(snapshot, colliderLines);
+                    const Vec4 green(0.f, 1.f, 0.f, 1.f);
+                    for (const auto& line : colliderLines)
+                        colored.push_back({ line, green });
+                }
+                ctx->sceneViewPipeline->SetPendingDebugLinesColored(view, proj, colored);
             }
             ctx->sceneViewPipeline->Render(scene, entityIdsForOpaque.empty() ? nullptr : &entityIdsForOpaque);
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))

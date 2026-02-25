@@ -67,6 +67,9 @@ public:
     /** Enqueue debug lines to be drawn before post in the next Render(). Use from scene view so lines are in HDR and get tone-mapped. */
     void SetPendingDebugLines(const math::Mat4& view, const math::Mat4& proj,
         const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b);
+    /** Enqueue debug lines with per-line color. Drawn before post in the next Render(). */
+    void SetPendingDebugLinesColored(const math::Mat4& view, const math::Mat4& proj,
+        const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors);
     void BlitToScreen();
     /** Entity ID render target (R32UI, shared depth with HDR). Null until first use. For ReadPixelUint32 after Render with entity IDs. */
     rhi::IRenderTarget* GetEntityIdRenderTarget() const { return m_entityIdRenderTarget; }
@@ -201,11 +204,10 @@ private:
     // Scratch for transparent drawables when using view (sorting requires a list)
     mutable std::vector<Drawable> m_scratchTransparent;
 
-    // Pending debug lines drawn before post (into HDR) so depth test and tone-mapping apply
-    std::vector<std::pair<math::Vec3, math::Vec3>> m_pendingDebugLines;
+    // Pending debug lines (per-line color) drawn before post (into HDR) so depth test and tone-mapping apply
+    std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>> m_pendingDebugLinesColored;
     math::Mat4 m_pendingDebugView{1.0f};
     math::Mat4 m_pendingDebugProj{1.0f};
-    float m_pendingDebugR = 0.f, m_pendingDebugG = 1.f, m_pendingDebugB = 0.47f;
 
 #ifndef NDEBUG
     /** Debug guard: set during Render() to catch invalid Resize() mid-frame. */

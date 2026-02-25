@@ -10,6 +10,8 @@ namespace render {
 
 namespace {
 const float kPi = 3.14159265358979323846f;
+static std::shared_ptr<Shader> s_lineShader;
+static std::shared_ptr<Shader> s_triShader;
 }
 
 Primitives::Primitives() = default;
@@ -28,6 +30,11 @@ void Primitives::Shutdown() {
     m_triVboCapacity = 0;
     m_triEboCapacity = 0;
     m_initialized = false;
+}
+
+void Primitives::ShutdownStaticResources() {
+    s_lineShader.reset();
+    s_triShader.reset();
 }
 
 bool Primitives::Initialize() {
@@ -120,14 +127,13 @@ void Primitives::Flush() {
 
 void Primitives::FlushLines() {
     if (m_lineVerts.empty()) return;
-    static std::shared_ptr<Shader> s_shader;
-    if (!s_shader || !s_shader->IsValid()) {
-        s_shader = std::make_shared<Shader>();
+    if (!s_lineShader || !s_lineShader->IsValid()) {
+        s_lineShader = std::make_shared<Shader>();
         rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
         if (!device) return;
-        s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
+        s_lineShader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
-    if (!s_shader->IsValid()) return;
+    if (!s_lineShader->IsValid()) return;
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
@@ -142,25 +148,24 @@ void Primitives::FlushLines() {
     cmd->SetDepthTest(false);
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
-    s_shader->Bind();
-    s_shader->SetMat4("u_View", m_view);
-    s_shader->SetMat4("u_Projection", m_projection);
+    s_lineShader->Bind();
+    s_lineShader->SetMat4("u_View", m_view);
+    s_lineShader->SetMat4("u_Projection", m_projection);
     cmd->DrawIndexed(static_cast<uint32_t>(m_lineIndices.size()), 0, 0);
-    s_shader->Unbind();
+    s_lineShader->Unbind();
     m_lineVerts.clear();
     m_lineIndices.clear();
 }
 
 void Primitives::FlushTriangles() {
     if (m_triVerts.empty()) return;
-    static std::shared_ptr<Shader> s_shader;
-    if (!s_shader || !s_shader->IsValid()) {
-        s_shader = std::make_shared<Shader>();
+    if (!s_triShader || !s_triShader->IsValid()) {
+        s_triShader = std::make_shared<Shader>();
         rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
         if (!device) return;
-        s_shader->Load(device, "passes/2d/primitive", GetVertexLayout());
+        s_triShader->Load(device, "passes/2d/primitive", GetVertexLayout());
     }
-    if (!s_shader->IsValid()) return;
+    if (!s_triShader->IsValid()) return;
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
@@ -175,11 +180,11 @@ void Primitives::FlushTriangles() {
     cmd->SetDepthTest(false);
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
-    s_shader->Bind();
-    s_shader->SetMat4("u_View", m_view);
-    s_shader->SetMat4("u_Projection", m_projection);
+    s_triShader->Bind();
+    s_triShader->SetMat4("u_View", m_view);
+    s_triShader->SetMat4("u_Projection", m_projection);
     cmd->DrawIndexed(static_cast<uint32_t>(m_triIndices.size()), 0, 0);
-    s_shader->Unbind();
+    s_triShader->Unbind();
     m_triVerts.clear();
     m_triIndices.clear();
 }

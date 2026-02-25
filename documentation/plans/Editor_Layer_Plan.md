@@ -109,14 +109,14 @@ Early phases focus on **core, platform, world, assets, math, render** so the edi
 - Hierarchy panel: list entities and parent-child structure using world API (GetEntities, GetChildren, GetParent); selection state in editor.
 - Create/delete entity, rename, reparent via world commands.
 - **Tests:** world (entities, hierarchy, metadata, commands).
-- **Done:** `EditorContext.selectedEntity`; Hierarchy panel tree (roots + children), selection on click, Create Entity, context menu (Create Child, Rename, Delete); Inspector shows selected entity.
+- **Done:** `EditorContext.selectedEntity`; Hierarchy panel tree (roots + children), selection on click, Create Entity, context menu (Create Child, Rename, Delete); Inspector shows selected entity. Hierarchy root row represents the scene (name from scene file, e.g. `main` for `main.json`); selecting it sets `EditorContext.sceneSelected` so Inspector shows scene-level options (e.g. skybox).
 
 ### Phase 3: Inspector and component edit ✅
 
 - Inspector panel: for selected entity, list components (GetComponentNames), show/edit via GetComponentJson/SetComponentJson (or typed helpers if available).
 - At least Transform, Name; then MeshRenderer, Camera, Light, Collider, RigidBody, etc., as needed.
 - **Tests:** world (component read/write), math (transform display).
-- **Done:** Inspector lists all components; Name (InputText + SetComponentJson/SetEntityName), Transform (position/rotation/scale InputFloat3/4 + SetComponentJson); generic components: raw JSON multiline + Apply.
+- **Done:** Inspector lists all components; Name (InputText + SetComponentJson/SetEntityName), Transform (position/rotation/scale InputFloat3/4 + SetComponentJson); generic components: raw JSON multiline + Apply. When scene root is selected (`sceneSelected`), Inspector shows only scene-level fields (e.g. skybox asset id).
 
 ### Phase 4: Scene view (viewport)
 
@@ -126,7 +126,7 @@ Early phases focus on **core, platform, world, assets, math, render** so the edi
 
 **Phase 4a (done):** Viewport panel with content region, placeholder background, and `EditorCamera` in context (distance, yaw, pitch, focus, fov). Ready for wiring render path. Player remains independent.
 
-**Phase 4b (done):** Render world to texture: GetOutputColorTextureNativeHandle(); EditorSceneBuilder (snapshot → RenderScene). Pipeline + AssetRegistry init; each frame: build scene, resize pipeline, Render(scene), display texture. No shared builder; editor-only “BuildRenderSceneFromWorld” using API only, then scene view renders world from `editorCamera` to a `RenderTarget`.
+**Phase 4b (done):** Render world to texture: GetOutputColorTextureNativeHandle(); EditorSceneBuilder (snapshot → RenderScene). Pipeline + AssetRegistry init; each frame: build scene, resize pipeline, Render(scene), display texture. No shared builder; editor-only “BuildRenderSceneFromWorld” using API only, then scene view renders world from `editorCamera` to a `RenderTarget`. Skybox comes from scene (serialize/load `skybox` in WorldSerializer); EditorSceneBuilder uses skybox cache so it is not reloaded every frame.
 
 ### Phase 5: Asset and resource integration
 
@@ -145,11 +145,17 @@ Early phases focus on **core, platform, world, assets, math, render** so the edi
 - Inspector for script components (properties); optional script reload.
 - **Tests:** audio, scripting.
 
-### Phase 8: Play mode and debug
+### Phase 8: Play mode and debug ✅
 
 - “Play” in editor: run game loop (update world, render, physics, etc.) on the same in-memory world; “Stop” returns to edit state.
 - Optional: debug overlay (stats, diagnostics) using debug API; geometry (picking) if available.
 - **Tests:** full integration of world, render, physics, animation, scripting; debug.
+
+**Done:**
+- **Play:** Menu Game → Play creates `GameRuntime`, initializes with world, asset registry, window (256×256), OpenGL backend; `EditorContext.isPlaying` and `gameRuntime` set; global default RHI device is restored to scene view device immediately after init so no editor-owned resource ever holds the game device.
+- **Stop:** Menu Game → Stop sets `gameRuntimeStopRequested` and `isPlaying = false`; teardown is deferred to the start of the next frame. In the main loop, when stopping: default device is set to scene view device, then `gameRuntime.reset()` (GameRuntime::Shutdown: audio → scripting → animation → physics → render); then default device is set to scene view again and log “Game runtime stopped; default device restored.”
+- **Game view panel:** When playing, panel calls `gameRuntime->Tick(deltaSeconds)` and `gameRuntime->Render(w, h)`, displays `GetOutputColorTextureNativeHandle()` as ImGui image. When not playing, shows “Press Play to run the game.”
+- **RHI/device lifetime (engine-side, required for editor Play/Stop):** (1) Static GPU resources must not outlive their device: `DebugDrawRenderer::Shutdown()` and `Primitives::ShutdownStaticResources()` tear down static shaders/buffers before device destroy; (2) device is destroyed in `RenderPipeline` destructor (not in `Shutdown()`), so pipeline-owned shaders (e.g. from passes) are destroyed before the device; (3) debug logging in `Shader::~Shader` and `DeviceGL::~DeviceGL` to confirm destroy order.
 
 ### Phase 9: Optional modules
 

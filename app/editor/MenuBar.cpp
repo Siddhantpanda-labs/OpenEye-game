@@ -2,10 +2,14 @@
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "GameRuntime.h"
+#include "api/platform/All.h"
+#include "api/core/All.h"
 #include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <cstdio>
+#include <string>
 
 namespace openeye::editor {
 
@@ -99,12 +103,29 @@ void ShowMenuBar(EditorContext& ctx) {
 
     if (ImGui::BeginMenu("Game")) {
         if (ImGui::MenuItem("Play", nullptr, false, !ctx.isPlaying && ctx.window && ctx.assetRegistry)) {
-            ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
-            if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
-                                           *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
-                ctx.isPlaying = true;
+            ctx.playSnapshotPath.clear();
+            std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(
+                eyelib::api::platform::filesystem::GetExecutablePath());
+            std::string snapshotPath = exeDir.empty() ? ".openeye_play_snapshot.json"
+                : (exeDir + (exeDir.back() == '/' || exeDir.back() == '\\' ? "" : "/") + ".openeye_play_snapshot.json");
+            if (!ctx.world.SaveScene(snapshotPath)) {
+                eyelib::api::core::Log::ErrorF("Play: failed to snapshot world to %s; Play aborted.", snapshotPath.c_str());
             } else {
-                ctx.gameRuntime.reset();
+                ctx.playSnapshotPath = snapshotPath;
+                ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
+                if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
+                                               *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
+                    ctx.isPlaying = true;
+                    // Keep global default device as scene view so no editor-owned resource ever holds the game device.
+                    if (ctx.sceneViewPipeline) {
+                        void* dev = ctx.sceneViewPipeline->GetDevice();
+                        eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
+                    }
+                } else {
+                    ctx.gameRuntime.reset();
+                    (void)eyelib::api::platform::filesystem::DeleteFile(ctx.playSnapshotPath);
+                    ctx.playSnapshotPath.clear();
+                }
             }
         }
         if (ImGui::MenuItem("Stop", nullptr, false, ctx.isPlaying)) {

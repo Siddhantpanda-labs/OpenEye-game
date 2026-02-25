@@ -58,6 +58,9 @@ struct EditorContext {
     /** Set when Stop is clicked; runtime is destroyed at start of next frame to avoid GL shutdown mid-frame crash. */
     bool gameRuntimeStopRequested = false;
 
+    /** Path to snapshot saved when Play was pressed; used to revert world on Stop. Empty when no snapshot. */
+    std::string playSnapshotPath;
+
     enum class Modal { None, Open, SaveAs };
     Modal activeModal = Modal::None;
     char pathBuffer[512] = "scenes/main.json";

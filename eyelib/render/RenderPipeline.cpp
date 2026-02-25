@@ -11,6 +11,7 @@
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/passes/LightCullPass.h"
 #include "eyelib/render/DebugDrawRenderer.h"
+#include "eyelib/render/2d/Primitives.h"
 #include "eyelib/debug/Presets.h"
 #include "eyelib/debug/Profiler.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
@@ -50,6 +51,9 @@ RenderPipeline::~RenderPipeline() {
 }
 
 void RenderPipeline::Shutdown() {
+    // Clear default device first so no code run during teardown sees this device as default.
+    if (m_device)
+        rhi::SetDefaultDevice(nullptr);
     debug::Profiler::SetGpuProfiler(nullptr);
     m_gpuProfilerRHI.reset();
 
@@ -84,9 +88,14 @@ void RenderPipeline::Shutdown() {
         if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
         if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
     }
+    // Tear down static GPU resources while device is still valid (they may hold this device).
+    DebugDrawRenderer::Shutdown();
+    Primitives::ShutdownStaticResources();
     DebugDrawRenderer::SetDevice(nullptr);
     rhi::SetDefaultDevice(nullptr);
-    m_device.reset();
+    // Do NOT m_device.reset() here: pipeline-owned shaders (shared_ptr) may have refcount > 1
+    // and are only released when the pipeline object is destroyed. Destroy device in destructor
+    // so it happens after member destructors (and thus after all shaders are destroyed).
     m_width = m_height = 0;
 }
 
@@ -985,10 +994,13 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         DebugDrawRenderer::Render(cam, target, m_width, m_height);
     }
 
-    if (!m_pendingDebugLines.empty()) {
-        RenderDebugLines(m_pendingDebugView, m_pendingDebugProj, m_pendingDebugLines,
-            m_pendingDebugR, m_pendingDebugG, m_pendingDebugB);
-        m_pendingDebugLines.clear();
+    if (!m_pendingDebugLinesColored.empty()) {
+        CameraView pendingCam;
+        pendingCam.view = m_pendingDebugView;
+        pendingCam.projection = m_pendingDebugProj;
+        pendingCam.viewPos = math::Vec3(0, 0, 0);
+        DebugDrawRenderer::RenderLinesWithDepth(pendingCam, m_hdrRenderTarget, m_width, m_height, m_pendingDebugLinesColored);
+        m_pendingDebugLinesColored.clear();
     }
 
     // Post runs exactly once, after all scene and debug passes. One path for all modes.
@@ -1254,10 +1266,18 @@ void RenderPipeline::SetPendingDebugLines(const math::Mat4& view, const math::Ma
     const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, float r, float g, float b) {
     m_pendingDebugView = view;
     m_pendingDebugProj = proj;
-    m_pendingDebugLines = lines;
-    m_pendingDebugR = r;
-    m_pendingDebugG = g;
-    m_pendingDebugB = b;
+    m_pendingDebugLinesColored.clear();
+    const math::Vec4 color(r, g, b, 1.f);
+    m_pendingDebugLinesColored.reserve(lines.size());
+    for (const auto& line : lines)
+        m_pendingDebugLinesColored.push_back({ line, color });
+}
+
+void RenderPipeline::SetPendingDebugLinesColored(const math::Mat4& view, const math::Mat4& proj,
+    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
+    m_pendingDebugView = view;
+    m_pendingDebugProj = proj;
+    m_pendingDebugLinesColored = linesWithColors;
 }
 
 void RenderPipeline::ReloadShaders() {
