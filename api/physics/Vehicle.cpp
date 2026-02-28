@@ -4,35 +4,21 @@ namespace eyelib {
 namespace api {
 namespace physics {
 
-VehicleHandle Vehicle::CreateVehicle(PhysicsWorld& world, RigidBodyHandle chassis,
-                                     const std::vector<WheelDesc>& wheels) {
-    auto* w = world.GetInternal();
-    return w ? eyelib::physics::Vehicle::CreateVehicle(w, chassis, wheels) : 0;
+VehicleHandle Vehicle::CreateVehicle(PhysicsWorld& /*world*/, RigidBodyHandle /*chassis*/,
+                                     const std::vector<WheelDesc>& /*wheels*/) {
+    return 0;
 }
 
-void Vehicle::DestroyVehicle(PhysicsWorld& world, VehicleHandle handle) {
-    auto* w = world.GetInternal();
-    if (w) eyelib::physics::Vehicle::DestroyVehicle(w, handle);
-}
+void Vehicle::DestroyVehicle(PhysicsWorld& /*world*/, VehicleHandle /*handle*/) {}
 
-void Vehicle::SetEnginePower(PhysicsWorld& world, VehicleHandle handle, float power) {
-    auto* w = world.GetInternal();
-    if (w) eyelib::physics::Vehicle::SetEnginePower(w, handle, power);
-}
+void Vehicle::SetEnginePower(PhysicsWorld& /*world*/, VehicleHandle /*handle*/, float /*power*/) {}
 
-void Vehicle::SetBrakeForce(PhysicsWorld& world, VehicleHandle handle, float force) {
-    auto* w = world.GetInternal();
-    if (w) eyelib::physics::Vehicle::SetBrakeForce(w, handle, force);
-}
+void Vehicle::SetBrakeForce(PhysicsWorld& /*world*/, VehicleHandle /*handle*/, float /*force*/) {}
 
-void Vehicle::SetSteeringAngle(PhysicsWorld& world, VehicleHandle handle, float angle) {
-    auto* w = world.GetInternal();
-    if (w) eyelib::physics::Vehicle::SetSteeringAngle(w, handle, angle);
-}
+void Vehicle::SetSteeringAngle(PhysicsWorld& /*world*/, VehicleHandle /*handle*/, float /*angle*/) {}
 
-WheelTransform Vehicle::GetWheelTransform(PhysicsWorld& world, VehicleHandle handle, int wheelIndex) {
-    auto* w = world.GetInternal();
-    return w ? eyelib::physics::Vehicle::GetWheelTransform(w, handle, wheelIndex) : WheelTransform{};
+WheelTransform Vehicle::GetWheelTransform(PhysicsWorld& /*world*/, VehicleHandle /*handle*/, int /*wheelIndex*/) {
+    return {};
 }
 
 } // namespace physics

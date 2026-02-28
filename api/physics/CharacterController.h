@@ -1,13 +1,13 @@
 #pragma once
 
 #include "api/physics/PhysicsWorld.h"
-#include "eyelib/physics/controllers/CharacterController.h"
+#include "eyelib/math/Types.h"
 
 namespace eyelib {
 namespace api {
 namespace physics {
 
-using CharacterControllerHandle = eyelib::physics::CharacterControllerHandle;
+using CharacterControllerHandle = uint32_t;
 
 class CharacterController {
 public:

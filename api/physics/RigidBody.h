@@ -1,7 +1,6 @@
 #pragma once
 
 #include "api/physics/PhysicsWorld.h"
-#include "api/physics/CollisionShape.h"
 
 namespace eyelib {
 namespace api {

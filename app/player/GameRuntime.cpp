@@ -64,7 +64,7 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
     }
 
     m_physics = std::make_unique<WorldPhysicsBridge>();
-    if (!m_physics->Initialize()) {
+    if (!m_physics->Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt)) {
         Shutdown();
         return false;
     }

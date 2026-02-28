@@ -8,8 +8,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Platform-specific settings
 if(MSVC)
-    # NOTE: Avoid /WX globally because some thirdparty deps (notably Bullet3Collision)
-    # emit MSVC warnings like C4201, which then become hard build failures.
     add_compile_options(/W4 /permissive- /Zc:preprocessor)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     # Enable parallel compilation
@@ -147,53 +145,15 @@ set(ALSOFT_INSTALL_UTILS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/openal-soft)
 
 # --------------------------------------
-# Bullet3 Physics Library
+# Jolt Physics (thirdparty/JoltPhysics) - used by eyelib/physics/backend/jolt
 # --------------------------------------
-# Configure Bullet3 build options
-set(USE_GRAPHICAL_BENCHMARK OFF CACHE BOOL "" FORCE)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(USE_DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
-set(BULLET_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BULLET_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-set(BUILD_GTEST OFF CACHE BOOL "" FORCE)
-set(BUILD_BULLET2_DEMOS OFF CACHE BOOL "" FORCE)
-set(BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
-# Disable warnings for Bullet3 (third-party code)
-add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/bullet3)
-# Suppress warnings for Bullet3 targets (must be after add_subdirectory)
-if(MSVC)
-    if(TARGET BulletDynamics)
-        target_compile_options(BulletDynamics PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456)
-        set_target_properties(BulletDynamics PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    if(TARGET BulletCollision)
-        target_compile_options(BulletCollision PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456)
-        set_target_properties(BulletCollision PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    if(TARGET LinearMath)
-        target_compile_options(LinearMath PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456)
-        set_target_properties(LinearMath PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    # Suppress warnings for additional Bullet3 libraries
-    if(TARGET BulletSoftBody)
-        target_compile_options(BulletSoftBody PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456 /wd4458 /wd4459 /wd4463 /wd4756 /wd4018 /wd4389)
-        set_target_properties(BulletSoftBody PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    if(TARGET BulletInverseDynamics)
-        target_compile_options(BulletInverseDynamics PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456)
-        set_target_properties(BulletInverseDynamics PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    if(TARGET Bullet3Common)
-        target_compile_options(Bullet3Common PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456 /wd4458)
-        set_target_properties(Bullet3Common PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-    # Suppress warnings for BulletRobotics (extras library) if it exists
-    if(TARGET BulletRobotics)
-        target_compile_options(BulletRobotics PRIVATE /W3 /wd4244 /wd4267 /wd4100 /wd4996 /wd4127 /wd4456 /wd5054)
-        set_target_properties(BulletRobotics PROPERTIES COMPILE_WARNING_AS_ERROR OFF)
-    endif()
-endif()
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "Let parent control CXX flags" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "Use parent warning level" FORCE)
+set(USE_ASSERTS OFF CACHE BOOL "Disable Jolt asserts in all configs" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "Disable LTO for Jolt" FORCE)
+# Use dynamic CRT (MD/MDd) so Jolt links with rest of OpenEye (avoids LNK2038 in demo/tests).
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "Use dynamic MSVC runtime" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/JoltPhysics/Build ${CMAKE_BINARY_DIR}/thirdparty/JoltPhysics)
 
 # ImGui library (shared across editor and game)
 set(IMGUI_SOURCES
@@ -318,9 +278,6 @@ endif()
 if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/player)
 endif()
-if(OPENEYE_BUILD_PLAYER)
-    add_subdirectory(app/test_forward_skinned)
-endif()
 
 # --------------------------------------
 # API Test Application
@@ -337,7 +294,12 @@ add_subdirectory(app/benchmark_transform)
 # --------------------------------------
 # Physics determinism test (60 FPS vs 144 FPS → same result)
 # --------------------------------------
-add_subdirectory(app/test_physics_determinism)
+
+
+# --------------------------------------
+# Jolt physics demo (floor + sphere, raycast, AABB query)
+# --------------------------------------
+add_subdirectory(app/demo_physics_jolt)
 
 # --------------------------------------
 # Diligent standalone test (clear + present)

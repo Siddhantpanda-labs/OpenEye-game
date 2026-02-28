@@ -4,11 +4,13 @@
 
 namespace openeye::player {
 
-bool WorldPhysicsBridge::Initialize() {
+bool WorldPhysicsBridge::Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType backendType) {
     if (m_ready) {
         return true;
     }
-    if (!m_physics.Initialize()) {
+    m_physics = std::make_unique<eyelib::api::physics::PhysicsWorld>(backendType);
+    if (!m_physics->Initialize()) {
+        m_physics.reset();
         return false;
     }
     m_ready = true;
@@ -21,14 +23,15 @@ void WorldPhysicsBridge::Shutdown() {
     }
     for (auto& binding : m_bindings) {
         if (binding.body != 0) {
-            eyelib::api::physics::RigidBody::Destroy(m_physics, binding.body);
+            eyelib::api::physics::RigidBody::Destroy(*m_physics, binding.body);
         }
         if (binding.shape != 0) {
-            eyelib::api::physics::CollisionShape::Destroy(binding.shape);
+            m_physics->DestroyShape(binding.shape);
         }
     }
     m_bindings.clear();
-    m_physics.Shutdown();
+    m_physics->Shutdown();
+    m_physics.reset();
     m_ready = false;
 }
 
@@ -71,13 +74,13 @@ bool WorldPhysicsBridge::BuildBodyForCollider(
     eyelib::api::physics::CollisionShapeHandle shape = 0;
     switch (collider.component.type) {
         case eyelib::world::components::Collider::Type::Box:
-            shape = eyelib::api::physics::CollisionShape::CreateBox(collider.component.size * 0.5f);
+            shape = m_physics->CreateBoxShape(collider.component.size * 0.5f);
             break;
         case eyelib::world::components::Collider::Type::Sphere:
-            shape = eyelib::api::physics::CollisionShape::CreateSphere(collider.component.radius);
+            shape = m_physics->CreateSphereShape(collider.component.radius);
             break;
         case eyelib::world::components::Collider::Type::Capsule:
-            shape = eyelib::api::physics::CollisionShape::CreateCapsule(collider.component.radius, collider.component.height);
+            shape = m_physics->CreateCapsuleShape(collider.component.radius, collider.component.height);
             break;
     }
 
@@ -89,20 +92,20 @@ bool WorldPhysicsBridge::BuildBodyForCollider(
     const auto position = transform ? transform->position : eyelib::math::Vec3(0.0f);
     const auto rotation = transform ? transform->rotation : eyelib::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
 
-    const auto body = eyelib::api::physics::RigidBody::Create(m_physics, position, rotation, shape, mass);
+    const auto body = eyelib::api::physics::RigidBody::Create(*m_physics, position, rotation, shape, mass);
     if (body == 0) {
-        eyelib::api::physics::CollisionShape::Destroy(shape);
+        m_physics->DestroyShape(shape);
         return false;
     }
 
     bool syncTransform = true;
     if (rigidBody) {
         syncTransform = rigidBody->component.syncTransform;
-        eyelib::api::physics::RigidBody::SetKinematic(m_physics, body, rigidBody->component.isKinematic);
+        eyelib::api::physics::RigidBody::SetKinematic(*m_physics, body, rigidBody->component.isKinematic);
         const eyelib::math::Vec3 gravity = rigidBody->component.useGravity
-            ? m_physics.GetGravity()
+            ? m_physics->GetGravity()
             : eyelib::math::Vec3(0.0f, 0.0f, 0.0f);
-        eyelib::api::physics::RigidBody::SetGravity(m_physics, body, gravity);
+        eyelib::api::physics::RigidBody::SetGravity(*m_physics, body, gravity);
         auto updated = rigidBody->component;
         updated.bodyHandle = body;
         updated.shapeHandle = shape;
@@ -136,7 +139,7 @@ void WorldPhysicsBridge::StepPhysicsOnly(float deltaSeconds, int maxSubSteps, fl
         return;
     }
     const float step = fixedTimeStep > 0.0f ? fixedTimeStep : (1.0f / 60.0f);
-    m_physics.Step(deltaSeconds, maxSubSteps, step);
+    m_physics->Step(deltaSeconds, maxSubSteps, step);
 }
 
 void WorldPhysicsBridge::SyncTransformsToWorld(eyelib::api::world::World& world) {
@@ -148,7 +151,7 @@ void WorldPhysicsBridge::SyncTransformsToWorld(eyelib::api::world::World& world)
         if (!binding.syncTransform || binding.body == 0) {
             continue;
         }
-        const auto transform = eyelib::api::physics::RigidBody::GetTransform(m_physics, binding.body);
+        const auto transform = eyelib::api::physics::RigidBody::GetTransform(*m_physics, binding.body);
         if (!transform.has_value()) {
             continue;
         }
@@ -173,7 +176,7 @@ bool WorldPhysicsBridge::GetVelocity(::eyelib::world::EntityId entity, eyelib::m
     if (!binding || binding->body == 0) {
         return false;
     }
-    out = eyelib::api::physics::RigidBody::GetVelocity(m_physics, binding->body);
+    out = eyelib::api::physics::RigidBody::GetVelocity(*m_physics, binding->body);
     return true;
 }
 
@@ -185,7 +188,7 @@ bool WorldPhysicsBridge::SetVelocity(::eyelib::world::EntityId entity, const eye
     if (!binding || binding->body == 0) {
         return false;
     }
-    eyelib::api::physics::RigidBody::SetVelocity(m_physics, binding->body, value);
+    eyelib::api::physics::RigidBody::SetVelocity(*m_physics, binding->body, value);
     return true;
 }
 
@@ -197,7 +200,7 @@ bool WorldPhysicsBridge::GetAngularVelocity(::eyelib::world::EntityId entity, ey
     if (!binding || binding->body == 0) {
         return false;
     }
-    out = eyelib::api::physics::RigidBody::GetAngularVelocity(m_physics, binding->body);
+    out = eyelib::api::physics::RigidBody::GetAngularVelocity(*m_physics, binding->body);
     return true;
 }
 
@@ -209,7 +212,7 @@ bool WorldPhysicsBridge::SetAngularVelocity(::eyelib::world::EntityId entity, co
     if (!binding || binding->body == 0) {
         return false;
     }
-    eyelib::api::physics::RigidBody::SetAngularVelocity(m_physics, binding->body, value);
+    eyelib::api::physics::RigidBody::SetAngularVelocity(*m_physics, binding->body, value);
     return true;
 }
 

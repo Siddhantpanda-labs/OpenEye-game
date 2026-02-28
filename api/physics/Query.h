@@ -3,16 +3,30 @@
 #include "api/physics/PhysicsWorld.h"
 #include "api/physics/CollisionShape.h"
 #include "eyelib/math/AABB.h"
+#include "eyelib/math/Types.h"
+
 #include <vector>
-#include "eyelib/physics/queries/PhysicsQuery.h"
 
 namespace eyelib {
 namespace api {
 namespace physics {
 
-using RaycastResult = eyelib::physics::RaycastResult;
-using SweepResult = eyelib::physics::SweepResult;
-using OverlapResult = eyelib::physics::OverlapResult;
+// RaycastResult from api/physics/IPhysicsWorld.h
+
+struct SweepResult {
+    bool hit = false;
+    eyelib::math::Vec3 point{0.0f};
+    eyelib::math::Vec3 normal{0.0f, 1.0f, 0.0f};
+    float distance = 0.0f;
+    RigidBodyHandle body = 0;
+    float fraction = 0.0f;
+};
+
+struct OverlapResult {
+    RigidBodyHandle body = 0;
+    eyelib::math::Vec3 contactPoint{0.0f};
+    eyelib::math::Vec3 normal{0.0f, 1.0f, 0.0f};
+};
 
 class Query {
 public:

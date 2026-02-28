@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/physics/IPhysicsWorld.h"
 #include "eyelib/math/Types.h"
 
 #include <cstdint>
@@ -8,21 +9,13 @@
 #include <vector>
 
 namespace eyelib {
-namespace physics { class PhysicsWorld; }
 namespace api {
 namespace physics {
-
-using RigidBodyHandle = uint32_t;
 
 struct DebugLine {
     eyelib::math::Vec3 from{0.0f};
     eyelib::math::Vec3 to{0.0f};
     eyelib::math::Vec3 color{1.0f, 1.0f, 1.0f};
-};
-
-struct RigidBodyTransform {
-    eyelib::math::Vec3 position{0.0f, 0.0f, 0.0f};
-    eyelib::math::Quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
 /**
@@ -37,7 +30,11 @@ public:
     };
     using ContactCallbackEx = std::function<void(const ContactObject&, const ContactObject&,
                                                  const eyelib::math::Vec3&, const eyelib::math::Vec3&)>;
+
+    enum class PhysicsBackendType { Jolt };
+
     PhysicsWorld();
+    explicit PhysicsWorld(PhysicsBackendType backendType);
     ~PhysicsWorld();
 
     PhysicsWorld(const PhysicsWorld&) = delete;
@@ -48,7 +45,15 @@ public:
 
     void Step(float deltaTime, int maxSubSteps = 3, float fixedTimeStep = 1.0f / 60.0f);
 
+    CollisionShapeHandle CreateBoxShape(const eyelib::math::Vec3& halfExtents);
+    CollisionShapeHandle CreateSphereShape(float radius);
+    CollisionShapeHandle CreateCapsuleShape(float radius, float height);
+    void DestroyShape(CollisionShapeHandle shape);
+
     RigidBodyHandle CreateBoxRigidBody(float mass, const eyelib::math::Vec3& halfExtents, const eyelib::math::Vec3& position);
+    RigidBodyHandle CreateRigidBody(const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation,
+                                    CollisionShapeHandle shape, float mass = 0.0f,
+                                    const eyelib::math::Vec3& inertia = eyelib::math::Vec3(0.0f));
     void DestroyRigidBody(RigidBodyHandle body);
 
     std::optional<RigidBodyTransform> GetRigidBodyTransform(RigidBodyHandle body) const;
@@ -73,8 +78,8 @@ private:
     class Impl;
     Impl* m_impl = nullptr;
 
-    ::eyelib::physics::PhysicsWorld* GetInternal();
-    const ::eyelib::physics::PhysicsWorld* GetInternal() const;
+    IPhysicsWorld* GetInternal();
+    const IPhysicsWorld* GetInternal() const;
 
     friend class CollisionShape;
     friend class RigidBody;

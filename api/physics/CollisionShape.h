@@ -3,13 +3,13 @@
 #include <cstdint>
 #include <vector>
 #include "eyelib/math/Types.h"
-#include "eyelib/physics/shapes/CollisionShapeFactory.h"
+#include "api/physics/IPhysicsWorld.h"
 
 namespace eyelib {
 namespace api {
 namespace physics {
 
-using CollisionShapeHandle = eyelib::physics::CollisionShapeHandle;
+// CollisionShapeHandle from IPhysicsWorld.h (uint32_t). Shapes are created via PhysicsWorld::CreateBoxShape etc.
 
 /**
  * @brief Collision shape API (opaque handles).

@@ -1,6 +1,8 @@
 #include "api/physics/PhysicsWorld.h"
+#include "api/physics/IPhysicsWorld.h"
+#include "api/physics/PhysicsBackendFactory.h"
 
-#include "eyelib/physics/PhysicsWorld.h"
+#include <memory>
 
 namespace eyelib {
 namespace api {
@@ -8,11 +10,15 @@ namespace physics {
 
 class PhysicsWorld::Impl {
 public:
-    eyelib::physics::PhysicsWorld world{};
+    std::unique_ptr<IPhysicsWorld> backend;
     std::vector<DebugLine> debugLines;
 };
 
-PhysicsWorld::PhysicsWorld() : m_impl(new Impl()) {}
+PhysicsWorld::PhysicsWorld() : PhysicsWorld(PhysicsBackendType::Jolt) {}
+
+PhysicsWorld::PhysicsWorld(PhysicsBackendType backendType) : m_impl(new Impl()) {
+    m_impl->backend = CreatePhysicsBackend(static_cast<eyelib::api::physics::PhysicsBackendType>(backendType));
+}
 
 PhysicsWorld::~PhysicsWorld() {
     Shutdown();
@@ -21,112 +27,107 @@ PhysicsWorld::~PhysicsWorld() {
 }
 
 bool PhysicsWorld::Initialize(const eyelib::math::Vec3& gravity) {
-    return m_impl->world.Initialize(gravity);
+    return m_impl->backend && m_impl->backend->Initialize(gravity);
 }
 
 void PhysicsWorld::Shutdown() {
-    if (!m_impl) return;
-    m_impl->world.Shutdown();
+    if (!m_impl || !m_impl->backend) return;
+    m_impl->backend->Shutdown();
 }
 
 void PhysicsWorld::Step(float deltaTime, int maxSubSteps, float fixedTimeStep) {
-    m_impl->world.Step(deltaTime, maxSubSteps, fixedTimeStep);
+    if (m_impl->backend) m_impl->backend->Step(deltaTime, maxSubSteps, fixedTimeStep);
+}
+
+CollisionShapeHandle PhysicsWorld::CreateBoxShape(const eyelib::math::Vec3& halfExtents) {
+    return m_impl->backend ? m_impl->backend->CreateBoxShape(halfExtents) : 0;
+}
+
+CollisionShapeHandle PhysicsWorld::CreateSphereShape(float radius) {
+    return m_impl->backend ? m_impl->backend->CreateSphereShape(radius) : 0;
+}
+
+CollisionShapeHandle PhysicsWorld::CreateCapsuleShape(float radius, float height) {
+    return m_impl->backend ? m_impl->backend->CreateCapsuleShape(radius, height) : 0;
+}
+
+void PhysicsWorld::DestroyShape(CollisionShapeHandle shape) {
+    if (m_impl->backend) m_impl->backend->DestroyShape(shape);
 }
 
 RigidBodyHandle PhysicsWorld::CreateBoxRigidBody(float mass, const eyelib::math::Vec3& halfExtents, const eyelib::math::Vec3& position) {
-    return m_impl->world.CreateBoxRigidBody(mass, halfExtents, position);
+    if (!m_impl->backend) return 0;
+    CollisionShapeHandle shape = m_impl->backend->CreateBoxShape(halfExtents);
+    if (shape == 0) return 0;
+    RigidBodyHandle body = m_impl->backend->CreateRigidBody(position, eyelib::math::Quat(1.f, 0.f, 0.f, 0.f), shape, mass);
+    if (body == 0) m_impl->backend->DestroyShape(shape);
+    return body;
+}
+
+RigidBodyHandle PhysicsWorld::CreateRigidBody(const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation,
+                                              CollisionShapeHandle shape, float mass,
+                                              const eyelib::math::Vec3& inertia) {
+    return m_impl->backend ? m_impl->backend->CreateRigidBody(position, rotation, shape, mass, inertia) : 0;
 }
 
 void PhysicsWorld::DestroyRigidBody(RigidBodyHandle body) {
-    m_impl->world.DestroyRigidBody(body);
+    if (m_impl->backend) m_impl->backend->DestroyRigidBody(body);
 }
 
 std::optional<RigidBodyTransform> PhysicsWorld::GetRigidBodyTransform(RigidBodyHandle body) const {
-    auto t = m_impl->world.GetRigidBodyTransform(body);
-    if (!t) return std::nullopt;
-    return RigidBodyTransform{ t->position, t->rotation };
+    return m_impl->backend ? m_impl->backend->GetRigidBodyTransform(body) : std::nullopt;
 }
 
 bool PhysicsWorld::SetRigidBodyTransform(RigidBodyHandle body, const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation) {
-    return m_impl->world.SetRigidBodyTransform(body, position, rotation);
+    return m_impl->backend && m_impl->backend->SetRigidBodyTransform(body, position, rotation);
 }
 
 void PhysicsWorld::SetGravity(const eyelib::math::Vec3& gravity) {
-    m_impl->world.SetGravity(gravity);
+    if (m_impl->backend) m_impl->backend->SetGravity(gravity);
 }
 
 eyelib::math::Vec3 PhysicsWorld::GetGravity() const {
-    return m_impl->world.GetGravity();
+    return m_impl->backend ? m_impl->backend->GetGravity() : eyelib::math::Vec3(0.f, -9.81f, 0.f);
 }
 
-void PhysicsWorld::SetSolverIterations(int iterations) {
-    m_impl->world.SetSolverIterations(iterations);
-}
+void PhysicsWorld::SetSolverIterations(int /*iterations*/) {}
 
-void PhysicsWorld::SetSolverSubSteps(int subSteps) {
-    m_impl->world.SetSolverSubSteps(subSteps);
-}
+void PhysicsWorld::SetSolverSubSteps(int /*subSteps*/) {}
 
 void PhysicsWorld::SetCollisionFilter(RigidBodyHandle body, short group, short mask) {
-    m_impl->world.SetCollisionFilter(body, group, mask);
+    if (m_impl->backend) m_impl->backend->SetCollisionFilter(body, group, mask);
 }
 
 size_t PhysicsWorld::GetBodyCount() const {
-    return m_impl->world.GetBodyCount();
+    return m_impl->backend ? m_impl->backend->GetBodyCount() : 0;
 }
 
 size_t PhysicsWorld::GetConstraintCount() const {
-    return m_impl->world.GetConstraintCount();
+    return m_impl->backend ? m_impl->backend->GetConstraintCount() : 0;
 }
 
 void PhysicsWorld::SetContactCallback(std::function<void(RigidBodyHandle, RigidBodyHandle, const eyelib::math::Vec3&, const eyelib::math::Vec3&)> cb) {
-    m_impl->world.SetContactCallback(std::move(cb));
+    if (m_impl->backend) m_impl->backend->SetContactCallback(std::move(cb));
 }
 
-void PhysicsWorld::SetContactCallbackEx(ContactCallbackEx cb) {
-    auto* w = GetInternal();
-    if (!w) return;
-    w->SetContactCallbackEx([cb](const ::eyelib::physics::PhysicsWorld::ContactObject& a,
-                                 const ::eyelib::physics::PhysicsWorld::ContactObject& b,
-                                 const eyelib::math::Vec3& point, const eyelib::math::Vec3& normal) {
-        if (!cb) return;
-        ContactObject oa{};
-        ContactObject ob{};
-        oa.type = static_cast<ContactObjectType>(a.type);
-        ob.type = static_cast<ContactObjectType>(b.type);
-        oa.handle = a.handle;
-        ob.handle = b.handle;
-        cb(oa, ob, point, normal);
-    });
-}
+void PhysicsWorld::SetContactCallbackEx(ContactCallbackEx /*cb*/) {}
 
 void PhysicsWorld::CollectDebugDrawData() {
-    m_impl->world.CollectDebugDrawData();
-    const auto& lines = m_impl->world.GetDebugDrawData();
     m_impl->debugLines.clear();
-    m_impl->debugLines.reserve(lines.size());
-    for (const auto& l : lines) {
-        DebugLine d;
-        d.from = l.from;
-        d.to = l.to;
-        d.color = l.color;
-        m_impl->debugLines.push_back(d);
-    }
 }
 
 const std::vector<DebugLine>& PhysicsWorld::GetDebugDrawData() const {
     return m_impl->debugLines;
 }
 
-::eyelib::physics::PhysicsWorld* PhysicsWorld::GetInternal() {
-    return m_impl ? &m_impl->world : nullptr;
+IPhysicsWorld* PhysicsWorld::GetInternal() {
+    return m_impl && m_impl->backend ? m_impl->backend.get() : nullptr;
 }
 
-const ::eyelib::physics::PhysicsWorld* PhysicsWorld::GetInternal() const {
-    return m_impl ? &m_impl->world : nullptr;
+const IPhysicsWorld* PhysicsWorld::GetInternal() const {
+    return m_impl && m_impl->backend ? m_impl->backend.get() : nullptr;
 }
 
 } // namespace physics
 } // namespace api
 } // namespace eyelib
-

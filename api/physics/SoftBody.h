@@ -1,15 +1,15 @@
 #pragma once
 
 #include "api/physics/PhysicsWorld.h"
-#include "eyelib/physics/softbody/SoftBodyFactory.h"
-#include "eyelib/physics/softbody/Cloth.h"
+#include "eyelib/math/Types.h"
+
 #include <vector>
 
 namespace eyelib {
 namespace api {
 namespace physics {
 
-using SoftBodyHandle = eyelib::physics::SoftBodyHandle;
+using SoftBodyHandle = uint32_t;
 
 class SoftBody {
 public:
@@ -45,7 +45,6 @@ public:
 
     static void Destroy(PhysicsWorld& world, SoftBodyHandle body);
 
-    // Cloth helpers
     static void ClothSetWind(PhysicsWorld& world, SoftBodyHandle cloth,
                              const eyelib::math::Vec3& direction, float strength);
     static void ClothSetCollision(PhysicsWorld& world, SoftBodyHandle cloth, bool enabled);

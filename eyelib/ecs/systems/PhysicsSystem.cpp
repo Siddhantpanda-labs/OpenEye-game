@@ -1,9 +1,9 @@
 #include "PhysicsSystem.h"
 
+#include "api/physics/IPhysicsWorld.h"
 #include "eyelib/ecs/World.h"
 #include "eyelib/ecs/components/RigidBody.h"
 #include "eyelib/ecs/components/Transform.h"
-#include "eyelib/physics/PhysicsWorld.h"
 
 namespace eyelib {
 namespace ecs {
@@ -18,14 +18,15 @@ void PhysicsSystem::Update(World& world, float /*deltaTime*/) {
         auto& rigidBody = view.get<components::RigidBody>(entity);
         if (rigidBody.bodyHandle == 0) continue;
 
+        using RBHandle = eyelib::api::physics::RigidBodyHandle;
         if (rigidBody.syncTransform) {
-            if (auto t = physicsWorld->GetRigidBodyTransform(rigidBody.bodyHandle)) {
+            if (auto t = physicsWorld->GetRigidBodyTransform(static_cast<RBHandle>(rigidBody.bodyHandle))) {
                 transform.position = t->position;
                 transform.rotation = t->rotation;
                 transform.MarkDirty();
             }
         } else {
-            physicsWorld->SetRigidBodyTransform(rigidBody.bodyHandle,
+            physicsWorld->SetRigidBodyTransform(static_cast<RBHandle>(rigidBody.bodyHandle),
                 transform.position, transform.rotation);
         }
     }

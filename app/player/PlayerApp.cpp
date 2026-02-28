@@ -338,7 +338,7 @@ int RunPlayer(int argc, char** argv) {
     }
 
     WorldPhysicsBridge physicsBridge;
-    if (!physicsBridge.Initialize()) {
+    if (!physicsBridge.Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt)) {
         eyelib::api::core::Log::Error("Failed to initialize physics world.");
         return static_cast<int>(ExitCode::PhysicsInitFailed);
     }

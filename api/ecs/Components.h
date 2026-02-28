@@ -7,8 +7,7 @@
 #include "api/animation/Skeleton.h"
 #include "api/render/Material.h"
 #include "api/render/Mesh.h"
-#include "eyelib/physics/PhysicsWorld.h"
-#include "eyelib/physics/shapes/CollisionShapeFactory.h"
+#include "api/physics/PhysicsWorld.h"
 
 #include <memory>
 #include <string>

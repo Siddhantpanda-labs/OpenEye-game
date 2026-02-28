@@ -24,68 +24,14 @@ World::World() {
         false,
         [this](float /*dt*/) { m_regionSystem.Update(m_state); }
     });
-    // TransformSystem runs in Simulation phase inside the fixed-step loop. Authority rule: only Simulation-phase systems mutate authoritative sim state.
+    // TransformSystem: recompute world matrices from local transforms. Physics is done by eyelib/physics (Jolt); bridge syncs transforms into World.
     m_systemGraph.Register(SystemDescriptor{
         "TransformSystem",
         SchedulePhase::Simulation,
         {},
-        {"PhysicsSystem"},
-        true,
-        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
-    });
-    // PhysicsSystem: integrate velocity -> position, write local transform. Runs after TransformSystem.
-    m_systemGraph.Register(SystemDescriptor{
-        "PhysicsSystem",
-        SchedulePhase::Simulation,
-        {"TransformSystem"},
-        {"TransformSystemPostPhysics"},
-        true,
-        [this](float dt) { m_physicsSystem.Update(m_state, dt, m_gravity, m_pendingForces, m_pendingImpulses, m_pendingTorques, m_pendingAngularImpulses); }
-    });
-    // Second TransformSystem pass after physics write-back so world matrices are up to date.
-    m_systemGraph.Register(SystemDescriptor{
-        "TransformSystemPostPhysics",
-        SchedulePhase::Simulation,
-        {"PhysicsSystem"},
-        {"WorldAABBSystem"},
-        true,
-        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
-    });
-    m_systemGraph.Register(SystemDescriptor{
-        "WorldAABBSystem",
-        SchedulePhase::Simulation,
-        {"TransformSystemPostPhysics"},
-        {"BroadPhaseSystem"},
-        true,
-        [this](float /*dt*/) { m_worldAABBSystem.Update(m_state); }
-    });
-    m_systemGraph.Register(SystemDescriptor{
-        "BroadPhaseSystem",
-        SchedulePhase::Simulation,
-        {"WorldAABBSystem"},
-        {"NarrowPhaseSystem"},
-        true,
-        [this](float /*dt*/) { m_broadPhaseSystem.Update(m_state, m_frameCollisionPairs); }
-    });
-    m_systemGraph.Register(SystemDescriptor{
-        "NarrowPhaseSystem",
-        SchedulePhase::Simulation,
-        {"BroadPhaseSystem"},
-        {"CollisionResponseSystem"},
-        true,
-        [this](float /*dt*/) { m_narrowPhaseSystem.Update(m_state, m_frameCollisionPairs, m_frameContactBuffer); }
-    });
-    m_systemGraph.Register(SystemDescriptor{
-        "CollisionResponseSystem",
-        SchedulePhase::Simulation,
-        {"NarrowPhaseSystem"},
         {},
         true,
-        [this](float /*dt*/) {
-            m_collisionResponseSystem.Update(m_state, m_frameContactBuffer, [this](const ContactEvent& e) {
-                m_contactEventQueue.push_back(e);
-            });
-        }
+        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
     });
     m_systemGraph.SetPostPhysicsStepCallback(nullptr);
     m_events.SetEventLog(&m_eventLog, [this]() { return m_simulationTime; });
@@ -327,44 +273,6 @@ void World::SetGravity(const math::Vec3& gravity) {
 
 math::Vec3 World::GetGravity() const {
     return m_gravity;
-}
-
-void World::AddForce(EntityId entity, const math::Vec3& force, ForceMode mode) {
-    m_pendingForces.push_back(PendingForceEntry{entity, force, mode});
-}
-
-void World::AddImpulse(EntityId entity, const math::Vec3& impulse) {
-    m_pendingImpulses.push_back(PendingImpulseEntry{entity, impulse});
-}
-
-void World::AddTorque(EntityId entity, const math::Vec3& torque) {
-    m_pendingTorques.push_back(PendingTorqueEntry{entity, torque});
-}
-
-void World::AddAngularImpulse(EntityId entity, const math::Vec3& impulse) {
-    m_pendingAngularImpulses.push_back(PendingAngularImpulseEntry{entity, impulse});
-}
-
-std::vector<ContactEvent> World::GetAndClearContactEvents() {
-    return std::move(m_contactEventQueue);
-}
-
-World::ContactListenerId World::AddContactListener(ContactListener listener) {
-    ContactListenerId id = m_nextContactListenerId++;
-    m_contactListeners[id] = std::move(listener);
-    return id;
-}
-
-void World::RemoveContactListener(ContactListenerId id) {
-    m_contactListeners.erase(id);
-}
-
-void World::DrainAndDispatchContactEvents() {
-    std::vector<ContactEvent> events = std::move(m_contactEventQueue);
-    m_contactEventQueue.clear();
-    for (const ContactEvent& e : events)
-        for (auto& [id, fn] : m_contactListeners)
-            fn(e);
 }
 
 void World::CopyTransformsToPrevious() {

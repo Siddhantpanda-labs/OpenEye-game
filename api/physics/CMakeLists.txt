@@ -1,6 +1,8 @@
 # Eyelib Physics API
 
 set(API_PHYSICS_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/IPhysicsWorld.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/PhysicsBackendFactory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/PhysicsWorld.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PhysicsWorld.h
     ${CMAKE_CURRENT_SOURCE_DIR}/CollisionShape.cpp

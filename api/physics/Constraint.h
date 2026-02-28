@@ -1,14 +1,25 @@
 #pragma once
 
 #include "api/physics/PhysicsWorld.h"
-#include "eyelib/physics/constraints/ConstraintFactory.h"
+#include "eyelib/math/Types.h"
 
 namespace eyelib {
 namespace api {
 namespace physics {
 
-using ConstraintHandle = eyelib::physics::ConstraintHandle;
-using ConstraintType = eyelib::physics::PhysicsWorld::ConstraintType;
+using ConstraintHandle = uint32_t;
+
+enum class ConstraintType : uint8_t {
+    Unknown = 0,
+    Hinge,
+    BallSocket,
+    Slider,
+    Fixed,
+    Spring,
+    SixDof,
+    Gear,
+    Rope
+};
 
 class Constraint {
 public:

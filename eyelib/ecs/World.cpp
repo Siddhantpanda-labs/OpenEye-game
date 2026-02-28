@@ -20,7 +20,7 @@ class World::Impl {
 public:
     ComponentRegistry registry;
     ComponentStorage storage{ registry };
-    ::eyelib::physics::PhysicsWorld* physicsWorld = nullptr;
+    ::eyelib::api::physics::IPhysicsWorld* physicsWorld = nullptr;
     ::eyelib::render::RenderPipeline* renderPipeline = nullptr;
 };
 
@@ -130,11 +130,11 @@ const entt::registry& World::Registry() const {
     return m_impl->storage.Registry();
 }
 
-void World::SetPhysicsWorld(::eyelib::physics::PhysicsWorld* world) {
+void World::SetPhysicsWorld(::eyelib::api::physics::IPhysicsWorld* world) {
     m_impl->physicsWorld = world;
 }
 
-::eyelib::physics::PhysicsWorld* World::GetPhysicsWorld() const {
+::eyelib::api::physics::IPhysicsWorld* World::GetPhysicsWorld() const {
     return m_impl->physicsWorld;
 }
 

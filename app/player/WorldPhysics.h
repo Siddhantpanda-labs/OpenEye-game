@@ -1,9 +1,11 @@
 #pragma once
 
 #include "PlayerConfig.h"
-#include "api/physics/All.h"
+#include "api/physics/PhysicsWorld.h"
+#include "api/physics/RigidBody.h"
 #include "api/world/All.h"
 
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -11,7 +13,8 @@ namespace openeye::player {
 
 class WorldPhysicsBridge {
 public:
-    bool Initialize();
+    /** Initialize with the given backend (e.g. PhysicsBackendType::Jolt). Uses only api. */
+    bool Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType backendType = eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt);
     void Shutdown();
 
     bool BuildFromWorld(eyelib::api::world::World& world);
@@ -49,7 +52,7 @@ private:
                               const eyelib::api::world::World::ColliderEntry& collider,
                               std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies);
 
-    eyelib::api::physics::PhysicsWorld m_physics;
+    std::unique_ptr<eyelib::api::physics::PhysicsWorld> m_physics;
     bool m_ready = false;
     std::vector<BodyBinding> m_bindings;
 };

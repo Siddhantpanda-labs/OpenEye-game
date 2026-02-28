@@ -72,18 +72,9 @@ public:
     ::eyelib::world::WorldScheduler::TimeMode GetTimeMode() const;
     void SetReplayDelta(float seconds);
 
-    /** Gravity vector (default 0, -9.8, 0). Applied each substep to non-kinematic RigidBody with useGravity. */
+    /** Gravity vector (default 0, -9.8, 0). Use physics backend (e.g. PhysicsWorld::SetGravity) for simulation; this is for compatibility. */
     void SetGravity(const ::eyelib::math::Vec3& gravity);
     ::eyelib::math::Vec3 GetGravity() const;
-
-    /** Queued; applied at start of next substep. Safe to call from gameplay/AI. */
-    void AddForce(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& force, ::eyelib::world::ForceMode mode);
-    /** Queued; applied at start of next substep (velocity += impulse/mass). Safe to call from gameplay/AI. */
-    void AddImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse);
-    /** Queued; applied at start of next substep (accumulatedTorque += torque). */
-    void AddTorque(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& torque);
-    /** Queued; applied at start of next substep (angularVelocity += impulse/mass). */
-    void AddAngularImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse);
 
     /** Simulation time (seconds), advanced each Update(deltaSeconds). For event timestamps and AI observation. */
     double GetSimulationTime() const;
@@ -96,17 +87,8 @@ public:
     /** Events with time > sinceTime. */
     std::vector<::eyelib::world::EventLogEntry> GetEventsSinceTime(double sinceTime) const;
 
-    /** Contact events from last frame (per-substep broad-phase AABB overlap). Drain each frame; cleared on read. */
-    std::vector<::eyelib::world::ContactEvent> GetAndClearContactEvents();
-    /** Per-substep hook: run after Simulation phase inside the fixed-step loop. Must not mutate simulation state—only enqueue events. */
+    /** Per-substep hook: run after Simulation phase inside the fixed-step loop. Must not mutate simulation state. */
     void SetPostPhysicsStepCallback(std::function<void()> fn);
-    /** Contact listener: called for each contact when you call DrainAndDispatchContactEvents(). */
-    using ContactListener = std::function<void(const ::eyelib::world::ContactEvent&)>;
-    using ContactListenerId = uint64_t;
-    ContactListenerId AddContactListener(ContactListener listener);
-    void RemoveContactListener(ContactListenerId id);
-    /** Drains the contact queue, invokes all contact listeners with each event, then clears the queue. */
-    void DrainAndDispatchContactEvents();
 
     /** All unique system names that appear in any region's SystemBindings. For AI/system introspection. */
     std::vector<std::string> GetSystemList() const;

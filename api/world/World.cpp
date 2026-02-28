@@ -173,26 +173,6 @@ void World::SetGravity(const ::eyelib::math::Vec3& gravity) {
     return m_impl->world.GetGravity();
 }
 
-void World::AddForce(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& force, ::eyelib::world::ForceMode mode) {
-    if (!m_impl) return;
-    m_impl->world.AddForce(entity, force, mode);
-}
-
-void World::AddImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse) {
-    if (!m_impl) return;
-    m_impl->world.AddImpulse(entity, impulse);
-}
-
-void World::AddTorque(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& torque) {
-    if (!m_impl) return;
-    m_impl->world.AddTorque(entity, torque);
-}
-
-void World::AddAngularImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse) {
-    if (!m_impl) return;
-    m_impl->world.AddAngularImpulse(entity, impulse);
-}
-
 double World::GetSimulationTime() const {
     if (!m_impl) {
         return 0.0;
@@ -228,39 +208,11 @@ std::vector<::eyelib::world::EventLogEntry> World::GetEventsSinceTime(double sin
     return m_impl->world.GetEventsSinceTime(sinceTime);
 }
 
-std::vector<::eyelib::world::ContactEvent> World::GetAndClearContactEvents() {
-    if (!m_impl) {
-        return {};
-    }
-    return m_impl->world.GetAndClearContactEvents();
-}
-
 void World::SetPostPhysicsStepCallback(std::function<void()> fn) {
     if (!m_impl) {
         return;
     }
     m_impl->world.SetPostPhysicsStepCallback(std::move(fn));
-}
-
-World::ContactListenerId World::AddContactListener(ContactListener listener) {
-    if (!m_impl) {
-        return 0;
-    }
-    return m_impl->world.AddContactListener(std::move(listener));
-}
-
-void World::RemoveContactListener(ContactListenerId id) {
-    if (!m_impl) {
-        return;
-    }
-    m_impl->world.RemoveContactListener(id);
-}
-
-void World::DrainAndDispatchContactEvents() {
-    if (!m_impl) {
-        return;
-    }
-    m_impl->world.DrainAndDispatchContactEvents();
 }
 
 std::vector<std::string> World::GetSystemList() const {

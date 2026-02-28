@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace eyelib {
-namespace physics { class PhysicsWorld; }
+namespace api { namespace physics { class IPhysicsWorld; } }
 namespace render { class RenderPipeline; }
 namespace ecs {
 
@@ -62,8 +62,8 @@ public:
     class entt::registry& Registry();
     const class entt::registry& Registry() const;
 
-    void SetPhysicsWorld(::eyelib::physics::PhysicsWorld* world);
-    ::eyelib::physics::PhysicsWorld* GetPhysicsWorld() const;
+    void SetPhysicsWorld(::eyelib::api::physics::IPhysicsWorld* world);
+    ::eyelib::api::physics::IPhysicsWorld* GetPhysicsWorld() const;
     void SetRenderPipeline(::eyelib::render::RenderPipeline* pipeline);
     ::eyelib::render::RenderPipeline* GetRenderPipeline() const;
 

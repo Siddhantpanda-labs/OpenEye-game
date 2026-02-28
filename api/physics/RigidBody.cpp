@@ -1,5 +1,5 @@
 #include "api/physics/RigidBody.h"
-#include "eyelib/physics/bodies/RigidBodyFactory.h"
+#include "api/physics/IPhysicsWorld.h"
 
 namespace eyelib {
 namespace api {
