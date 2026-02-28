@@ -3,10 +3,15 @@
 #include "IComponentStore.h"
 #include "eyelib/math/Transform.h"
 #include "eyelib/math/Types.h"
+#include "eyelib/math/TransformUtils.h"
 #include "eyelib/world/EntityId.h"
 #include "eyelib/world/components/Transform.h"
 
+#include "eyelib/world/WorldGraph/Hierarchy.h"
+
 #include <cstddef>
+#include <cstdint>
+#include <queue>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -39,6 +44,10 @@ public:
     const math::Quat& rotation() const { return Rotation(); }
     math::Vec3& scale() { return Scale(); }
     const math::Vec3& scale() const { return Scale(); }
+
+    /** World matrix (derived). Valid after TransformSystem has run. */
+    math::Mat4 WorldMatrix() const;
+    const math::Mat4& WorldMatrixRef() const;
 
     operator math::Transform() const;
     TransformRef& operator=(const math::Transform& t);
@@ -97,11 +106,37 @@ public:
     std::span<math::Quat> RotationsSpanMutable() { return m_rotations; }
     std::span<math::Vec3> ScalesSpanMutable() { return m_scales; }
 
+    /** World matrices (derived by TransformSystem). Same order as EntitiesSpan(). */
+    std::span<const math::Mat4> WorldMatricesSpan() const { return m_worldMatrices; }
+    std::span<math::Mat4> WorldMatricesSpanMutable() { return m_worldMatrices; }
+
+    /** Get world matrix for entity. Identity if not found. Valid after TransformSystem run. */
+    math::Mat4 GetWorldMatrix(EntityId entity) const;
+    /** Get store index for entity. Returns static_cast<size_t>(-1) if not found. */
+    size_t GetIndex(EntityId entity) const;
+    /** Set world matrix by index (used by TransformSystem). Index must be < Size(). */
+    void SetWorldMatrixByIndex(size_t index, const math::Mat4& world);
+    /** Set world-computed version after computing world matrix (dirty propagation). */
+    void SetWorldComputedVersionByIndex(size_t index, uint32_t version);
+
+    /** Dirty propagation: call when local transform is set. */
+    void MarkLocalDirty(EntityId entity);
+    /** Dirty propagation: call after reparent; marks entity and all descendants in store. */
+    void MarkSubtreeDirty(const Hierarchy& hierarchy, EntityId root);
+
+    /** For TransformSystem: version at index (same order as EntitiesSpan). */
+    uint32_t GetLocalDirtyVersion(size_t index) const;
+    uint32_t GetWorldComputedVersion(size_t index) const;
+
     // Storage (public for TransformRef and Range; treat as internal)
     std::vector<EntityId> m_entityIds;
     std::vector<math::Vec3> m_positions;
     std::vector<math::Quat> m_rotations;
     std::vector<math::Vec3> m_scales;
+    std::vector<math::Mat4> m_worldMatrices;
+    std::vector<uint32_t> m_localDirtyVersion;
+    std::vector<uint32_t> m_worldComputedVersion;
+    uint32_t m_globalTransformVersion = 0;
     std::unordered_map<EntityId, size_t, EntityIdHash> m_entityToIndex;
 
 private:
@@ -115,6 +150,8 @@ inline math::Quat& TransformRef::Rotation() { return m_store->m_rotations[m_inde
 inline const math::Quat& TransformRef::Rotation() const { return m_store->m_rotations[m_index]; }
 inline math::Vec3& TransformRef::Scale() { return m_store->m_scales[m_index]; }
 inline const math::Vec3& TransformRef::Scale() const { return m_store->m_scales[m_index]; }
+inline math::Mat4 TransformRef::WorldMatrix() const { return m_store->m_worldMatrices[m_index]; }
+inline const math::Mat4& TransformRef::WorldMatrixRef() const { return m_store->m_worldMatrices[m_index]; }
 inline TransformRef::operator math::Transform() const { return { Position(), Rotation(), Scale() }; }
 inline TransformRef& TransformRef::operator=(const math::Transform& t) {
     Position() = t.position;
@@ -134,6 +171,8 @@ inline TransformRef TransformStore::Add(EntityId entity, const math::Transform& 
         m_positions[i] = value.position;
         m_rotations[i] = value.rotation;
         m_scales[i] = value.scale;
+        m_globalTransformVersion++;
+        m_localDirtyVersion[i] = m_globalTransformVersion;
         m_cachedRef = TransformRef(this, i);
         return TransformRef(this, i);
     }
@@ -142,6 +181,10 @@ inline TransformRef TransformStore::Add(EntityId entity, const math::Transform& 
     m_positions.push_back(value.position);
     m_rotations.push_back(value.rotation);
     m_scales.push_back(value.scale);
+    m_worldMatrices.push_back(math::Compose(value.position, value.rotation, value.scale));
+    m_globalTransformVersion++;
+    m_localDirtyVersion.push_back(m_globalTransformVersion);
+    m_worldComputedVersion.push_back(0u);
     m_entityToIndex[entity] = i;
     return TransformRef(this, i);
 }
@@ -159,12 +202,18 @@ inline void TransformStore::Remove(EntityId entity) {
         m_positions[i] = std::move(m_positions[last]);
         m_rotations[i] = std::move(m_rotations[last]);
         m_scales[i] = std::move(m_scales[last]);
+        m_worldMatrices[i] = std::move(m_worldMatrices[last]);
+        m_localDirtyVersion[i] = std::move(m_localDirtyVersion[last]);
+        m_worldComputedVersion[i] = std::move(m_worldComputedVersion[last]);
         m_entityToIndex[moved] = i;
     }
     m_entityIds.pop_back();
     m_positions.pop_back();
     m_rotations.pop_back();
     m_scales.pop_back();
+    m_worldMatrices.pop_back();
+    m_localDirtyVersion.pop_back();
+    m_worldComputedVersion.pop_back();
     m_entityToIndex.erase(it);
 }
 
@@ -177,7 +226,59 @@ inline void TransformStore::Clear() {
     m_positions.clear();
     m_rotations.clear();
     m_scales.clear();
+    m_worldMatrices.clear();
+    m_localDirtyVersion.clear();
+    m_worldComputedVersion.clear();
     m_entityToIndex.clear();
+}
+
+inline math::Mat4 TransformStore::GetWorldMatrix(EntityId entity) const {
+    auto it = m_entityToIndex.find(entity);
+    if (it == m_entityToIndex.end()) return math::Mat4(1.0f);
+    return m_worldMatrices[it->second];
+}
+
+inline size_t TransformStore::GetIndex(EntityId entity) const {
+    auto it = m_entityToIndex.find(entity);
+    return it == m_entityToIndex.end() ? static_cast<size_t>(-1) : it->second;
+}
+
+inline void TransformStore::SetWorldMatrixByIndex(size_t index, const math::Mat4& world) {
+    if (index < m_worldMatrices.size()) m_worldMatrices[index] = world;
+}
+
+inline void TransformStore::SetWorldComputedVersionByIndex(size_t index, uint32_t version) {
+    if (index < m_worldComputedVersion.size()) m_worldComputedVersion[index] = version;
+}
+
+inline uint32_t TransformStore::GetLocalDirtyVersion(size_t index) const {
+    return index < m_localDirtyVersion.size() ? m_localDirtyVersion[index] : 0u;
+}
+
+inline uint32_t TransformStore::GetWorldComputedVersion(size_t index) const {
+    return index < m_worldComputedVersion.size() ? m_worldComputedVersion[index] : 0u;
+}
+
+inline void TransformStore::MarkLocalDirty(EntityId entity) {
+    auto it = m_entityToIndex.find(entity);
+    if (it == m_entityToIndex.end()) return;
+    m_globalTransformVersion++;
+    m_localDirtyVersion[it->second] = m_globalTransformVersion;
+}
+
+inline void TransformStore::MarkSubtreeDirty(const Hierarchy& hierarchy, EntityId root) {
+    m_globalTransformVersion++;
+    std::queue<EntityId> queue;
+    queue.push(root);
+    while (!queue.empty()) {
+        EntityId entity = queue.front();
+        queue.pop();
+        auto it = m_entityToIndex.find(entity);
+        if (it != m_entityToIndex.end())
+            m_localDirtyVersion[it->second] = m_globalTransformVersion;
+        for (EntityId child : hierarchy.GetChildren(entity))
+            queue.push(child);
+    }
 }
 
 inline TransformRef* TransformStore::TryGet(EntityId entity) {

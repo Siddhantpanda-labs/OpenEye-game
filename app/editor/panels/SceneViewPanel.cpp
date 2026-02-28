@@ -245,8 +245,10 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         const bool canRender = ctx->sceneViewPipeline && ctx->assetRegistry && w > 0 && h > 0;
 
         eyelib::api::world::World::RenderSnapshot snapshot;
-        if (canRender)
+        if (canRender) {
+            ctx->world.FlushTransforms();
             ctx->world.CaptureRenderSnapshot(snapshot);
+        }
 
         std::vector<EntityId> drawableToEntity;
         std::vector<uint32_t> entityIdsForOpaque;

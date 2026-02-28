@@ -7,8 +7,10 @@
 #include "eyelib/world/WorldGraph/Metadata.h"
 #include "eyelib/world/WorldGraph/Tags.h"
 #include "eyelib/world/Events/WorldEvents.h"
+#include "eyelib/math/TransformUtils.h"
 #include "eyelib/world/ComponentStorage/TransformStore.h"
 #include "eyelib/world/components/Transform.h"
+#include "eyelib/math/Transform.h"
 #include "eyelib/world/components/Region.h"
 #include "eyelib/world/components/SystemBindings.h"
 
@@ -90,19 +92,55 @@ private:
 
 class ReparentEntityCommand final : public Command {
 public:
-    ReparentEntityCommand(EntityId child, EntityId parent)
-        : m_child(child), m_parent(parent) {}
+    ReparentEntityCommand(EntityId child, EntityId parent, bool preserveWorldTransform = false)
+        : m_child(child), m_parent(parent), m_preserveWorld(preserveWorldTransform) {}
 
     bool Apply(WorldState& state) override {
         m_prevParent = state.GraphHierarchy().GetParent(m_child);
+        auto& store = state.GetTransformStore();
+        if (m_preserveWorld && store.Has(m_child)) {
+            if (const auto* ref = store.TryGet(m_child))
+                m_prevLocal = math::Transform{ ref->Position(), ref->Rotation(), ref->Scale() };
+            const math::Mat4 childWorld = store.GetWorldMatrix(m_child);
+            math::Mat4 newLocal;
+            if (m_parent == InvalidEntity) {
+                newLocal = childWorld;
+            } else if (store.Has(m_parent)) {
+                const math::Mat4 parentWorld = store.GetWorldMatrix(m_parent);
+                newLocal = math::Inverse(parentWorld) * childWorld;
+            } else {
+                newLocal = childWorld;
+            }
+            math::Vec3 pos, scale;
+            math::Quat rot;
+            math::Decompose(newLocal, pos, rot, scale);
+            if (auto* ref = store.TryGet(m_child)) {
+                ref->Position() = pos;
+                ref->Rotation() = rot;
+                ref->Scale() = scale;
+            }
+        }
         if (m_parent == InvalidEntity) {
             state.GraphHierarchy().RemoveParent(m_child);
+            state.GetTransformStore().MarkSubtreeDirty(state.GraphHierarchy(), m_child);
             return true;
         }
-        return state.GraphHierarchy().SetParent(m_child, m_parent);
+        if (state.GraphHierarchy().SetParent(m_child, m_parent)) {
+            state.GetTransformStore().MarkSubtreeDirty(state.GraphHierarchy(), m_child);
+            return true;
+        }
+        return false;
     }
 
     bool Revert(WorldState& state) override {
+        if (m_prevLocal.has_value()) {
+            auto& store = state.GetTransformStore();
+            if (auto* ref = store.TryGet(m_child)) {
+                ref->Position() = m_prevLocal->position;
+                ref->Rotation() = m_prevLocal->rotation;
+                ref->Scale() = m_prevLocal->scale;
+            }
+        }
         if (m_prevParent.has_value() && *m_prevParent != InvalidEntity) {
             return state.GraphHierarchy().SetParent(m_child, *m_prevParent);
         }
@@ -114,11 +152,14 @@ public:
 
     EntityId GetChild() const { return m_child; }
     EntityId GetParent() const { return m_parent; }
+    bool GetPreserveWorld() const { return m_preserveWorld; }
 
 private:
     EntityId m_child;
     EntityId m_parent;
+    bool m_preserveWorld = false;
     std::optional<EntityId> m_prevParent;
+    std::optional<math::Transform> m_prevLocal;
 };
 
 class AddTagCommand final : public Command {
@@ -239,6 +280,7 @@ public:
         auto& store = state.GetTransformStore();
         if (auto* ref = store.TryGet(m_entity)) {
             *ref = m_value;
+            store.MarkLocalDirty(m_entity);
             return true;
         }
         store.Add(m_entity, m_value);

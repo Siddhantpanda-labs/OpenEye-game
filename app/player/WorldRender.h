@@ -121,6 +121,7 @@ private:
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, ModelEntry> m_modelCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
+    bool m_captureCallbackSet = false;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;
 };
 

@@ -12,6 +12,7 @@ bool Hierarchy::SetParent(EntityId child, EntityId parent) {
     RemoveParent(child);
     m_parent[child] = parent;
     m_children[parent].push_back(child);
+    ++m_version;
     return true;
 }
 
@@ -32,6 +33,7 @@ void Hierarchy::RemoveParent(EntityId child) {
     if (list.empty()) {
         m_children.erase(childrenIt);
     }
+    ++m_version;
 }
 
 EntityId Hierarchy::GetParent(EntityId child) const {
@@ -75,6 +77,7 @@ const std::unordered_map<EntityId, EntityId, EntityIdHash>& Hierarchy::Parents()
 void Hierarchy::Clear() {
     m_parent.clear();
     m_children.clear();
+    ++m_version;
 }
 
 } // namespace world

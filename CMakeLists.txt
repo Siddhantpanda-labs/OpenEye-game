@@ -330,6 +330,16 @@ if(OPENEYE_BUILD_TESTS)
 endif()
 
 # --------------------------------------
+# Transform hierarchy benchmark (100k entities; requires EyelibWorld)
+# --------------------------------------
+add_subdirectory(app/benchmark_transform)
+
+# --------------------------------------
+# Physics determinism test (60 FPS vs 144 FPS → same result)
+# --------------------------------------
+add_subdirectory(app/test_physics_determinism)
+
+# --------------------------------------
 # Diligent standalone test (clear + present)
 # --------------------------------------
 if(OPENEYE_USE_DILIGENT)

@@ -279,8 +279,15 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    world.CaptureRenderSnapshot(m_frameSnapshot);
-    world.SetFrameSnapshot(&m_frameSnapshot);
+    if (!m_captureCallbackSet) {
+        world.SetCaptureSnapshotCallback([this, &world]() {
+            world.CaptureRenderSnapshot(m_frameSnapshot);
+            world.SetFrameSnapshot(&m_frameSnapshot);
+        });
+        m_captureCallbackSet = true;
+        world.CaptureRenderSnapshot(m_frameSnapshot);
+        world.SetFrameSnapshot(&m_frameSnapshot);
+    }
     BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
 
     const std::string skyboxId = world.GetSkyboxAssetId();

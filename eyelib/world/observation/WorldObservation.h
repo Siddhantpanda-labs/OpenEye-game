@@ -10,10 +10,12 @@
 #include "eyelib/world/components/MeshRenderer.h"
 #include "eyelib/world/components/Renderable.h"
 #include "eyelib/world/components/RigidBody.h"
+#include "eyelib/world/EntityId.h"
 
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -53,8 +55,15 @@ public:
     std::span<const std::pair<EntityId, components::Collider>> GetCollidersView() const;
 
 private:
+    void EnsureWorldTransformsComputed() const;
+
     WorldView m_view;
+    mutable std::unordered_map<EntityId, components::Transform, EntityIdHash> m_worldTransformCache;
     mutable std::vector<std::pair<EntityId, components::Transform>> m_transformBuffer;
+    mutable std::vector<EntityId> m_soaEntityIds;
+    mutable std::vector<math::Vec3> m_soaPositions;
+    mutable std::vector<math::Quat> m_soaRotations;
+    mutable std::vector<math::Vec3> m_soaScales;
     mutable std::vector<std::pair<EntityId, components::Renderable>> m_renderableBuffer;
     mutable std::vector<std::pair<EntityId, components::MeshRenderer>> m_meshRendererBuffer;
     mutable std::vector<std::pair<EntityId, components::Camera>> m_cameraBuffer;

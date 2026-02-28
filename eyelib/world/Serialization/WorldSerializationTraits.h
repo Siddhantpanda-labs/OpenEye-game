@@ -118,9 +118,13 @@ struct SerializationTraits<eyelib::world::components::RigidBody> {
         j["bodyHandle"] = v.bodyHandle;
         j["shapeHandle"] = v.shapeHandle;
         j["mass"] = v.mass;
+        j["restitution"] = v.restitution;
+        j["friction"] = v.friction;
         j["useGravity"] = v.useGravity;
         j["isKinematic"] = v.isKinematic;
         j["syncTransform"] = v.syncTransform;
+        j["linearVelocity"] = nlohmann::json::array({v.linearVelocity.x, v.linearVelocity.y, v.linearVelocity.z});
+        j["angularVelocity"] = nlohmann::json::array({v.angularVelocity.x, v.angularVelocity.y, v.angularVelocity.z});
         return j;
     }
     static eyelib::world::components::RigidBody Deserialize(const nlohmann::json& j, const eyelib::world::components::RigidBody& fallback = {}) {
@@ -129,9 +133,21 @@ struct SerializationTraits<eyelib::world::components::RigidBody> {
         out.bodyHandle = j.value("bodyHandle", 0u);
         out.shapeHandle = j.value("shapeHandle", 0u);
         out.mass = j.value("mass", 1.0f);
+        out.restitution = j.value("restitution", 0.5f);
+        out.friction = j.value("friction", 0.3f);
         out.useGravity = j.value("useGravity", true);
         out.isKinematic = j.value("isKinematic", false);
         out.syncTransform = j.value("syncTransform", true);
+        if (j.contains("linearVelocity") && j["linearVelocity"].is_array() && j["linearVelocity"].size() >= 3) {
+            out.linearVelocity.x = j["linearVelocity"][0].get<float>();
+            out.linearVelocity.y = j["linearVelocity"][1].get<float>();
+            out.linearVelocity.z = j["linearVelocity"][2].get<float>();
+        }
+        if (j.contains("angularVelocity") && j["angularVelocity"].is_array() && j["angularVelocity"].size() >= 3) {
+            out.angularVelocity.x = j["angularVelocity"][0].get<float>();
+            out.angularVelocity.y = j["angularVelocity"][1].get<float>();
+            out.angularVelocity.z = j["angularVelocity"][2].get<float>();
+        }
         return out;
     }
 };

@@ -20,6 +20,7 @@
 #include "eyelib/world/Events/EventLog.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -50,6 +51,10 @@ public:
     ApplySyncResult ApplyCommandSync(std::unique_ptr<::eyelib::world::Command> command);
     void ApplyPendingCommands();
     void ApplyTransaction(::eyelib::world::Transaction&& transaction);
+    /** Run Simulation phase once (dt=0) so derived state (world matrices) is up to date. Call after ApplyCommandSync/ApplyTransaction when editor or tools need immediate world-space reads. Explicit only. */
+    void FlushSimulation();
+    /** Run TransformSystem once (world matrices from local transforms). Does not advance accumulator or run physics. Call after transform-modifying commands, e.g. before CaptureRenderSnapshot in editor. */
+    void FlushTransforms();
     void Update();
     void Update(float deltaSeconds);
     bool UndoLastTransaction();
@@ -67,12 +72,41 @@ public:
     ::eyelib::world::WorldScheduler::TimeMode GetTimeMode() const;
     void SetReplayDelta(float seconds);
 
+    /** Gravity vector (default 0, -9.8, 0). Applied each substep to non-kinematic RigidBody with useGravity. */
+    void SetGravity(const ::eyelib::math::Vec3& gravity);
+    ::eyelib::math::Vec3 GetGravity() const;
+
+    /** Queued; applied at start of next substep. Safe to call from gameplay/AI. */
+    void AddForce(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& force, ::eyelib::world::ForceMode mode);
+    /** Queued; applied at start of next substep (velocity += impulse/mass). Safe to call from gameplay/AI. */
+    void AddImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse);
+    /** Queued; applied at start of next substep (accumulatedTorque += torque). */
+    void AddTorque(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& torque);
+    /** Queued; applied at start of next substep (angularVelocity += impulse/mass). */
+    void AddAngularImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse);
+
     /** Simulation time (seconds), advanced each Update(deltaSeconds). For event timestamps and AI observation. */
     double GetSimulationTime() const;
+    /** Accumulator after last Update (remaining time before next fixed step). For interpolation: alpha = 1 - GetSimulationAccumulator()/GetFixedTimestep() (0 = current step, 1 = next). */
+    double GetSimulationAccumulator() const;
+    /** Interpolation: previous transforms captured at start of each Update(deltaSeconds). Use alpha = 1 - GetSimulationAccumulator()/GetFixedTimestep() (0 = previous, 1 = current). Nullopt if entity has no transform. */
+    std::optional<::eyelib::world::components::Transform> GetInterpolatedTransform(::eyelib::world::EntityId entity, float alpha) const;
     /** Events with sequenceId > sinceSequenceId. Use 0 for all events in the log. */
     std::vector<::eyelib::world::EventLogEntry> GetEventsSince(uint64_t sinceSequenceId) const;
     /** Events with time > sinceTime. */
     std::vector<::eyelib::world::EventLogEntry> GetEventsSinceTime(double sinceTime) const;
+
+    /** Contact events from last frame (per-substep broad-phase AABB overlap). Drain each frame; cleared on read. */
+    std::vector<::eyelib::world::ContactEvent> GetAndClearContactEvents();
+    /** Per-substep hook: run after Simulation phase inside the fixed-step loop. Must not mutate simulation state—only enqueue events. */
+    void SetPostPhysicsStepCallback(std::function<void()> fn);
+    /** Contact listener: called for each contact when you call DrainAndDispatchContactEvents(). */
+    using ContactListener = std::function<void(const ::eyelib::world::ContactEvent&)>;
+    using ContactListenerId = uint64_t;
+    ContactListenerId AddContactListener(ContactListener listener);
+    void RemoveContactListener(ContactListenerId id);
+    /** Drains the contact queue, invokes all contact listeners with each event, then clears the queue. */
+    void DrainAndDispatchContactEvents();
 
     /** All unique system names that appear in any region's SystemBindings. For AI/system introspection. */
     std::vector<std::string> GetSystemList() const;
@@ -81,8 +115,8 @@ public:
 
     ::eyelib::world::EntityId CreateEntity(const std::string& name = "");
     bool DestroyEntity(::eyelib::world::EntityId entity);
-    bool SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent);
-    void ClearParent(::eyelib::world::EntityId child);
+    bool SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent, bool preserveWorldTransform = false);
+    void ClearParent(::eyelib::world::EntityId child, bool preserveWorldTransform = false);
     ::eyelib::world::EntityId GetParent(::eyelib::world::EntityId child) const;
     std::vector<::eyelib::world::EntityId> GetChildren(::eyelib::world::EntityId parent) const;
     std::vector<::eyelib::world::EntityId> GetAncestors(::eyelib::world::EntityId entity) const;
@@ -189,6 +223,8 @@ public:
     void CaptureRenderSnapshot(RenderSnapshot& out) const;
     /** Set the current frame snapshot. GetObservation() will return a view over it until cleared. Call at frame start after CaptureRenderSnapshot; clear at frame end. */
     void SetFrameSnapshot(const RenderSnapshot* snapshot);
+    /** Set callback run in RenderSnapshot phase (after PreRender). Use to capture and set frame snapshot so BuildScene sees stable world. */
+    void SetCaptureSnapshotCallback(std::function<void()> fn);
     const RenderSnapshot* GetFrameSnapshot() const { return m_frameSnapshot; }
 
     struct AnimatorEntry {

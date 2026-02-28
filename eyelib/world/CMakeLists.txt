@@ -44,8 +44,22 @@ set(EYELIB_WORLD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/RegionQueries.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/RegionSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/RegionSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/TransformSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/TransformSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/PhysicsSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/PhysicsSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/WorldAABBSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/WorldAABBSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/BroadPhaseSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/BroadPhaseSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/NarrowPhaseSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/NarrowPhaseSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/CollisionResponseSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/systems/CollisionResponseSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/scheduler/WorldScheduler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scheduler/WorldScheduler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/scheduler/SystemGraphScheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scheduler/SystemGraphScheduler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/observation/WorldObservation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/observation/WorldObservation.h
 )

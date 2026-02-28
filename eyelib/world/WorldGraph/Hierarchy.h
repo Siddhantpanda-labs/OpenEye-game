@@ -2,6 +2,7 @@
 
 #include "eyelib/world/EntityId.h"
 
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -21,9 +22,13 @@ public:
 
     void Clear();
 
+    /** Bumped on SetParent, RemoveParent, Clear. Used to invalidate linearized order cache. */
+    uint32_t GetVersion() const { return m_version; }
+
 private:
     std::unordered_map<EntityId, EntityId, EntityIdHash> m_parent;
     std::unordered_map<EntityId, std::vector<EntityId>, EntityIdHash> m_children;
+    uint32_t m_version = 0;
 };
 
 } // namespace world

@@ -12,8 +12,8 @@ CommandPtr DestroyEntity(::eyelib::world::EntityId entity) {
     return std::make_unique<::eyelib::world::DestroyEntityCommand>(entity);
 }
 
-CommandPtr ReparentEntity(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent) {
-    return std::make_unique<::eyelib::world::ReparentEntityCommand>(child, parent);
+CommandPtr ReparentEntity(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent, bool preserveWorldTransform) {
+    return std::make_unique<::eyelib::world::ReparentEntityCommand>(child, parent, preserveWorldTransform);
 }
 
 CommandPtr SetName(::eyelib::world::EntityId entity, const std::string& name) {

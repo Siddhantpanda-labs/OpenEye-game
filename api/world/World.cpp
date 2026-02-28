@@ -21,8 +21,7 @@
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Script.h"
 #include "eyelib/world/components/Transform.h"
-
-#include <unordered_set>
+#include "eyelib/world/observation/WorldObservation.h"
 
 namespace eyelib {
 namespace api {
@@ -164,11 +163,55 @@ void World::SetReplayDelta(float seconds) {
     m_impl->world.Scheduler().SetReplayDelta(seconds);
 }
 
+void World::SetGravity(const ::eyelib::math::Vec3& gravity) {
+    if (!m_impl) return;
+    m_impl->world.SetGravity(gravity);
+}
+
+::eyelib::math::Vec3 World::GetGravity() const {
+    if (!m_impl) return ::eyelib::math::Vec3(0.f, -9.8f, 0.f);
+    return m_impl->world.GetGravity();
+}
+
+void World::AddForce(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& force, ::eyelib::world::ForceMode mode) {
+    if (!m_impl) return;
+    m_impl->world.AddForce(entity, force, mode);
+}
+
+void World::AddImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse) {
+    if (!m_impl) return;
+    m_impl->world.AddImpulse(entity, impulse);
+}
+
+void World::AddTorque(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& torque) {
+    if (!m_impl) return;
+    m_impl->world.AddTorque(entity, torque);
+}
+
+void World::AddAngularImpulse(::eyelib::world::EntityId entity, const ::eyelib::math::Vec3& impulse) {
+    if (!m_impl) return;
+    m_impl->world.AddAngularImpulse(entity, impulse);
+}
+
 double World::GetSimulationTime() const {
     if (!m_impl) {
         return 0.0;
     }
     return m_impl->world.GetSimulationTime();
+}
+
+double World::GetSimulationAccumulator() const {
+    if (!m_impl) {
+        return 0.0;
+    }
+    return m_impl->world.Scheduler().GetAccumulator();
+}
+
+std::optional<::eyelib::world::components::Transform> World::GetInterpolatedTransform(::eyelib::world::EntityId entity, float alpha) const {
+    if (!m_impl) {
+        return std::nullopt;
+    }
+    return m_impl->world.GetInterpolatedTransform(entity, alpha);
 }
 
 std::vector<::eyelib::world::EventLogEntry> World::GetEventsSince(uint64_t sinceSequenceId) const {
@@ -183,6 +226,41 @@ std::vector<::eyelib::world::EventLogEntry> World::GetEventsSinceTime(double sin
         return {};
     }
     return m_impl->world.GetEventsSinceTime(sinceTime);
+}
+
+std::vector<::eyelib::world::ContactEvent> World::GetAndClearContactEvents() {
+    if (!m_impl) {
+        return {};
+    }
+    return m_impl->world.GetAndClearContactEvents();
+}
+
+void World::SetPostPhysicsStepCallback(std::function<void()> fn) {
+    if (!m_impl) {
+        return;
+    }
+    m_impl->world.SetPostPhysicsStepCallback(std::move(fn));
+}
+
+World::ContactListenerId World::AddContactListener(ContactListener listener) {
+    if (!m_impl) {
+        return 0;
+    }
+    return m_impl->world.AddContactListener(std::move(listener));
+}
+
+void World::RemoveContactListener(ContactListenerId id) {
+    if (!m_impl) {
+        return;
+    }
+    m_impl->world.RemoveContactListener(id);
+}
+
+void World::DrainAndDispatchContactEvents() {
+    if (!m_impl) {
+        return;
+    }
+    m_impl->world.DrainAndDispatchContactEvents();
 }
 
 std::vector<std::string> World::GetSystemList() const {
@@ -214,18 +292,18 @@ bool World::DestroyEntity(::eyelib::world::EntityId entity) {
     return ApplyCommandSync(eyelib::api::world::DestroyEntity(entity)).success;
 }
 
-bool World::SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent) {
+bool World::SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent, bool preserveWorldTransform) {
     if (!m_impl) {
         return false;
     }
-    return ApplyCommandSync(eyelib::api::world::ReparentEntity(child, parent)).success;
+    return ApplyCommandSync(eyelib::api::world::ReparentEntity(child, parent, preserveWorldTransform)).success;
 }
 
-void World::ClearParent(::eyelib::world::EntityId child) {
+void World::ClearParent(::eyelib::world::EntityId child, bool preserveWorldTransform) {
     if (!m_impl) {
         return;
     }
-    ApplyCommandSync(eyelib::api::world::ReparentEntity(child, ::eyelib::world::InvalidEntity));
+    ApplyCommandSync(eyelib::api::world::ReparentEntity(child, ::eyelib::world::InvalidEntity, preserveWorldTransform));
 }
 
 ::eyelib::world::EntityId World::GetParent(::eyelib::world::EntityId child) const {
@@ -1099,57 +1177,47 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.transformRotations.clear();
     out.transformScales.clear();
     if (!m_impl) return;
-    const auto& state = m_impl->world.GetState();
-    const auto& transformStore = state.GetTransformStore();
-    const size_t transformCount = transformStore.Size();
-    out.transforms.reserve(transformCount);
-    out.transformEntityIds.reserve(transformCount);
-    out.transformPositions.reserve(transformCount);
-    out.transformRotations.reserve(transformCount);
-    out.transformScales.reserve(transformCount);
-    for (const auto& [entity, ref] : transformStore.All()) {
-        const auto t = static_cast<::eyelib::world::components::Transform>(ref);
+    ::eyelib::world::WorldObservation obs(m_impl->world.GetView());
+    const auto transforms = obs.GetTransformsView();
+    for (const auto& [entity, t] : transforms) {
         out.transformCache[entity] = t;
         out.transforms.push_back({ entity, t });
         out.transformEntityIds.push_back(entity);
-        out.transformPositions.push_back(ref.Position());
-        out.transformRotations.push_back(ref.Rotation());
-        out.transformScales.push_back(ref.Scale());
+        out.transformPositions.push_back(t.position);
+        out.transformRotations.push_back(t.rotation);
+        out.transformScales.push_back(t.scale);
     }
-    const auto& renderableStore = state.Components<::eyelib::world::components::Renderable>().All();
-    out.renderables.reserve(renderableStore.size());
-    for (const auto& [entity, comp] : renderableStore) {
+    for (const auto& [entity, comp] : obs.GetRenderablesView())
         out.renderables.push_back({ entity, comp });
-    }
-    const auto& meshRendererStore = state.Components<::eyelib::world::components::MeshRenderer>().All();
-    out.meshRenderers.reserve(meshRendererStore.size());
-    for (const auto& [entity, comp] : meshRendererStore) {
+    for (const auto& [entity, comp] : obs.GetMeshRenderersView())
         out.meshRenderers.push_back({ entity, comp });
-    }
-    const auto& cameraStore = state.Components<::eyelib::world::components::Camera>().All();
-    out.cameras.reserve(cameraStore.size());
-    for (const auto& [entity, comp] : cameraStore) {
+    for (const auto& [entity, comp] : obs.GetCamerasView())
         out.cameras.push_back({ entity, comp });
-    }
-    const auto& lightStore = state.Components<::eyelib::world::components::Light>().All();
-    out.lights.reserve(lightStore.size());
-    for (const auto& [entity, comp] : lightStore) {
+    for (const auto& [entity, comp] : obs.GetLightsView())
         out.lights.push_back({ entity, comp });
-    }
-    const auto& rigidBodyStore = state.Components<::eyelib::world::components::RigidBody>().All();
-    out.rigidBodies.reserve(rigidBodyStore.size());
-    for (const auto& [entity, comp] : rigidBodyStore) {
+    for (const auto& [entity, comp] : obs.GetRigidBodiesView())
         out.rigidBodies.push_back({ entity, comp });
-    }
-    const auto& colliderStore = state.Components<::eyelib::world::components::Collider>().All();
-    out.colliders.reserve(colliderStore.size());
-    for (const auto& [entity, comp] : colliderStore) {
+    for (const auto& [entity, comp] : obs.GetCollidersView())
         out.colliders.push_back({ entity, comp });
-    }
 }
 
 void World::SetFrameSnapshot(const RenderSnapshot* snapshot) {
     m_frameSnapshot = snapshot;
+}
+
+void World::SetCaptureSnapshotCallback(std::function<void()> fn) {
+    if (!m_impl) return;
+    m_impl->world.SetCaptureSnapshotCallback(std::move(fn));
+}
+
+void World::FlushSimulation() {
+    if (!m_impl) return;
+    m_impl->world.FlushSimulation();
+}
+
+void World::FlushTransforms() {
+    if (!m_impl) return;
+    m_impl->world.FlushTransforms();
 }
 
 std::optional<::eyelib::world::components::Transform> World::RenderSnapshot::GetTransform(::eyelib::world::EntityId entity) const {

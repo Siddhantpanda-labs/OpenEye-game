@@ -1,18 +1,93 @@
 #include "World.h"
 
 #include "Commands/CommandTypes.h"
+#include "eyelib/world/components/RigidBody.h"
 #include "Events/WorldEvents.h"
 #include "eyelib/world/components/SystemBindings.h"
+#include "eyelib/world/ComponentStorage/TransformStore.h"
+#include "eyelib/math/Interpolation.h"
 #include <unordered_set>
 
 namespace eyelib {
 namespace world {
 
 World::World() {
-    m_scheduler.ClearSteps();
-    m_scheduler.SetFixedTimestep(1.0f / 60.0f);
-    m_scheduler.AddStep("mutation", "core", 0, [this](float /*dt*/) { ApplyPendingCommands(); });
-    m_scheduler.AddStep("region", "core", 10, [this](float /*dt*/) { m_regionSystem.Update(m_state); });
+    m_scheduler.SetSystemGraph(&m_systemGraph);
+    m_systemGraph.SetFixedTimestep(1.0f / 60.0f);
+    // ProcessCommands: apply pending commands only. No derived system updates; those run in Simulation phase.
+    m_systemGraph.SetProcessCommandsCallback([this]() { ApplyPendingCommands(); });
+    m_systemGraph.Register(SystemDescriptor{
+        "region",
+        SchedulePhase::PreSimulation,
+        {},
+        {},
+        false,
+        [this](float /*dt*/) { m_regionSystem.Update(m_state); }
+    });
+    // TransformSystem runs in Simulation phase inside the fixed-step loop. Authority rule: only Simulation-phase systems mutate authoritative sim state.
+    m_systemGraph.Register(SystemDescriptor{
+        "TransformSystem",
+        SchedulePhase::Simulation,
+        {},
+        {"PhysicsSystem"},
+        true,
+        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
+    });
+    // PhysicsSystem: integrate velocity -> position, write local transform. Runs after TransformSystem.
+    m_systemGraph.Register(SystemDescriptor{
+        "PhysicsSystem",
+        SchedulePhase::Simulation,
+        {"TransformSystem"},
+        {"TransformSystemPostPhysics"},
+        true,
+        [this](float dt) { m_physicsSystem.Update(m_state, dt, m_gravity, m_pendingForces, m_pendingImpulses, m_pendingTorques, m_pendingAngularImpulses); }
+    });
+    // Second TransformSystem pass after physics write-back so world matrices are up to date.
+    m_systemGraph.Register(SystemDescriptor{
+        "TransformSystemPostPhysics",
+        SchedulePhase::Simulation,
+        {"PhysicsSystem"},
+        {"WorldAABBSystem"},
+        true,
+        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
+    });
+    m_systemGraph.Register(SystemDescriptor{
+        "WorldAABBSystem",
+        SchedulePhase::Simulation,
+        {"TransformSystemPostPhysics"},
+        {"BroadPhaseSystem"},
+        true,
+        [this](float /*dt*/) { m_worldAABBSystem.Update(m_state); }
+    });
+    m_systemGraph.Register(SystemDescriptor{
+        "BroadPhaseSystem",
+        SchedulePhase::Simulation,
+        {"WorldAABBSystem"},
+        {"NarrowPhaseSystem"},
+        true,
+        [this](float /*dt*/) { m_broadPhaseSystem.Update(m_state, m_frameCollisionPairs); }
+    });
+    m_systemGraph.Register(SystemDescriptor{
+        "NarrowPhaseSystem",
+        SchedulePhase::Simulation,
+        {"BroadPhaseSystem"},
+        {"CollisionResponseSystem"},
+        true,
+        [this](float /*dt*/) { m_narrowPhaseSystem.Update(m_state, m_frameCollisionPairs, m_frameContactBuffer); }
+    });
+    m_systemGraph.Register(SystemDescriptor{
+        "CollisionResponseSystem",
+        SchedulePhase::Simulation,
+        {"NarrowPhaseSystem"},
+        {},
+        true,
+        [this](float /*dt*/) {
+            m_collisionResponseSystem.Update(m_state, m_frameContactBuffer, [this](const ContactEvent& e) {
+                m_contactEventQueue.push_back(e);
+            });
+        }
+    });
+    m_systemGraph.SetPostPhysicsStepCallback(nullptr);
     m_events.SetEventLog(&m_eventLog, [this]() { return m_simulationTime; });
 }
 World::~World() = default;
@@ -178,6 +253,7 @@ void World::Update() {
 
 void World::Update(float deltaSeconds) {
     m_simulationTime += deltaSeconds;
+    CopyTransformsToPrevious();
     m_scheduler.Run(deltaSeconds);
 }
 
@@ -195,6 +271,22 @@ WorldView World::GetView() const {
 
 WorldScheduler& World::Scheduler() { return m_scheduler; }
 const WorldScheduler& World::Scheduler() const { return m_scheduler; }
+
+void World::SetCaptureSnapshotCallback(std::function<void()> fn) {
+    m_systemGraph.SetCaptureSnapshotCallback(std::move(fn));
+}
+
+void World::SetPostPhysicsStepCallback(std::function<void()> fn) {
+    m_systemGraph.SetPostPhysicsStepCallback(std::move(fn));
+}
+
+void World::FlushSimulation() {
+    m_systemGraph.RunSimulationPhaseOnce(0.0f);
+}
+
+void World::FlushTransforms() {
+    m_transformSystem.Update(m_state);
+}
 
 TransactionManager& World::Transactions() { return m_transactions; }
 const TransactionManager& World::Transactions() const { return m_transactions; }
@@ -227,6 +319,79 @@ std::vector<std::string> World::GetRegionEnabledSystems(EntityId regionEntityId)
     const auto* bindings = store.TryGet(regionEntityId);
     if (!bindings) return {};
     return bindings->enabledSystems;
+}
+
+void World::SetGravity(const math::Vec3& gravity) {
+    m_gravity = gravity;
+}
+
+math::Vec3 World::GetGravity() const {
+    return m_gravity;
+}
+
+void World::AddForce(EntityId entity, const math::Vec3& force, ForceMode mode) {
+    m_pendingForces.push_back(PendingForceEntry{entity, force, mode});
+}
+
+void World::AddImpulse(EntityId entity, const math::Vec3& impulse) {
+    m_pendingImpulses.push_back(PendingImpulseEntry{entity, impulse});
+}
+
+void World::AddTorque(EntityId entity, const math::Vec3& torque) {
+    m_pendingTorques.push_back(PendingTorqueEntry{entity, torque});
+}
+
+void World::AddAngularImpulse(EntityId entity, const math::Vec3& impulse) {
+    m_pendingAngularImpulses.push_back(PendingAngularImpulseEntry{entity, impulse});
+}
+
+std::vector<ContactEvent> World::GetAndClearContactEvents() {
+    return std::move(m_contactEventQueue);
+}
+
+World::ContactListenerId World::AddContactListener(ContactListener listener) {
+    ContactListenerId id = m_nextContactListenerId++;
+    m_contactListeners[id] = std::move(listener);
+    return id;
+}
+
+void World::RemoveContactListener(ContactListenerId id) {
+    m_contactListeners.erase(id);
+}
+
+void World::DrainAndDispatchContactEvents() {
+    std::vector<ContactEvent> events = std::move(m_contactEventQueue);
+    m_contactEventQueue.clear();
+    for (const ContactEvent& e : events)
+        for (auto& [id, fn] : m_contactListeners)
+            fn(e);
+}
+
+void World::CopyTransformsToPrevious() {
+    auto& store = m_state.GetTransformStore();
+    const auto& rigidBodies = m_state.Components<components::RigidBody>();
+    m_previousTransforms.clear();
+    for (const auto& [entity, rb] : rigidBodies.All()) {
+        const auto* ref = store.TryGet(entity);
+        if (ref)
+            m_previousTransforms[entity] = static_cast<math::Transform>(*ref);
+    }
+}
+
+std::optional<math::Transform> World::GetInterpolatedTransform(EntityId entity, float alpha) const {
+    const auto& store = m_state.GetTransformStore();
+    const auto* ref = store.TryGet(entity);
+    if (!ref) return std::nullopt;
+    math::Transform current = static_cast<math::Transform>(*ref);
+    auto it = m_previousTransforms.find(entity);
+    if (it == m_previousTransforms.end())
+        return current;
+    const math::Transform& prev = it->second;
+    math::Transform out;
+    out.position = math::Lerp(prev.position, current.position, alpha);
+    out.rotation = math::Slerp(prev.rotation, current.rotation, alpha);
+    out.scale = math::Lerp(prev.scale, current.scale, alpha);
+    return out;
 }
 
 } // namespace world

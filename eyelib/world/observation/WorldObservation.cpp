@@ -1,5 +1,6 @@
 #include "WorldObservation.h"
 
+#include "eyelib/math/TransformUtils.h"
 #include "eyelib/world/ComponentStorage/TransformStore.h"
 #include "eyelib/world/RegionQueries.h"
 #include "eyelib/world/Serialization/ComponentSerializer.h"
@@ -13,11 +14,25 @@
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Transform.h"
 
+
 namespace eyelib {
 namespace world {
 
 WorldObservation::WorldObservation(WorldView view)
     : m_view(std::move(view)) {}
+
+void WorldObservation::EnsureWorldTransformsComputed() const {
+    if (!m_worldTransformCache.empty())
+        return;
+    const auto& store = m_view.GetTransformStore();
+    for (const auto& [entity, ref] : store.All()) {
+        const math::Mat4 world = ref.WorldMatrixRef();
+        math::Vec3 pos, scl;
+        math::Quat rot;
+        math::Decompose(world, pos, rot, scl);
+        m_worldTransformCache[entity] = components::Transform{ pos, rot, scl };
+    }
+}
 
 std::vector<EntityId> WorldObservation::GetEntities() const {
     return m_view.Entities().GetAliveEntities();
@@ -32,10 +47,10 @@ std::optional<std::string> WorldObservation::GetEntityName(EntityId entity) cons
 }
 
 std::optional<math::Transform> WorldObservation::GetTransform(EntityId entity) const {
-    const auto& store = m_view.GetTransformStore();
-    if (const auto* t = store.TryGet(entity)) {
-        return *t;
-    }
+    EnsureWorldTransformsComputed();
+    auto it = m_worldTransformCache.find(entity);
+    if (it != m_worldTransformCache.end())
+        return math::Transform{ it->second.position, it->second.rotation, it->second.scale };
     return std::nullopt;
 }
 
@@ -64,23 +79,43 @@ std::optional<EntityId> WorldObservation::GetHighestPriorityRegion(const math::V
 }
 
 std::span<const std::pair<EntityId, components::Transform>> WorldObservation::GetTransformsView() const {
+    EnsureWorldTransformsComputed();
     m_transformBuffer.clear();
     const auto& store = m_view.GetTransformStore();
-    const auto range = store.All();
     m_transformBuffer.reserve(store.Size());
-    for (const auto& [entity, ref] : range) {
-        m_transformBuffer.push_back({ entity, static_cast<math::Transform>(ref) });
+    for (const auto& [entity, ref] : store.All()) {
+        auto it = m_worldTransformCache.find(entity);
+        if (it != m_worldTransformCache.end())
+            m_transformBuffer.push_back({ entity, it->second });
     }
     return std::span<const std::pair<EntityId, components::Transform>>(m_transformBuffer);
 }
 
 WorldObservation::TransformSoAView WorldObservation::GetTransformSoAView() const {
+    EnsureWorldTransformsComputed();
+    m_soaEntityIds.clear();
+    m_soaPositions.clear();
+    m_soaRotations.clear();
+    m_soaScales.clear();
     const auto& store = m_view.GetTransformStore();
+    m_soaEntityIds.reserve(store.Size());
+    m_soaPositions.reserve(store.Size());
+    m_soaRotations.reserve(store.Size());
+    m_soaScales.reserve(store.Size());
+    for (const auto& [entity, ref] : store.All()) {
+        auto it = m_worldTransformCache.find(entity);
+        if (it != m_worldTransformCache.end()) {
+            m_soaEntityIds.push_back(entity);
+            m_soaPositions.push_back(it->second.position);
+            m_soaRotations.push_back(it->second.rotation);
+            m_soaScales.push_back(it->second.scale);
+        }
+    }
     return {
-        store.EntitiesSpan(),
-        store.PositionsSpan(),
-        store.RotationsSpan(),
-        store.ScalesSpan(),
+        m_soaEntityIds,
+        m_soaPositions,
+        m_soaRotations,
+        m_soaScales,
     };
 }
 

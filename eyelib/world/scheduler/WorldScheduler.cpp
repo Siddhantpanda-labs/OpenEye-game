@@ -1,57 +1,44 @@
 #include "WorldScheduler.h"
-
-#include <algorithm>
+#include "SystemGraphScheduler.h"
 
 namespace eyelib {
 namespace world {
 
-void WorldScheduler::AddStep(const std::string& name, StepFn fn) {
-    AddStep(name, "", 0, std::move(fn));
+void WorldScheduler::SetSystemGraph(SystemGraphScheduler* scheduler) {
+    m_systemGraph = scheduler;
 }
 
-void WorldScheduler::AddStep(const std::string& name, int priority, StepFn fn) {
-    AddStep(name, "", priority, std::move(fn));
-}
-
-void WorldScheduler::AddStep(const std::string& name, const std::string& group, int priority, StepFn fn) {
-    m_steps.push_back(Step{name, group, priority, std::move(fn)});
-}
-
-void WorldScheduler::ClearSteps() {
-    m_steps.clear();
-}
-
-void WorldScheduler::SetPaused(bool paused) {
-    m_paused = paused;
-}
-
-void WorldScheduler::StepOnce() {
-    m_stepOnce = true;
-}
+void WorldScheduler::AddStep(const std::string& /*name*/, StepFn /*fn*/) {}
+void WorldScheduler::AddStep(const std::string& /*name*/, int /*priority*/, StepFn /*fn*/) {}
+void WorldScheduler::AddStep(const std::string& /*name*/, const std::string& /*group*/, int /*priority*/, StepFn /*fn*/) {}
+void WorldScheduler::ClearSteps() {}
 
 void WorldScheduler::SetFixedTimestep(float seconds) {
-    m_fixedTimestep = seconds;
-    m_accumulator = 0.0f;
+    if (m_systemGraph) m_systemGraph->SetFixedTimestep(seconds);
 }
 
 float WorldScheduler::GetFixedTimestep() const {
-    return m_fixedTimestep;
+    return m_systemGraph ? m_systemGraph->GetFixedTimestep() : 0.0f;
+}
+
+double WorldScheduler::GetAccumulator() const {
+    return m_systemGraph ? m_systemGraph->GetAccumulator() : 0.0;
 }
 
 void WorldScheduler::SetMaxSubsteps(int maxSubsteps) {
-    m_maxSubsteps = maxSubsteps;
+    if (m_systemGraph) m_systemGraph->SetMaxSubsteps(maxSubsteps);
 }
 
 int WorldScheduler::GetMaxSubsteps() const {
-    return m_maxSubsteps;
+    return m_systemGraph ? m_systemGraph->GetMaxSubsteps() : 0;
 }
 
 void WorldScheduler::SetTimeScale(float scale) {
-    m_timeScale = scale;
+    if (m_systemGraph) m_systemGraph->SetTimeScale(scale);
 }
 
 float WorldScheduler::GetTimeScale() const {
-    return m_timeScale;
+    return m_systemGraph ? m_systemGraph->GetTimeScale() : 0.0f;
 }
 
 void WorldScheduler::SetTimeMode(TimeMode mode) {
@@ -66,46 +53,18 @@ void WorldScheduler::SetReplayDelta(float seconds) {
     m_replayDelta = seconds;
 }
 
+void WorldScheduler::SetPaused(bool paused) {
+    if (m_systemGraph) m_systemGraph->SetPaused(paused);
+}
+
+void WorldScheduler::StepOnce() {
+    if (m_systemGraph) m_systemGraph->StepOnce();
+}
+
 void WorldScheduler::Run(float deltaSeconds) {
-    if (m_paused && !m_stepOnce) {
-        return;
-    }
-
-    float stepDelta = deltaSeconds * m_timeScale;
-    if (m_timeMode == TimeMode::Replay) {
-        stepDelta = m_replayDelta;
-    }
-
-    std::sort(m_steps.begin(), m_steps.end(), [](const Step& a, const Step& b) {
-        if (a.group != b.group) {
-            return a.group < b.group;
-        }
-        return a.priority < b.priority;
-    });
-
-    if (m_timeMode == TimeMode::Realtime || m_fixedTimestep <= 0.0f) {
-        for (auto& step : m_steps) {
-            if (step.fn) {
-                step.fn(stepDelta);
-            }
-        }
-        m_stepOnce = false;
-        return;
-    }
-
-    m_accumulator += stepDelta;
-    int substeps = 0;
-    while (m_accumulator >= m_fixedTimestep && substeps < m_maxSubsteps) {
-        for (auto& step : m_steps) {
-            if (step.fn) {
-                step.fn(m_fixedTimestep);
-            }
-        }
-        m_accumulator -= m_fixedTimestep;
-        ++substeps;
-    }
-
-    m_stepOnce = false;
+    if (!m_systemGraph) return;
+    float stepDelta = (m_timeMode == TimeMode::Replay) ? m_replayDelta : deltaSeconds;
+    m_systemGraph->Run(stepDelta);
 }
 
 } // namespace world
