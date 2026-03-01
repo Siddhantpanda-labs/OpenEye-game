@@ -202,15 +202,11 @@ void ComponentSerializer::RegisterBuiltins() {
         [](const void* c) {
             const auto* rb = static_cast<const RigidBody*>(c);
             nlohmann::json j;
-            j["bodyHandle"] = rb->bodyHandle;
-            j["shapeHandle"] = rb->shapeHandle;
             j["syncTransform"] = rb->syncTransform;
             return j;
         },
         [](const nlohmann::json& j) -> void* {
             auto* out = new RigidBody();
-            out->bodyHandle = j.value("bodyHandle", 0u);
-            out->shapeHandle = j.value("shapeHandle", 0u);
             out->syncTransform = j.value("syncTransform", true);
             return out;
         }

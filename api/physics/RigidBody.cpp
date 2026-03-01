@@ -12,7 +12,7 @@ RigidBodyHandle RigidBody::Create(PhysicsWorld& world,
                                   float mass,
                                   const eyelib::math::Vec3& inertia) {
     auto* w = world.GetInternal();
-    return w ? w->CreateRigidBody(position, rotation, shape, mass, inertia) : 0;
+    return w ? w->CreateRigidBody(position, rotation, shape, mass, inertia) : RigidBodyHandle{};
 }
 
 void RigidBody::Destroy(PhysicsWorld& world, RigidBodyHandle body) {

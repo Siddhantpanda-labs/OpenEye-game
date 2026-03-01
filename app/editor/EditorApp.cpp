@@ -12,6 +12,7 @@
 
 #include "api/assets/All.h"
 #include "api/core/All.h"
+#include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
 #include "eyelib/assets/ShaderWatcher.h"
@@ -106,6 +107,7 @@ int RunEditor(int argc, char** argv) {
     engineConfig.logFile = "editor.log";
     engineConfig.headless = false;
 
+    eyelib::api::Engine::RegisterSubsystem(std::make_unique<eyelib::api::PhysicsModule>());
     ScopedEngine engine;
     if (!engine.Initialize(engineConfig)) {
         std::fprintf(stderr, "Editor: Engine init failed.\n");
@@ -188,6 +190,9 @@ int RunEditor(int argc, char** argv) {
         window.MakeContextCurrent();
         window.RefreshFramebufferSize();
         if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
+            // Sever world's references to the runtime so no callback/pointer outlives it (avoids use-after-free on second Play).
+            ctx.world.SetFrameSnapshot(nullptr);
+            ctx.world.SetCaptureSnapshotCallback(nullptr);
             // Restore default device before teardown so nothing during shutdown sees the game device as default.
             if (ctx.sceneViewPipeline) {
                 void* dev = ctx.sceneViewPipeline->GetDevice();
@@ -198,7 +203,7 @@ int RunEditor(int argc, char** argv) {
             } catch (...) {
                 // Ensure we restore the default device even if shutdown throws.
             }
-            ctx.world.SetFrameSnapshot(nullptr);  // clear dangling pointer so next Play uses live world for GetObservation()
+            ctx.world.SetFrameSnapshot(nullptr);  // ensure clean for next Play (GetObservation() uses live world)
             ctx.gameRuntimeStopRequested = false;
             if (ctx.sceneViewPipeline) {
                 void* dev = ctx.sceneViewPipeline->GetDevice();

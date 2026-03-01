@@ -75,6 +75,9 @@ public:
     const std::vector<DebugLine>& GetDebugDrawData() const;
 
 private:
+    enum class State { Uninitialized, Running, ShuttingDown, Destroyed };
+    State m_state = State::Uninitialized;
+
     class Impl;
     Impl* m_impl = nullptr;
 

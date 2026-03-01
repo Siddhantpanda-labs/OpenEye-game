@@ -13,19 +13,25 @@ namespace openeye::player {
 
 class WorldPhysicsBridge {
 public:
-    /** Initialize with the given backend (e.g. PhysicsBackendType::Jolt). Uses only api. */
+    ~WorldPhysicsBridge();
+
+    WorldPhysicsBridge() = default;
+    WorldPhysicsBridge(const WorldPhysicsBridge&) = delete;
+    WorldPhysicsBridge& operator=(const WorldPhysicsBridge&) = delete;
+
     bool Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType backendType = eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt);
     void Shutdown();
 
+    /**
+     * Build physics bodies from world entities that have BOTH Collider AND RigidBody.
+     * Entities with only a Collider (no RigidBody) are skipped — Collider is a shape
+     * description, RigidBody is the dynamics component that authorizes body creation.
+     */
     bool BuildFromWorld(eyelib::api::world::World& world);
 
-    /** Run physics simulation only; does not read from or write to World. Safe to call from a job. */
     void StepPhysicsOnly(float deltaSeconds, int maxSubSteps, float fixedTimeStep);
-
-    /** Sync physics body transforms back into World. Must run on main thread after jobs complete. */
     void SyncTransformsToWorld(eyelib::api::world::World& world);
 
-    /** Convenience: StepPhysicsOnly + SyncTransformsToWorld (single-threaded path). */
     void Step(eyelib::api::world::World& world, float deltaSeconds,
               int maxSubSteps, float fixedTimeStep);
 
@@ -37,8 +43,8 @@ public:
 private:
     struct BodyBinding {
         ::eyelib::world::EntityId entity;
-        eyelib::api::physics::RigidBodyHandle body = 0;
-        eyelib::api::physics::CollisionShapeHandle shape = 0;
+        eyelib::physics::PhysicsBodyId body;
+        eyelib::physics::PhysicsShapeId shape;
         bool syncTransform = true;
     };
 
@@ -48,9 +54,9 @@ private:
     const BodyBinding* FindBinding(::eyelib::world::EntityId entity) const;
     BodyBinding* FindBinding(::eyelib::world::EntityId entity);
 
-    bool BuildBodyForCollider(eyelib::api::world::World& world,
-                              const eyelib::api::world::World::ColliderEntry& collider,
-                              std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies);
+    bool BuildBodyForEntity(eyelib::api::world::World& world,
+                            const eyelib::api::world::World::ColliderEntry& collider,
+                            const eyelib::api::world::World::RigidBodyEntry& rigidBody);
 
     std::unique_ptr<eyelib::api::physics::PhysicsWorld> m_physics;
     bool m_ready = false;

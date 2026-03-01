@@ -152,6 +152,8 @@ set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "Use parent warning level" FORCE)
 set(USE_ASSERTS OFF CACHE BOOL "Disable Jolt asserts in all configs" FORCE)
 set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "Disable LTO for Jolt" FORCE)
 # Use dynamic CRT (MD/MDd) so Jolt links with rest of OpenEye (avoids LNK2038 in demo/tests).
+# Per physics_advice checklist: Jolt and app must use same runtime and iterator debug level
+# to avoid proxy corruption; dynamic CRT and same config (Debug/Release) keep these aligned.
 set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "Use dynamic MSVC runtime" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/JoltPhysics/Build ${CMAKE_BINARY_DIR}/thirdparty/JoltPhysics)
 

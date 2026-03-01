@@ -64,6 +64,9 @@ public:
     size_t GetBodyCount() const override;
     size_t GetConstraintCount() const override;
 
+    /** True if Shutdown() has not been called; backend is alive. */
+    bool IsAlive() const { return m_impl != nullptr; }
+
     eyelib::api::physics::RaycastResult Raycast(const eyelib::math::Vec3& from, const eyelib::math::Vec3& to) const override;
     std::vector<eyelib::api::physics::RigidBodyHandle> QueryAABB(const eyelib::math::AABB& aabb) const override;
 

@@ -63,6 +63,8 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
         return false;
     }
 
+    world.FlushTransforms();
+
     m_physics = std::make_unique<WorldPhysicsBridge>();
     if (!m_physics->Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt)) {
         Shutdown();
@@ -100,6 +102,10 @@ void GameRuntime::Shutdown() {
     if (m_audio) {
         m_audio->Shutdown();
         m_audio.reset();
+    }
+    // Disable scripting access to physics before tearing down physics (per physics_advice §4).
+    if (m_scripting) {
+        m_scripting->SetPhysicsBridge(nullptr);
     }
     m_scripting.reset();
     m_animation.reset();

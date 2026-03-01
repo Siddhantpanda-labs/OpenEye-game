@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/physics/PhysicsHandles.h"
 #include "eyelib/math/AABB.h"
 #include "eyelib/math/Types.h"
 
@@ -12,8 +13,8 @@ namespace eyelib {
 namespace api {
 namespace physics {
 
-using RigidBodyHandle = uint32_t;
-using CollisionShapeHandle = uint32_t;
+using RigidBodyHandle = eyelib::physics::PhysicsBodyId;
+using CollisionShapeHandle = eyelib::physics::PhysicsShapeId;
 
 struct RigidBodyTransform {
     eyelib::math::Vec3 position{0.0f, 0.0f, 0.0f};
@@ -27,13 +28,9 @@ struct RaycastResult {
     eyelib::math::Vec3 point{0.0f};
     eyelib::math::Vec3 normal{0.0f, 1.0f, 0.0f};
     float distance = 0.0f;
-    RigidBodyHandle body = 0;
+    RigidBodyHandle body;
 };
 
-/**
- * Physics world interface. Implemented by backends (e.g. Jolt).
- * Used only within api layer and by impl; client code uses PhysicsWorld, not this.
- */
 class IPhysicsWorld {
 public:
     virtual ~IPhysicsWorld() = default;

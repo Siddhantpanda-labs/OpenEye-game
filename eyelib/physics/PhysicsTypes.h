@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/physics/PhysicsHandles.h"
 #include "eyelib/math/Types.h"
 
 #include <cstdint>
@@ -10,9 +11,8 @@
 namespace eyelib {
 namespace physics {
 
-// Opaque handles. No backend types.
-using RigidBodyHandle = uint32_t;
-using CollisionShapeHandle = uint32_t;
+using RigidBodyHandle = PhysicsBodyId;
+using CollisionShapeHandle = PhysicsShapeId;
 using ConstraintHandle = uint32_t;
 using CharacterControllerHandle = uint32_t;
 using SoftBodyHandle = uint32_t;

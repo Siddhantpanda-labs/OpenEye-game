@@ -134,15 +134,11 @@ struct ComponentConverter<RigidBody> {
     using Internal = eyelib::ecs::components::RigidBody;
     static Internal ToInternal(const RigidBody& r) {
         Internal out;
-        out.bodyHandle = r.bodyHandle;
-        out.shapeHandle = r.shapeHandle;
         out.syncTransform = r.syncTransform;
         return out;
     }
     static RigidBody FromInternal(const Internal& r) {
         RigidBody out;
-        out.bodyHandle = r.bodyHandle;
-        out.shapeHandle = r.shapeHandle;
         out.syncTransform = r.syncTransform;
         return out;
     }

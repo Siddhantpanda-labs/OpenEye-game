@@ -5,6 +5,7 @@
 set(JOLT_BACKEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/JoltBackend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/JoltBackend.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/JoltGlobals.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/JoltWorld.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/JoltWorld.h
     ${CMAKE_CURRENT_SOURCE_DIR}/JoltShapeStore.cpp

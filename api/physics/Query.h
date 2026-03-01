@@ -18,12 +18,12 @@ struct SweepResult {
     eyelib::math::Vec3 point{0.0f};
     eyelib::math::Vec3 normal{0.0f, 1.0f, 0.0f};
     float distance = 0.0f;
-    RigidBodyHandle body = 0;
+    RigidBodyHandle body{};
     float fraction = 0.0f;
 };
 
 struct OverlapResult {
-    RigidBodyHandle body = 0;
+    RigidBodyHandle body{};
     eyelib::math::Vec3 contactPoint{0.0f};
     eyelib::math::Vec3 normal{0.0f, 1.0f, 0.0f};
 };

@@ -115,8 +115,6 @@ template<>
 struct SerializationTraits<eyelib::world::components::RigidBody> {
     static nlohmann::json Serialize(const eyelib::world::components::RigidBody& v) {
         nlohmann::json j;
-        j["bodyHandle"] = v.bodyHandle;
-        j["shapeHandle"] = v.shapeHandle;
         j["mass"] = v.mass;
         j["restitution"] = v.restitution;
         j["friction"] = v.friction;
@@ -130,8 +128,6 @@ struct SerializationTraits<eyelib::world::components::RigidBody> {
     static eyelib::world::components::RigidBody Deserialize(const nlohmann::json& j, const eyelib::world::components::RigidBody& fallback = {}) {
         auto out = fallback;
         if (!j.is_object()) return out;
-        out.bodyHandle = j.value("bodyHandle", 0u);
-        out.shapeHandle = j.value("shapeHandle", 0u);
         out.mass = j.value("mass", 1.0f);
         out.restitution = j.value("restitution", 0.5f);
         out.friction = j.value("friction", 0.3f);

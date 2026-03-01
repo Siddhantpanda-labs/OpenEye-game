@@ -12,6 +12,7 @@
 
 #include "api/assets/All.h"
 #include "api/core/All.h"
+#include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
 #include "api/world/All.h"
 #include "eyelib/assets/ShaderWatcher.h"
@@ -244,6 +245,7 @@ int RunPlayer(int argc, char** argv) {
     config.logFile = options.logPath;
     config.headless = options.headless;
 
+    eyelib::api::Engine::RegisterSubsystem(std::make_unique<eyelib::api::PhysicsModule>());
     ScopedEngine engine;
     if (!engine.Initialize(config)) {
         std::cerr << "Failed to initialize engine.\n";
@@ -336,6 +338,8 @@ int RunPlayer(int argc, char** argv) {
         eyelib::api::core::Log::Error("Strict asset mode: missing or unknown assets detected.");
         return static_cast<int>(ExitCode::AssetStrictFailed);
     }
+
+    world.FlushTransforms();
 
     WorldPhysicsBridge physicsBridge;
     if (!physicsBridge.Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt)) {

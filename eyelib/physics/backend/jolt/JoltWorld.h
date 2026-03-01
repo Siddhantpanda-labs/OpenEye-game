@@ -28,6 +28,10 @@ public:
 
     bool IsInitialized() const { return m_initialized; }
 
+    /** Per physics_advice §5: state for assert-on-use. */
+    enum class State { Uninitialized, Running, ShuttingDown, Destroyed };
+    State GetState() const { return m_state; }
+
     void SetGravity(const eyelib::math::Vec3& gravity);
     eyelib::math::Vec3 GetGravity() const;
 
@@ -48,7 +52,10 @@ public:
     ContactCallback GetContactCallback() const { return m_contactCb; }
 
 private:
+    void DrainJobSystem();
+
     bool m_initialized = false;
+    State m_state = State::Uninitialized;
     ContactCallback m_contactCb;
 
     struct Impl;

@@ -476,10 +476,12 @@ bool ReadCollider(lua_State* L, int index, ::eyelib::world::components::Collider
 
 void PushRigidBody(lua_State* L, const ::eyelib::world::components::RigidBody& rigidBody) {
     lua_newtable(L);
-    lua_pushinteger(L, static_cast<lua_Integer>(rigidBody.bodyHandle));
-    lua_setfield(L, -2, "bodyHandle");
-    lua_pushinteger(L, static_cast<lua_Integer>(rigidBody.shapeHandle));
-    lua_setfield(L, -2, "shapeHandle");
+    lua_pushnumber(L, static_cast<lua_Number>(rigidBody.mass));
+    lua_setfield(L, -2, "mass");
+    lua_pushboolean(L, rigidBody.useGravity ? 1 : 0);
+    lua_setfield(L, -2, "useGravity");
+    lua_pushboolean(L, rigidBody.isKinematic ? 1 : 0);
+    lua_setfield(L, -2, "isKinematic");
     lua_pushboolean(L, rigidBody.syncTransform ? 1 : 0);
     lua_setfield(L, -2, "syncTransform");
 }

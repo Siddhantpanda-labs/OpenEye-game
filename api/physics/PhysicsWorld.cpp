@@ -2,6 +2,7 @@
 #include "api/physics/IPhysicsWorld.h"
 #include "api/physics/PhysicsBackendFactory.h"
 
+#include <cassert>
 #include <memory>
 
 namespace eyelib {
@@ -21,34 +22,44 @@ PhysicsWorld::PhysicsWorld(PhysicsBackendType backendType) : m_impl(new Impl()) 
 }
 
 PhysicsWorld::~PhysicsWorld() {
-    Shutdown();
-    delete m_impl;
-    m_impl = nullptr;
+    assert((m_state == State::Destroyed || m_state == State::Uninitialized) && "PhysicsWorld must call Shutdown() before destruction");
+    if (m_impl) {
+        delete m_impl;
+        m_impl = nullptr;
+    }
 }
 
 bool PhysicsWorld::Initialize(const eyelib::math::Vec3& gravity) {
-    return m_impl->backend && m_impl->backend->Initialize(gravity);
+    if (!m_impl->backend || !m_impl->backend->Initialize(gravity)) return false;
+    m_state = State::Running;
+    return true;
 }
 
 void PhysicsWorld::Shutdown() {
-    if (!m_impl || !m_impl->backend) return;
-    m_impl->backend->Shutdown();
+    if (m_state != State::Running) return;
+    m_state = State::ShuttingDown;
+    if (m_impl && m_impl->backend) {
+        m_impl->backend->Shutdown();
+        m_impl->backend.reset();
+    }
+    m_state = State::Destroyed;
 }
 
 void PhysicsWorld::Step(float deltaTime, int maxSubSteps, float fixedTimeStep) {
+    assert(m_state == State::Running && "Step() only valid when Running");
     if (m_impl->backend) m_impl->backend->Step(deltaTime, maxSubSteps, fixedTimeStep);
 }
 
 CollisionShapeHandle PhysicsWorld::CreateBoxShape(const eyelib::math::Vec3& halfExtents) {
-    return m_impl->backend ? m_impl->backend->CreateBoxShape(halfExtents) : 0;
+    return m_impl->backend ? m_impl->backend->CreateBoxShape(halfExtents) : CollisionShapeHandle{};
 }
 
 CollisionShapeHandle PhysicsWorld::CreateSphereShape(float radius) {
-    return m_impl->backend ? m_impl->backend->CreateSphereShape(radius) : 0;
+    return m_impl->backend ? m_impl->backend->CreateSphereShape(radius) : CollisionShapeHandle{};
 }
 
 CollisionShapeHandle PhysicsWorld::CreateCapsuleShape(float radius, float height) {
-    return m_impl->backend ? m_impl->backend->CreateCapsuleShape(radius, height) : 0;
+    return m_impl->backend ? m_impl->backend->CreateCapsuleShape(radius, height) : CollisionShapeHandle{};
 }
 
 void PhysicsWorld::DestroyShape(CollisionShapeHandle shape) {
@@ -56,18 +67,18 @@ void PhysicsWorld::DestroyShape(CollisionShapeHandle shape) {
 }
 
 RigidBodyHandle PhysicsWorld::CreateBoxRigidBody(float mass, const eyelib::math::Vec3& halfExtents, const eyelib::math::Vec3& position) {
-    if (!m_impl->backend) return 0;
+    if (!m_impl->backend) return RigidBodyHandle{};
     CollisionShapeHandle shape = m_impl->backend->CreateBoxShape(halfExtents);
-    if (shape == 0) return 0;
+    if (!shape) return RigidBodyHandle{};
     RigidBodyHandle body = m_impl->backend->CreateRigidBody(position, eyelib::math::Quat(1.f, 0.f, 0.f, 0.f), shape, mass);
-    if (body == 0) m_impl->backend->DestroyShape(shape);
+    if (!body) m_impl->backend->DestroyShape(shape);
     return body;
 }
 
 RigidBodyHandle PhysicsWorld::CreateRigidBody(const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation,
                                               CollisionShapeHandle shape, float mass,
                                               const eyelib::math::Vec3& inertia) {
-    return m_impl->backend ? m_impl->backend->CreateRigidBody(position, rotation, shape, mass, inertia) : 0;
+    return m_impl->backend ? m_impl->backend->CreateRigidBody(position, rotation, shape, mass, inertia) : RigidBodyHandle{};
 }
 
 void PhysicsWorld::DestroyRigidBody(RigidBodyHandle body) {
