@@ -1,5 +1,7 @@
 # Lua Scripting System - Industry Standard Assessment
 
+**Note:** This assessment was written when scripting used `eyelib::ecs`. The codebase has since consolidated to **eyelib::world**; bindings now use `world::World` and `world::EntityId`. The issues and solutions below still apply; read `ecs::World`/`ecs::Entity` as **world::World**/**world::EntityId** where relevant.
+
 ## Executive Summary
 
 **Current Status**: ✅ **Foundation is solid, but needs refinement for production-grade scalability**
@@ -13,7 +15,7 @@ The Lua scripting system has a **good architectural foundation** with proper sep
 ### 1. **Architecture & Organization** ⭐⭐⭐⭐⭐
 - ✅ Clear separation: `LuaVM`, `ScriptManager`, `ScriptSystem`
 - ✅ Proper namespace organization (`eyelib::scripting::bindings`)
-- ✅ ECS integration via `ScriptComponent`
+- ✅ World/entity integration via `ScriptComponent` (world::World, world::EntityId)
 - ✅ Modular binding structure (one file per API module)
 - ✅ CMake integration is clean
 
@@ -36,9 +38,9 @@ The Lua scripting system has a **good architectural foundation** with proper sep
 
 **Problem:**
 ```cpp
-// EntityBindings.cpp
-static ecs::World* s_world = nullptr;  // ❌ Global static - not thread-safe
-void RegisterEntityBindings(lua_State* L, ecs::World* world) {
+// EntityBindings.cpp (historical example; now uses BindingRegistry + world::World*)
+static world::World* s_world = nullptr;  // ❌ Global static - not thread-safe
+void RegisterEntityBindings(lua_State* L, world::World* world) {
     s_world = world;  // ❌ Overwrites previous world
 }
 ```
@@ -52,7 +54,7 @@ void RegisterEntityBindings(lua_State* L, ecs::World* world) {
 **Industry Standard Solution:**
 ```cpp
 // Use Lua registry to store world pointer per VM
-void RegisterEntityBindings(lua_State* L, ecs::World* world) {
+void RegisterEntityBindings(lua_State* L, world::World* world) {
     // Store world in Lua registry (thread-safe, per-VM)
     lua_pushlightuserdata(L, (void*)&WORLD_REGISTRY_KEY);
     lua_pushlightuserdata(L, world);
@@ -66,9 +68,9 @@ void RegisterEntityBindings(lua_State* L, ecs::World* world) {
 
 **Problem:**
 ```cpp
-// Current: Entity is just an integer
-inline void PushEntity(lua_State* L, ecs::Entity e) {
-    lua_pushinteger(L, static_cast<lua_Integer>(e));  // ❌ No validation
+// Current: Entity (world::EntityId) pushed as userdata or index
+inline void PushEntity(lua_State* L, world::EntityId e) {
+    // e.g. lua_pushinteger(L, e.index);  // ❌ Or userdata; validation varies
 }
 ```
 
@@ -81,8 +83,8 @@ inline void PushEntity(lua_State* L, ecs::Entity e) {
 ```cpp
 // Use userdata with metatable
 struct EntityUserdata {
-    ecs::Entity entity;
-    ecs::World* world;  // For validation
+    world::EntityId entity;
+    world::World* world;  // For validation
 };
 
 // Register metatable with __gc, __index, __eq

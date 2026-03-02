@@ -301,11 +301,27 @@ void ShowInspectorPanel(EditorContext* ctx) {
             ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
         } else {
             ctx->sceneSelected = false;  // ensure entity selection takes precedence if both were set
-            std::string name;
-            if (ctx->world.GetEntityName(ctx->selectedEntity, name))
-                ImGui::Text("Entity: %s", name.c_str());
-            else
-                ImGui::Text("Entity (index %u)", ctx->selectedEntity.index);
+            // Top name box: click to edit, click away or Enter to apply rename
+            {
+                static char nameBuffer[256] = "";
+                static EntityId s_lastNameEntity = ::eyelib::world::InvalidEntity;
+                EntityId e = ctx->selectedEntity;
+                if (e.index != s_lastNameEntity.index || e.generation != s_lastNameEntity.generation) {
+                    s_lastNameEntity = e;
+                    std::string name;
+                    if (ctx->world.GetEntityName(e, name))
+                        std::snprintf(nameBuffer, sizeof(nameBuffer), "%.255s", name.c_str());
+                    else
+                        std::snprintf(nameBuffer, sizeof(nameBuffer), "Entity %u", e.index);
+                }
+                ImGui::SetNextItemWidth(-1.0f);
+                if (ImGui::InputText("##EntityName", nameBuffer, sizeof(nameBuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    ctx->world.SetEntityName(e, nameBuffer);
+                }
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    ctx->world.SetEntityName(e, nameBuffer);
+                }
+            }
             ImGui::Separator();
 
             std::vector<std::string> componentNames = ctx->world.GetComponentNames(ctx->selectedEntity);

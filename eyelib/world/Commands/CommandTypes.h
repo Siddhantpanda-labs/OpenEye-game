@@ -37,6 +37,8 @@ public:
         if (m_entity.has_value()) {
             entt::entity e = state.GetRegistry().create();
             state.RegisterEntityMapping(*m_entity, e);
+            // Default component: every entity gets a Transform (identity) on creation
+            state.GetTransformStore().Add(*m_entity, math::Transform{});
         }
         if (!m_name.empty() && m_entity.has_value()) {
             MetadataEntry entry;
@@ -50,6 +52,7 @@ public:
         if (!m_entity.has_value()) {
             return false;
         }
+        state.GetTransformStore().Remove(*m_entity);
         state.UnregisterEntity(*m_entity);
         state.Entities().Destroy(*m_entity);
         state.GraphMetadata().Remove(*m_entity);
@@ -75,6 +78,12 @@ public:
     bool Apply(WorldState& state) override {
         if (!state.Entities().IsAlive(m_entity)) {
             return false;
+        }
+        // Remove from all component stores (Transform, Renderable, Camera, etc.) so entity is fully gone from scene
+        for (const auto& [typeKey, store] : state.ComponentStores()) {
+            if (store) {
+                store->Remove(m_entity);
+            }
         }
         state.UnregisterEntity(m_entity);
         state.Entities().Destroy(m_entity);

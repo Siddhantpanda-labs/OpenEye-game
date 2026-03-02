@@ -2,7 +2,7 @@
 
 **Goal:** Make the render stack **backend-agnostic** by introducing a **low-level, explicit RHI (Render Hardware Interface)** and implementing it for OpenGL and Vulkan. The render module (pipeline, passes) will use the RHI (and a thin helper layer on top) so that no GL or Vulkan calls live outside the RHI layer. Target: **Unreal-level structure, control, and scalability**.
 
-**Scope:** `eyelib/render/`, `eyelib/platform/` (context/device), `eyelib/fluids/` (FluidVolumeRenderer), `eyelib/debug/` (Profiler). All other modules (animation, assets, core, ecs, geometry, math, physics, scene, scripting, serialize, world, Tienet) remain unchanged.
+**Scope:** `eyelib/render/`, `eyelib/platform/` (context/device), `eyelib/fluids/` (FluidVolumeRenderer), `eyelib/debug/` (Profiler). All other modules (animation, assets, core, geometry, math, physics, scene, scripting, serialize, world, Tienet) remain unchanged.
 
 **References:** `Render_Thread_Unified_Scene_Plan.md` (thread model, unified scene, frame allocator — already done); this plan builds on that and adds the abstraction layer.
 

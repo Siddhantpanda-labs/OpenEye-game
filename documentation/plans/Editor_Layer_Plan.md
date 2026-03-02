@@ -79,7 +79,7 @@ The editor should eventually exercise each library area as follows. Phases can b
 | **api/scripting** | Script components, property edit; optional script reload. |
 | **api/geometry** | Picking, raycast, selection in viewport (if exposed). |
 | **api/debug**   | Debug draw, stats, diagnostics overlay. |
-| **api/ecs**     | If exposed for advanced queries; otherwise world entity/component API suffices. |
+| *(api/ecs removed)* | Entity/component access is via **api/world** (world entity/component API) only. |
 | **api/particles** | If editor supports particle entities/components. |
 | **api/fluids**  | If editor supports fluid entities/components. |
 

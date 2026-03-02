@@ -106,6 +106,11 @@ std::string GetDisplayName(eyelib::api::world::World& world, EntityId id) {
     return buf;
 }
 
+/** When non-null, the next entity created from Add Entity popup will be parented to this (e.g. from "Add Child"). */
+static EntityId s_pendingAddParent = ::eyelib::world::InvalidEntity;
+/** Set when "Add Child" is clicked; open "Add Entity" popup next frame from Hierarchy window (not from context menu). */
+static bool s_openAddEntityPopupNextFrame = false;
+
 void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
     if (!ctx || !ctx->world.IsAlive(entity)) return;
     eyelib::api::world::World& world = ctx->world;
@@ -130,20 +135,11 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
     }
 
     if (ImGui::BeginPopupContextItem()) {
-        if (ImGui::MenuItem("Create Child")) {
-            auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity("Entity"));
-            if (result.success && result.createdEntity) {
-                world.SetParent(*result.createdEntity, entity);
-                ctx->selectedEntity = *result.createdEntity;
-            }
+        if (ImGui::MenuItem("Add Child")) {
+            s_pendingAddParent = entity;
+            s_openAddEntityPopupNextFrame = true;
         }
-        if (ImGui::MenuItem("Rename...")) {
-            ctx->selectedEntity = entity;
-            ImGui::PushID("Hierarchy");
-            ImGui::OpenPopup("Rename Entity");
-            ImGui::PopID();
-        }
-        if (ImGui::MenuItem("Delete")) {
+        if (ImGui::MenuItem("Remove")) {
             world.DestroyEntity(entity);
             if (ctx->selectedEntity.index == entity.index && ctx->selectedEntity.generation == entity.generation) {
                 ctx->selectedEntity = ::eyelib::world::InvalidEntity;
@@ -184,50 +180,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
     }
 }
 
-void RunRenamePopup(EditorContext* ctx) {
-    ImGui::PushID("Hierarchy");
-    const bool open = ImGui::BeginPopup("Rename Entity", ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::PopID();
-    if (!open) return;
-    if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
-        ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-        return;
-    }
-    static char renameBuffer[256] = "";
-    if (ImGui::IsWindowAppearing()) {
-        std::string name;
-        if (ctx->world.GetEntityName(ctx->selectedEntity, name)) {
-            std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", name.c_str());
-        } else {
-            renameBuffer[0] = '\0';
-        }
-    }
-    ImGui::SetNextItemWidth(200.0f);
-    ImGui::PushID("HierarchyRename");
-    ImGui::InputText("##name", renameBuffer, sizeof(renameBuffer));
-    if (ImGui::Button("OK", ImVec2(80, 0))) {
-        ctx->world.SetEntityName(ctx->selectedEntity, renameBuffer);
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(80, 0))) {
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::PopID();
-    ImGui::EndPopup();
-}
-
-/** Ensure entity has a Transform component (so it appears in Inspector and can be positioned). */
-static void EnsureEntityHasTransform(eyelib::api::world::World& world, EntityId entity) {
-    eyelib::world::components::Transform t;
-    t.position = eyelib::math::Vec3(0.0f, 0.0f, 0.0f);
-    t.rotation = eyelib::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
-    t.scale = eyelib::math::Vec3(1.0f, 1.0f, 1.0f);
-    world.SetTransform(entity, t);
-}
-
-/** Create entity with primitive mesh (Renderable + optional Collider), select it, close popups. */
+/** Create entity with primitive mesh (Renderable + optional Collider), select it, close popups. Optionally parent to s_pendingAddParent. */
 static void AddPrimitiveEntity(EditorContext* ctx, AddEntityMeshChoice choice) {
     if (!ctx) return;
     eyelib::api::world::World& world = ctx->world;
@@ -235,7 +188,10 @@ static void AddPrimitiveEntity(EditorContext* ctx, AddEntityMeshChoice choice) {
     auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
     if (!result.success || !result.createdEntity) return;
     EntityId newEntity = *result.createdEntity;
-    EnsureEntityHasTransform(world, newEntity);
+    if (s_pendingAddParent != ::eyelib::world::InvalidEntity && world.IsAlive(s_pendingAddParent)) {
+        world.SetParent(newEntity, s_pendingAddParent);
+        s_pendingAddParent = ::eyelib::world::InvalidEntity;
+    }
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
 
@@ -279,7 +235,7 @@ static void AddPrimitiveEntity(EditorContext* ctx, AddEntityMeshChoice choice) {
     }
 }
 
-/** Create entity with Light component, select it. */
+/** Create entity with Light component, select it. Optionally parent to s_pendingAddParent. */
 static void AddLightEntity(EditorContext* ctx, eyelib::world::components::Light::Type lightType, const char* baseName) {
     if (!ctx) return;
     eyelib::api::world::World& world = ctx->world;
@@ -287,7 +243,10 @@ static void AddLightEntity(EditorContext* ctx, eyelib::world::components::Light:
     auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
     if (!result.success || !result.createdEntity) return;
     EntityId newEntity = *result.createdEntity;
-    EnsureEntityHasTransform(world, newEntity);
+    if (s_pendingAddParent != ::eyelib::world::InvalidEntity && world.IsAlive(s_pendingAddParent)) {
+        world.SetParent(newEntity, s_pendingAddParent);
+        s_pendingAddParent = ::eyelib::world::InvalidEntity;
+    }
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
     eyelib::world::components::Light light{};
@@ -295,7 +254,7 @@ static void AddLightEntity(EditorContext* ctx, eyelib::world::components::Light:
     world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Light>(newEntity, light));
 }
 
-/** Create entity with Camera component, select it. */
+/** Create entity with Camera component, select it. Optionally parent to s_pendingAddParent. */
 static void AddCameraEntity(EditorContext* ctx) {
     if (!ctx) return;
     eyelib::api::world::World& world = ctx->world;
@@ -303,19 +262,42 @@ static void AddCameraEntity(EditorContext* ctx) {
     auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
     if (!result.success || !result.createdEntity) return;
     EntityId newEntity = *result.createdEntity;
-    EnsureEntityHasTransform(world, newEntity);
+    if (s_pendingAddParent != ::eyelib::world::InvalidEntity && world.IsAlive(s_pendingAddParent)) {
+        world.SetParent(newEntity, s_pendingAddParent);
+        s_pendingAddParent = ::eyelib::world::InvalidEntity;
+    }
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
     eyelib::world::components::Camera camera{};
     world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Camera>(newEntity, camera));
 }
 
-void RunAddEntityPopup(EditorContext* ctx) {
+/** Create empty entity (Transform only, from default), select it. Optionally parent to s_pendingAddParent. */
+static void AddEmptyEntity(EditorContext* ctx) {
     if (!ctx) return;
     eyelib::api::world::World& world = ctx->world;
+    const std::string name = GetUniqueEntityName(world, "Entity");
+    auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    if (!result.success || !result.createdEntity) return;
+    EntityId newEntity = *result.createdEntity;
+    if (s_pendingAddParent != ::eyelib::world::InvalidEntity && world.IsAlive(s_pendingAddParent)) {
+        world.SetParent(newEntity, s_pendingAddParent);
+        s_pendingAddParent = ::eyelib::world::InvalidEntity;
+    }
+    ctx->sceneSelected = false;
+    ctx->selectedEntity = newEntity;
+}
+
+void RunAddEntityPopup(EditorContext* ctx) {
+    if (!ctx) return;
 
     if (!ImGui::BeginPopup("Add Entity", ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
+    }
+
+    if (ImGui::Selectable("Empty")) {
+        AddEmptyEntity(ctx);
+        ImGui::CloseCurrentPopup();
     }
 
     // Mesh section: label + ">" opens primitives sub-popup
@@ -376,12 +358,15 @@ void ShowHierarchyPanel(EditorContext* ctx) {
             return;
         }
 
-        RunRenamePopup(ctx);
-
         eyelib::api::world::World& world = ctx->world;
 
         ImGui::PushID("AddEntity");
         if (ImGui::Button("Add Entity")) {
+            s_pendingAddParent = ::eyelib::world::InvalidEntity;
+            ImGui::OpenPopup("Add Entity");
+        }
+        if (s_openAddEntityPopupNextFrame) {
+            s_openAddEntityPopupNextFrame = false;
             ImGui::OpenPopup("Add Entity");
         }
         RunAddEntityPopup(ctx);
