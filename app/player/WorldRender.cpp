@@ -3,6 +3,8 @@
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
+#include "api/geometry/BuiltinMeshIds.h"
+#include "api/geometry/Primitives.h"
 #include "api/math/TransformUtils.h"
 #include "api/platform/All.h"
 #include "api/render/RenderScene.h"
@@ -117,6 +119,7 @@ void WorldRenderBridge::Shutdown() {
     // Destroy caches and shaders/materials first; their destructors call into the RHI device.
     // Only then shut down the pipeline (which destroys the device).
     m_modelCache.clear();
+    m_primitiveCache.clear();
     m_skyboxCache.clear();
     m_skinnedMaterials.clear();
     m_defaultMaterial.reset();
@@ -232,6 +235,36 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::strin
     return entry;
 }
 
+WorldRenderBridge::ModelEntry WorldRenderBridge::GetPrimitiveEntry(const std::string& meshId) {
+    using namespace eyelib::api::geometry;
+    if (!IsBuiltinMeshId(meshId)) return ModelEntry{};
+    auto it = m_primitiveCache.find(meshId);
+    if (it != m_primitiveCache.end()) return it->second;
+
+    ModelEntry entry{};
+    std::shared_ptr<eyelib::api::Mesh> mesh;
+    if (meshId == BuiltinMesh::Cube) {
+        mesh = Primitives::CreateCube(0.5f);
+    } else if (meshId == BuiltinMesh::Sphere) {
+        mesh = Primitives::CreateSphere(0.5f, 32, 16);
+    } else if (meshId == BuiltinMesh::Plane) {
+        mesh = Primitives::CreatePlane(1.0f, 1.0f, 1, 1);
+    } else if (meshId == BuiltinMesh::Cylinder) {
+        mesh = Primitives::CreateCylinder(0.5f, 1.0f, 32, 1, true, true);
+    } else if (meshId == BuiltinMesh::Cone) {
+        mesh = Primitives::CreateCone(0.5f, 1.0f, 32, true);
+    } else if (meshId == BuiltinMesh::Torus) {
+        mesh = Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
+    }
+    if (mesh) {
+        entry.mesh = std::move(mesh);
+        EnsureDefaultMaterial();
+        entry.material = m_defaultMaterial;
+    }
+    m_primitiveCache[meshId] = entry;
+    return entry;
+}
+
 std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
     const std::string& materialId,
     eyelib::api::AssetRegistry* registry) {
@@ -344,17 +377,24 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
-        if (ResolveAssetPath(meshId, options.assetRoots).empty()) continue;
-        auto modelEntry = LoadModelEntry(ResolveAssetPath(meshId, options.assetRoots));
-        if (!modelEntry.mesh) continue;
-        opaqueCount++;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            if (meshResolved.empty()) continue;
+            if (LoadModelEntry(meshResolved).mesh) opaqueCount++;
+        }
     }
     for (const auto& entry : meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty()) continue;
-        if (ResolveAssetPath(renderer.meshAssetId, options.assetRoots).empty()) continue;
-        if (!LoadModelEntry(ResolveAssetPath(renderer.meshAssetId, options.assetRoots)).mesh) continue;
-        opaqueCount++;
+        const std::string& meshId = renderer.meshAssetId;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
+        } else {
+            if (ResolveAssetPath(meshId, options.assetRoots).empty()) continue;
+            if (LoadModelEntry(ResolveAssetPath(meshId, options.assetRoots)).mesh) opaqueCount++;
+        }
     }
     size_t pointLightCount = 0;
     size_t spotLightCount = 0;
@@ -396,9 +436,14 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
-        const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
-        if (meshResolved.empty()) continue;
-        auto modelEntry = LoadModelEntry(meshResolved);
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            if (meshResolved.empty()) continue;
+            modelEntry = LoadModelEntry(meshResolved);
+        }
         if (!modelEntry.mesh) continue;
 
         eyelib::api::Drawable drawable;
@@ -453,9 +498,15 @@ void WorldRenderBridge::BuildSceneFromViews(
     for (const auto& entry : meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty()) continue;
-        const std::string meshResolved = ResolveAssetPath(renderer.meshAssetId, options.assetRoots);
-        if (meshResolved.empty()) continue;
-        auto modelEntry = LoadModelEntry(meshResolved);
+        const std::string& meshId = renderer.meshAssetId;
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            if (meshResolved.empty()) continue;
+            modelEntry = LoadModelEntry(meshResolved);
+        }
         if (!modelEntry.mesh) continue;
 
         eyelib::api::Drawable drawable;

@@ -5,34 +5,33 @@
 #include "Events/WorldEvents.h"
 #include "eyelib/world/components/SystemBindings.h"
 #include "eyelib/world/ComponentStorage/TransformStore.h"
+#include "eyelib/world/systems/RegionSystem.h"
+#include "eyelib/world/systems/TransformSystem.h"
 #include "eyelib/math/Interpolation.h"
 #include <unordered_set>
 
 namespace eyelib {
 namespace world {
 
+bool World::RegisterSystem(std::shared_ptr<IWorldSystem> system) {
+    if (!system) return false;
+    m_systems.push_back(system);
+    return m_systemGraph.Register(SystemDescriptor{
+        system->Name(),
+        system->Phase(),
+        system->Dependencies(),
+        {},
+        system->FixedStep(),
+        [this, system](float dt) { system->Update(*this, dt); }
+    });
+}
+
 World::World() {
     m_scheduler.SetSystemGraph(&m_systemGraph);
     m_systemGraph.SetFixedTimestep(1.0f / 60.0f);
-    // ProcessCommands: apply pending commands only. No derived system updates; those run in Simulation phase.
     m_systemGraph.SetProcessCommandsCallback([this]() { ApplyPendingCommands(); });
-    m_systemGraph.Register(SystemDescriptor{
-        "region",
-        SchedulePhase::PreSimulation,
-        {},
-        {},
-        false,
-        [this](float /*dt*/) { m_regionSystem.Update(m_state); }
-    });
-    // TransformSystem: recompute world matrices from local transforms. Physics is done by eyelib/physics (Jolt); bridge syncs transforms into World.
-    m_systemGraph.Register(SystemDescriptor{
-        "TransformSystem",
-        SchedulePhase::Simulation,
-        {},
-        {},
-        true,
-        [this](float /*dt*/) { m_transformSystem.Update(m_state); }
-    });
+    RegisterSystem(std::make_shared<systems::RegionSystem>());
+    RegisterSystem(std::make_shared<systems::TransformSystem>());
     m_systemGraph.SetPostPhysicsStepCallback(nullptr);
     m_events.SetEventLog(&m_eventLog, [this]() { return m_simulationTime; });
 }
@@ -231,7 +230,7 @@ void World::FlushSimulation() {
 }
 
 void World::FlushTransforms() {
-    m_transformSystem.Update(m_state);
+    m_systemGraph.RunSimulationPhaseOnce(0.0f);
 }
 
 TransactionManager& World::Transactions() { return m_transactions; }
@@ -300,6 +299,53 @@ std::optional<math::Transform> World::GetInterpolatedTransform(EntityId entity, 
     out.rotation = math::Slerp(prev.rotation, current.rotation, alpha);
     out.scale = math::Lerp(prev.scale, current.scale, alpha);
     return out;
+}
+
+EntityId World::CreateEntity(const std::string& name) {
+    auto result = ApplyCommandSync(std::make_unique<CreateEntityCommand>(name));
+    return result.createdEntity.value_or(InvalidEntity);
+}
+
+bool World::DestroyEntity(EntityId entity) {
+    return ApplyCommandSync(std::make_unique<DestroyEntityCommand>(entity)).success;
+}
+
+bool World::SetParent(EntityId child, EntityId parent, bool preserveWorldTransform) {
+    return ApplyCommandSync(std::make_unique<ReparentEntityCommand>(child, parent, preserveWorldTransform)).success;
+}
+
+EntityId World::GetParent(EntityId child) const {
+    return m_state.GraphHierarchy().GetParent(child);
+}
+
+std::vector<EntityId> World::GetChildren(EntityId parent) const {
+    return m_state.GraphHierarchy().GetChildren(parent);
+}
+
+bool World::IsAlive(EntityId entity) const {
+    return m_state.Entities().IsAlive(entity);
+}
+
+std::optional<std::string> World::GetName(EntityId entity) const {
+    auto entry = m_state.GraphMetadata().Get(entity);
+    if (!entry.has_value()) return std::nullopt;
+    return entry->name;
+}
+
+void World::SetName(EntityId entity, const std::string& name) {
+    SubmitCommand(std::make_unique<SetNameCommand>(entity, name));
+    ApplyPendingCommands();
+}
+
+std::optional<math::Transform> World::GetTransform(EntityId entity) const {
+    const auto* ref = m_state.GetTransformStore().TryGet(entity);
+    if (!ref) return std::nullopt;
+    return static_cast<math::Transform>(*ref);
+}
+
+void World::SetTransform(EntityId entity, const math::Transform& t) {
+    SubmitCommand(std::make_unique<SetTransformCommand>(entity, t));
+    ApplyPendingCommands();
 }
 
 } // namespace world

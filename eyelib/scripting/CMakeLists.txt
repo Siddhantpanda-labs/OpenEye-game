@@ -31,6 +31,6 @@ target_link_libraries(EyelibScripting
     PUBLIC
         EyelibCore
         EyelibMath
-        EyelibECS
+        EyelibWorld
         Lua
 )

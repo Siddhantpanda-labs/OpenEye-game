@@ -25,6 +25,5 @@ target_include_directories(EyelibSceneAPI
 target_link_libraries(EyelibSceneAPI
     PUBLIC
         EyelibScene
-        EyelibECSAPI
 )
 

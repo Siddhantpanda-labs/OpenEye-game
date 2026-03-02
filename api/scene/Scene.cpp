@@ -23,15 +23,15 @@ Scene::~Scene() {
     m_impl = nullptr;
 }
 
-Entity Scene::CreateEntity(const std::string& name) {
+Scene::Entity Scene::CreateEntity(const std::string& name) {
     return m_impl->scene->CreateEntity(name);
 }
 
-void Scene::DestroyEntity(Entity e) {
+void Scene::DestroyEntity(Scene::Entity e) {
     m_impl->scene->DestroyEntity(e);
 }
 
-bool Scene::IsAlive(Entity e) const {
+bool Scene::IsAlive(Scene::Entity e) const {
     return m_impl->scene->IsAlive(e);
 }
 
@@ -39,63 +39,63 @@ void Scene::Clear() {
     m_impl->scene->Clear();
 }
 
-void Scene::SetName(Entity e, const std::string& name) {
+void Scene::SetName(Scene::Entity e, const std::string& name) {
     m_impl->scene->SetName(e, name);
 }
 
-std::optional<std::string> Scene::GetName(Entity e) const {
+std::optional<std::string> Scene::GetName(Scene::Entity e) const {
     return m_impl->scene->GetName(e);
 }
 
-void Scene::SetTransform(Entity e, const eyelib::math::Transform& t) {
+void Scene::SetTransform(Scene::Entity e, const eyelib::math::Transform& t) {
     m_impl->scene->SetTransform(e, t);
 }
 
-std::optional<eyelib::math::Transform> Scene::GetTransform(Entity e) const {
+std::optional<eyelib::math::Transform> Scene::GetTransform(Scene::Entity e) const {
     return m_impl->scene->GetTransform(e);
 }
 
-bool Scene::SetParent(Entity child, Entity parent) {
+bool Scene::SetParent(Scene::Entity child, Scene::Entity parent) {
     return m_impl->scene->SetParent(child, parent);
 }
 
-Entity Scene::GetParent(Entity child) const {
+Scene::Entity Scene::GetParent(Scene::Entity child) const {
     return m_impl->scene->GetParent(child);
 }
 
-std::vector<Entity> Scene::GetChildren(Entity parent) const {
+std::vector<Scene::Entity> Scene::GetChildren(Scene::Entity parent) const {
     return m_impl->scene->GetChildren(parent);
 }
 
-std::vector<Entity> Scene::GetEntities() const {
+std::vector<Scene::Entity> Scene::GetEntities() const {
     return m_impl->scene->GetEntities();
 }
 
-std::vector<Entity> Scene::GetRootEntities() const {
+std::vector<Scene::Entity> Scene::GetRootEntities() const {
     return m_impl->scene->GetRootEntities();
 }
 
-std::string Scene::GetEntityPath(Entity entity) const {
+std::string Scene::GetEntityPath(Scene::Entity entity) const {
     return m_impl->scene->GetEntityPath(entity);
 }
 
-Entity Scene::FindEntity(const std::string& path) const {
+Scene::Entity Scene::FindEntity(const std::string& path) const {
     return m_impl->scene->FindEntity(path);
 }
 
-size_t Scene::GetSiblingCount(Entity entity) const {
+size_t Scene::GetSiblingCount(Scene::Entity entity) const {
     return m_impl->scene->GetSiblingCount(entity);
 }
 
-size_t Scene::GetChildCount(Entity entity) const {
+size_t Scene::GetChildCount(Scene::Entity entity) const {
     return m_impl->scene->GetChildCount(entity);
 }
 
-bool Scene::MoveEntity(Entity entity, Entity newParent) {
+bool Scene::MoveEntity(Scene::Entity entity, Scene::Entity newParent) {
     return m_impl->scene->MoveEntity(entity, newParent);
 }
 
-Entity Scene::DuplicateEntity(Entity entity) {
+Scene::Entity Scene::DuplicateEntity(Scene::Entity entity) {
     return m_impl->scene->DuplicateEntity(entity);
 }
 

@@ -23,11 +23,11 @@ public:
     static bool IsValid(PrefabVariantHandle handle);
     static PrefabHandle GetBasePrefab(PrefabVariantHandle handle);
 
-    static void OverrideComponent(PrefabVariantHandle handle, ecs::ComponentTypeId type, const void* data);
-    static void* GetOverride(PrefabVariantHandle handle, ecs::ComponentTypeId type);
+    static void OverrideComponent(PrefabVariantHandle handle, world::ComponentTypeId type, const void* data);
+    static void* GetOverride(PrefabVariantHandle handle, world::ComponentTypeId type);
 
 private:
-    static ecs::ComponentRegistry& Registry();
+    static world::ComponentRegistry& Registry();
     static VariantData* GetData(PrefabVariantHandle handle);
 };
 

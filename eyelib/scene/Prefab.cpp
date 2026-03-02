@@ -1,7 +1,13 @@
 #include "Prefab.h"
 
 #include "eyelib/core/Log.h"
-#include "eyelib/ecs/components/All.h"
+#include "eyelib/world/World.h"
+#include "eyelib/world/WorldView.h"
+#include "eyelib/world/Commands/CommandTypes.h"
+#include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/Light.h"
+#include "eyelib/world/components/AABB.h"
+#include "eyelib/world/components/Renderable.h"
 
 #include <json.hpp>
 
@@ -10,8 +16,6 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "entt/entt.hpp"
-
 namespace eyelib {
 namespace scene {
 
@@ -19,28 +23,12 @@ namespace {
 static constexpr int kPrefabJsonVersion = 1;
 
 struct PrefabStore {
-    ecs::ComponentRegistry registry;
     std::unordered_map<PrefabHandle, Prefab::PrefabData> prefabs;
     PrefabHandle nextHandle = 1;
-    bool initialized = false;
-
-    void EnsureRegistry() {
-        if (initialized) return;
-        registry.RegisterComponent<ecs::components::Name>();
-        registry.RegisterComponent<ecs::components::Transform>();
-        registry.RegisterComponent<ecs::components::Renderable>();
-        registry.RegisterComponent<ecs::components::Camera>();
-        registry.RegisterComponent<ecs::components::Light>();
-        registry.RegisterComponent<ecs::components::RigidBody>();
-        registry.RegisterComponent<ecs::components::Animator>();
-        registry.RegisterComponent<ecs::components::AABB>();
-        initialized = true;
-    }
 };
 
 PrefabStore& Store() {
     static PrefabStore store;
-    store.EnsureRegistry();
     return store;
 }
 
@@ -79,17 +67,13 @@ static math::Transform TransformFromJson(const nlohmann::json& j) {
     return t;
 }
 
-template<typename T>
-std::shared_ptr<void> CloneComponentData(const T& value) {
-    return std::shared_ptr<void>(new T(value), [](void* p) { delete static_cast<T*>(p); });
-}
-
-static nlohmann::json ComponentToJson(const PrefabComponent& comp, const ecs::ComponentRegistry& registry) {
+static nlohmann::json ComponentToJson(const PrefabComponent& comp, world::ComponentRegistry& registry) {
     nlohmann::json out;
     out["type"] = registry.GetComponentName(comp.type);
 
-    if (comp.type == registry.GetComponentType<ecs::components::Camera>()) {
-        const auto* c = static_cast<const ecs::components::Camera*>(comp.data.get());
+    using namespace world::components;
+    if (comp.type == registry.GetComponentType<Camera>()) {
+        const auto* c = static_cast<const Camera*>(comp.data.get());
         out["data"]["isPrimary"] = c->isPrimary;
         out["data"]["isPerspective"] = c->isPerspective;
         out["data"]["fov"] = c->fov;
@@ -97,8 +81,8 @@ static nlohmann::json ComponentToJson(const PrefabComponent& comp, const ecs::Co
         out["data"]["near"] = c->nearPlane;
         out["data"]["far"] = c->farPlane;
         out["data"]["orthoSize"] = c->orthoSize;
-    } else if (comp.type == registry.GetComponentType<ecs::components::Light>()) {
-        const auto* l = static_cast<const ecs::components::Light*>(comp.data.get());
+    } else if (comp.type == registry.GetComponentType<Light>()) {
+        const auto* l = static_cast<const Light*>(comp.data.get());
         out["data"]["type"] = static_cast<int>(l->type);
         out["data"]["color"] = Vec3ToJson(l->color);
         out["data"]["intensity"] = l->intensity;
@@ -106,28 +90,31 @@ static nlohmann::json ComponentToJson(const PrefabComponent& comp, const ecs::Co
         out["data"]["innerCone"] = l->innerConeAngle;
         out["data"]["outerCone"] = l->outerConeAngle;
         out["data"]["castShadows"] = l->castShadows;
-    } else if (comp.type == registry.GetComponentType<ecs::components::AABB>()) {
-        const auto* a = static_cast<const ecs::components::AABB*>(comp.data.get());
+    } else if (comp.type == registry.GetComponentType<AABB>()) {
+        const auto* a = static_cast<const AABB*>(comp.data.get());
         out["data"]["min"] = Vec3ToJson(a->min);
         out["data"]["max"] = Vec3ToJson(a->max);
         out["data"]["isVisible"] = a->isVisible;
-    } else if (comp.type == registry.GetComponentType<ecs::components::Renderable>()) {
-        const auto* r = static_cast<const ecs::components::Renderable*>(comp.data.get());
+    } else if (comp.type == registry.GetComponentType<Renderable>()) {
+        const auto* r = static_cast<const Renderable*>(comp.data.get());
         out["data"]["visible"] = r->visible;
         out["data"]["activeLOD"] = r->activeLOD;
+        out["data"]["meshAssetId"] = r->meshAssetId;
+        out["data"]["materialAssetId"] = r->materialAssetId;
     } else {
         out["data"] = nullptr;
     }
     return out;
 }
 
-static bool ComponentFromJson(const nlohmann::json& compJson, PrefabComponent& out, const ecs::ComponentRegistry& registry) {
+static bool ComponentFromJson(const nlohmann::json& compJson, PrefabComponent& out, world::ComponentRegistry& registry) {
     if (!compJson.is_object() || !compJson.contains("type")) return false;
     const std::string typeName = compJson["type"].get<std::string>();
     const auto* data = compJson.contains("data") ? &compJson["data"] : nullptr;
 
-    if (typeName == registry.GetComponentName(registry.GetComponentType<ecs::components::Camera>())) {
-        ecs::components::Camera c;
+    using namespace world::components;
+    if (typeName == registry.GetComponentName(registry.GetComponentType<Camera>())) {
+        Camera c;
         if (data && data->is_object()) {
             c.isPrimary = data->value("isPrimary", c.isPrimary);
             c.isPerspective = data->value("isPerspective", c.isPerspective);
@@ -137,14 +124,14 @@ static bool ComponentFromJson(const nlohmann::json& compJson, PrefabComponent& o
             c.farPlane = data->value("far", c.farPlane);
             c.orthoSize = data->value("orthoSize", c.orthoSize);
         }
-        out.type = registry.GetComponentType<ecs::components::Camera>();
-        out.data = CloneComponentData(c);
+        out.type = registry.GetComponentType<Camera>();
+        out.data = std::make_shared<Camera>(c);
         return true;
     }
-    if (typeName == registry.GetComponentName(registry.GetComponentType<ecs::components::Light>())) {
-        ecs::components::Light l;
+    if (typeName == registry.GetComponentName(registry.GetComponentType<Light>())) {
+        Light l;
         if (data && data->is_object()) {
-            l.type = static_cast<ecs::components::Light::Type>(data->value("type", 0));
+            l.type = static_cast<Light::Type>(data->value("type", 0));
             if (data->contains("color")) l.color = Vec3FromJson((*data)["color"], l.color);
             l.intensity = data->value("intensity", l.intensity);
             l.range = data->value("range", l.range);
@@ -152,35 +139,37 @@ static bool ComponentFromJson(const nlohmann::json& compJson, PrefabComponent& o
             l.outerConeAngle = data->value("outerCone", l.outerConeAngle);
             l.castShadows = data->value("castShadows", l.castShadows);
         }
-        out.type = registry.GetComponentType<ecs::components::Light>();
-        out.data = CloneComponentData(l);
+        out.type = registry.GetComponentType<Light>();
+        out.data = std::make_shared<Light>(l);
         return true;
     }
-    if (typeName == registry.GetComponentName(registry.GetComponentType<ecs::components::AABB>())) {
-        ecs::components::AABB a;
+    if (typeName == registry.GetComponentName(registry.GetComponentType<AABB>())) {
+        AABB a;
         if (data && data->is_object()) {
             if (data->contains("min")) a.min = Vec3FromJson((*data)["min"], a.min);
             if (data->contains("max")) a.max = Vec3FromJson((*data)["max"], a.max);
             a.isVisible = data->value("isVisible", a.isVisible);
         }
-        out.type = registry.GetComponentType<ecs::components::AABB>();
-        out.data = CloneComponentData(a);
+        out.type = registry.GetComponentType<AABB>();
+        out.data = std::make_shared<AABB>(a);
         return true;
     }
-    if (typeName == registry.GetComponentName(registry.GetComponentType<ecs::components::Renderable>())) {
-        ecs::components::Renderable r;
+    if (typeName == registry.GetComponentName(registry.GetComponentType<Renderable>())) {
+        Renderable r;
         if (data && data->is_object()) {
             r.visible = data->value("visible", r.visible);
             r.activeLOD = static_cast<size_t>(data->value("activeLOD", static_cast<int>(r.activeLOD)));
+            r.meshAssetId = data->value("meshAssetId", r.meshAssetId);
+            r.materialAssetId = data->value("materialAssetId", r.materialAssetId);
         }
-        out.type = registry.GetComponentType<ecs::components::Renderable>();
-        out.data = CloneComponentData(r);
+        out.type = registry.GetComponentType<Renderable>();
+        out.data = std::make_shared<Renderable>(r);
         return true;
     }
     return false;
 }
 
-static nlohmann::json NodeToJson(const PrefabNode& node, const ecs::ComponentRegistry& registry) {
+static nlohmann::json NodeToJson(const PrefabNode& node, world::ComponentRegistry& registry) {
     nlohmann::json out;
     out["name"] = node.name;
     out["transform"] = TransformToJson(node.transform);
@@ -195,7 +184,7 @@ static nlohmann::json NodeToJson(const PrefabNode& node, const ecs::ComponentReg
     return out;
 }
 
-static PrefabNode NodeFromJson(const nlohmann::json& node, const ecs::ComponentRegistry& registry) {
+static PrefabNode NodeFromJson(const nlohmann::json& node, world::ComponentRegistry& registry) {
     PrefabNode out;
     if (!node.is_object()) return out;
     out.name = node.value("name", std::string{});
@@ -217,12 +206,8 @@ static PrefabNode NodeFromJson(const nlohmann::json& node, const ecs::ComponentR
 }
 } // namespace
 
-ecs::ComponentRegistry& Prefab::Registry() {
-    return Store().registry;
-}
-
-ecs::ComponentRegistry& Prefab::GetRegistry() {
-    return Registry();
+world::ComponentRegistry& Prefab::GetRegistry() {
+    return world::ComponentRegistry::Get();
 }
 
 Prefab::PrefabData* Prefab::GetDataMutable(PrefabHandle handle) {
@@ -281,21 +266,21 @@ void Prefab::SetName(PrefabHandle handle, const std::string& name) {
     data->root.name = name;
 }
 
-void Prefab::AddComponent(PrefabHandle handle, ecs::ComponentTypeId type, const void* data) {
+void Prefab::AddComponent(PrefabHandle handle, world::ComponentTypeId type, const void* data) {
     auto* prefab = GetDataMutable(handle);
-    if (!prefab) return;
-    auto* ops = Registry().GetOps(type);
-    if (!ops || !ops->clone || !ops->destroy) return;
+    if (!prefab || !data) return;
+    const world::ComponentTypeInfo* info = GetRegistry().GetTypeInfo(type);
+    if (!info || !info->clone || !info->destroy) return;
     PrefabComponent comp;
     comp.type = type;
-    comp.data = std::shared_ptr<void>(ops->clone(data), ops->destroy);
+    comp.data = std::shared_ptr<void>(info->clone(data), info->destroy);
     prefab->root.components.push_back(std::move(comp));
 }
 
-void* Prefab::GetComponent(PrefabHandle handle, ecs::ComponentTypeId type) {
-    auto* prefab = GetData(handle);
+void* Prefab::GetComponent(PrefabHandle handle, world::ComponentTypeId type) {
+    const auto* prefab = GetData(handle);
     if (!prefab) return nullptr;
-    for (auto& comp : prefab->root.components) {
+    for (const auto& comp : prefab->root.components) {
         if (comp.type == type) return comp.data.get();
     }
     return nullptr;
@@ -307,7 +292,7 @@ bool Prefab::SavePrefab(PrefabHandle handle, const std::string& path) {
     nlohmann::json root;
     root["version"] = kPrefabJsonVersion;
     root["name"] = data->name;
-    root["root"] = NodeToJson(data->root, Registry());
+    root["root"] = NodeToJson(data->root, GetRegistry());
     std::ofstream out(path, std::ios::binary);
     if (!out.is_open()) return false;
     const auto text = root.dump(2);
@@ -334,7 +319,7 @@ PrefabHandle Prefab::LoadPrefab(const std::string& path) {
     auto* data = GetDataMutable(handle);
     if (!data) return NullPrefab;
     if (root.contains("root")) {
-        data->root = NodeFromJson(root["root"], Registry());
+        data->root = NodeFromJson(root["root"], GetRegistry());
     }
     return handle;
 }
@@ -342,6 +327,50 @@ PrefabHandle Prefab::LoadPrefab(const std::string& path) {
 const PrefabNode* Prefab::GetRoot(PrefabHandle handle) {
     const auto* data = GetData(handle);
     return data ? &data->root : nullptr;
+}
+
+void Prefab::CaptureComponents(Scene& scene, Entity entity, PrefabNode& node) {
+    auto& reg = GetRegistry();
+    world::WorldView view = scene.World().GetView();
+    using namespace world::components;
+    if (const auto* c = view.TryGetComponent<Camera>(entity)) {
+        PrefabComponent comp;
+        comp.type = reg.GetComponentType<Camera>();
+        comp.data = std::make_shared<Camera>(*c);
+        node.components.push_back(std::move(comp));
+    }
+    if (const auto* l = view.TryGetComponent<Light>(entity)) {
+        PrefabComponent comp;
+        comp.type = reg.GetComponentType<Light>();
+        comp.data = std::make_shared<Light>(*l);
+        node.components.push_back(std::move(comp));
+    }
+    if (const auto* a = view.TryGetComponent<AABB>(entity)) {
+        PrefabComponent comp;
+        comp.type = reg.GetComponentType<AABB>();
+        comp.data = std::make_shared<AABB>(*a);
+        node.components.push_back(std::move(comp));
+    }
+    if (const auto* r = view.TryGetComponent<Renderable>(entity)) {
+        PrefabComponent comp;
+        comp.type = reg.GetComponentType<Renderable>();
+        comp.data = std::make_shared<Renderable>(*r);
+        node.components.push_back(std::move(comp));
+    }
+}
+
+void Prefab::ApplyComponentToWorld(world::World& world, Entity entity, const PrefabComponent& comp) {
+    auto& reg = GetRegistry();
+    using namespace world::components;
+    if (comp.type == reg.GetComponentType<Camera>() && comp.data) {
+        world.SubmitCommand(std::make_unique<world::AddComponentCommand<Camera>>(entity, *static_cast<const Camera*>(comp.data.get())));
+    } else if (comp.type == reg.GetComponentType<Light>() && comp.data) {
+        world.SubmitCommand(std::make_unique<world::AddComponentCommand<Light>>(entity, *static_cast<const Light*>(comp.data.get())));
+    } else if (comp.type == reg.GetComponentType<AABB>() && comp.data) {
+        world.SubmitCommand(std::make_unique<world::AddComponentCommand<AABB>>(entity, *static_cast<const AABB*>(comp.data.get())));
+    } else if (comp.type == reg.GetComponentType<Renderable>() && comp.data) {
+        world.SubmitCommand(std::make_unique<world::AddComponentCommand<Renderable>>(entity, *static_cast<const Renderable*>(comp.data.get())));
+    }
 }
 
 PrefabNode Prefab::CaptureNode(Scene& scene, Entity entity) {
@@ -354,28 +383,6 @@ PrefabNode Prefab::CaptureNode(Scene& scene, Entity entity) {
         node.children.push_back(CaptureNode(scene, child));
     }
     return node;
-}
-
-void Prefab::CaptureComponents(Scene& scene, Entity entity, PrefabNode& node) {
-    auto& registry = Registry();
-    auto& world = scene.World();
-    auto& storage = world.Storage().Registry();
-    const auto& types = registry.GetComponentTypes();
-
-    const auto nameId = registry.GetComponentType<ecs::components::Name>();
-    const auto transformId = registry.GetComponentType<ecs::components::Transform>();
-
-    for (auto type : types) {
-        if (type == nameId || type == transformId) continue;
-        const auto* ops = registry.GetOps(type);
-        if (!ops || !ops->get || !ops->clone || !ops->destroy) continue;
-        void* ptr = ops->get(storage, static_cast<entt::entity>(static_cast<entt::id_type>(entity)));
-        if (!ptr) continue;
-        PrefabComponent comp;
-        comp.type = type;
-        comp.data = std::shared_ptr<void>(ops->clone(ptr), ops->destroy);
-        node.components.push_back(std::move(comp));
-    }
 }
 
 } // namespace scene

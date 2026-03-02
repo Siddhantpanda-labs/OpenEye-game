@@ -87,8 +87,11 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
         }
 
         try {
+            const bool alreadyRegistered = registry.IsRegistered(resolved);
             registry.LoadAsset(resolved, type);
-            eyelib::api::core::Log::InfoF("Loaded asset: %s", resolved.c_str());
+            if (!alreadyRegistered) {
+                eyelib::api::core::Log::InfoF("Loaded asset: %s", resolved.c_str());
+            }
             stats.loaded += 1;
         } catch (const std::exception& e) {
             eyelib::api::core::Log::ErrorF("Failed to load asset: %s - %s", resolved.c_str(), e.what());

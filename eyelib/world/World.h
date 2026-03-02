@@ -6,8 +6,7 @@
 #include "Events/EventDispatcher.h"
 #include "Events/EventLog.h"
 #include "Transactions/TransactionManager.h"
-#include "systems/RegionSystem.h"
-#include "systems/TransformSystem.h"
+#include "systems/IWorldSystem.h"
 #include "WorldView.h"
 #include "scheduler/WorldScheduler.h"
 #include "scheduler/SystemGraphScheduler.h"
@@ -83,6 +82,9 @@ public:
     /** Return all events with time > sinceTime. */
     std::vector<EventLogEntry> GetEventsSinceTime(double sinceTime) const;
 
+    /** Register a system; it will run in its Phase() with dependency order. Call before first Update(). */
+    bool RegisterSystem(std::shared_ptr<IWorldSystem> system);
+
     /** All unique system names that appear in any region's SystemBindings. For AI/system introspection. */
     std::vector<std::string> GetSystemList() const;
     /** Enabled system names for a region entity (that has SystemBindings). Empty if entity has no SystemBindings. */
@@ -95,6 +97,33 @@ public:
     /** Interpolation: previous transforms are captured at the start of each Update(deltaSeconds). Use alpha = 1 - GetSimulationAccumulator()/GetFixedTimestep() (0 = previous, 1 = current). Returns nullopt if entity has no transform. */
     std::optional<math::Transform> GetInterpolatedTransform(EntityId entity, float alpha) const;
 
+    /** Typed component read (from EnTT registry). Mutation must go through commands. */
+    template<typename T>
+    T* TryGetComponent(EntityId entity) { return GetView().TryGetComponent<T>(entity); }
+    template<typename T>
+    const T* TryGetComponent(EntityId entity) const { return GetView().TryGetComponent<T>(entity); }
+    template<typename T>
+    T& GetComponent(EntityId entity) { return GetView().GetComponent<T>(entity); }
+    template<typename T>
+    const T& GetComponent(EntityId entity) const { return GetView().GetComponent<T>(entity); }
+    template<typename T>
+    bool HasComponent(EntityId entity) const { return GetView().HasComponent<T>(entity); }
+
+    /** Build a query over the registry. Example: world.CreateQuery().With<Transform>().With<Renderable>().Execute() */
+    Query CreateQuery() const { return Query(&m_state); }
+
+    /** Convenience API for Scene/Scripting: create entity and apply name. Returns InvalidEntity on failure. */
+    EntityId CreateEntity(const std::string& name = "");
+    bool DestroyEntity(EntityId entity);
+    bool SetParent(EntityId child, EntityId parent, bool preserveWorldTransform = false);
+    EntityId GetParent(EntityId child) const;
+    std::vector<EntityId> GetChildren(EntityId parent) const;
+    bool IsAlive(EntityId entity) const;
+    std::optional<std::string> GetName(EntityId entity) const;
+    void SetName(EntityId entity, const std::string& name);
+    std::optional<math::Transform> GetTransform(EntityId entity) const;
+    void SetTransform(EntityId entity, const math::Transform& t);
+
 private:
     void CopyTransformsToPrevious();
 
@@ -104,8 +133,7 @@ private:
     EventDispatcher m_events;
     EventLog m_eventLog;
     TransactionManager m_transactions;
-    systems::RegionSystem m_regionSystem;
-    systems::TransformSystem m_transformSystem;
+    std::vector<std::shared_ptr<IWorldSystem>> m_systems;
     SystemGraphScheduler m_systemGraph;
     WorldScheduler m_scheduler;
     double m_simulationTime = 0.0;

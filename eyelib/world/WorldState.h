@@ -5,6 +5,8 @@
 #include "ComponentStorage/ComponentStore.h"
 #include "ComponentStorage/TransformStore.h"
 
+#include <entt/entt.hpp>
+
 #include <memory>
 #include <string>
 #include <typeinfo>
@@ -81,6 +83,21 @@ public:
     const std::string& GetSkyboxAssetId() const { return m_skyboxAssetId; }
     void SetSkyboxAssetId(std::string id) { m_skyboxAssetId = std::move(id); }
 
+    /** Internal only: EnTT registry for component storage. Only Command::Apply and world internals may use this. Never expose in api::world. */
+    entt::registry& GetRegistry() { return m_registry; }
+    const entt::registry& GetRegistry() const { return m_registry; }
+
+    /** Map World EntityId to EnTT entity. Returns entt::null if entity was not created via registry path. Internal only. */
+    entt::entity ToEnTT(EntityId id) const;
+    /** Register mapping after creating an entity in both EntityRegistry and registry. Internal only. */
+    void RegisterEntityMapping(EntityId id, entt::entity e);
+    /** Remove mapping and destroy the EnTT entity. Call before EntityRegistry::Destroy. Internal only. */
+    void UnregisterEntity(EntityId id);
+    /** True if this entity has an EnTT mapping (e.g. for typed component API). */
+    bool HasEnTTEntity(EntityId id) const;
+    /** Map EnTT entity back to World EntityId. Returns InvalidEntity if not found. Internal only. */
+    EntityId FromEnTT(entt::entity e) const;
+
 private:
     std::unique_ptr<EntityRegistry> m_entities;
     std::unique_ptr<Hierarchy> m_hierarchy;
@@ -89,6 +106,9 @@ private:
 
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
     std::string m_skyboxAssetId;
+    entt::registry m_registry;
+    std::unordered_map<EntityId, entt::entity, EntityIdHash> m_entityToEnTT;
+    std::unordered_map<entt::entity, EntityId> m_enttToEntity;
 };
 
 } // namespace world

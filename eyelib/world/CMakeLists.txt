@@ -40,6 +40,12 @@ set(EYELIB_WORLD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Serialization/ComponentSerializer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Serialization/WorldSnapshot.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Serialization/WorldSnapshot.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Query.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Query.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/QueryResult.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentRegistry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentRegistry.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentRegistry.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/RegionQueries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RegionQueries.h
     ${CMAKE_CURRENT_SOURCE_DIR}/systems/RegionSystem.cpp
@@ -61,10 +67,9 @@ target_include_directories(EyelibWorld
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/eyelib>
+        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/thirdparty>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/thirdparty/nlohmann>
         $<INSTALL_INTERFACE:include>
-    PRIVATE
-        ${CMAKE_SOURCE_DIR}/thirdparty
 )
 
 target_link_libraries(EyelibWorld

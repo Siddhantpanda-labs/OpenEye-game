@@ -3,7 +3,7 @@
 struct lua_State;
 
 namespace eyelib {
-namespace ecs { class World; }
+namespace world { class World; }
 namespace scripting {
 namespace bindings {
 
@@ -14,10 +14,10 @@ namespace bindings {
 class BindingRegistry {
 public:
     // Store World pointer in Lua registry (per-VM, thread-safe)
-    static void SetWorld(lua_State* L, ecs::World* world);
+    static void SetWorld(lua_State* L, world::World* world);
     
     // Retrieve World pointer from Lua registry
-    static ecs::World* GetWorld(lua_State* L);
+    static world::World* GetWorld(lua_State* L);
     
     // Clear World pointer from registry
     static void ClearWorld(lua_State* L);

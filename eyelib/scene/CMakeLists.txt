@@ -31,7 +31,7 @@ target_link_libraries(EyelibScene
     PUBLIC
         EyelibCore
         EyelibMath
-        EyelibECS
+        EyelibWorld
         EyelibSerialize
 )
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "eyelib/ecs/World.h"
+#include "eyelib/world/World.h"
+#include "eyelib/world/EntityId.h"
 #include "eyelib/math/Transform.h"
 
 #include <optional>
@@ -10,14 +11,14 @@
 namespace eyelib {
 namespace scene {
 
-using Entity = eyelib::ecs::Entity;
-static constexpr Entity NullEntity = eyelib::ecs::NullEntity;
+using Entity = eyelib::world::EntityId;
+static constexpr Entity NullEntity = eyelib::world::InvalidEntity;
 
 /**
  * @brief Scene: world ownership + hierarchy utilities.
  *
- * This is intentionally engine-only (not rendering-dependent). Rendering/physics
- * will consume the Scene/World data later via dedicated systems.
+ * Backed by eyelib::world::World. Hierarchy and entity list come from the world's
+ * GraphHierarchy and EntityRegistry.
  */
 class Scene {
 public:
@@ -52,16 +53,12 @@ public:
     bool MoveEntity(Entity entity, Entity newParent);
     Entity DuplicateEntity(Entity entity);
 
-    ecs::World& World() { return m_world; }
-    const ecs::World& World() const { return m_world; }
+    world::World& World() { return m_world; }
+    const world::World& World() const { return m_world; }
 
 private:
-    class Impl;
-    Impl* m_impl = nullptr;
-
-    ecs::World m_world{};
+    world::World m_world;
 };
 
 } // namespace scene
 } // namespace eyelib
-

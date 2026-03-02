@@ -1,7 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
-#include "eyelib/ecs/Entity.h"
+#include "eyelib/world/EntityId.h"
 #include <string>
 #include <variant>
 
@@ -29,7 +29,7 @@ struct ScriptValue {
         double,              // Number
         std::string,         // String
         math::Vec3,          // Vec3
-        ecs::Entity          // Entity
+        world::EntityId      // Entity
     > value;
 
     ScriptValue() : type(Type::Nil) {}
@@ -40,7 +40,7 @@ struct ScriptValue {
     ScriptValue(const std::string& s) : type(Type::String), value(s) {}
     ScriptValue(const char* s) : type(Type::String), value(std::string(s)) {}
     ScriptValue(const math::Vec3& v) : type(Type::Vec3), value(v) {}
-    ScriptValue(ecs::Entity e) : type(Type::Entity), value(e) {}
+    ScriptValue(world::EntityId e) : type(Type::Entity), value(e) {}
 
     bool IsNil() const { return type == Type::Nil; }
     bool IsBool() const { return type == Type::Bool; }
@@ -69,9 +69,9 @@ struct ScriptValue {
         return math::Vec3(0.0f);
     }
 
-    ecs::Entity GetEntity() const {
-        if (type == Type::Entity) return std::get<ecs::Entity>(value);
-        return ecs::NullEntity;
+    world::EntityId GetEntity() const {
+        if (type == Type::Entity) return std::get<world::EntityId>(value);
+        return world::InvalidEntity;
     }
 };
 

@@ -7,11 +7,11 @@ PrefabHandle Prefab::CreatePrefab(const std::string& name) {
     return eyelib::scene::Prefab::CreatePrefab(name);
 }
 
-PrefabHandle Prefab::CreateFromEntity(Scene& scene, Entity entity, const std::string& name) {
+PrefabHandle Prefab::CreateFromEntity(Scene& scene, Scene::Entity entity, const std::string& name) {
     return eyelib::scene::Prefab::CreateFromEntity(*scene.GetInternal(), entity, name);
 }
 
-PrefabHandle Prefab::CreateFromHierarchy(Scene& scene, Entity root, const std::string& name) {
+PrefabHandle Prefab::CreateFromHierarchy(Scene& scene, Scene::Entity root, const std::string& name) {
     return eyelib::scene::Prefab::CreateFromHierarchy(*scene.GetInternal(), root, name);
 }
 
@@ -39,15 +39,15 @@ PrefabHandle Prefab::LoadPrefab(const std::string& path) {
     return eyelib::scene::Prefab::LoadPrefab(path);
 }
 
-Entity Prefab::Instantiate(Scene& scene, PrefabHandle prefab, const math::Vec3& position, const math::Quat& rotation) {
+Scene::Entity Prefab::Instantiate(Scene& scene, PrefabHandle prefab, const math::Vec3& position, const math::Quat& rotation) {
     return eyelib::scene::PrefabInstantiator::Instantiate(*scene.GetInternal(), prefab, position, rotation);
 }
 
-Entity Prefab::Instantiate(Scene& scene, PrefabHandle prefab, Entity parent) {
+Scene::Entity Prefab::Instantiate(Scene& scene, PrefabHandle prefab, Scene::Entity parent) {
     return eyelib::scene::PrefabInstantiator::Instantiate(*scene.GetInternal(), prefab, parent);
 }
 
-void Prefab::DestroyInstance(Scene& scene, Entity entity) {
+void Prefab::DestroyInstance(Scene& scene, Scene::Entity entity) {
     eyelib::scene::PrefabInstantiator::DestroyInstance(*scene.GetInternal(), entity);
 }
 

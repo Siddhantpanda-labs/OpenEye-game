@@ -34,7 +34,11 @@ public:
 
     bool Apply(WorldState& state) override {
         m_entity = state.Entities().Create();
-        if (!m_name.empty()) {
+        if (m_entity.has_value()) {
+            entt::entity e = state.GetRegistry().create();
+            state.RegisterEntityMapping(*m_entity, e);
+        }
+        if (!m_name.empty() && m_entity.has_value()) {
             MetadataEntry entry;
             entry.name = m_name;
             state.GraphMetadata().Set(*m_entity, entry);
@@ -46,6 +50,7 @@ public:
         if (!m_entity.has_value()) {
             return false;
         }
+        state.UnregisterEntity(*m_entity);
         state.Entities().Destroy(*m_entity);
         state.GraphMetadata().Remove(*m_entity);
         state.GraphHierarchy().RemoveParent(*m_entity);
@@ -71,6 +76,7 @@ public:
         if (!state.Entities().IsAlive(m_entity)) {
             return false;
         }
+        state.UnregisterEntity(m_entity);
         state.Entities().Destroy(m_entity);
         state.GraphMetadata().Remove(m_entity);
         state.GraphHierarchy().RemoveParent(m_entity);
@@ -340,8 +346,12 @@ public:
 
     bool Apply(WorldState& state) override {
         m_entity = state.Entities().Create();
+        if (m_entity.has_value()) {
+            entt::entity e = state.GetRegistry().create();
+            state.RegisterEntityMapping(*m_entity, e);
+        }
         state.Components<components::Region>().Add(*m_entity, m_region);
-        if (!m_name.empty()) {
+        if (!m_name.empty() && m_entity.has_value()) {
             MetadataEntry entry;
             entry.name = m_name;
             state.GraphMetadata().Set(*m_entity, entry);
@@ -356,6 +366,7 @@ public:
         state.Components<components::Region>().Remove(*m_entity);
         state.GraphMetadata().Remove(*m_entity);
         state.GraphHierarchy().RemoveParent(*m_entity);
+        state.UnregisterEntity(*m_entity);
         state.Entities().Destroy(*m_entity);
         return true;
     }
@@ -520,11 +531,20 @@ public:
             m_prev = *store.TryGet(m_entity);
         }
         store.Add(m_entity, m_value);
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().emplace_or_replace<T>(e, m_value);
+        }
         return true;
     }
 
     bool Revert(WorldState& state) override {
         auto& store = state.Components<T>();
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().remove<T>(e);
+            if (m_prev.has_value()) {
+                state.GetRegistry().emplace_or_replace<T>(e, *m_prev);
+            }
+        }
         if (m_prev.has_value()) {
             store.Add(m_entity, *m_prev);
         } else {
@@ -567,6 +587,9 @@ public:
             m_prev = *existing;
         }
         store.Remove(m_entity);
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().remove<T>(e);
+        }
         return true;
     }
 
@@ -575,6 +598,9 @@ public:
             return true;
         }
         state.Components<T>().Add(m_entity, *m_prev);
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().emplace_or_replace<T>(e, *m_prev);
+        }
         return true;
     }
 
@@ -609,11 +635,20 @@ public:
             m_prev = *existing;
         }
         store.Add(m_entity, m_value);
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().emplace_or_replace<T>(e, m_value);
+        }
         return true;
     }
 
     bool Revert(WorldState& state) override {
         auto& store = state.Components<T>();
+        if (entt::entity e = state.ToEnTT(m_entity); e != entt::null) {
+            state.GetRegistry().remove<T>(e);
+            if (m_prev.has_value()) {
+                state.GetRegistry().emplace_or_replace<T>(e, *m_prev);
+            }
+        }
         if (m_prev.has_value()) {
             store.Add(m_entity, *m_prev);
         } else {

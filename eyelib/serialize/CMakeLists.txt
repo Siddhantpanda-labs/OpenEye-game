@@ -3,13 +3,9 @@
 set(SERIALIZE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/BinarySerializer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BinarySerializer.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentSerializer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ComponentSerializer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/SerializationTraits.h
     ${CMAKE_CURRENT_SOURCE_DIR}/SerializeTests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/SerializeTests.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/WorldSnapshot.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/WorldSnapshot.h
 )
 
 add_library(EyelibSerialize STATIC ${SERIALIZE_SOURCES})
@@ -28,7 +24,7 @@ target_include_directories(EyelibSerialize
 target_link_libraries(EyelibSerialize
     PUBLIC
         EyelibCore
-        EyelibECS
+        EyelibWorld
         EyelibScene
 )
 

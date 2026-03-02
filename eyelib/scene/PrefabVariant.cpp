@@ -17,7 +17,7 @@ VariantStore& Store() {
 }
 } // namespace
 
-ecs::ComponentRegistry& PrefabVariant::Registry() {
+world::ComponentRegistry& PrefabVariant::Registry() {
     return Prefab::GetRegistry();
 }
 
@@ -46,19 +46,19 @@ PrefabHandle PrefabVariant::GetBasePrefab(PrefabVariantHandle handle) {
     return data ? data->base : NullPrefab;
 }
 
-void PrefabVariant::OverrideComponent(PrefabVariantHandle handle, ecs::ComponentTypeId type, const void* data) {
+void PrefabVariant::OverrideComponent(PrefabVariantHandle handle, world::ComponentTypeId type, const void* data) {
     auto* variant = GetData(handle);
-    if (!variant) return;
-    auto* ops = Registry().GetOps(type);
-    if (!ops || !ops->clone || !ops->destroy) return;
+    if (!variant || !data) return;
+    const world::ComponentTypeInfo* info = Registry().GetTypeInfo(type);
+    if (!info || !info->clone || !info->destroy) return;
 
     PrefabComponent comp;
     comp.type = type;
-    comp.data = std::shared_ptr<void>(ops->clone(data), ops->destroy);
+    comp.data = std::shared_ptr<void>(info->clone(data), info->destroy);
     variant->overrides.push_back(std::move(comp));
 }
 
-void* PrefabVariant::GetOverride(PrefabVariantHandle handle, ecs::ComponentTypeId type) {
+void* PrefabVariant::GetOverride(PrefabVariantHandle handle, world::ComponentTypeId type) {
     auto* variant = GetData(handle);
     if (!variant) return nullptr;
     for (auto& comp : variant->overrides) {

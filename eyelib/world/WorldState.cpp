@@ -80,7 +80,46 @@ void WorldState::RegisterComponentStore(size_t typeKey, std::unique_ptr<ICompone
     m_componentStores[typeKey] = std::move(store);
 }
 
+entt::entity WorldState::ToEnTT(EntityId id) const {
+    auto it = m_entityToEnTT.find(id);
+    if (it == m_entityToEnTT.end()) {
+        return entt::null;
+    }
+    return it->second;
+}
+
+void WorldState::RegisterEntityMapping(EntityId id, entt::entity e) {
+    m_entityToEnTT[id] = e;
+    m_enttToEntity[e] = id;
+}
+
+void WorldState::UnregisterEntity(EntityId id) {
+    auto it = m_entityToEnTT.find(id);
+    if (it == m_entityToEnTT.end()) {
+        return;
+    }
+    entt::entity e = it->second;
+    m_enttToEntity.erase(e);
+    m_entityToEnTT.erase(it);
+    m_registry.destroy(e);
+}
+
+bool WorldState::HasEnTTEntity(EntityId id) const {
+    return m_entityToEnTT.find(id) != m_entityToEnTT.end();
+}
+
+EntityId WorldState::FromEnTT(entt::entity e) const {
+    auto it = m_enttToEntity.find(e);
+    if (it == m_enttToEntity.end()) {
+        return InvalidEntity;
+    }
+    return it->second;
+}
+
 void WorldState::Clear() {
+    m_entityToEnTT.clear();
+    m_enttToEntity.clear();
+    m_registry.clear();
     m_componentStores.clear();
     m_skyboxAssetId.clear();
     if (m_entities) {

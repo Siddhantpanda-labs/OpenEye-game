@@ -45,9 +45,12 @@ private:
     };
     static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots);  // used by BindSceneAssets and Build
     ModelEntry LoadModelEntry(const std::string& path);
+    /** Resolve builtin:// primitive mesh id to procedural mesh + default material. Returns empty entry if not builtin. */
+    ModelEntry GetPrimitiveEntry(const std::string& meshId);
     void EnsureDefaultMaterial();
 
     std::unordered_map<std::string, ModelEntry> m_modelCache;
+    std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;
 };

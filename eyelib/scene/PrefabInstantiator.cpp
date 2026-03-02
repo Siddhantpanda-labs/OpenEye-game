@@ -1,12 +1,11 @@
 #include "PrefabInstantiator.h"
 
-#include "eyelib/ecs/components/All.h"
-#include "entt/entt.hpp"
+#include "Prefab.h"
 
 namespace eyelib {
 namespace scene {
 
-std::unordered_map<Entity, PrefabHandle> PrefabInstantiator::s_instances{};
+std::unordered_map<Entity, PrefabHandle, world::EntityIdHash> PrefabInstantiator::s_instances{};
 
 Entity PrefabInstantiator::Instantiate(Scene& scene, PrefabHandle prefab,
                                        const math::Vec3& position, const math::Quat& rotation) {
@@ -48,14 +47,11 @@ Entity PrefabInstantiator::InstantiateNode(Scene& scene, const PrefabNode& node,
     if (overrideRoot) t = *overrideRoot;
     scene.SetTransform(entity, t);
 
-    auto& registry = Prefab::GetRegistry();
-    auto& world = scene.World();
-    auto& storage = world.Storage().Registry();
+    world::World& world = scene.World();
     for (const auto& comp : node.components) {
-        const auto* ops = registry.GetOps(comp.type);
-        if (!ops || !ops->add || !comp.data) continue;
-        ops->add(storage, static_cast<entt::entity>(static_cast<entt::id_type>(entity)), comp.data.get());
+        Prefab::ApplyComponentToWorld(world, entity, comp);
     }
+    world.ApplyPendingCommands();
 
     for (const auto& child : node.children) {
         InstantiateNode(scene, child, entity, nullptr);

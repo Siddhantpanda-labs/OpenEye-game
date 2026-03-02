@@ -25,7 +25,7 @@ target_include_directories(EyelibSerializeAPI
 target_link_libraries(EyelibSerializeAPI
     PUBLIC
         EyelibSceneAPI
-        EyelibECSAPI
+        EyelibWorld
         EyelibCore
 )
 

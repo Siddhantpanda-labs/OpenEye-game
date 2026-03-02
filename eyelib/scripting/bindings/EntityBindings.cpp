@@ -1,8 +1,7 @@
 #include "EntityBindings.h"
 #include "BindingHelpers.h"
 #include "BindingRegistry.h"
-#include "eyelib/ecs/World.h"
-#include "eyelib/ecs/components/Transform.h"
+#include "eyelib/world/World.h"
 
 extern "C" {
 #include <lua.h>
@@ -14,20 +13,20 @@ namespace scripting {
 namespace bindings {
 
 static int lua_Entity_Create(lua_State* L) {
-    ecs::World* world = BindingRegistry::GetWorld(L);
+    world::World* world = BindingRegistry::GetWorld(L);
     if (!world) {
         lua_pushnil(L);
         return 1;
     }
     
     const char* name = luaL_optstring(L, 1, nullptr);
-    ecs::Entity e = name ? world->CreateEntity(name) : world->CreateEntity();
+    world::EntityId e = name ? world->CreateEntity(name) : world->CreateEntity();
     PushEntity(L, e, world);
     return 1;
 }
 
 static int lua_Entity_IsValid(lua_State* L) {
-    ecs::World* world = BindingRegistry::GetWorld(L);
+    world::World* world = BindingRegistry::GetWorld(L);
     EntityUserdata* ud = GetEntityUserdata(L, 1);
     
     if (!world || !ud) {
@@ -40,7 +39,7 @@ static int lua_Entity_IsValid(lua_State* L) {
 }
 
 static int lua_Entity_Destroy(lua_State* L) {
-    ecs::World* world = BindingRegistry::GetWorld(L);
+    world::World* world = BindingRegistry::GetWorld(L);
     EntityUserdata* ud = GetEntityUserdata(L, 1);
     
     if (world && ud) {
@@ -49,7 +48,7 @@ static int lua_Entity_Destroy(lua_State* L) {
     return 0;
 }
 
-void RegisterEntityBindings(lua_State* L, ecs::World* world) {
+void RegisterEntityBindings(lua_State* L, world::World* world) {
     // Store world in registry
     BindingRegistry::SetWorld(L, world);
     

@@ -216,10 +216,7 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib animation module
     add_subdirectory(eyelib/animation)
     add_subdirectory(api/animation)
-    # Eyelib ECS module
-    add_subdirectory(eyelib/ecs)
-    add_subdirectory(api/ecs)
-    # Eyelib scene module
+    # Eyelib scene module (ecs removed Steps 7–8: consolidated into world)
     add_subdirectory(eyelib/scene)
     add_subdirectory(api/scene)
     # Eyelib serialize module

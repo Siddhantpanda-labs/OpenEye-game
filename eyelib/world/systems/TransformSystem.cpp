@@ -1,5 +1,6 @@
 #include "TransformSystem.h"
 
+#include "eyelib/world/World.h"
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/world/ComponentStorage/TransformStore.h"
 #include "eyelib/world/WorldGraph/Hierarchy.h"
@@ -10,6 +11,10 @@
 namespace eyelib {
 namespace world {
 namespace systems {
+
+void TransformSystem::Update(World& world, float /*dt*/) {
+    Update(world.GetState());
+}
 
 void TransformSystem::RebuildLinearizedOrder(WorldState& state) const {
     const auto& store = state.GetTransformStore();

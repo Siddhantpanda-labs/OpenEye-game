@@ -18,7 +18,7 @@ static int Entity__index(lua_State* L) {
     const char* key = luaL_checkstring(L, 2);
     
     if (strcmp(key, "id") == 0) {
-        lua_pushinteger(L, static_cast<lua_Integer>(ud->entity));
+        lua_pushinteger(L, static_cast<lua_Integer>(ud->entity.index));
         return 1;
     }
     
@@ -35,7 +35,8 @@ static int Entity__index(lua_State* L) {
 static int Entity__eq(lua_State* L) {
     EntityUserdata* ud1 = GetEntityUserdata(L, 1);
     EntityUserdata* ud2 = GetEntityUserdata(L, 2);
-    lua_pushboolean(L, (ud1->entity == ud2->entity) ? 1 : 0);
+    bool eq = (ud1->entity.index == ud2->entity.index && ud1->entity.generation == ud2->entity.generation);
+    lua_pushboolean(L, eq ? 1 : 0);
     return 1;
 }
 
@@ -43,9 +44,9 @@ static int Entity__tostring(lua_State* L) {
     EntityUserdata* ud = GetEntityUserdata(L, 1);
     bool valid = (ud->world && ud->world->IsAlive(ud->entity));
     if (valid) {
-        lua_pushfstring(L, "Entity(%zu)", ud->entity);
+        lua_pushfstring(L, "Entity(%u,%u)", ud->entity.index, ud->entity.generation);
     } else {
-        lua_pushfstring(L, "Entity(%zu, invalid)", ud->entity);
+        lua_pushfstring(L, "Entity(%u,%u, invalid)", ud->entity.index, ud->entity.generation);
     }
     return 1;
 }
@@ -76,7 +77,7 @@ void RegisterEntityMetatable(lua_State* L) {
     lua_pop(L, 1); // Pop metatable
 }
 
-void PushScriptValue(lua_State* L, const scripting::ScriptValue& value, ecs::World* world) {
+void PushScriptValue(lua_State* L, const scripting::ScriptValue& value, world::World* world) {
     switch (value.type) {
         case scripting::ScriptValue::Type::Bool:
             lua_pushboolean(L, value.GetBool() ? 1 : 0);

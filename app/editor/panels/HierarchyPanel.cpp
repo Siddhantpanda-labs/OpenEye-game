@@ -2,10 +2,17 @@
 #include "EditorContext.h"
 #include "PanelCommon.h"
 
+#include "api/geometry/BuiltinMeshIds.h"
 #include "api/world/All.h"
+#include "api/world/Commands.h"
+#include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/Collider.h"
+#include "eyelib/world/components/Light.h"
+#include "eyelib/world/components/Renderable.h"
 
 #include <imgui.h>
 #include <cstdio>
+#include <unordered_set>
 
 namespace openeye::editor::panels {
 
@@ -14,6 +21,58 @@ namespace {
 using EntityId = ::eyelib::world::EntityId;
 
 constexpr const char* kEntityPayload = "OpenEyeEntity";
+
+/** Primitive mesh choice for Add Entity (mesh primitives only; no None). */
+enum class AddEntityMeshChoice : int {
+    Cube,
+    Sphere,
+    Plane,
+    Cylinder,
+    Cone,
+    Torus,
+};
+
+const char* AddEntityMeshChoiceBuiltinId(AddEntityMeshChoice choice) {
+    switch (choice) {
+        case AddEntityMeshChoice::Cube:     return eyelib::api::geometry::BuiltinMesh::Cube;
+        case AddEntityMeshChoice::Sphere:   return eyelib::api::geometry::BuiltinMesh::Sphere;
+        case AddEntityMeshChoice::Plane:    return eyelib::api::geometry::BuiltinMesh::Plane;
+        case AddEntityMeshChoice::Cylinder: return eyelib::api::geometry::BuiltinMesh::Cylinder;
+        case AddEntityMeshChoice::Cone:    return eyelib::api::geometry::BuiltinMesh::Cone;
+        case AddEntityMeshChoice::Torus:   return eyelib::api::geometry::BuiltinMesh::Torus;
+    }
+    return "";
+}
+
+const char* AddEntityMeshChoiceDefaultName(AddEntityMeshChoice choice) {
+    switch (choice) {
+        case AddEntityMeshChoice::Cube:     return "Cube";
+        case AddEntityMeshChoice::Sphere:   return "Sphere";
+        case AddEntityMeshChoice::Plane:    return "Plane";
+        case AddEntityMeshChoice::Cylinder: return "Cylinder";
+        case AddEntityMeshChoice::Cone:    return "Cone";
+        case AddEntityMeshChoice::Torus:   return "Torus";
+    }
+    return "Entity";
+}
+
+std::string GetUniqueEntityName(eyelib::api::world::World& world, const std::string& baseName) {
+    std::unordered_set<std::string> existing;
+    for (EntityId id : world.GetEntities()) {
+        if (!world.IsAlive(id)) continue;
+        std::string n;
+        if (world.GetEntityName(id, n) && !n.empty())
+            existing.insert(n);
+    }
+    if (existing.find(baseName) == existing.end())
+        return baseName;
+    for (int i = 1; i < 10000; ++i) {
+        std::string candidate = baseName + std::to_string(i);
+        if (existing.find(candidate) == existing.end())
+            return candidate;
+    }
+    return baseName + "_";
+}
 
 /** True if \a entity is a descendant of \a potentialAncestor (i.e. potentialAncestor is in the parent chain of entity). */
 bool IsDescendant(eyelib::api::world::World& world, EntityId entity, EntityId potentialAncestor) {
@@ -159,6 +218,154 @@ void RunRenamePopup(EditorContext* ctx) {
     ImGui::EndPopup();
 }
 
+/** Ensure entity has a Transform component (so it appears in Inspector and can be positioned). */
+static void EnsureEntityHasTransform(eyelib::api::world::World& world, EntityId entity) {
+    eyelib::world::components::Transform t;
+    t.position = eyelib::math::Vec3(0.0f, 0.0f, 0.0f);
+    t.rotation = eyelib::math::Quat(1.0f, 0.0f, 0.0f, 0.0f);
+    t.scale = eyelib::math::Vec3(1.0f, 1.0f, 1.0f);
+    world.SetTransform(entity, t);
+}
+
+/** Create entity with primitive mesh (Renderable + optional Collider), select it, close popups. */
+static void AddPrimitiveEntity(EditorContext* ctx, AddEntityMeshChoice choice) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+    const std::string name = GetUniqueEntityName(world, AddEntityMeshChoiceDefaultName(choice));
+    auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    if (!result.success || !result.createdEntity) return;
+    EntityId newEntity = *result.createdEntity;
+    EnsureEntityHasTransform(world, newEntity);
+    ctx->sceneSelected = false;
+    ctx->selectedEntity = newEntity;
+
+    const char* meshId = AddEntityMeshChoiceBuiltinId(choice);
+    eyelib::world::components::Renderable renderable{};
+    renderable.meshAssetId = meshId;
+    renderable.visible = true;
+    world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Renderable>(newEntity, renderable));
+
+    using CT = eyelib::world::components::Collider::Type;
+    bool addCollider = false;
+    eyelib::world::components::Collider collider{};
+    switch (choice) {
+        case AddEntityMeshChoice::Cube:
+            collider.type = CT::Box;
+            collider.size = eyelib::math::Vec3(1.0f, 1.0f, 1.0f);
+            addCollider = true;
+            break;
+        case AddEntityMeshChoice::Plane:
+            collider.type = CT::Box;
+            collider.size = eyelib::math::Vec3(10.0f, 0.01f, 10.0f);
+            addCollider = true;
+            break;
+        case AddEntityMeshChoice::Sphere:
+            collider.type = CT::Sphere;
+            collider.radius = 0.5f;
+            addCollider = true;
+            break;
+        case AddEntityMeshChoice::Cylinder:
+        case AddEntityMeshChoice::Cone:
+            collider.type = CT::Capsule;
+            collider.radius = 0.5f;
+            collider.height = 1.0f;
+            addCollider = true;
+            break;
+        default:
+            break;
+    }
+    if (addCollider) {
+        world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Collider>(newEntity, collider));
+    }
+}
+
+/** Create entity with Light component, select it. */
+static void AddLightEntity(EditorContext* ctx, eyelib::world::components::Light::Type lightType, const char* baseName) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+    const std::string name = GetUniqueEntityName(world, baseName);
+    auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    if (!result.success || !result.createdEntity) return;
+    EntityId newEntity = *result.createdEntity;
+    EnsureEntityHasTransform(world, newEntity);
+    ctx->sceneSelected = false;
+    ctx->selectedEntity = newEntity;
+    eyelib::world::components::Light light{};
+    light.type = lightType;
+    world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Light>(newEntity, light));
+}
+
+/** Create entity with Camera component, select it. */
+static void AddCameraEntity(EditorContext* ctx) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+    const std::string name = GetUniqueEntityName(world, "Camera");
+    auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    if (!result.success || !result.createdEntity) return;
+    EntityId newEntity = *result.createdEntity;
+    EnsureEntityHasTransform(world, newEntity);
+    ctx->sceneSelected = false;
+    ctx->selectedEntity = newEntity;
+    eyelib::world::components::Camera camera{};
+    world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Camera>(newEntity, camera));
+}
+
+void RunAddEntityPopup(EditorContext* ctx) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+
+    if (!ImGui::BeginPopup("Add Entity", ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    // Mesh section: label + ">" opens primitives sub-popup
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("Mesh");
+    ImGui::SameLine(80.0f);
+    if (ImGui::Button(">")) {
+        ImGui::OpenPopup("Primitive Mesh");
+    }
+    if (ImGui::BeginPopup("Primitive Mesh")) {
+        auto addPrimitive = [&](AddEntityMeshChoice choice, const char* label) {
+            if (ImGui::Selectable(label)) {
+                AddPrimitiveEntity(ctx, choice);
+                ImGui::CloseCurrentPopup();  // close Primitive Mesh
+                ImGui::CloseCurrentPopup();  // close Add Entity
+            }
+        };
+        addPrimitive(AddEntityMeshChoice::Cube, "Cube");
+        addPrimitive(AddEntityMeshChoice::Sphere, "Sphere");
+        addPrimitive(AddEntityMeshChoice::Plane, "Plane");
+        addPrimitive(AddEntityMeshChoice::Cylinder, "Cylinder");
+        addPrimitive(AddEntityMeshChoice::Cone, "Cone");
+        addPrimitive(AddEntityMeshChoice::Torus, "Torus");
+        ImGui::EndPopup();
+    }
+
+    // Light section
+    using LightType = eyelib::world::components::Light::Type;
+    if (ImGui::Selectable("Directional Light")) {
+        AddLightEntity(ctx, LightType::Directional, "Directional Light");
+        ImGui::CloseCurrentPopup();
+    }
+    if (ImGui::Selectable("Point Light")) {
+        AddLightEntity(ctx, LightType::Point, "Point Light");
+        ImGui::CloseCurrentPopup();
+    }
+    if (ImGui::Selectable("Spot Light")) {
+        AddLightEntity(ctx, LightType::Spot, "Spot Light");
+        ImGui::CloseCurrentPopup();
+    }
+
+    // Camera
+    if (ImGui::Selectable("Camera")) {
+        AddCameraEntity(ctx);
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
 } // namespace
 
 void ShowHierarchyPanel(EditorContext* ctx) {
@@ -173,13 +380,12 @@ void ShowHierarchyPanel(EditorContext* ctx) {
 
         eyelib::api::world::World& world = ctx->world;
 
-        if (ImGui::Button("Create Entity")) {
-            auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity("Entity"));
-            if (result.success && result.createdEntity) {
-                ctx->sceneSelected = false;
-                ctx->selectedEntity = *result.createdEntity;
-            }
+        ImGui::PushID("AddEntity");
+        if (ImGui::Button("Add Entity")) {
+            ImGui::OpenPopup("Add Entity");
         }
+        RunAddEntityPopup(ctx);
+        ImGui::PopID();
 
         ImGui::Separator();
 

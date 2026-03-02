@@ -5,6 +5,7 @@
  * @brief Include all geometry API headers.
  */
 
+#include "api/geometry/BuiltinMeshIds.h"
 #include "api/geometry/Selection.h"
 #include "api/geometry/Mask.h"
 #include "api/geometry/MeshOps.h"

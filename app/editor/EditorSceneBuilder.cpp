@@ -2,6 +2,8 @@
 
 #include "api/assets/AssetRegistry.h"
 #include "api/assets/AssetTypes.h"
+#include "api/geometry/BuiltinMeshIds.h"
+#include "api/geometry/Primitives.h"
 #include "api/render/Light.h"
 #include "eyelib/world/components/Light.h"
 #include "api/assets/loaders/ModelLoader.h"
@@ -158,6 +160,36 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(const std::str
     return entry;
 }
 
+EditorSceneBuilder::ModelEntry EditorSceneBuilder::GetPrimitiveEntry(const std::string& meshId) {
+    using namespace eyelib::api::geometry;
+    if (!IsBuiltinMeshId(meshId)) return ModelEntry{};
+    auto it = m_primitiveCache.find(meshId);
+    if (it != m_primitiveCache.end()) return it->second;
+
+    ModelEntry entry{};
+    std::shared_ptr<eyelib::api::Mesh> mesh;
+    if (meshId == BuiltinMesh::Cube) {
+        mesh = eyelib::api::geometry::Primitives::CreateCube(0.5f);
+    } else if (meshId == BuiltinMesh::Sphere) {
+        mesh = eyelib::api::geometry::Primitives::CreateSphere(0.5f, 32, 16);
+    } else if (meshId == BuiltinMesh::Plane) {
+        mesh = eyelib::api::geometry::Primitives::CreatePlane(1.0f, 1.0f, 1, 1);
+    } else if (meshId == BuiltinMesh::Cylinder) {
+        mesh = eyelib::api::geometry::Primitives::CreateCylinder(0.5f, 1.0f, 32, 1, true, true);
+    } else if (meshId == BuiltinMesh::Cone) {
+        mesh = eyelib::api::geometry::Primitives::CreateCone(0.5f, 1.0f, 32, true);
+    } else if (meshId == BuiltinMesh::Torus) {
+        mesh = eyelib::api::geometry::Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
+    }
+    if (mesh) {
+        entry.mesh = std::move(mesh);
+        EnsureDefaultMaterial();
+        entry.material = m_defaultMaterial;
+    }
+    m_primitiveCache[meshId] = entry;
+    return entry;
+}
+
 std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAssetId(const std::string& assetId,
                                                                                     const std::vector<std::string>& assetRoots) {
     if (assetId.empty()) return nullptr;
@@ -268,9 +300,14 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         std::string meshId = renderable.meshAssetId;
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size())
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
-        const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
-        if (meshResolved.empty()) continue;
-        ModelEntry modelEntry = LoadModelEntry(meshResolved);
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
+            if (meshResolved.empty()) continue;
+            modelEntry = LoadModelEntry(meshResolved);
+        }
         if (!modelEntry.mesh) continue;
 
         eyelib::api::Drawable drawable{};
@@ -295,9 +332,15 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     for (const auto& entry : snapshot.meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty()) continue;
-        const std::string meshResolved = ResolveAssetPath(renderer.meshAssetId, assetRoots);
-        if (meshResolved.empty()) continue;
-        ModelEntry modelEntry = LoadModelEntry(meshResolved);
+        const std::string& meshId = renderer.meshAssetId;
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
+            if (meshResolved.empty()) continue;
+            modelEntry = LoadModelEntry(meshResolved);
+        }
         if (!modelEntry.mesh) continue;
 
         eyelib::api::Drawable drawable{};

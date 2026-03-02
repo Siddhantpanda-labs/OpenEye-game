@@ -1,8 +1,8 @@
 #include "TransformBindings.h"
 #include "BindingHelpers.h"
 #include "BindingRegistry.h"
-#include "eyelib/ecs/World.h"
-#include "eyelib/ecs/components/Transform.h"
+#include "eyelib/world/World.h"
+#include "eyelib/math/Transform.h"
 
 extern "C" {
 #include <lua.h>
@@ -14,7 +14,7 @@ namespace scripting {
 namespace bindings {
 
 static int lua_Transform_GetPosition(lua_State* L) {
-    ecs::World* world = BindingRegistry::GetWorld(L);
+    world::World* world = BindingRegistry::GetWorld(L);
     EntityUserdata* ud = GetEntityUserdata(L, 1);
     
     if (!world || !ud || !world->IsAlive(ud->entity)) {
@@ -22,8 +22,9 @@ static int lua_Transform_GetPosition(lua_State* L) {
         return 1;
     }
     
-    if (auto* transform = world->TryGetComponent<ecs::components::Transform>(ud->entity)) {
-        PushVec3(L, transform->position);
+    auto opt = world->GetTransform(ud->entity);
+    if (opt) {
+        PushVec3(L, opt->position);
     } else {
         PushVec3(L, math::Vec3(0.0f));
     }
@@ -31,7 +32,7 @@ static int lua_Transform_GetPosition(lua_State* L) {
 }
 
 static int lua_Transform_SetPosition(lua_State* L) {
-    ecs::World* world = BindingRegistry::GetWorld(L);
+    world::World* world = BindingRegistry::GetWorld(L);
     EntityUserdata* ud = GetEntityUserdata(L, 1);
     
     if (!world || !ud || !world->IsAlive(ud->entity)) {
@@ -42,18 +43,14 @@ static int lua_Transform_SetPosition(lua_State* L) {
     float y = static_cast<float>(luaL_checknumber(L, 3));
     float z = static_cast<float>(luaL_checknumber(L, 4));
     
-    if (auto* transform = world->TryGetComponent<ecs::components::Transform>(ud->entity)) {
-        transform->position = math::Vec3(x, y, z);
-        transform->MarkDirty();
-    } else {
-        ecs::components::Transform t;
-        t.position = math::Vec3(x, y, z);
-        world->AddComponent<ecs::components::Transform>(ud->entity, t);
-    }
+    auto opt = world->GetTransform(ud->entity);
+    math::Transform t = opt.value_or(math::Transform{});
+    t.position = math::Vec3(x, y, z);
+    world->SetTransform(ud->entity, t);
     return 0;
 }
 
-void RegisterTransformBindings(lua_State* L, ecs::World* world) {
+void RegisterTransformBindings(lua_State* L, world::World* world) {
     // World is already stored in registry by RegisterEntityBindings
     // But we ensure it's set here too for standalone use
     BindingRegistry::SetWorld(L, world);

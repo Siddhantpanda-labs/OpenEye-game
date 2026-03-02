@@ -39,6 +39,7 @@ target_include_directories(OpenEyeGameRuntime
 target_link_libraries(OpenEyeGameRuntime
     PUBLIC
         EyelibCoreAPI
+        EyelibGeometryAPI
         EyelibPlatformAPI
         EyelibAssetsAPI
         EyelibWorldAPI

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "eyelib/ecs/ComponentRegistry.h"
+#include "eyelib/world/ComponentRegistry.h"
+#include "eyelib/world/EntityId.h"
 #include "eyelib/scene/Scene.h"
 
 #include <cstdint>
@@ -16,7 +17,7 @@ using PrefabHandle = uint32_t;
 static constexpr PrefabHandle NullPrefab = 0;
 
 struct PrefabComponent {
-    ecs::ComponentTypeId type = 0;
+    world::ComponentTypeId type = 0;
     std::shared_ptr<void> data;
 };
 
@@ -43,17 +44,19 @@ public:
     static const std::string& GetName(PrefabHandle handle);
     static void SetName(PrefabHandle handle, const std::string& name);
 
-    static void AddComponent(PrefabHandle handle, ecs::ComponentTypeId type, const void* data);
-    static void* GetComponent(PrefabHandle handle, ecs::ComponentTypeId type);
+    static void AddComponent(PrefabHandle handle, world::ComponentTypeId type, const void* data);
+    static void* GetComponent(PrefabHandle handle, world::ComponentTypeId type);
 
     static bool SavePrefab(PrefabHandle handle, const std::string& path);
     static PrefabHandle LoadPrefab(const std::string& path);
 
     static const PrefabNode* GetRoot(PrefabHandle handle);
-    static ecs::ComponentRegistry& GetRegistry();
+    static world::ComponentRegistry& GetRegistry();
+
+    /** Apply a prefab component to a world entity (used by PrefabInstantiator). */
+    static void ApplyComponentToWorld(world::World& world, Entity entity, const PrefabComponent& comp);
 
 private:
-    static ecs::ComponentRegistry& Registry();
     static PrefabData* GetDataMutable(PrefabHandle handle);
     static const PrefabData* GetData(PrefabHandle handle);
 

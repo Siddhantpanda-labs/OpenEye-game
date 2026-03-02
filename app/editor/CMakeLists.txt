@@ -32,6 +32,7 @@ target_include_directories(OpenEyeEditor
 target_link_libraries(OpenEyeEditor
     PRIVATE
         EyelibCoreAPI
+        EyelibGeometryAPI
         EyelibPlatformAPI
         EyelibWorldAPI
         EyelibRenderAPI

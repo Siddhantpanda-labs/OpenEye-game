@@ -94,6 +94,8 @@ private:
     std::shared_ptr<eyelib::api::Material> ResolveMaterial(const std::string& materialId,
                                                            eyelib::api::AssetRegistry* registry);
     ModelEntry LoadModelEntry(const std::string& path);
+    /** Resolve builtin:// primitive mesh id to procedural mesh + default material. */
+    ModelEntry GetPrimitiveEntry(const std::string& meshId);
     std::shared_ptr<eyelib::api::TextureCube> GetOrLoadSkybox(const std::string& assetId,
                                                              const std::vector<std::string>& assetRoots);
 
@@ -120,6 +122,7 @@ private:
     std::shared_ptr<eyelib::api::Shader> m_skinnedShader;
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, ModelEntry> m_modelCache;
+    std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     bool m_captureCallbackSet = false;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;

@@ -5,8 +5,8 @@ extern "C" {
 #include <lauxlib.h>
 }
 #include "eyelib/math/Types.h"
-#include "eyelib/ecs/Entity.h"
-#include "eyelib/ecs/World.h"
+#include "eyelib/world/EntityId.h"
+#include "eyelib/world/World.h"
 #include "eyelib/scripting/ScriptValue.h"
 
 // Forward declare BindingRegistry for macros
@@ -27,10 +27,10 @@ struct EntityUserdata;
 
 // Entity userdata structure
 struct EntityUserdata {
-    ecs::Entity entity;
-    ecs::World* world;  // For validation
+    world::EntityId entity;
+    world::World* world;  // For validation
     
-    EntityUserdata(ecs::Entity e, ecs::World* w) : entity(e), world(w) {}
+    EntityUserdata(world::EntityId e, world::World* w) : entity(e), world(w) {}
 };
 
 // Helper functions for pushing/pulling Lua values
@@ -64,7 +64,7 @@ inline math::Vec3 GetVec3(lua_State* L, int index) {
 }
 
 // Entity userdata management
-inline void PushEntity(lua_State* L, ecs::Entity e, ecs::World* world) {
+inline void PushEntity(lua_State* L, world::EntityId e, world::World* world) {
     // Allocate userdata
     EntityUserdata* ud = static_cast<EntityUserdata*>(
         lua_newuserdata(L, sizeof(EntityUserdata))
@@ -75,9 +75,9 @@ inline void PushEntity(lua_State* L, ecs::Entity e, ecs::World* world) {
     luaL_getmetatable(L, "Entity");
     if (lua_isnil(L, -1)) {
         lua_pop(L, 1);
-        // Fallback: push as integer if metatable not registered
+        // Fallback: push index as integer if metatable not registered
         lua_pop(L, 1);
-        lua_pushinteger(L, static_cast<lua_Integer>(e));
+        lua_pushinteger(L, static_cast<lua_Integer>(e.index));
         return;
     }
     lua_setmetatable(L, -2);
@@ -88,7 +88,7 @@ inline EntityUserdata* GetEntityUserdata(lua_State* L, int index) {
     return ud;
 }
 
-inline ecs::Entity GetEntity(lua_State* L, int index) {
+inline world::EntityId GetEntity(lua_State* L, int index) {
     // Try userdata first
     if (lua_isuserdata(L, index)) {
         EntityUserdata* ud = static_cast<EntityUserdata*>(luaL_testudata(L, index, "Entity"));
@@ -97,23 +97,19 @@ inline ecs::Entity GetEntity(lua_State* L, int index) {
             if (ud->world && ud->world->IsAlive(ud->entity)) {
                 return ud->entity;
             }
-            return ecs::NullEntity;
+            return world::InvalidEntity;
         }
     }
     
-    // Fallback to integer (for backward compatibility during migration)
-    if (lua_isnumber(L, index)) {
-        return static_cast<ecs::Entity>(lua_tointeger(L, index));
-    }
-    
-    return ecs::NullEntity;
+    // Fallback: no integer form for EntityId
+    return world::InvalidEntity;
 }
 
 // Register Entity metatable (call once per VM)
 void RegisterEntityMetatable(lua_State* L);
 
 // Push ScriptValue to Lua stack
-void PushScriptValue(lua_State* L, const scripting::ScriptValue& value, ecs::World* world);
+void PushScriptValue(lua_State* L, const scripting::ScriptValue& value, world::World* world);
 
 // ============================================================================
 // Binding Macros - Industry Standard Pattern
@@ -175,7 +171,7 @@ void PushScriptValue(lua_State* L, const scripting::ScriptValue& value, ecs::Wor
  * @brief Get World pointer from registry with error checking
  * 
  * Usage:
- *   ecs::World* world = LUA_GET_WORLD(L);
+ *   world::World* world = LUA_GET_WORLD(L);
  *   if (!world) return luaL_error(L, "World not available");
  */
 #define LUA_GET_WORLD(L) \

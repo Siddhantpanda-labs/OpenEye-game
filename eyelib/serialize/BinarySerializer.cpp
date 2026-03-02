@@ -1,8 +1,17 @@
 #include "BinarySerializer.h"
 
 #include "eyelib/core/Log.h"
-#include "eyelib/ecs/ComponentStorage.h"
-#include "eyelib/serialize/ComponentSerializer.h"
+#include "eyelib/scene/Scene.h"
+#include "eyelib/world/EntityId.h"
+#include "eyelib/world/World.h"
+#include "eyelib/world/WorldView.h"
+#include "eyelib/world/Commands/CommandTypes.h"
+#include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/Light.h"
+#include "eyelib/world/components/AABB.h"
+#include "eyelib/world/components/Renderable.h"
+#include "eyelib/world/Serialization/WorldSerializationTraits.h"
+#include "eyelib/serialize/SerializationTraits.h"
 
 #include <json.hpp>
 
@@ -22,8 +31,10 @@ namespace eyelib {
 namespace serialize {
 
 namespace {
+using namespace eyelib::world::components;
+
 static constexpr uint32_t kMagic = 0x45425932; // "EYB2"
-static constexpr uint32_t kVersion = 2;
+static constexpr uint32_t kVersion = 3; // EntityId (index+generation), hierarchy+names+components (Transform,Camera,Light,AABB,Renderable)
 
 static void WriteU32(std::vector<uint8_t>& out, uint32_t v) {
     out.insert(out.end(), reinterpret_cast<uint8_t*>(&v), reinterpret_cast<uint8_t*>(&v) + sizeof(v));
@@ -182,58 +193,102 @@ struct ComponentRecord {
     std::vector<uint8_t> payload;
 };
 
+static void WriteEntityComponents(const scene::Scene& scene, eyelib::world::EntityId e,
+    const eyelib::world::WorldView& view, std::vector<uint8_t>& payload) {
+    std::vector<ComponentRecord> comps;
+
+    if (auto opt = scene.GetTransform(e)) {
+        nlohmann::json j = SerializationTraits<eyelib::math::Transform>::Serialize(*opt);
+        std::string s = j.dump();
+        comps.push_back({"Transform", 1, std::vector<uint8_t>(s.begin(), s.end())});
+    }
+    if (const auto* c = view.TryGetComponent<Camera>(e)) {
+        nlohmann::json j = SerializationTraits<Camera>::Serialize(*c);
+        comps.push_back({"Camera", 1, std::vector<uint8_t>(j.dump().begin(), j.dump().end())});
+    }
+    if (const auto* l = view.TryGetComponent<Light>(e)) {
+        nlohmann::json j = SerializationTraits<Light>::Serialize(*l);
+        comps.push_back({"Light", 1, std::vector<uint8_t>(j.dump().begin(), j.dump().end())});
+    }
+    if (const auto* a = view.TryGetComponent<AABB>(e)) {
+        nlohmann::json j = SerializationTraits<AABB>::Serialize(*a);
+        comps.push_back({"AABB", 1, std::vector<uint8_t>(j.dump().begin(), j.dump().end())});
+    }
+    if (const auto* r = view.TryGetComponent<Renderable>(e)) {
+        nlohmann::json j = SerializationTraits<Renderable>::Serialize(*r);
+        comps.push_back({"Renderable", 1, std::vector<uint8_t>(j.dump().begin(), j.dump().end())});
+    }
+
+    WriteU32(payload, static_cast<uint32_t>(comps.size()));
+    for (const auto& comp : comps) {
+        WriteString(payload, comp.name);
+        WriteU32(payload, comp.version);
+        WriteU32(payload, static_cast<uint32_t>(comp.payload.size()));
+        if (!comp.payload.empty())
+            payload.insert(payload.end(), comp.payload.begin(), comp.payload.end());
+    }
+}
+
+static bool ApplyEntityComponents(scene::Scene& scene, scene::Entity entity,
+    const std::vector<ComponentRecord>& comps) {
+    eyelib::world::World& world = scene.World();
+    for (const auto& comp : comps) {
+        try {
+            nlohmann::json j = nlohmann::json::parse(std::string(comp.payload.begin(), comp.payload.end()));
+            if (comp.name == "Transform") {
+                auto t = SerializationTraits<eyelib::math::Transform>::Deserialize(j, {});
+                scene.SetTransform(entity, t);
+            } else if (comp.name == "Camera") {
+                auto v = SerializationTraits<Camera>::Deserialize(j, {});
+                world.ApplyCommandSync(std::make_unique<eyelib::world::AddComponentCommand<Camera>>(entity, v));
+            } else if (comp.name == "Light") {
+                auto v = SerializationTraits<Light>::Deserialize(j, {});
+                world.ApplyCommandSync(std::make_unique<eyelib::world::AddComponentCommand<Light>>(entity, v));
+            } else if (comp.name == "AABB") {
+                auto v = SerializationTraits<AABB>::Deserialize(j, {});
+                world.ApplyCommandSync(std::make_unique<eyelib::world::AddComponentCommand<AABB>>(entity, v));
+            } else if (comp.name == "Renderable") {
+                auto v = SerializationTraits<Renderable>::Deserialize(j, {});
+                world.ApplyCommandSync(std::make_unique<eyelib::world::AddComponentCommand<Renderable>>(entity, v));
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+    return true;
+}
+
 struct EntityRecord {
-    uint32_t id = 0;
-    uint32_t parent = 0;
+    eyelib::world::EntityId id{};
+    eyelib::world::EntityId parent{};
     std::string name;
     std::vector<ComponentRecord> components;
 };
 
+static uint64_t EntityIdKey(eyelib::world::EntityId e) {
+    return (static_cast<uint64_t>(e.index) << 32) | e.generation;
+}
+
 static std::vector<uint8_t> BuildPayload(const scene::Scene& scene) {
     std::vector<uint8_t> payload;
 
-    const auto& world = scene.World();
-    const auto& registry = world.Components();
-    const auto& storage = world.Storage().Registry();
-    auto& serializer = ComponentSerializer::Get();
-
     auto entities = scene.GetEntities();
-    std::sort(entities.begin(), entities.end());
+    std::sort(entities.begin(), entities.end(),
+        [](eyelib::world::EntityId a, eyelib::world::EntityId b) {
+            if (a.index != b.index) return a.index < b.index;
+            return a.generation < b.generation;
+        });
     WriteU32(payload, static_cast<uint32_t>(entities.size()));
 
+    eyelib::world::WorldView view = scene.World().GetView();
     for (auto e : entities) {
-        std::vector<ComponentRecord> comps;
-        for (auto type : registry.GetComponentTypes()) {
-            const auto* ops = registry.GetOps(type);
-            const auto* desc = serializer.GetDescriptor(type);
-            if (!ops || !ops->getConst || !desc) continue;
-            const void* ptr = ops->getConst(storage, ecs::detail::ToEnTT(e));
-            if (!ptr) continue;
-            nlohmann::json json = serializer.SerializeComponent(type, ptr);
-            std::string text = json.dump();
-            ComponentRecord rec;
-            rec.name = desc->name;
-            rec.version = desc->version;
-            rec.payload.assign(text.begin(), text.end());
-            comps.push_back(std::move(rec));
-        }
-
-        std::sort(comps.begin(), comps.end(), [](const ComponentRecord& a, const ComponentRecord& b) {
-            return a.name < b.name;
-        });
-
-        WriteU32(payload, e);
-        WriteU32(payload, scene.GetParent(e));
+        eyelib::world::EntityId parent = scene.GetParent(e);
+        WriteU32(payload, e.index);
+        WriteU32(payload, e.generation);
+        WriteU32(payload, parent.index);
+        WriteU32(payload, parent.generation);
         WriteString(payload, scene.GetName(e).value_or(std::string{}));
-        WriteU32(payload, static_cast<uint32_t>(comps.size()));
-        for (const auto& comp : comps) {
-            WriteString(payload, comp.name);
-            WriteU32(payload, comp.version);
-            WriteU32(payload, static_cast<uint32_t>(comp.payload.size()));
-            if (!comp.payload.empty()) {
-                WriteBytes(payload, comp.payload.data(), comp.payload.size());
-            }
-        }
+        WriteEntityComponents(scene, e, view, payload);
     }
 
     return payload;
@@ -249,14 +304,14 @@ static bool ParsePayload(const std::vector<uint8_t>& payload, scene::Scene& scen
 
     for (uint32_t i = 0; i < entityCount; ++i) {
         EntityRecord rec;
-        if (!ReadU32(payload, offset, rec.id)) return false;
-        if (!ReadU32(payload, offset, rec.parent)) return false;
+        if (!ReadU32(payload, offset, rec.id.index)) return false;
+        if (!ReadU32(payload, offset, rec.id.generation)) return false;
+        if (!ReadU32(payload, offset, rec.parent.index)) return false;
+        if (!ReadU32(payload, offset, rec.parent.generation)) return false;
         if (!ReadString(payload, offset, rec.name)) return false;
 
         uint32_t componentCount = 0;
         if (!ReadU32(payload, offset, componentCount)) return false;
-        rec.components.reserve(componentCount);
-
         for (uint32_t c = 0; c < componentCount; ++c) {
             ComponentRecord comp;
             if (!ReadString(payload, offset, comp.name)) return false;
@@ -264,7 +319,8 @@ static bool ParsePayload(const std::vector<uint8_t>& payload, scene::Scene& scen
             uint32_t payloadSize = 0;
             if (!ReadU32(payload, offset, payloadSize)) return false;
             if (offset + payloadSize > payload.size()) return false;
-            comp.payload.assign(payload.begin() + offset, payload.begin() + offset + payloadSize);
+            comp.payload.assign(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                payload.begin() + static_cast<std::ptrdiff_t>(offset + payloadSize));
             offset += payloadSize;
             rec.components.push_back(std::move(comp));
         }
@@ -273,60 +329,30 @@ static bool ParsePayload(const std::vector<uint8_t>& payload, scene::Scene& scen
 
     scene.Clear();
 
-    std::unordered_map<uint32_t, uint32_t> idMap;
+    std::unordered_map<uint64_t, scene::Entity> idMap;
     idMap.reserve(records.size());
     for (const auto& rec : records) {
-        const auto newEntity = scene.CreateEntity(rec.name);
-        idMap[rec.id] = newEntity;
-    }
-
-    auto& world = scene.World();
-    auto& registry = world.Components();
-    auto& storage = world.Storage().Registry();
-    auto& serializer = ComponentSerializer::Get();
-
-    for (const auto& rec : records) {
-        auto it = idMap.find(rec.id);
-        if (it == idMap.end()) continue;
-        const uint32_t newEntity = it->second;
-
-        for (const auto& comp : rec.components) {
-            const auto typeId = serializer.FindTypeId(comp.name);
-            if (typeId == ecs::ComponentTypeId{}) continue;
-            const auto* desc = serializer.GetDescriptor(typeId);
-            if (!desc || comp.version > desc->version) {
-                core::Log::WarnF("BinarySerializer: skipping component '%s' (version %u)", comp.name.c_str(), comp.version);
-                continue;
-            }
-
-            nlohmann::json json;
-            try {
-                json = nlohmann::json::parse(std::string(comp.payload.begin(), comp.payload.end()));
-            } catch (const std::exception& e) {
-                core::Log::WarnF("BinarySerializer: component parse error '%s': %s", comp.name.c_str(), e.what());
-                continue;
-            }
-
-            void* component = serializer.DeserializeComponent(typeId, json);
-            const auto* ops = registry.GetOps(typeId);
-            if (component && ops && ops->add && ops->destroy) {
-                ops->add(storage, ecs::detail::ToEnTT(newEntity), component);
-                ops->destroy(component);
-            }
-        }
+        scene::Entity newEntity = scene.CreateEntity(rec.name);
+        idMap[EntityIdKey(rec.id)] = newEntity;
     }
 
     for (const auto& rec : records) {
-        auto itChild = idMap.find(rec.id);
+        auto itChild = idMap.find(EntityIdKey(rec.id));
         if (itChild == idMap.end()) continue;
-        const uint32_t newChild = itChild->second;
-        if (rec.parent == 0u) {
+        scene::Entity newChild = itChild->second;
+        if (rec.parent.index == eyelib::world::InvalidEntity.index && rec.parent.generation == eyelib::world::InvalidEntity.generation) {
             scene.SetParent(newChild, scene::NullEntity);
             continue;
         }
-        auto itParent = idMap.find(rec.parent);
+        auto itParent = idMap.find(EntityIdKey(rec.parent));
         if (itParent == idMap.end()) continue;
         scene.SetParent(newChild, itParent->second);
+    }
+
+    for (const auto& rec : records) {
+        auto it = idMap.find(EntityIdKey(rec.id));
+        if (it == idMap.end() || rec.components.empty()) continue;
+        ApplyEntityComponents(scene, it->second, rec.components);
     }
 
     return true;
