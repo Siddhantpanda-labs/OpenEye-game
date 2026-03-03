@@ -23,9 +23,10 @@ public:
     void Shutdown();
 
     /**
-     * Build physics bodies from world entities that have BOTH Collider AND RigidBody.
-     * Entities with only a Collider (no RigidBody) are skipped — Collider is a shape
-     * description, RigidBody is the dynamics component that authorizes body creation.
+     * Build physics bodies from world entities:
+     * - Collider + RigidBody: full dynamics
+     * - Collider only: static body (mass=0)
+     * - RigidBody only: body with default 1x1x1 box shape
      */
     bool BuildFromWorld(eyelib::api::world::World& world);
 
@@ -51,16 +52,26 @@ private:
     const eyelib::api::world::World::RigidBodyEntry* FindRigidBody(
         std::span<const eyelib::api::world::World::RigidBodyEntry> rigidBodies,
         ::eyelib::world::EntityId entity) const;
+    const eyelib::api::world::World::ColliderEntry* FindCollider(
+        std::span<const eyelib::api::world::World::ColliderEntry> colliders,
+        ::eyelib::world::EntityId entity) const;
     const BodyBinding* FindBinding(::eyelib::world::EntityId entity) const;
     BodyBinding* FindBinding(::eyelib::world::EntityId entity);
 
     bool BuildBodyForEntity(eyelib::api::world::World& world,
                             const eyelib::api::world::World::ColliderEntry& collider,
                             const eyelib::api::world::World::RigidBodyEntry& rigidBody);
+    bool BuildBodyForRigidBodyOnly(eyelib::api::world::World& world,
+                                   const eyelib::api::world::World::RigidBodyEntry& rigidBody);
 
     std::unique_ptr<eyelib::api::physics::PhysicsWorld> m_physics;
     bool m_ready = false;
     std::vector<BodyBinding> m_bindings;
+
+    /** Fixed-timestep accumulator. Only advance physics for time elapsed while simulation was running. */
+    float m_physicsAccumulator = 0.0f;
+    /** First frame after init: do not add frame delta (it includes pre-simulation time). */
+    bool m_physicsFirstFrame = true;
 };
 
 } // namespace openeye::player

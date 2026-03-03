@@ -13,14 +13,14 @@ void ShowGameViewPanel(EditorContext* ctx) {
     ImGui::Begin(title);
 
     if (ctx->isPlaying && ctx->gameRuntime && ctx->gameRuntime->IsReady()) {
-        float deltaSeconds = ImGui::GetIO().DeltaTime;
-        if (deltaSeconds <= 0.f) deltaSeconds = 1.f / 60.f;
-        ctx->gameRuntime->Tick(deltaSeconds);
-
         ImVec2 region = ImGui::GetContentRegionAvail();
         uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
         uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
+        // Render before Tick so the first frame shows bodies at their initial position (no jump on Play).
         (void)ctx->gameRuntime->Render(w, h);
+        float deltaSeconds = ImGui::GetIO().DeltaTime;
+        if (deltaSeconds <= 0.f) deltaSeconds = 1.f / 60.f;
+        ctx->gameRuntime->Tick(deltaSeconds);
 
         void* texId = ctx->gameRuntime->GetOutputColorTextureNativeHandle();
         if (texId) {
