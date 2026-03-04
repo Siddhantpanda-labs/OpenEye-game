@@ -29,14 +29,20 @@ public:
     using DecodeCallback = std::function<void(DecodedImage)>;
 
     static Texture2DPtr LoadPNG(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
+    /** Load with explicit device (recommended). */
+    static Texture2DPtr LoadPNG(rhi::IDevice* device, const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
     static Texture2DPtr LoadJPEG(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
+    static Texture2DPtr LoadJPEG(rhi::IDevice* device, const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
     static Texture2DPtr LoadHDR(const std::string& path, bool generateMipmaps = false);
+    static Texture2DPtr LoadHDR(rhi::IDevice* device, const std::string& path, bool generateMipmaps = false);
 
     /** Async decode only. Callback runs on worker; create Texture2D from DecodedImage on main thread. */
     static void LoadAsync(const std::string& path, DecodeCallback callback);
 
     /** Create Texture2D from DecodedImage. Call on main thread (uses GL). */
     static Texture2DPtr CreateFromDecoded(const DecodedImage& img, bool isSRGB = false, bool generateMipmaps = true);
+    /** Create with explicit device (recommended). */
+    static Texture2DPtr CreateFromDecoded(rhi::IDevice* device, const DecodedImage& img, bool isSRGB = false, bool generateMipmaps = true);
 };
 
 } // namespace render

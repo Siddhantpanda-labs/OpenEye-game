@@ -23,19 +23,29 @@ AssetId TextureLoader::LoadTextureDescriptorOnly(const std::string& path, bool i
 AssetId TextureLoader::LoadTexture(const std::string& path, bool isSRGB) {
     auto& manager = AssetManager::Get();
     const AssetId id = manager.Registry().RegisterAsset(path, "Texture");
+    render::rhi::IDevice* device = static_cast<render::rhi::IDevice*>(manager.GetRenderDevice());
     std::shared_ptr<render::Texture2D> tex;
-    if (path.rfind(".hdr") != std::string::npos || path.rfind(".HDR") != std::string::npos) {
-        tex = render::TextureLoader::LoadHDR(path);
-    } else if (path.rfind(".png") != std::string::npos || path.rfind(".PNG") != std::string::npos) {
-        tex = render::TextureLoader::LoadPNG(path, isSRGB, true);
+    if (device) {
+        if (path.rfind(".hdr") != std::string::npos || path.rfind(".HDR") != std::string::npos) {
+            tex = render::TextureLoader::LoadHDR(device, path);
+        } else if (path.rfind(".png") != std::string::npos || path.rfind(".PNG") != std::string::npos) {
+            tex = render::TextureLoader::LoadPNG(device, path, isSRGB, true);
+        } else {
+            tex = render::TextureLoader::LoadJPEG(device, path, isSRGB, true);
+        }
     } else {
-        tex = render::TextureLoader::LoadJPEG(path, isSRGB, true);
+        if (path.rfind(".hdr") != std::string::npos || path.rfind(".HDR") != std::string::npos) {
+            tex = render::TextureLoader::LoadHDR(path);
+        } else if (path.rfind(".png") != std::string::npos || path.rfind(".PNG") != std::string::npos) {
+            tex = render::TextureLoader::LoadPNG(path, isSRGB, true);
+        } else {
+            tex = render::TextureLoader::LoadJPEG(path, isSRGB, true);
+        }
     }
     if (tex) {
         tex->SetAssetId(id);
         manager.Cache().Store(id, tex, "Texture");
         manager.StoreTextureDescriptor(id, tex->GetDescriptor());
-        void* device = manager.GetRenderDevice();
         if (device) manager.RegisterTextureInstance(id, device, tex);
     }
     return id;

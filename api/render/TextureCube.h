@@ -7,6 +7,7 @@
 #include <vector>
 
 namespace eyelib {
+namespace api { struct RenderDevice; }
 namespace render { class TextureCube; }
 namespace api {
 
@@ -20,11 +21,12 @@ public:
     TextureCube(TextureCube&& other) noexcept;
     TextureCube& operator=(TextureCube&& other) noexcept;
 
-    bool LoadFromFiles(const std::string& px, const std::string& nx,
+    /** Load 6 faces. Device required for GPU upload. */
+    bool LoadFromFiles(RenderDevice device, const std::string& px, const std::string& nx,
                        const std::string& py, const std::string& ny,
                        const std::string& pz, const std::string& nz,
                        bool isSRGB = false, bool generateMipmaps = true);
-    bool LoadFromFiles(const std::vector<std::string>& facePaths,
+    bool LoadFromFiles(RenderDevice device, const std::vector<std::string>& facePaths,
                        bool isSRGB = false, bool generateMipmaps = true);
 
     void GenerateMipmaps();

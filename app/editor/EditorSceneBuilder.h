@@ -36,9 +36,10 @@ public:
                const eyelib::api::world::World* world = nullptr,
                std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr);
 
-    /** Load skybox cubemap from scene asset id (e.g. "Skybox/Citadella"). Returns null if missing or failed. */
+    /** Load skybox cubemap from scene asset id (e.g. "Skybox/Citadella"). Returns null if missing or failed. Device required for GPU upload. */
     static std::shared_ptr<eyelib::api::TextureCube> LoadSkyboxFromAssetId(const std::string& assetId,
-                                                                           const std::vector<std::string>& assetRoots);
+                                                                           const std::vector<std::string>& assetRoots,
+                                                                           eyelib::api::RenderDevice device);
 
     /** Resolve material for scene (registry used only for GetId; GPU resolution via AssetManager). Use instead of registry->GetMaterial in Build. */
     static std::shared_ptr<eyelib::api::Material> ResolveMaterialForScene(eyelib::api::AssetRegistry* registry,

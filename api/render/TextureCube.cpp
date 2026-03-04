@@ -1,4 +1,5 @@
 #include "api/render/TextureCube.h"
+#include "api/render/RenderDevice.h"
 #include "eyelib/render/resources/TextureCube.h"
 #include "eyelib/render/resources/TextureTypes.h"
 
@@ -28,15 +29,17 @@ TextureCube::TextureCube(TextureCube&& other) noexcept = default;
 
 TextureCube& TextureCube::operator=(TextureCube&& other) noexcept = default;
 
-bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
+bool TextureCube::LoadFromFiles(RenderDevice device, const std::string& px, const std::string& nx,
                                 const std::string& py, const std::string& ny,
                                 const std::string& pz, const std::string& nz,
                                 bool isSRGB, bool generateMipmaps) {
-    return m_impl->texture->LoadFromFiles(px, nx, py, ny, pz, nz, isSRGB, generateMipmaps);
+    auto* dev = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    return dev && m_impl->texture->LoadFromFiles(dev, px, nx, py, ny, pz, nz, isSRGB, generateMipmaps);
 }
 
-bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool isSRGB, bool generateMipmaps) {
-    return m_impl->texture->LoadFromFiles(facePaths, isSRGB, generateMipmaps);
+bool TextureCube::LoadFromFiles(RenderDevice device, const std::vector<std::string>& facePaths, bool isSRGB, bool generateMipmaps) {
+    auto* dev = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    return dev && m_impl->texture->LoadFromFiles(dev, facePaths, isSRGB, generateMipmaps);
 }
 
 void TextureCube::GenerateMipmaps() {

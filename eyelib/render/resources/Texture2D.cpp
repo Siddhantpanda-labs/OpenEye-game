@@ -166,6 +166,12 @@ void Texture2D::Destroy(rhi::IDevice* device) {
 }
 
 bool Texture2D::LoadFromFile(const std::string& path, bool isSRGB, bool generateMipmaps) {
+    rhi::IDevice* device = GetDevice();
+    return device && LoadFromFile(device, path, isSRGB, generateMipmaps);
+}
+
+bool Texture2D::LoadFromFile(rhi::IDevice* device, const std::string& path, bool isSRGB, bool generateMipmaps) {
+    if (!device) return false;
     m_descriptor.filePath = path;
     m_descriptor.isSRGB = isSRGB;
     m_descriptor.generateMipmaps = generateMipmaps;
@@ -174,7 +180,7 @@ bool Texture2D::LoadFromFile(const std::string& path, bool isSRGB, bool generate
         core::Log::ErrorF("Texture2D: failed to read file: %s", path.c_str());
         return false;
     }
-    return LoadFromMemory(bytes.data(), bytes.size(), isSRGB, generateMipmaps);
+    return LoadFromMemory(device, bytes.data(), bytes.size(), isSRGB, generateMipmaps);
 }
 
 TextureDescriptor Texture2D::GetDescriptor() const {
@@ -183,14 +189,16 @@ TextureDescriptor Texture2D::GetDescriptor() const {
 
 bool Texture2D::LoadFromDescriptor(rhi::IDevice* device, const TextureDescriptor& desc) {
     if (!device || desc.filePath.empty()) return false;
-    SetDevice(device);
-    return LoadFromFile(desc.filePath, desc.isSRGB, desc.generateMipmaps);
+    return LoadFromFile(device, desc.filePath, desc.isSRGB, desc.generateMipmaps);
 }
 
 bool Texture2D::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bool generateMipmaps) {
-    if (!data || size == 0) return false;
     rhi::IDevice* device = GetDevice();
-    if (!device) return false;
+    return device && LoadFromMemory(device, data, size, isSRGB, generateMipmaps);
+}
+
+bool Texture2D::LoadFromMemory(rhi::IDevice* device, const uint8_t* data, size_t size, bool isSRGB, bool generateMipmaps) {
+    if (!data || size == 0 || !device) return false;
 
     stbi_set_flip_vertically_on_load(0);
     int w = 0, h = 0, ch = 0;

@@ -1,4 +1,5 @@
 #include "api/render/FrameGraph.h"
+#include "api/render/RenderDevice.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include <memory>
@@ -79,8 +80,8 @@ void FrameGraph::Clear() {
     m_impl->fg->Clear();
 }
 
-void FrameGraph::Compile() {
-    m_impl->fg->Compile();
+void FrameGraph::Compile(RenderDevice device) {
+    m_impl->fg->Compile(static_cast<::eyelib::render::rhi::IDevice*>(device.Get()));
 }
 
 void FrameGraph::Execute() {

@@ -29,15 +29,19 @@ public:
     /** RHI path: create texture via device. */
     bool Create(rhi::IDevice* device, int width, int height, TextureFormat format, const void* data = nullptr);
 
-    /** Load from file (uses platform::filesystem::ReadFile + stb_image). */
+    /** Load from file (uses platform::filesystem::ReadFile + stb_image). Prefer overload with device. */
     bool LoadFromFile(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
+    /** Load from file using explicit device (recommended). */
+    bool LoadFromFile(rhi::IDevice* device, const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
     /** CPU descriptor for last LoadFromFile (path + options). Empty path if never loaded from file. */
     TextureDescriptor GetDescriptor() const;
     /** Create GPU instance from CPU descriptor (loads from file). */
     bool LoadFromDescriptor(rhi::IDevice* device, const TextureDescriptor& desc);
 
-    /** Load from image bytes (PNG/JPEG etc. via stb_image). */
+    /** Load from image bytes (PNG/JPEG etc. via stb_image). Prefer overload with device. */
     bool LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB = false, bool generateMipmaps = true);
+    /** Load from image bytes using explicit device (recommended). */
+    bool LoadFromMemory(rhi::IDevice* device, const uint8_t* data, size_t size, bool isSRGB = false, bool generateMipmaps = true);
 
     /** Update subregion. Use (0,0,0,0) for full update. */
     void SetData(const void* data, int x = 0, int y = 0, int width = 0, int height = 0);

@@ -210,8 +210,9 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::GetPrimitiveEntry(const std::
 }
 
 std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAssetId(const std::string& assetId,
-                                                                                    const std::vector<std::string>& assetRoots) {
-    if (assetId.empty()) return nullptr;
+                                                                                    const std::vector<std::string>& assetRoots,
+                                                                                    eyelib::api::RenderDevice device) {
+    if (assetId.empty() || !device) return nullptr;
     const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
     std::string paths[6];
     for (int i = 0; i < 6; ++i) {
@@ -223,7 +224,7 @@ std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAsse
         }
     }
     auto skybox = std::make_shared<eyelib::api::TextureCube>();
-    if (!skybox->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
+    if (!skybox->LoadFromFiles(device, paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
         eyelib::api::core::Log::WarnF("EditorSceneBuilder: failed to load skybox %s", assetId.c_str());
         return nullptr;
     }
@@ -263,12 +264,14 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         if (!skyboxId.empty()) {
             auto it = m_skyboxCache.find(skyboxId);
             if (it != m_skyboxCache.end()) {
-                scene.skybox = it->second;
+                scene.skybox = it->second;  // cached success or failure — no retry, no log
             } else {
-                auto skybox = LoadSkyboxFromAssetId(skyboxId, assetRoots);
+                auto skybox = LoadSkyboxFromAssetId(skyboxId, assetRoots, m_renderDevice);
                 if (skybox) {
                     m_skyboxCache[skyboxId] = skybox;
                     scene.skybox = std::move(skybox);
+                } else {
+                    m_skyboxCache[skyboxId] = nullptr;  // cache failure so we don't retry every frame
                 }
             }
         }

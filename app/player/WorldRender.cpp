@@ -338,7 +338,7 @@ std::shared_ptr<eyelib::api::TextureCube> WorldRenderBridge::GetOrLoadSkybox(con
     if (assetId.empty()) return nullptr;
     auto it = m_skyboxCache.find(assetId);
     if (it != m_skyboxCache.end()) {
-        return it->second;
+        return it->second;  // cached success or failure (nullptr) — no retry, no log
     }
     const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
     std::string paths[6];
@@ -346,12 +346,19 @@ std::shared_ptr<eyelib::api::TextureCube> WorldRenderBridge::GetOrLoadSkybox(con
         paths[i] = ResolveAssetPath(assetId + "/" + kFaces[i], assetRoots);
         if (paths[i].empty()) {
             eyelib::api::core::Log::WarnF("WorldRenderBridge: skybox face missing: %s/%s", assetId.c_str(), kFaces[i]);
+            m_skyboxCache[assetId] = nullptr;
             return nullptr;
         }
     }
+    eyelib::api::RenderDevice device = m_pipeline.GetDevice();
+    if (!device) {
+        m_skyboxCache[assetId] = nullptr;
+        return nullptr;
+    }
     auto skybox = std::make_shared<eyelib::api::TextureCube>();
-    if (!skybox->LoadFromFiles(paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
+    if (!skybox->LoadFromFiles(device, paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
         eyelib::api::core::Log::WarnF("WorldRenderBridge: failed to load skybox %s", assetId.c_str());
+        m_skyboxCache[assetId] = nullptr;
         return nullptr;
     }
     m_skyboxCache[assetId] = skybox;

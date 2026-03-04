@@ -15,6 +15,7 @@
 #include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <stb_image.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -471,13 +472,25 @@ std::optional<std::filesystem::path> ResolveTexture(
 }
 
 static std::shared_ptr<render::Texture2D> LoadTextureFromEmbedded(
-    const aiTexture* embedded, bool isSRGB) {
+    const aiTexture* embedded, bool isSRGB, render::rhi::IDevice* device) {
     if (!embedded) return nullptr;
+    if (!device) return nullptr;
     auto tex = std::make_shared<render::Texture2D>();
     if (embedded->mHeight == 0) {
-        if (tex->LoadFromMemory(reinterpret_cast<const uint8_t*>(embedded->pcData),
-                               static_cast<size_t>(embedded->mWidth), isSRGB, true))
-            return tex;
+        int w = 0, h = 0, ch = 0;
+        stbi_set_flip_vertically_on_load(0);
+        unsigned char* decoded = stbi_load_from_memory(
+            reinterpret_cast<const uint8_t*>(embedded->pcData),
+            static_cast<int>(embedded->mWidth), &w, &h, &ch, 0);
+        if (!decoded) return nullptr;
+        render::TextureFormat fmt = render::TextureFormat::RGBA8;
+        if (ch == 1) fmt = render::TextureFormat::R8;
+        else if (ch == 2) fmt = render::TextureFormat::RG8;
+        else if (ch == 3) fmt = isSRGB ? render::TextureFormat::RGB8_SRGB : render::TextureFormat::RGB8;
+        else if (ch == 4) fmt = isSRGB ? render::TextureFormat::RGBA8_SRGB : render::TextureFormat::RGBA8;
+        const bool ok = tex->Create(device, w, h, fmt, decoded);
+        stbi_image_free(decoded);
+        if (ok) return tex;
     } else {
         const int width = static_cast<int>(embedded->mWidth);
         const int height = static_cast<int>(embedded->mHeight);
@@ -490,7 +503,7 @@ static std::shared_ptr<render::Texture2D> LoadTextureFromEmbedded(
             rgba[i * 4 + 2] = src[i].b;
             rgba[i * 4 + 3] = src[i].a;
         }
-        if (tex->Create(width, height, render::TextureFormat::RGBA8, rgba.data())) {
+        if (tex->Create(device, width, height, render::TextureFormat::RGBA8, rgba.data())) {
             tex->GenerateMipmaps();
             return tex;
         }
@@ -502,7 +515,8 @@ static std::shared_ptr<render::Texture2D> LoadOneTexture(
     const std::string& rawPath,
     const std::filesystem::path& baseDir,
     const aiScene* scene,
-    bool isSRGB) {
+    bool isSRGB,
+    render::rhi::IDevice* device) {
     if (rawPath.empty()) return nullptr;
 
     // 1) Explicit *N reference (embedded by index)
@@ -513,9 +527,9 @@ static std::shared_ptr<render::Texture2D> LoadOneTexture(
         } catch (...) {}
         if (index >= 0 && scene && scene->mNumTextures > 0 &&
             static_cast<unsigned>(index) < scene->mNumTextures)
-            return LoadTextureFromEmbedded(scene->mTextures[static_cast<unsigned>(index)], isSRGB);
+            return LoadTextureFromEmbedded(scene->mTextures[static_cast<unsigned>(index)], isSRGB, device);
         const aiTexture* emb = scene->GetEmbeddedTexture(rawPath.c_str());
-        if (emb) return LoadTextureFromEmbedded(emb, isSRGB);
+        if (emb) return LoadTextureFromEmbedded(emb, isSRGB, device);
         core::Log::WarnF("ModelLoader: texture not found (file or embedded): %s", rawPath.c_str());
         return nullptr;
     }
@@ -524,7 +538,11 @@ static std::shared_ptr<render::Texture2D> LoadOneTexture(
     auto resolved = ResolveTexture(rawPath, baseDir);
     if (resolved) {
         auto tex = std::make_shared<render::Texture2D>();
-        if (tex->LoadFromFile(resolved->string(), isSRGB, true))
+        render::TextureDescriptor desc;
+        desc.filePath = resolved->string();
+        desc.isSRGB = isSRGB;
+        desc.generateMipmaps = true;
+        if (tex->LoadFromDescriptor(device, desc))
             return tex;
     }
 
@@ -532,7 +550,7 @@ static std::shared_ptr<render::Texture2D> LoadOneTexture(
     if (scene) {
         const aiTexture* embedded = scene->GetEmbeddedTexture(rawPath.c_str());
         if (embedded)
-            return LoadTextureFromEmbedded(embedded, isSRGB);
+            return LoadTextureFromEmbedded(embedded, isSRGB, device);
     }
 
     core::Log::WarnF("ModelLoader: texture not found (file or embedded): %s", rawPath.c_str());
@@ -544,12 +562,13 @@ static std::shared_ptr<render::Texture2D> LoadFirstAvailable(
     const std::vector<aiTextureType>& types,
     const std::filesystem::path& baseDir,
     const aiScene* scene,
-    bool isSRGB) {
+    bool isSRGB,
+    render::rhi::IDevice* device) {
     for (aiTextureType type : types) {
         if (material->GetTextureCount(type) == 0) continue;
         aiString path;
         if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS) continue;
-        auto tex = LoadOneTexture(path.C_Str(), baseDir, scene, isSRGB);
+        auto tex = LoadOneTexture(path.C_Str(), baseDir, scene, isSRGB, device);
         if (tex) return tex;
     }
     return nullptr;
@@ -559,10 +578,11 @@ static std::shared_ptr<render::Texture2D> LoadFirstAvailable(
 static std::shared_ptr<render::Texture2D> LoadMetallicRoughnessTexture(
     const aiMaterial* material,
     const std::filesystem::path& baseDir,
-    const aiScene* scene) {
+    const aiScene* scene,
+    render::rhi::IDevice* device) {
     auto tex = LoadFirstAvailable(material,
         { aiTextureType_METALNESS, aiTextureType_DIFFUSE_ROUGHNESS },
-        baseDir, scene, false);
+        baseDir, scene, false, device);
     if (tex) return tex;
     for (int t = 1; t < AI_TEXTURE_TYPE_MAX; ++t) {
         aiTextureType type = static_cast<aiTextureType>(t);
@@ -573,7 +593,7 @@ static std::shared_ptr<render::Texture2D> LoadMetallicRoughnessTexture(
         std::transform(s.begin(), s.end(), s.begin(), ::tolower);
         if ((s.find("metallicroughness") != std::string::npos) ||
             (s.find("metallic") != std::string::npos && s.find("roughness") != std::string::npos)) {
-            tex = LoadOneTexture(path.C_Str(), baseDir, scene, false);
+            tex = LoadOneTexture(path.C_Str(), baseDir, scene, false, device);
             if (tex) return tex;
         }
     }
@@ -671,27 +691,27 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     auto defaultAlbedo = std::make_shared<render::Texture2D>();
     {
         const uint8_t gray[4] = {128, 128, 128, 255};
-        defaultAlbedo->Create(1, 1, render::TextureFormat::RGBA8, gray);
+        defaultAlbedo->Create(device, 1, 1, render::TextureFormat::RGBA8, gray);
     }
     auto defaultNormal = std::make_shared<render::Texture2D>();
     {
         const uint8_t normal[4] = {128, 128, 255, 255}; // Normal pointing up (0.5, 0.5, 1.0) -> (128, 128, 255)
-        defaultNormal->Create(1, 1, render::TextureFormat::RGBA8, normal);
+        defaultNormal->Create(device, 1, 1, render::TextureFormat::RGBA8, normal);
     }
     auto defaultMetallicRoughness = std::make_shared<render::Texture2D>();
     {
         const uint8_t mr[4] = {0, 128, 0, 255}; // Metallic=0, Roughness=0.5
-        defaultMetallicRoughness->Create(1, 1, render::TextureFormat::RGBA8, mr);
+        defaultMetallicRoughness->Create(device, 1, 1, render::TextureFormat::RGBA8, mr);
     }
     auto defaultAO = std::make_shared<render::Texture2D>();
     {
         const uint8_t ao[4] = {255, 255, 255, 255}; // AO=1.0
-        defaultAO->Create(1, 1, render::TextureFormat::RGBA8, ao);
+        defaultAO->Create(device, 1, 1, render::TextureFormat::RGBA8, ao);
     }
     auto defaultEmissive = std::make_shared<render::Texture2D>();
     {
         const uint8_t emissive[4] = {0, 0, 0, 255}; // No emission
-        defaultEmissive->Create(1, 1, render::TextureFormat::RGBA8, emissive);
+        defaultEmissive->Create(device, 1, 1, render::TextureFormat::RGBA8, emissive);
     }
 
     const size_t materialCount = scene->mNumMaterials;
@@ -706,25 +726,25 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
 
         // Format-agnostic texture loading (try types in order)
         std::shared_ptr<render::Texture2D> albedo = LoadFirstAvailable(aiMat,
-            { aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE }, baseDir, scene, true);
+            { aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE }, baseDir, scene, true, device);
         mat->SetAlbedoTexture(albedo ? albedo : defaultAlbedo);
 
         std::shared_ptr<render::Texture2D> normalTex = LoadFirstAvailable(aiMat,
-            { aiTextureType_NORMALS, aiTextureType_HEIGHT }, baseDir, scene, false);
+            { aiTextureType_NORMALS, aiTextureType_HEIGHT }, baseDir, scene, false, device);
         mat->SetNormalTexture(normalTex ? normalTex : defaultNormal);
         mat->SetFloat("u_HasNormalTexture", normalTex ? 1.0f : 0.0f);
 
-        std::shared_ptr<render::Texture2D> mrTex = LoadMetallicRoughnessTexture(aiMat, baseDir, scene);
+        std::shared_ptr<render::Texture2D> mrTex = LoadMetallicRoughnessTexture(aiMat, baseDir, scene, device);
         mat->SetMetallicRoughnessTexture(mrTex ? mrTex : defaultMetallicRoughness);
         mat->SetFloat("u_HasMetallicRoughnessTexture", mrTex ? 1.0f : 0.0f);
 
         std::shared_ptr<render::Texture2D> aoTex = LoadFirstAvailable(aiMat,
-            { aiTextureType_AMBIENT_OCCLUSION, aiTextureType_LIGHTMAP }, baseDir, scene, false);
+            { aiTextureType_AMBIENT_OCCLUSION, aiTextureType_LIGHTMAP }, baseDir, scene, false, device);
         mat->SetAOTexture(aoTex ? aoTex : defaultAO);
         mat->SetFloat("u_HasAOTexture", aoTex ? 1.0f : 0.0f);
 
         std::shared_ptr<render::Texture2D> emissiveTex = LoadFirstAvailable(aiMat,
-            { aiTextureType_EMISSIVE }, baseDir, scene, true);
+            { aiTextureType_EMISSIVE }, baseDir, scene, true, device);
         mat->SetEmissiveTexture(emissiveTex ? emissiveTex : defaultEmissive);
         mat->SetFloat("u_HasEmissiveTexture", emissiveTex ? 1.0f : 0.0f);
 

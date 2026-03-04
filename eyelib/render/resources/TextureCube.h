@@ -22,14 +22,14 @@ public:
     TextureCube(TextureCube&& other) noexcept;
     TextureCube& operator=(TextureCube&& other) noexcept;
 
-    /** Load 6 faces: +X, -X, +Y, -Y, +Z, -Z. Uses platform FileSystem + stb_image. */
-    bool LoadFromFiles(const std::string& px, const std::string& nx,
+    /** Load 6 faces: +X, -X, +Y, -Y, +Z, -Z. Uses platform FileSystem + stb_image. Device required for GPU upload. */
+    bool LoadFromFiles(rhi::IDevice* device, const std::string& px, const std::string& nx,
                       const std::string& py, const std::string& ny,
                       const std::string& pz, const std::string& nz,
                       bool isSRGB = false, bool generateMipmaps = true);
 
     /** Overload: single array of 6 paths. */
-    bool LoadFromFiles(const std::vector<std::string>& facePaths, bool isSRGB = false, bool generateMipmaps = true);
+    bool LoadFromFiles(rhi::IDevice* device, const std::vector<std::string>& facePaths, bool isSRGB = false, bool generateMipmaps = true);
 
     void Bind(int slot = 0) const;
     void GenerateMipmaps();
@@ -41,11 +41,7 @@ public:
     unsigned int Id() const;
     rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
 
-    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
-
 private:
-    rhi::IDevice* GetDevice() const;
-    rhi::IDevice* m_injectedDevice = nullptr;
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::ITexture* m_textureRHI = nullptr;
     int m_size = 0;

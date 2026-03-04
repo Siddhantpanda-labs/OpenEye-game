@@ -29,8 +29,19 @@ TextureLoader::Texture2DPtr TextureLoader::LoadPNG(const std::string& path, bool
     return nullptr;
 }
 
+TextureLoader::Texture2DPtr TextureLoader::LoadPNG(rhi::IDevice* device, const std::string& path, bool isSRGB, bool generateMipmaps) {
+    if (!device) return nullptr;
+    auto tex = std::make_shared<Texture2D>();
+    if (tex->LoadFromFile(device, path, isSRGB, generateMipmaps)) return tex;
+    return nullptr;
+}
+
 TextureLoader::Texture2DPtr TextureLoader::LoadJPEG(const std::string& path, bool isSRGB, bool generateMipmaps) {
     return LoadPNG(path, isSRGB, generateMipmaps);
+}
+
+TextureLoader::Texture2DPtr TextureLoader::LoadJPEG(rhi::IDevice* device, const std::string& path, bool isSRGB, bool generateMipmaps) {
+    return LoadPNG(device, path, isSRGB, generateMipmaps);
 }
 
 TextureLoader::Texture2DPtr TextureLoader::LoadHDR(const std::string& path, bool generateMipmaps) {
@@ -49,6 +60,31 @@ TextureLoader::Texture2DPtr TextureLoader::LoadHDR(const std::string& path, bool
     auto tex = std::make_shared<Texture2D>();
     TextureFormat fmt = (ch == 3) ? TextureFormat::RGB16F : TextureFormat::RGBA16F;
     if (!tex->Create(w, h, fmt, data)) {
+        stbi_image_free(data);
+        return nullptr;
+    }
+    stbi_image_free(data);
+    if (generateMipmaps) tex->GenerateMipmaps();
+    return tex;
+}
+
+TextureLoader::Texture2DPtr TextureLoader::LoadHDR(rhi::IDevice* device, const std::string& path, bool generateMipmaps) {
+    if (!device) return nullptr;
+    std::vector<uint8_t> bytes = eyelib::platform::filesystem::ReadFile(path);
+    if (bytes.empty()) {
+        core::Log::ErrorF("TextureLoader::LoadHDR: failed to read %s", path.c_str());
+        return nullptr;
+    }
+    stbi_set_flip_vertically_on_load(1);
+    int w = 0, h = 0, ch = 0;
+    float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &ch, 0);
+    if (!data) {
+        core::Log::ErrorF("TextureLoader::LoadHDR: stbi_loadf failed: %s", stbi_failure_reason());
+        return nullptr;
+    }
+    auto tex = std::make_shared<Texture2D>();
+    TextureFormat fmt = (ch == 3) ? TextureFormat::RGB16F : TextureFormat::RGBA16F;
+    if (!tex->Create(device, w, h, fmt, data)) {
         stbi_image_free(data);
         return nullptr;
     }
@@ -117,6 +153,24 @@ TextureLoader::Texture2DPtr TextureLoader::CreateFromDecoded(const DecodedImage&
         else if (img.channels == 2) fmt = TextureFormat::RG8;
         else if (img.channels == 3) fmt = TextureFormat::RGB8;
         if (!tex->Create(img.width, img.height, fmt, img.ldr.data())) return nullptr;
+    }
+    if (generateMipmaps) tex->GenerateMipmaps();
+    return tex;
+}
+
+TextureLoader::Texture2DPtr TextureLoader::CreateFromDecoded(rhi::IDevice* device, const DecodedImage& img, bool isSRGB, bool generateMipmaps) {
+    if (!device || img.width <= 0 || img.height <= 0) return nullptr;
+    auto tex = std::make_shared<Texture2D>();
+    if (img.isHDR) {
+        TextureFormat fmt = (img.channels == 3) ? TextureFormat::RGB16F : TextureFormat::RGBA16F;
+        if (!tex->Create(device, img.width, img.height, fmt, img.hdr.data())) return nullptr;
+    } else {
+        if (img.ldr.empty()) return nullptr;
+        TextureFormat fmt = TextureFormat::RGBA8;
+        if (img.channels == 1) fmt = TextureFormat::R8;
+        else if (img.channels == 2) fmt = TextureFormat::RG8;
+        else if (img.channels == 3) fmt = TextureFormat::RGB8;
+        if (!tex->Create(device, img.width, img.height, fmt, img.ldr.data())) return nullptr;
     }
     if (generateMipmaps) tex->GenerateMipmaps();
     return tex;

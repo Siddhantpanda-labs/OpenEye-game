@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace eyelib {
+namespace api { struct RenderDevice; }
 namespace render { class FrameGraph; }
 namespace api {
 
@@ -54,7 +55,8 @@ public:
                 bool sideEffect = false);
 
     void Clear();
-    void Compile();
+    /** Compile the graph. Requires non-null device for resource creation. */
+    void Compile(RenderDevice device);
     void Execute();
 
     struct PassInfo { std::string name; double gpuMs = 0.0; bool culled = false; };

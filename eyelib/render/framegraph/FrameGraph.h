@@ -52,8 +52,6 @@ public:
 
     /** Compile the graph. Device must be non-null (used for resource creation). */
     void Compile(rhi::IDevice* device);
-    /** @deprecated Use Compile(device). */
-    void Compile() { if (m_device) Compile(m_device); }
 
     using ExecuteFunc = std::function<void(const FGPassResources&)>;
 

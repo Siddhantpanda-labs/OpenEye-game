@@ -34,9 +34,8 @@ TextureCube::~TextureCube() {
 }
 
 TextureCube::TextureCube(TextureCube&& other) noexcept
-    : m_injectedDevice(other.m_injectedDevice), m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
+    : m_deviceRHI(other.m_deviceRHI), m_textureRHI(other.m_textureRHI),
       m_size(other.m_size), m_cpuData(std::move(other.m_cpuData)) {
-    other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_textureRHI = nullptr;
     other.m_size = 0;
@@ -45,12 +44,10 @@ TextureCube::TextureCube(TextureCube&& other) noexcept
 TextureCube& TextureCube::operator=(TextureCube&& other) noexcept {
     if (this != &other) {
         if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
-        m_injectedDevice = other.m_injectedDevice;
         m_deviceRHI = other.m_deviceRHI;
         m_textureRHI = other.m_textureRHI;
         m_size = other.m_size;
         m_cpuData = std::move(other.m_cpuData);
-        other.m_injectedDevice = nullptr;
         other.m_deviceRHI = nullptr;
         other.m_textureRHI = nullptr;
         other.m_size = 0;
@@ -58,7 +55,7 @@ TextureCube& TextureCube::operator=(TextureCube&& other) noexcept {
     return *this;
 }
 
-bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool isSRGB, bool generateMipmaps) {
+bool TextureCube::LoadFromFiles(rhi::IDevice* device, const std::vector<std::string>& facePaths, bool isSRGB, bool generateMipmaps) {
     if (facePaths.size() != 6) {
         core::Log::ErrorF("TextureCube: expected 6 face paths");
         return false;
@@ -96,7 +93,6 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
     }
 
     (void)generateMipmaps;
-    rhi::IDevice* device = GetDevice();
     if (!device) return false;
 
     const size_t bpp = BytesPerPixel(fmt);
@@ -124,23 +120,17 @@ bool TextureCube::LoadFromFiles(const std::vector<std::string>& facePaths, bool 
     return true;
 }
 
-bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
+bool TextureCube::LoadFromFiles(rhi::IDevice* device, const std::string& px, const std::string& nx,
                                const std::string& py, const std::string& ny,
                                const std::string& pz, const std::string& nz,
                                bool isSRGB, bool generateMipmaps) {
     std::vector<std::string> faces = {px, nx, py, ny, pz, nz};
-    return LoadFromFiles(faces, isSRGB, generateMipmaps);
-}
-
-rhi::IDevice* TextureCube::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : m_deviceRHI;
+    return LoadFromFiles(device, faces, isSRGB, generateMipmaps);
 }
 
 void TextureCube::Bind(int slot) const {
-    if (!m_textureRHI) return;
-    rhi::IDevice* device = GetDevice();
-    if (!device) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!m_textureRHI || !m_deviceRHI) return;
+    rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
     if (cmd) cmd->BindTexture(m_textureRHI, static_cast<uint32_t>(slot));
 }
 
