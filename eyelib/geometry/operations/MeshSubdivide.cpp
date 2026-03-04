@@ -1,64 +1,46 @@
 #include "eyelib/geometry/operations/MeshSubdivide.h"
 #include "eyelib/geometry/core/MeshTopology.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 
 namespace eyelib {
 namespace geometry {
 
-void MeshSubdivide::Subdivide(render::Mesh& mesh, const Selection& selection, int levels) {
+void MeshSubdivide::Subdivide(assets::EditableMesh& editable, const Selection& selection, int levels) {
     if (levels <= 0) return;
     
-    const auto& inputVertices = mesh.GetVertices();
+    if (editable.GetVertices().empty() || editable.GetIndices().empty()) return;
     
-    // Get indices (handle both formats)
-    std::vector<uint32_t> inputIndices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        inputIndices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        inputIndices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            inputIndices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
-    
-    if (inputVertices.empty() || inputIndices.empty()) return;
-    
-    // Determine which faces to subdivide
-    std::unordered_set<uint32_t> facesToSubdivide;
-    if (selection.IsEmpty() || selection.GetType() != Selection::Type::Faces) {
-        // Subdivide all faces
-        size_t faceCount = inputIndices.size() / 3;
-        for (size_t i = 0; i < faceCount; ++i) {
-            facesToSubdivide.insert(static_cast<uint32_t>(i));
-        }
-    } else {
-        // Subdivide only selected faces
-        for (uint32_t fid : selection.GetIDs()) {
+    for (int level = 0; level < levels; ++level) {
+        const auto& inputVertices = editable.GetVertices();
+        const auto& inputIndices = editable.GetIndices();
+        if (inputVertices.empty() || inputIndices.empty()) break;
+        
+        std::unordered_set<uint32_t> facesToSubdivide;
+        if (level == 0 && !selection.IsEmpty() && selection.GetType() == Selection::Type::Faces) {
             size_t faceCount = inputIndices.size() / 3;
-            if (fid < faceCount) {
-                facesToSubdivide.insert(fid);
+            for (uint32_t fid : selection.GetIDs()) {
+                if (fid < faceCount) facesToSubdivide.insert(fid);
             }
         }
-    }
-    
-    // Perform subdivision levels
-    for (int level = 0; level < levels; ++level) {
-        std::vector<render::Vertex> newVertices;
+        if (facesToSubdivide.empty()) {
+            size_t faceCount = inputIndices.size() / 3;
+            for (size_t i = 0; i < faceCount; ++i) facesToSubdivide.insert(static_cast<uint32_t>(i));
+        }
+        
+        std::vector<assets::EditableMesh::Vertex> newVertices = inputVertices;
         std::vector<uint32_t> newIndices;
+        newIndices.reserve(inputIndices.size() * 4);
         std::unordered_map<uint64_t, uint32_t> edgeMidpoints;
         
-        // Copy existing vertices
-        newVertices = inputVertices;
-        
-        // Subdivide each face
         size_t faceCount = inputIndices.size() / 3;
         for (size_t faceIdx = 0; faceIdx < faceCount; ++faceIdx) {
-            if (facesToSubdivide.find(static_cast<uint32_t>(faceIdx)) != facesToSubdivide.end()) {
-                SubdivideFace(mesh, faceIdx, newVertices, newIndices, edgeMidpoints);
+            if (facesToSubdivide.count(static_cast<uint32_t>(faceIdx))) {
+                SubdivideFace(editable, faceIdx, newVertices, newIndices, edgeMidpoints);
             } else {
-                // Keep original face
                 uint32_t baseIdx = static_cast<uint32_t>(faceIdx * 3);
                 newIndices.push_back(inputIndices[baseIdx]);
                 newIndices.push_back(inputIndices[baseIdx + 1]);
@@ -66,46 +48,24 @@ void MeshSubdivide::Subdivide(render::Mesh& mesh, const Selection& selection, in
             }
         }
         
-        // Update mesh
-        mesh.SetVertices(newVertices);
-        mesh.SetIndices(newIndices);
-        
-        // Recalculate topology for next level
-        if (level < levels - 1) {
-            // Rebuild selection for next level (all new faces)
-            // For simplicity, we'll subdivide all faces in subsequent levels
-            facesToSubdivide.clear();
-            faceCount = newIndices.size() / 3;
-            for (size_t i = 0; i < faceCount; ++i) {
-                facesToSubdivide.insert(static_cast<uint32_t>(i));
-            }
-        }
+        editable.SetVertices(std::move(newVertices));
+        editable.SetIndices(std::move(newIndices));
     }
     
-    // Finalize mesh
-    mesh.GenerateNormals();
-    mesh.GenerateTangents();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
+    desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshSubdivide::SubdivideFace(const render::Mesh& inputMesh, size_t faceIndex,
-                                 std::vector<render::Vertex>& newVertices,
+void MeshSubdivide::SubdivideFace(const assets::EditableMesh& inputMesh, size_t faceIndex,
+                                 std::vector<assets::EditableMesh::Vertex>& newVertices,
                                  std::vector<uint32_t>& newIndices,
                                  std::unordered_map<uint64_t, uint32_t>& edgeMidpoints) {
     const auto& inputVertices = inputMesh.GetVertices();
-    
-    // Get indices (handle both formats)
-    std::vector<uint32_t> inputIndices;
-    if (inputMesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        inputIndices = inputMesh.GetIndices32();
-    } else {
-        const auto& indices16 = inputMesh.GetIndices16();
-        inputIndices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            inputIndices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& inputIndices = inputMesh.GetIndices();
     
     if (faceIndex * 3 + 2 >= inputIndices.size()) return;
     
@@ -129,7 +89,7 @@ void MeshSubdivide::SubdivideFace(const render::Mesh& inputMesh, size_t faceInde
         const auto& va = inputVertices[a];
         const auto& vb = inputVertices[b];
         
-        render::Vertex midpoint;
+        assets::EditableMesh::Vertex midpoint;
         midpoint.position = (va.position + vb.position) * 0.5f;
         midpoint.normal = glm::normalize((va.normal + vb.normal) * 0.5f);
         midpoint.uv = (va.uv + vb.uv) * 0.5f;
@@ -167,10 +127,8 @@ void MeshSubdivide::SubdivideFace(const render::Mesh& inputMesh, size_t faceInde
     newIndices.push_back(m20);
 }
 
-void MeshSubdivide::SubdivideLoop(render::Mesh& mesh, const Selection& selection, int levels) {
-    // For now, use simple subdivision
-    // Full Loop subdivision would require edge-based topology and special rules
-    Subdivide(mesh, selection, levels);
+void MeshSubdivide::SubdivideLoop(assets::EditableMesh& editable, const Selection& selection, int levels) {
+    Subdivide(editable, selection, levels);
 }
 
 uint64_t MeshSubdivide::GetEdgeKey(uint32_t v0, uint32_t v1) {

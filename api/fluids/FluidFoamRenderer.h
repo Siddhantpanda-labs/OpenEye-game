@@ -3,6 +3,7 @@
 #include "api/fluids/FluidSimulation.h"
 #include "api/render/Camera.h"
 #include "api/render/Mesh.h"
+#include "api/render/RenderDevice.h"
 
 #include <cstdint>
 #include <memory>
@@ -40,7 +41,8 @@ public:
     FluidFoamSettings GetSettings() const;
 
     void UpdateFromSimulation(const FluidSimulation& sim, float dt);
-    std::shared_ptr<Mesh> BuildMesh(const render::Camera& camera);
+    /** Pass device for lazy material/shader creation. */
+    std::shared_ptr<Mesh> BuildMesh(RenderDevice device, const render::Camera& camera);
 
 private:
     class Impl;

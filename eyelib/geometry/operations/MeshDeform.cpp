@@ -1,6 +1,8 @@
 #include "eyelib/geometry/operations/MeshDeform.h"
 #include "eyelib/geometry/core/MeshTopology.h"
 #include "eyelib/geometry/operations/MeshSmooth.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <unordered_set>
@@ -9,23 +11,15 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshDeform::Inflate(render::Mesh& mesh, const Selection& selection,
+void MeshDeform::Inflate(assets::EditableMesh& editable, const Selection& selection,
                          float amount, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Build topology for normal computation
     MeshTopology topology;
     std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    indices = editable.GetIndices();
     
     if (indices.empty()) return;
     topology.BuildFromIndices(vertices.size(), indices);
@@ -60,7 +54,7 @@ void MeshDeform::Inflate(render::Mesh& mesh, const Selection& selection,
         for (uint32_t vid : verticesToInflate) {
             if (vid >= vertices.size()) continue;
             
-            math::Vec3 normal = ComputeVertexNormal(mesh, vid, topology, vertices.size());
+            math::Vec3 normal = ComputeVertexNormal(editable, vid, topology, vertices.size());
             if (glm::length(normal) < 0.001f) continue;
             
             float finalAmount = amount;
@@ -73,30 +67,30 @@ void MeshDeform::Inflate(render::Mesh& mesh, const Selection& selection,
     }
     
     // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDeform::Deflate(render::Mesh& mesh, const Selection& selection,
+void MeshDeform::Deflate(assets::EditableMesh& editable, const Selection& selection,
                         float amount, const Mask* mask) {
     // Deflate is just negative inflate
-    Inflate(mesh, selection, -amount, mask);
+    Inflate(editable, selection, -amount, mask);
 }
 
-void MeshDeform::Relax(render::Mesh& mesh, const Selection& selection,
+void MeshDeform::Relax(assets::EditableMesh& editable, const Selection& selection,
                       float strength, int iterations, const Mask* mask) {
     // Relax is gentle smoothing - use SmoothUniform with lower strength
     // Typically relax uses strength around 0.1-0.2 vs normal smooth at 0.5+
-    MeshSmooth::SmoothUniform(mesh, selection, strength, iterations, mask);
+    MeshSmooth::SmoothUniform(editable, selection, strength, iterations, mask);
 }
 
-void MeshDeform::Lattice(render::Mesh& mesh, const Selection& selection,
+void MeshDeform::Lattice(assets::EditableMesh& editable, const Selection& selection,
                         const math::Vec3& latticeOrigin, const math::Vec3& latticeSize,
                         const math::IVec3& latticeResolution,
                         const std::vector<math::Vec3>& controlPoints,
                         const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Validate control points
@@ -199,14 +193,14 @@ void MeshDeform::Lattice(render::Mesh& mesh, const Selection& selection,
     }
     
     // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshDeform::ComputeVertexNormal(const render::Mesh& mesh, uint32_t vertexID,
+math::Vec3 MeshDeform::ComputeVertexNormal(const assets::EditableMesh& editable, uint32_t vertexID,
                                           const MeshTopology& topology, size_t vertexCount) {
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertexID >= vertices.size()) return math::Vec3(0, 1, 0);
     
     // Use stored normal if valid

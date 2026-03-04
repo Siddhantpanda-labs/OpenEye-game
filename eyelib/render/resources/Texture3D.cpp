@@ -1,5 +1,4 @@
 #include "eyelib/render/resources/Texture3D.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
@@ -61,7 +60,7 @@ Texture3D& Texture3D::operator=(Texture3D&& other) noexcept {
 }
 
 rhi::IDevice* Texture3D::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    return m_injectedDevice ? m_injectedDevice : m_deviceRHI;
 }
 
 bool Texture3D::Create(int width, int height, int depth, TextureFormat format, const void* data) {

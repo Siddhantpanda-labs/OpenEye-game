@@ -23,6 +23,8 @@ public:
     void Shutdown();
     /** Release static shader cache. Call before destroying the device they were created with. */
     static void ShutdownStaticResources();
+    /** Set device for static shader creation (e.g. from pipeline at init). Call once per device. */
+    static void SetStaticDevice(rhi::IDevice* device);
 
     void SetViewProjection(const math::Mat4& view, const math::Mat4& projection);
 

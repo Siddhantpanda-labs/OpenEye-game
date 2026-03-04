@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -18,12 +19,24 @@ public:
     ShadowPass();
     ~ShadowPass() = default;
 
-    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void SetDepthShader(std::shared_ptr<Shader> shader);
+    void SetDepthSkinnedShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetDepthShader() const { return m_depthShader; }
 
-    /** cmd is used for ShadowMap bind/unbind (SetRenderTarget, Clear). May be null if shadow map uses legacy path. */
+    /** Render (context-based). */
     void Render(ShadowMap& shadowMap,
+                const RenderContext& ctx,
+                const std::vector<Drawable>& drawables,
+                const math::Vec3& lightDir,
+                const math::Mat4& view,
+                const math::Mat4& projection,
+                const math::Vec3& cameraPos,
+                float nearPlane,
+                float farPlane);
+
+    /** device and cmd must be non-null. */
+    void Render(ShadowMap& shadowMap,
+                rhi::IDevice* device,
                 rhi::ICommandList* cmd,
                 const std::vector<Drawable>& drawables,
                 const math::Vec3& lightDir,
@@ -34,7 +47,19 @@ public:
                 float farPlane);
 
     using DrawableFeed = std::function<void(std::function<void(const Drawable&)>)>;
+    /** Render with drawable feed (context-based). */
     void Render(ShadowMap& shadowMap,
+                const RenderContext& ctx,
+                DrawableFeed feedDrawables,
+                const math::Vec3& lightDir,
+                const math::Mat4& view,
+                const math::Mat4& projection,
+                const math::Vec3& cameraPos,
+                float nearPlane,
+                float farPlane);
+
+    void Render(ShadowMap& shadowMap,
+                rhi::IDevice* device,
                 rhi::ICommandList* cmd,
                 DrawableFeed feedDrawables,
                 const math::Vec3& lightDir,
@@ -50,9 +75,10 @@ public:
     void ReloadShaders();
 
 private:
-    void EnsureDefaultShader();
-    void EnsureSkinnedShader();
+    void EnsureDefaultShader(rhi::IDevice* device);
+    void EnsureSkinnedShader(rhi::IDevice* device);
     void RenderDrawables(ShadowMap& shadowMap,
+                        rhi::IDevice* device,
                         rhi::ICommandList* cmd,
                         DrawableFeed feedDrawables,
                         const math::Vec3& lightDir,
@@ -65,7 +91,6 @@ private:
     std::shared_ptr<Shader> m_depthShader;
     std::shared_ptr<Shader> m_depthSkinnedShader;
     ShadowMap* m_currentShadowMap = nullptr;
-    rhi::IDevice* m_device = nullptr;
 };
 
 } // namespace render

@@ -1,4 +1,5 @@
 #include "eyelib/animation/RiggingUtils.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -8,17 +9,16 @@ namespace eyelib {
 namespace animation {
 
 void RiggingUtils::CalculateDistanceWeights(
-    std::shared_ptr<render::Mesh> mesh,
+    assets::EditableMesh& editable,
     std::shared_ptr<Skeleton> skeleton,
     float falloffDistance,
     float power) {
     
-    if (!mesh || !skeleton) return;
+    if (!skeleton) return;
     
-    auto& vertices = mesh->GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
-    // For each vertex, find closest bones and assign weights
     for (auto& vertex : vertices) {
         std::vector<std::pair<float, size_t>> boneDistances; // (distance, boneIndex)
         
@@ -44,7 +44,7 @@ void RiggingUtils::CalculateDistanceWeights(
         math::IVec4 indices(0, 0, 0, 0);
         math::Vec4 weights(0.0f, 0.0f, 0.0f, 0.0f);
         
-        for (size_t i = 0; i < count; ++i) {
+        for (int i = 0; i < static_cast<int>(count); ++i) {
             float dist = boneDistances[i].first;
             if (dist < 0.0001f) dist = 0.0001f; // Avoid division by zero
             float weight = 1.0f / std::pow(dist, power);
@@ -53,7 +53,6 @@ void RiggingUtils::CalculateDistanceWeights(
             weights[i] = weight;
         }
         
-        // Normalize weights
         if (totalWeight > 0.0f) {
             weights = weights / totalWeight;
         } else {
@@ -65,9 +64,6 @@ void RiggingUtils::CalculateDistanceWeights(
         vertex.boneIndices = indices;
         vertex.boneWeights = weights;
     }
-    
-    mesh->InvalidateAABB();
-    mesh->UploadToGPU();
 }
 
 void RiggingUtils::AssignDistanceWeights(
@@ -103,7 +99,7 @@ void RiggingUtils::AssignDistanceWeights(
         math::IVec4 indices(0, 0, 0, 0);
         math::Vec4 weights(0.0f, 0.0f, 0.0f, 0.0f);
         
-        for (size_t i = 0; i < count; ++i) {
+        for (int i = 0; i < static_cast<int>(count); ++i) {
             float dist = boneDistances[i].first;
             if (dist < 0.0001f) dist = 0.0001f;
             float weight = 1.0f / std::pow(dist, power);
@@ -125,13 +121,11 @@ void RiggingUtils::AssignDistanceWeights(
 }
 
 void RiggingUtils::CalculateHeatDiffusionWeights(
-    std::shared_ptr<render::Mesh> mesh,
+    assets::EditableMesh& editable,
     std::shared_ptr<Skeleton> skeleton,
     int iterations) {
     
-    // Simplified heat diffusion: iterative smoothing of distance-based weights
-    // Full implementation would require mesh connectivity, so we use distance-based as base
-    CalculateDistanceWeights(mesh, skeleton, 1.0f, 2.0f);
+    CalculateDistanceWeights(editable, skeleton, 1.0f, 2.0f);
     
     // For now, heat diffusion is approximated by distance-based with smoothing
     // A full implementation would require mesh topology (edges/faces)

@@ -1,103 +1,49 @@
 #include "eyelib/geometry/core/MeshSnapshot.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/render/resources/Mesh.h"
 #include <algorithm>
 
 namespace eyelib {
 namespace geometry {
 
-std::shared_ptr<MeshSnapshot> MeshSnapshot::Create(const render::Mesh& mesh) {
+std::shared_ptr<MeshSnapshot> MeshSnapshot::Create(const assets::EditableMesh& editable) {
     auto snapshot = std::make_shared<MeshSnapshot>();
-    
-    // Copy vertices
-    snapshot->m_vertices = mesh.GetVertices();
-    
-    // Copy indices
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        snapshot->m_indices = mesh.GetIndices32();
-        snapshot->m_indexFormat = render::IndexFormat::UInt32;
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        snapshot->m_indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            snapshot->m_indices.push_back(static_cast<uint32_t>(idx));
-        }
-        snapshot->m_indexFormat = render::IndexFormat::UInt16;
-    }
-    
-    // Copy submeshes
-    snapshot->m_submeshes.clear();
-    for (size_t i = 0; i < mesh.GetSubmeshCount(); ++i) {
-        snapshot->m_submeshes.push_back(mesh.GetSubmesh(i));
-    }
-    
+    snapshot->m_vertices = editable.GetVertices();
+    snapshot->m_indices = editable.GetIndices();
+    snapshot->m_submeshes = editable.GetSubmeshes();
     return snapshot;
 }
 
-void MeshSnapshot::Restore(render::Mesh& mesh) const {
-    // Restore vertices
-    mesh.SetVertices(m_vertices);
-    
-    // Restore indices
-    if (m_indexFormat == render::IndexFormat::UInt32) {
-        mesh.SetIndices(m_indices);
-    } else {
-        std::vector<uint16_t> indices16;
-        indices16.reserve(m_indices.size());
-        for (uint32_t idx : m_indices) {
-            if (idx > 65535) {
-                // Can't fit in uint16_t, skip or clamp
-                continue;
-            }
-            indices16.push_back(static_cast<uint16_t>(idx));
-        }
-        mesh.SetIndices(indices16);
-    }
-    
-    // Restore submeshes
-    mesh.ClearSubmeshes();
-    for (const auto& submesh : m_submeshes) {
-        mesh.AddSubmesh(submesh.indexOffset, submesh.indexCount, submesh.materialIndex);
-    }
-    
-    // Upload to GPU
-    mesh.UploadToGPU();
+void MeshSnapshot::Restore(assets::EditableMesh& editable) const {
+    editable.SetVertices(m_vertices);
+    editable.SetIndices(m_indices);
+    editable.SetSubmeshes(m_submeshes);
 }
 
 // MeshHistory implementation
 
 MeshHistory::MeshHistory() : m_currentIndex(0), m_maxHistorySize(100) {}
 
-void MeshHistory::Save(const render::Mesh& mesh) {
-    // Remove any "future" history if we're not at the end
+void MeshHistory::Save(const assets::EditableMesh& editable) {
     if (m_currentIndex < m_history.size()) {
         m_history.erase(m_history.begin() + m_currentIndex, m_history.end());
     }
-    
-    // Add new snapshot
-    m_history.push_back(MeshSnapshot::Create(mesh));
+    m_history.push_back(MeshSnapshot::Create(editable));
     m_currentIndex = m_history.size() - 1;
-    
-    // Trim if needed
     TrimHistory();
 }
 
-bool MeshHistory::Undo(render::Mesh& mesh) {
-    if (!CanUndo()) {
-        return false;
-    }
-    
+bool MeshHistory::Undo(assets::EditableMesh& editable) {
+    if (!CanUndo()) return false;
     m_currentIndex--;
-    m_history[m_currentIndex]->Restore(mesh);
+    m_history[m_currentIndex]->Restore(editable);
     return true;
 }
 
-bool MeshHistory::Redo(render::Mesh& mesh) {
-    if (!CanRedo()) {
-        return false;
-    }
-    
+bool MeshHistory::Redo(assets::EditableMesh& editable) {
+    if (!CanRedo()) return false;
     m_currentIndex++;
-    m_history[m_currentIndex]->Restore(mesh);
+    m_history[m_currentIndex]->Restore(editable);
     return true;
 }
 

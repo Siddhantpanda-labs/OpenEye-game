@@ -11,12 +11,15 @@
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/passes/LightCullPass.h"
 #include "eyelib/render/DebugDrawRenderer.h"
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/debug/Presets.h"
 #include "eyelib/debug/Profiler.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
+#include "eyelib/render/framegraph/FrameGraphRecipe.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
+#include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
@@ -26,7 +29,6 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 
 #include "eyelib/math/TransformUtils.h"
@@ -51,15 +53,11 @@ RenderPipeline::~RenderPipeline() {
 }
 
 void RenderPipeline::Shutdown() {
-    // Clear default device first so no code run during teardown sees this device as default.
-    if (m_device)
-        rhi::SetDefaultDevice(nullptr);
+    // Pipeline never mutates global state. Caller must run DebugDrawRenderer::Shutdown(), Primitives::ShutdownStaticResources() before Shutdown() when OwnsDevice().
     debug::Profiler::SetGpuProfiler(nullptr);
     m_gpuProfilerRHI.reset();
 
     DestroyHDRFramebuffer();
-    // Destroy all objects that hold a raw pointer to m_device before destroying the device.
-    // Their destructors call back into the device (DestroyRenderTarget, DestroyPipeline, etc.).
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
     m_forwardPlusSkinnedShader.reset();
@@ -88,14 +86,9 @@ void RenderPipeline::Shutdown() {
         if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
         if (m_lightIndexBuffer) { m_device->DestroyBuffer(m_lightIndexBuffer); m_lightIndexBuffer = nullptr; }
     }
-    // Tear down static GPU resources while device is still valid (they may hold this device).
-    DebugDrawRenderer::Shutdown();
-    Primitives::ShutdownStaticResources();
-    DebugDrawRenderer::SetDevice(nullptr);
-    rhi::SetDefaultDevice(nullptr);
-    // Do NOT m_device.reset() here: pipeline-owned shaders (shared_ptr) may have refcount > 1
-    // and are only released when the pipeline object is destroyed. Destroy device in destructor
-    // so it happens after member destructors (and thus after all shaders are destroyed).
+    if (m_ownedDevice)
+        m_ownedDevice.reset();
+    m_device = nullptr;
     m_width = m_height = 0;
 }
 
@@ -106,20 +99,34 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     }
     m_width = width;
     m_height = height;
-    m_device = std::move(device);
-    rhi::SetDefaultDevice(m_device.get());
-    DebugDrawRenderer::SetDevice(m_device.get());
+    m_ownedDevice = std::move(device);
+    m_device = m_ownedDevice.get();
+    return InitializeDeviceResources(width, height);
+}
 
+bool RenderPipeline::Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height) {
+    if (!sharedDevice) {
+        core::Log::Error("RenderPipeline::Initialize(shared): device is null");
+        return false;
+    }
+    m_width = width;
+    m_height = height;
+    m_device = sharedDevice;
+    return InitializeDeviceResources(width, height);
+}
+
+bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) {
+    Primitives::SetStaticDevice(m_device);
     core::Log::Info("RenderPipeline::Initialize: initializing GBuffer");
     m_gbuffer = std::make_unique<GBuffer>();
-    if (!m_gbuffer->Initialize(m_device.get(), width, height)) {
+    if (!m_gbuffer->Initialize(m_device, width, height)) {
         core::Log::Error("RenderPipeline::Initialize: GBuffer::Initialize failed");
         return false;
     }
 
     core::Log::Info("RenderPipeline::Initialize: initializing ShadowMap");
     m_shadowMap = std::make_unique<ShadowMap>();
-    if (!m_shadowMap->Initialize(m_device.get(), 2048)) {
+    if (!m_shadowMap->Initialize(m_device, 2048)) {
         core::Log::Error("RenderPipeline::Initialize: ShadowMap::Initialize failed");
         return false;
     }
@@ -131,16 +138,14 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
         m_gbufferPass->SetBindlessHeap(m_bindlessHeap);
     m_gbufferPass->SetBindlessGetHandle([this](rhi::ITexture* t) { return GetOrAllocateBindlessHandle(t); });
     m_gpuCullPass = std::make_unique<GpuCullPass>();
-    m_gpuCullPass->SetDevice(m_device.get());
-    if (m_gpuCullPass->IsSupported())
-        m_gpuCullPass->Initialize();
+    if (m_gpuCullPass->IsSupported(m_device))
+        m_gpuCullPass->Initialize(m_device);
     m_lightCullPass = std::make_unique<LightCullPass>();
-    m_lightCullPass->SetDevice(m_device.get());
-    if (m_lightCullPass->IsSupported())
-        m_lightCullPass->Initialize();
+    if (m_lightCullPass->IsSupported(m_device))
+        m_lightCullPass->Initialize(m_device);
     // A2: Transform buffer for GPU cull path; draw list is now inside GpuCullPass combined buffer.
     constexpr uint32_t kMaxGpuCullDraws = 256;
-    if (m_device && m_gpuCullPass->IsSupported()) {
+    if (m_device && m_gpuCullPass->IsSupported(m_device)) {
         rhi::BufferDesc bd;
         bd.sizeInBytes = kMaxGpuCullDraws * sizeof(math::Mat4);
         bd.usage = rhi::BufferUsage::Storage;
@@ -148,36 +153,59 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
         m_gpuCullTransformBuffer = m_device->CreateBuffer(bd, nullptr);
     }
     // Quad for GPU-driven GBuffer path (E8): matches cull_indirect.comp output (6 indices, 1 draw).
-    m_gpuDrivenQuad = std::make_unique<Mesh>();
     {
-        std::vector<Vertex> verts(4);
-        verts[0].position = math::Vec3(-1.0f, -1.0f, 0.0f);
-        verts[0].uv = math::Vec2(0.0f, 0.0f);
-        verts[1].position = math::Vec3(1.0f, -1.0f, 0.0f);
-        verts[1].uv = math::Vec2(1.0f, 0.0f);
-        verts[2].position = math::Vec3(1.0f, 1.0f, 0.0f);
-        verts[2].uv = math::Vec2(1.0f, 1.0f);
-        verts[3].position = math::Vec3(-1.0f, 1.0f, 0.0f);
-        verts[3].uv = math::Vec2(0.0f, 1.0f);
-        std::vector<uint32_t> indices = {0, 1, 2, 2, 3, 0};
-        m_gpuDrivenQuad->SetVertices(verts);
-        m_gpuDrivenQuad->SetIndices(indices);
-        m_gpuDrivenQuad->UploadToGPU(m_device.get());
+        MeshDescriptor quadDesc;
+        quadDesc.vertices.resize(4);
+        quadDesc.vertices[0].position = math::Vec3(-1.0f, -1.0f, 0.0f);
+        quadDesc.vertices[0].uv = math::Vec2(0.0f, 0.0f);
+        quadDesc.vertices[1].position = math::Vec3(1.0f, -1.0f, 0.0f);
+        quadDesc.vertices[1].uv = math::Vec2(1.0f, 0.0f);
+        quadDesc.vertices[2].position = math::Vec3(1.0f, 1.0f, 0.0f);
+        quadDesc.vertices[2].uv = math::Vec2(1.0f, 1.0f);
+        quadDesc.vertices[3].position = math::Vec3(-1.0f, 1.0f, 0.0f);
+        quadDesc.vertices[3].uv = math::Vec2(0.0f, 1.0f);
+        quadDesc.indices32 = {0, 1, 2, 2, 3, 0};
+        quadDesc.indices16.clear();
+        quadDesc.indexFormat = IndexFormat::UInt32;
+        quadDesc.submeshes.clear();
+        m_gpuDrivenQuad = std::make_unique<Mesh>();
+        m_gpuDrivenQuad->CreateFromDescriptor(m_device, quadDesc);
     }
     m_shadowPass = std::make_unique<ShadowPass>();
     m_lightingPass = std::make_unique<LightingPass>();
-    m_gbufferPass->SetDevice(m_device.get());
-    m_shadowPass->SetDevice(m_device.get());
-    m_lightingPass->SetDevice(m_device.get());
+
+    // Create pass default shaders once at init (no lazy creation during render).
+    {
+        auto gbufferShader = std::make_shared<Shader>();
+        if (gbufferShader->Load(m_device, "passes/deferred/gbuffer_skinned", Mesh::GetVertexLayoutRHI()))
+            m_gbufferPass->SetGeometryShader(std::move(gbufferShader));
+
+        auto shadowShader = std::make_shared<Shader>();
+        if (shadowShader->Load(m_device, "passes/shadow/shadow", Mesh::GetVertexLayoutRHI()))
+            m_shadowPass->SetDepthShader(std::move(shadowShader));
+        auto shadowSkinnedShader = std::make_shared<Shader>();
+        if (shadowSkinnedShader->Load(m_device, "passes/shadow/shadow_skinned", Mesh::GetVertexLayoutRHI()))
+            m_shadowPass->SetDepthSkinnedShader(std::move(shadowSkinnedShader));
+
+        rhi::VertexLayout fullscreenLayout;
+        fullscreenLayout.strideInBytes = 4u * sizeof(float);
+        fullscreenLayout.attributes = {
+            {0, rhi::VertexAttributeType::Float2, 0},
+            {1, rhi::VertexAttributeType::Float2, 2u * sizeof(float)},
+        };
+        auto lightingShader = std::make_shared<Shader>();
+        if (lightingShader->Load(m_device, "passes/deferred/lighting", fullscreenLayout))
+            m_lightingPass->SetLightingShader(std::move(lightingShader));
+    }
+
     m_frameGraph = std::make_unique<FrameGraph>();
-    m_frameGraph->SetDevice(m_device.get());
     m_frameGraph->SetFrameSize(width, height);
     m_clusteredLightGrid = std::make_unique<ClusteredLightGrid>();
     m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Default, will be updated per-frame
 
     core::Log::Info("RenderPipeline::Initialize: initializing PostProcessor");
     m_postProcessor = std::make_unique<PostProcessor>();
-    if (!m_postProcessor->Initialize(width, height, m_device.get())) {
+    if (!m_postProcessor->Initialize(width, height, m_device)) {
         core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
         return false;
     }
@@ -197,7 +225,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_prevView = math::Mat4(1.0f);
     m_prevProjection = math::Mat4(1.0f);
 
-    m_gpuProfilerRHI = std::make_unique<GpuProfilerRHI>(m_device.get());
+    m_gpuProfilerRHI = std::make_unique<GpuProfilerRHI>(m_device);
     debug::Profiler::SetGpuProfiler(m_gpuProfilerRHI.get());
 
     core::Log::Info("RenderPipeline::Initialize: pipeline init success");
@@ -344,8 +372,7 @@ uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, co
     if (m_scratchGpuCullDrawList.empty()) m_gpuCullSingleMesh = false;
     const uint32_t gpuCullDrawListCount = static_cast<uint32_t>(m_scratchGpuCullDrawList.size());
 
-    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
-        m_gpuCullPass->SetDevice(m_device.get());
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported(m_device)) {
         if (gpuCullDrawListCount > 0) {
             m_gpuCullPass->SetDrawList(m_scratchGpuCullDrawList.data(), gpuCullDrawListCount);
             if (m_gpuCullTransformBuffer && m_scratchGpuCullTransforms.size() >= gpuCullDrawListCount) {
@@ -367,20 +394,22 @@ uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, co
 
 void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount) {
     if (!m_gbufferPass || !m_gbuffer) return;
-    const bool useIndirectQuad = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported()
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    if (!ctx) return;
+    const bool useIndirectQuad = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported(m_device)
         && m_gpuDrivenQuad && m_gpuDrivenQuad->IsValid() && (gpuCullDrawListCount == 0);
-    const bool useIndirectScene = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported()
+    const bool useIndirectScene = m_useGpuDrivenGBuffer && m_gpuCullPass && m_gpuCullPass->IsSupported(m_device)
         && gpuCullDrawListCount > 0 && m_gpuCullSingleMesh && m_gpuCullRepresentativeMesh && m_gpuCullRepresentativeMesh->IsValid()
         && m_gpuCullTransformBuffer;
     if (useIndirectQuad) {
-        m_gbufferPass->RenderIndirect(*m_gbuffer, cmd,
+        m_gbufferPass->RenderIndirect(*m_gbuffer, ctx,
             m_gpuCullPass->GetIndirectBuffer(),
             m_gpuCullPass->GetDrawCount(),
             m_gpuCullPass->GetIndirectStride(),
             m_gpuDrivenQuad.get(),
             cam.view, cam.projection, &m_prevView, &m_prevProjection);
     } else if (useIndirectScene) {
-        m_gbufferPass->RenderIndirectWithPerDrawData(*m_gbuffer, cmd,
+        m_gbufferPass->RenderIndirectWithPerDrawData(*m_gbuffer, ctx,
             m_gpuCullPass->GetIndirectBuffer(),
             m_gpuCullPass->GetDrawCount(),
             m_gpuCullPass->GetIndirectStride(),
@@ -389,7 +418,7 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
             gpuCullDrawListCount,
             cam.view, cam.projection, &m_prevView, &m_prevProjection);
     } else {
-        m_gbufferPass->Render(*m_gbuffer, cmd,
+        m_gbufferPass->Render(*m_gbuffer, ctx,
             [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
             cam.view, cam.projection, m_prevView, m_prevProjection);
     }
@@ -403,90 +432,86 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     const CameraView cam = view.GetCamera();
     const LightParams light = view.GetLight();
 
-    // Fill scratch lights for lighting pass (view may be API or engine)
     m_scratchPointLights.clear();
     m_scratchSpotLights.clear();
     view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
     view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
 
+    FGNameToHandle nameToHandle;
     rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
     rhi::ITexture* hdrDepthTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetDepthTexture() : nullptr;
-    auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
-    auto hdrDepth = m_frameGraph->ImportTextureRHI("HDRDepth", hdrDepthTex, m_width, m_height);
-    auto gbPos = m_frameGraph->ImportTextureRHI("GBufferPos", m_gbuffer->GetPositionTextureRHI(), m_width, m_height);
-    auto gbNorm = m_frameGraph->ImportTextureRHI("GBufferNorm", m_gbuffer->GetNormalTextureRHI(), m_width, m_height);
-    auto gbAlb = m_frameGraph->ImportTextureRHI("GBufferAlb", m_gbuffer->GetAlbedoTextureRHI(), m_width, m_height);
-    auto gbPBR = m_frameGraph->ImportTextureRHI("GBufferPBR", m_gbuffer->GetPBRParamsTextureRHI(), m_width, m_height);
-    auto gbVelocity = m_frameGraph->ImportTextureRHI("GBufferVelocity", m_gbuffer->GetVelocityTextureRHI(), m_width, m_height);
-    auto gbDepth = m_frameGraph->ImportTextureRHI("GBufferDepth", m_gbuffer->GetDepthTextureRHI(), m_width, m_height);
-    auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
-    rhi::ICommandList* cmd = GetRHICommandList();
+    nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    nameToHandle["HDRDepth"] = m_frameGraph->ImportTextureRHI("HDRDepth", hdrDepthTex, m_width, m_height);
+    nameToHandle["GBufferPos"] = m_frameGraph->ImportTextureRHI("GBufferPos", m_gbuffer->GetPositionTextureRHI(), m_width, m_height);
+    nameToHandle["GBufferNorm"] = m_frameGraph->ImportTextureRHI("GBufferNorm", m_gbuffer->GetNormalTextureRHI(), m_width, m_height);
+    nameToHandle["GBufferAlb"] = m_frameGraph->ImportTextureRHI("GBufferAlb", m_gbuffer->GetAlbedoTextureRHI(), m_width, m_height);
+    nameToHandle["GBufferPBR"] = m_frameGraph->ImportTextureRHI("GBufferPBR", m_gbuffer->GetPBRParamsTextureRHI(), m_width, m_height);
+    nameToHandle["GBufferVelocity"] = m_frameGraph->ImportTextureRHI("GBufferVelocity", m_gbuffer->GetVelocityTextureRHI(), m_width, m_height);
+    nameToHandle["GBufferDepth"] = m_frameGraph->ImportTextureRHI("GBufferDepth", m_gbuffer->GetDepthTextureRHI(), m_width, m_height);
+    nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
 
+    RenderContext ctx = RenderContext::FromDevice(m_device);
     const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
-        m_frameGraph->AddPass("GPU Cull",
-            [this, cmd](const FGPassResources&) {
-                if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
-            },
-            {}, {}, true);
-    }
+    const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
 
-    if (light.castShadows) {
-        m_frameGraph->AddPass("Shadow",
-            [this, &view, &light, &cam, cmd](const FGPassResources&) {
-                m_shadowPass->Render(*m_shadowMap, cmd,
+    FrameGraphRecipe recipe;
+    recipe.push_back({ "GPU Cull", {}, {}, true });
+    if (light.castShadows)
+        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "GBuffer", {}, { "GBufferPos", "GBufferNorm", "GBufferAlb", "GBufferPBR", "GBufferVelocity", "GBufferDepth" }, true });
+    recipe.push_back({ "Copy depth for occlusion", { "GBufferDepth" }, {}, true });
+    std::vector<std::string> lightingReads = { "GBufferPos", "GBufferNorm", "GBufferAlb", "GBufferPBR" };
+    if (light.castShadows) lightingReads.push_back("Shadow");
+    recipe.push_back({ "Lighting", lightingReads, { "HDR" }, true });
+    recipe.push_back({ "Transparency", {}, { "HDR" }, true });
+
+    auto getExecutor = [this, &view, &cam, &light, ctx, gpuCullDrawListCount, clearBlack](const std::string& name) -> FrameGraph::ExecuteFunc {
+        if (name == "GPU Cull")
+            return [this, ctx](const FGPassResources&) { if (m_gpuCullPass) m_gpuCullPass->Execute(ctx); };
+        if (name == "Shadow")
+            return [this, &view, &light, &cam, ctx](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, ctx,
                     [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                     light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
-            },
-            {}, { shadowTex }, true);
-    }
+            };
+        if (name == "GBuffer")
+            return [this, &view, &cam, ctx, gpuCullDrawListCount](const FGPassResources&) {
+                RenderOpaqueGeometryToGBuffer(ctx.cmd, view, cam, gpuCullDrawListCount);
+            };
+        if (name == "Copy depth for occlusion")
+            return [this](const FGPassResources&) {
+                if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
+                    m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
+                m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+            };
+        if (name == "Lighting")
+            return [this, &view, &cam, ctx, clearBlack](const FGPassResources&) {
+                if (ctx.cmd && m_hdrRenderTarget)
+                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
+                ShadowMap* shadowMapForLighting = view.GetLight().castShadows ? m_shadowMap.get() : nullptr;
+                m_lightingPass->Render(*m_gbuffer, ctx, view.GetLight(), cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
+                    &m_scratchPointLights, &m_scratchSpotLights);
+            };
+        if (name == "Transparency")
+            return [this, &view, &cam, ctx](const FGPassResources&) {
+                if (m_device && m_hdrRenderTarget)
+                    m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
+                if (ctx.cmd && m_hdrRenderTarget) {
+                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
+                    ctx.cmd->SetViewport(0, 0, m_width, m_height);
+                }
+                m_scratchTransparent.clear();
+                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
+                TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+            };
+        return [](const FGPassResources&) {};
+    };
 
-    m_frameGraph->AddPass("GBuffer",
-        [this, &view, &cam, cmd, gpuCullDrawListCount](const FGPassResources&) {
-            RenderOpaqueGeometryToGBuffer(cmd, view, cam, gpuCullDrawListCount);
-        },
-        {}, { gbPos, gbNorm, gbAlb, gbPBR, gbVelocity, gbDepth }, true);
+    AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
+    AddSkyboxPassToFrameGraph(view, nameToHandle["HDR"], true);
 
-    m_frameGraph->AddPass("Copy depth for occlusion",
-        [this](const FGPassResources&) {
-            if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
-                m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
-            m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
-        },
-        { gbDepth }, {}, true);
-
-    std::vector<FGTextureHandle> lightingReads = { gbPos, gbNorm, gbAlb, gbPBR };
-    if (light.castShadows) lightingReads.push_back(shadowTex);
-    rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
-    m_frameGraph->AddPass("Lighting",
-        [this, &view, &cam, cmd, clearBlack](const FGPassResources&) {
-            if (cmd && m_hdrRenderTarget)
-                rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
-            ShadowMap* shadowMapForLighting = view.GetLight().castShadows ? m_shadowMap.get() : nullptr;
-            m_lightingPass->Render(*m_gbuffer, cmd, view.GetLight(), cam.view, cam.projection, cam.viewPos, shadowMapForLighting,
-                &m_scratchPointLights, &m_scratchSpotLights);
-        },
-        lightingReads, { hdrColor }, true);
-
-    m_frameGraph->AddPass("Transparency",
-        [this, &view, &cam, cmd](const FGPassResources&) {
-            if (m_device && m_hdrRenderTarget)
-                m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
-            if (cmd && m_hdrRenderTarget) {
-                cmd->SetRenderTarget(m_hdrRenderTarget);
-                cmd->SetViewport(0, 0, m_width, m_height);
-            }
-            m_scratchTransparent.clear();
-            view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-            TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
-        },
-        {}, { hdrColor }, true);
-
-    AddSkyboxPassToFrameGraph(view, hdrColor, true);
-
-    // Frame graph outputs HDR + depth only. Post runs once after debug (see Render()).
-    m_frameGraph->Compile();
-    m_frameGraph->Execute(GetRHICommandList());
+    m_frameGraph->Compile(m_device);
+    m_frameGraph->Execute(ctx);
 }
 
 void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view) {
@@ -502,65 +527,64 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
     view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
     view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
 
+    FGNameToHandle nameToHandle;
     rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
-    auto hdrColor = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
-    auto shadowTex = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
-    rhi::ICommandList* cmd = GetRHICommandList();
+    nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
 
+    RenderContext ctx = RenderContext::FromDevice(m_device);
     const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    if (m_gpuCullPass && m_gpuCullPass->IsSupported()) {
-        m_frameGraph->AddPass("GPU Cull",
-            [this, cmd](const FGPassResources&) {
-                if (m_gpuCullPass) m_gpuCullPass->Execute(cmd);
-            },
-            {}, {}, true);
-    }
+    const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
 
-    if (light.castShadows) {
-        m_frameGraph->AddPass("Shadow",
-            [this, &view, &light, &cam, cmd](const FGPassResources&) {
-                m_shadowPass->Render(*m_shadowMap, cmd,
+    FrameGraphRecipe recipe;
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported(m_device))
+        recipe.push_back({ "GPU Cull", {}, {}, true });
+    if (light.castShadows)
+        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Forward Opaque", {}, { "HDR" }, true });
+    recipe.push_back({ "Copy depth for occlusion", { "HDR" }, {}, true });
+    recipe.push_back({ "Transparency", {}, { "HDR" }, true });
+
+    auto getExecutor = [this, &view, &cam, &light, ctx, clearFwd](const std::string& name) -> FrameGraph::ExecuteFunc {
+        if (name == "GPU Cull")
+            return [this, ctx](const FGPassResources&) { if (m_gpuCullPass) m_gpuCullPass->Execute(ctx); };
+        if (name == "Shadow")
+            return [this, &view, &light, &cam, ctx](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, ctx,
                     [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
                     light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
-            },
-            {}, { shadowTex }, true);
-    }
+            };
+        if (name == "Forward Opaque")
+            return [this, &view, ctx, clearFwd](const FGPassResources&) {
+                if (ctx.cmd && m_hdrRenderTarget)
+                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+                if (ctx.cmd) { ctx.cmd->SetDepthTest(true); ctx.cmd->SetCullFace(false); }
+                RenderForwardOpaque(ctx.cmd, view);
+            };
+        if (name == "Copy depth for occlusion")
+            return [this](const FGPassResources&) {
+                if (m_prevFrameDepthRT && m_hdrRenderTarget)
+                    m_device->BlitDepthOnly(m_hdrRenderTarget, m_prevFrameDepthRT);
+                m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+            };
+        if (name == "Transparency")
+            return [this, &view, &cam, ctx](const FGPassResources&) {
+                if (ctx.cmd && m_hdrRenderTarget) {
+                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
+                    ctx.cmd->SetViewport(0, 0, m_width, m_height);
+                }
+                m_scratchTransparent.clear();
+                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
+                TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+            };
+        return [](const FGPassResources&) {};
+    };
 
-    rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
-    m_frameGraph->AddPass("Forward Opaque",
-        [this, &view, cmd, clearFwd](const FGPassResources&) {
-            if (cmd && m_hdrRenderTarget)
-                rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
-            if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
-            RenderForwardOpaque(cmd, view);
-        },
-        {}, { hdrColor }, true);
+    AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
+    AddSkyboxPassToFrameGraph(view, nameToHandle["HDR"], false);
 
-    m_frameGraph->AddPass("Copy depth for occlusion",
-        [this](const FGPassResources&) {
-            if (m_prevFrameDepthRT && m_hdrRenderTarget)
-                m_device->BlitDepthOnly(m_hdrRenderTarget, m_prevFrameDepthRT);
-            m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
-        },
-        { hdrColor }, {}, true);
-
-    m_frameGraph->AddPass("Transparency",
-        [this, &view, &cam, cmd](const FGPassResources&) {
-            if (cmd && m_hdrRenderTarget) {
-                cmd->SetRenderTarget(m_hdrRenderTarget);
-                cmd->SetViewport(0, 0, m_width, m_height);
-            }
-            m_scratchTransparent.clear();
-            view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-            TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
-        },
-        {}, { hdrColor }, true);
-
-    AddSkyboxPassToFrameGraph(view, hdrColor, false);
-
-    // Frame graph outputs HDR + depth only. Post runs once after debug (see Render()).
-    m_frameGraph->Compile();
-    m_frameGraph->Execute(GetRHICommandList());
+    m_frameGraph->Compile(m_device);
+    m_frameGraph->Execute(ctx);
 }
 
 void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view) {
@@ -581,9 +605,9 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
     view.ForEachOpaqueDrawable([&](const Drawable& d) {
         if (!d.mesh || !d.material) return;
         if (d.materialInstance) {
-            d.materialInstance->Bind();
+            d.materialInstance->Bind(m_device);
         } else {
-            d.material->Bind();
+            d.material->Bind(m_device);
         }
         Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
         if (!sh) return;
@@ -639,8 +663,8 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
             sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
             sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
         }
-        d.mesh->Bind();
-        d.mesh->Draw();
+        d.mesh->Bind(m_device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         d.mesh->Unbind();
         sh->Unbind();
     });
@@ -668,7 +692,8 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     const CameraView cam = view.GetCamera();
     m_scratchTransparent.clear();
     view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-    TransparencyPass::Render(cmd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
     if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
@@ -732,8 +757,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     }
 
     // Light grid: GPU compute cull (when supported) or CPU fallback
-    if (m_lightCullPass && m_lightCullPass->IsSupported() && m_lightIndexBuffer) {
-        m_lightCullPass->SetDevice(m_device.get());
+    if (m_lightCullPass && m_lightCullPass->IsSupported(m_device) && m_lightIndexBuffer) {
         m_lightCullPass->SetPointLights(m_pointLightBuffer, static_cast<uint32_t>(m_scratchPointLights.size()));
         m_lightCullPass->SetSpotLights(m_spotLightBuffer, static_cast<uint32_t>(m_scratchSpotLights.size()));
         m_lightCullPass->SetOutputBuffer(m_lightIndexBuffer);
@@ -747,7 +771,8 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
             m_clusteredLightGrid->GetNearPlane(),
             m_clusteredLightGrid->GetFarPlane(),
             m_width, m_height);
-        m_lightCullPass->Execute(cmdFwd);
+        RenderContext lightCullCtx = RenderContext::FromDevice(m_device);
+        m_lightCullPass->Execute(lightCullCtx);
     } else {
         m_clusteredLightGrid->BuildLightGrid(m_scratchPointLights, m_scratchSpotLights,
                                              cam.view, cam.projection, cam.viewPos);
@@ -756,7 +781,8 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     if (cmdFwd && m_lightIndexBuffer) cmdFwd->BindStorageBuffer(m_lightIndexBuffer, 2);
 
     if (light.castShadows && m_shadowMap && m_shadowPass) {
-        m_shadowPass->Render(*m_shadowMap, GetRHICommandList(),
+        RenderContext ctx = RenderContext::FromDevice(m_device);
+        m_shadowPass->Render(*m_shadowMap, ctx,
             [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
             light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane);
     }
@@ -765,7 +791,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     if (!m_forwardPlusShader || !m_forwardPlusShader->IsValid()) {
         m_forwardPlusShader = std::make_shared<Shader>();
         if (m_device)
-            m_forwardPlusShader->Load(m_device.get(), "passes/forward/forwardplus", Mesh::GetVertexLayoutRHI());
+            m_forwardPlusShader->Load(m_device, "passes/forward/forwardplus", Mesh::GetVertexLayoutRHI());
     }
 
     if (!m_forwardPlusShader->IsValid()) {
@@ -776,7 +802,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     if (!m_forwardPlusSkinnedShader || !m_forwardPlusSkinnedShader->IsValid()) {
         m_forwardPlusSkinnedShader = std::make_shared<Shader>();
         if (m_device)
-            m_forwardPlusSkinnedShader->Load(m_device.get(), "passes/forward/forwardplus_skinned", Mesh::GetVertexLayoutRHI());
+            m_forwardPlusSkinnedShader->Load(m_device, "passes/forward/forwardplus_skinned", Mesh::GetVertexLayoutRHI());
     }
 
     if (cmdFwd && m_hdrRenderTarget) {
@@ -845,7 +871,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
 
         const bool useSkinned = (bonePtr && boneCount > 0 && m_forwardPlusSkinnedShader && m_forwardPlusSkinnedShader->IsValid());
         Shader* sh = useSkinned ? m_forwardPlusSkinnedShader.get() : m_forwardPlusShader.get();
-        sh->Bind();
+        sh->Bind(m_device);
 
         if (useSkinned) {
             if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; }
@@ -923,8 +949,8 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
             sh->SetInt("u_UseEmissiveTexture", 0);
         }
 
-        d.mesh->Bind();
-        d.mesh->Draw();
+        d.mesh->Bind(m_device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         d.mesh->Unbind();
     });
 
@@ -933,7 +959,8 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
     if (light.castShadows && m_shadowMap && cmdFwd) cmdFwd->UnbindTexture(kShadowMapUnit);
     m_scratchTransparent.clear();
     view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-    TransparencyPass::Render(cmdFwd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+    RenderContext ctxFwd = RenderContext::FromDevice(m_device);
+    TransparencyPass::Render(ctxFwd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
     if (cmdFwd) { cmdFwd->SetCullFace(true); cmdFwd->SetRenderTarget(nullptr); }
 }
 
@@ -989,17 +1016,19 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
             m_prePostCallback(m_hdrRenderTarget, m_width, m_height, *sceneForCb);
     }
 
-    if (eyelib::debug::GetPresets().debugDrawEnabled.load()) {
+    if (eyelib::debug::GetPresets().debugDrawEnabled.load() && m_device) {
+        RenderContext ctx = RenderContext::FromDevice(m_device);
         rhi::IRenderTarget* target = m_hdrRenderTarget;
-        DebugDrawRenderer::Render(cam, target, m_width, m_height);
+        DebugDrawRenderer::Render(ctx, cam, target, m_width, m_height);
     }
 
-    if (!m_pendingDebugLinesColored.empty()) {
+    if (!m_pendingDebugLinesColored.empty() && m_device) {
+        RenderContext ctx = RenderContext::FromDevice(m_device);
         CameraView pendingCam;
         pendingCam.view = m_pendingDebugView;
         pendingCam.projection = m_pendingDebugProj;
         pendingCam.viewPos = math::Vec3(0, 0, 0);
-        DebugDrawRenderer::RenderLinesWithDepth(pendingCam, m_hdrRenderTarget, m_width, m_height, m_pendingDebugLinesColored);
+        DebugDrawRenderer::RenderLinesWithDepth(ctx, pendingCam, m_hdrRenderTarget, m_width, m_height, m_pendingDebugLinesColored);
         m_pendingDebugLinesColored.clear();
     }
 
@@ -1081,7 +1110,7 @@ void RenderPipeline::EnsureSkyboxShader() {
     skyboxDepth.depthTest = true;
     skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
-    if (!m_skyboxShader->Load(m_device.get(), "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth)) {
+    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth)) {
         core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
@@ -1127,7 +1156,7 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     if (cmdSky)
         cmdSky->SetCullFace(false);
 
-    m_skyboxShader->Bind();
+    m_skyboxShader->Bind(m_device);
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
     m_skyboxShader->SetMat4("u_InverseProjectionMatrix", glm::inverse(camera.projection));
     m_skyboxShader->SetInt("u_Skybox", 0);
@@ -1158,7 +1187,7 @@ void RenderPipeline::EnsureOutlinePostShader() {
     rhi::DepthStencilState postDepth;
     postDepth.depthTest = false;
     postDepth.depthWrite = false;
-    if (!m_outlinePostShader->Load(m_device.get(), "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth)) {
+    if (!m_outlinePostShader->Load(m_device, "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth)) {
         core::Log::WarnF("Outline post shader failed to load (passes/outline_post/outline_post). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
@@ -1168,7 +1197,7 @@ void RenderPipeline::EnsureEntityIdShader() {
     if (m_entityIdShader && m_entityIdShader->IsValid()) return;
     if (!m_device) return;
     m_entityIdShader = std::make_shared<Shader>();
-    if (!m_entityIdShader->Load(m_device.get(), "passes/entityid/entityid", Mesh::GetVertexLayoutRHI())) {
+    if (!m_entityIdShader->Load(m_device, "passes/entityid/entityid", Mesh::GetVertexLayoutRHI())) {
         core::Log::WarnF("EntityID shader failed to load (passes/entityid/entityid). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
@@ -1193,7 +1222,7 @@ void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std:
     clearId.colorUint = 0u;
     cmd->ClearRenderTarget(m_entityIdRenderTarget, clearId);
 
-    m_entityIdShader->Bind();
+    m_entityIdShader->Bind(m_device);
     m_entityIdShader->SetMat4("u_View", cam.view);
     m_entityIdShader->SetMat4("u_Projection", cam.projection);
 
@@ -1203,8 +1232,8 @@ void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std:
         uint32_t id = entityIdsForOpaque[index++];
         m_entityIdShader->SetUint("u_EntityID", id);
         m_entityIdShader->SetMat4("u_Model", d.transform);
-        d.mesh->Bind();
-        d.mesh->Draw();
+        d.mesh->Bind(m_device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         d.mesh->Unbind();
     });
 
@@ -1229,7 +1258,7 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
 
-    m_outlinePostShader->Bind();
+    m_outlinePostShader->Bind(m_device);
     rhi::ITexture* sceneTex = m_outlineCompositeTemp->GetColorTexture(0);
     rhi::ITexture* idTex = m_entityIdRenderTarget->GetColorTexture(0);
     if (sceneTex) cmd->BindTexture(sceneTex, 0);
@@ -1255,11 +1284,12 @@ void RenderPipeline::RenderDebugLines(const math::Mat4& view, const math::Mat4& 
     // Always draw into HDR so depth test runs against scene depth; post then consumes HDR (with lines).
     rhi::IRenderTarget* rt = m_hdrRenderTarget;
     if (lines.empty() || !rt || m_width == 0 || m_height == 0) return;
+    RenderContext ctx = RenderContext::FromDevice(m_device);
     CameraView cam;
     cam.view = view;
     cam.projection = proj;
     cam.viewPos = math::Vec3(0, 0, 0);
-    DebugDrawRenderer::RenderLinesWithDepth(cam, rt, m_width, m_height, lines, math::Vec4(r, g, b, 1.f));
+    DebugDrawRenderer::RenderLinesWithDepth(ctx, cam, rt, m_width, m_height, lines, math::Vec4(r, g, b, 1.f));
 }
 
 void RenderPipeline::SetPendingDebugLines(const math::Mat4& view, const math::Mat4& proj,

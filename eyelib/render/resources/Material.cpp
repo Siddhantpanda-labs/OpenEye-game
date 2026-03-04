@@ -1,6 +1,7 @@
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
+#include "eyelib/render/MaterialDescriptor.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <functional>
 
@@ -90,10 +91,10 @@ bool Material::IsKeywordEnabled(const std::string& keyword) const {
     return it != m_keywords.end() && it->second;
 }
 
-void Material::Bind() const {
-    if (!m_shader || !m_shader->IsValid()) return;
+void Material::Bind(rhi::IDevice* device) const {
+    if (!device || !m_shader || !m_shader->IsValid()) return;
 
-    m_shader->Bind();
+    m_shader->Bind(device);
 
     int unit = 0;
     for (const auto& p : m_textures) {
@@ -172,6 +173,33 @@ void Material::ForEachMat4Array(std::function<void(const std::string&, const mat
         if (!p.second.empty())
             fn(p.first, p.second.data(), p.second.size());
     }
+}
+
+std::shared_ptr<Material> CreateMaterialFromDescriptor(
+    const MaterialDescriptor& desc,
+    std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
+    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
+    auto mat = std::make_shared<Material>();
+    if (!desc.shaderName.empty()) {
+        auto sh = resolveShader(desc.shaderName);
+        if (sh) mat->SetShader(sh);
+    }
+    for (const auto& p : desc.texturePaths) {
+        auto tex = resolveTexture(p.second);
+        if (tex) mat->SetTexture(p.first, tex);
+    }
+    for (const auto& p : desc.floats) mat->SetFloat(p.first, p.second);
+    for (const auto& p : desc.vec3s) mat->SetVec3(p.first, p.second);
+    for (const auto& p : desc.vec4s) mat->SetVec4(p.first, p.second);
+    for (const auto& p : desc.mat4Arrays) mat->SetMat4Array(p.first, p.second);
+    for (const auto& p : desc.keywords) mat->SetKeyword(p.first, p.second);
+    mat->SetAlbedo(desc.albedo);
+    mat->SetMetallic(desc.metallic);
+    mat->SetRoughness(desc.roughness);
+    mat->SetEmission(desc.emission);
+    mat->SetAO(desc.ao);
+    mat->SetAlpha(desc.alpha);
+    return mat;
 }
 
 } // namespace render

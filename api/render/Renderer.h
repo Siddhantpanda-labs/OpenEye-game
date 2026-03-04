@@ -1,5 +1,7 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
+
 namespace eyelib {
 namespace api {
 
@@ -13,6 +15,8 @@ public:
     Renderer();
     ~Renderer();
 
+    /** Set device before Clear (for default framebuffer clear). */
+    void SetDevice(RenderDevice device);
     bool Initialize();
     void Shutdown();
 

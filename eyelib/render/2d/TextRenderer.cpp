@@ -3,7 +3,6 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include <algorithm>
 
 namespace eyelib {
@@ -27,7 +26,7 @@ void TextRenderer::Shutdown() {
 
 bool TextRenderer::Initialize() {
     if (m_initialized) return true;
-    m_deviceRHI = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
+    m_deviceRHI = m_injectedDevice;
     if (!m_deviceRHI) return false;
     EnsureShader();
     if (!m_shader || !m_shader->IsValid()) {
@@ -41,7 +40,7 @@ bool TextRenderer::Initialize() {
 void TextRenderer::EnsureShader() {
     if (m_shader && m_shader->IsValid()) return;
     m_shader = std::make_shared<Shader>();
-    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : m_deviceRHI;
     if (!device) return;
     m_shader->Load(device, "passes/2d/sprite", GetVertexLayout());
 }
@@ -83,7 +82,7 @@ void TextRenderer::RenderText(const std::string& text, Font& font, const math::V
             m_indices.push_back(static_cast<unsigned int>(base) + i);
     }
     if (m_vertices.empty()) return;
-    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : m_deviceRHI;
     if (!device) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;
@@ -91,7 +90,7 @@ void TextRenderer::RenderText(const std::string& text, Font& font, const math::V
     if (!m_vertexBufferRHI || !m_indexBufferRHI) return;
     m_vertexBufferRHI->Update(m_vertices.data(), 0, m_vertices.size() * sizeof(Vertex));
     m_indexBufferRHI->Update(m_indices.data(), 0, m_indices.size() * sizeof(unsigned int));
-    m_shader->Bind();
+    m_shader->Bind(device);
     m_shader->SetMat4("u_View", view);
     m_shader->SetMat4("u_Projection", projection);
     m_shader->SetInt("u_Texture", 0);

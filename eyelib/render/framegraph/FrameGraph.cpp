@@ -1,6 +1,7 @@
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
+#include <queue>
 
 namespace eyelib {
 namespace render {
@@ -201,9 +202,11 @@ void FrameGraph::Clear() {
     }
     m_passes.clear();
     m_passInfos.clear();
+    m_executionOrder.clear();
 }
 
-void FrameGraph::Compile() {
+void FrameGraph::Compile(rhi::IDevice* device) {
+    m_device = device;
     m_passInfos.clear();
     m_passInfos.reserve(m_passes.size());
     for (auto& p : m_passes)
@@ -226,7 +229,7 @@ void FrameGraph::Compile() {
         }
     }
 
-    // Compute per-resource lifetime (first/last pass that uses each texture)
+    // Compute per-resource lifetime (first/last pass that uses each texture) in insertion order; BuildDAGAndComputeExecutionOrder will overwrite with execution-order positions.
     for (int passIdx = 0; passIdx < static_cast<int>(m_passes.size()); ++passIdx) {
         const auto& p = m_passes[passIdx];
         if (p.culled) continue;
@@ -245,6 +248,9 @@ void FrameGraph::Compile() {
             }
         }
     }
+
+    // Build DAG from read/write deps, topological sort, recompute texture lifetimes in execution order.
+    BuildDAGAndComputeExecutionOrder();
 
     // Resolve transients: pool + aliasing (acquire from pool, assign by lifetime)
     ResolveAliasing();
@@ -271,6 +277,78 @@ void FrameGraph::Compile() {
     }
 }
 
+void FrameGraph::BuildDAGAndComputeExecutionOrder() {
+    const size_t n = m_passes.size();
+    m_executionOrder.clear();
+    if (n == 0) return;
+
+    // Build adjacency list: adj[i] = passes that must run after pass i (edge i -> j means i before j)
+    std::vector<std::vector<size_t>> adj(n);
+    for (size_t h = 0; h < m_textures.size(); ++h) {
+        std::vector<size_t> writers, readers;
+        for (size_t p = 0; p < n; ++p) {
+            if (m_passes[p].culled) continue;
+            for (FGTextureHandle w : m_passes[p].writes)
+                if (w >= 0 && static_cast<size_t>(w) == h) { writers.push_back(p); break; }
+            for (FGTextureHandle r : m_passes[p].reads)
+                if (r >= 0 && static_cast<size_t>(r) == h) { readers.push_back(p); break; }
+        }
+        // Writer must run before every reader
+        for (size_t w : writers)
+            for (size_t r : readers)
+                if (w != r) adj[w].push_back(r);
+        // Multiple writers: declaration order (lower pass index first)
+        std::sort(writers.begin(), writers.end());
+        for (size_t i = 0; i < writers.size(); ++i)
+            for (size_t j = i + 1; j < writers.size(); ++j)
+                adj[writers[i]].push_back(writers[j]);
+    }
+
+    // Kahn's algorithm (topological sort)
+    std::vector<int> inDegree(n, 0);
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j : adj[i]) inDegree[j]++;
+    std::queue<size_t> q;
+    for (size_t i = 0; i < n; ++i)
+        if (inDegree[i] == 0) q.push(i);
+    while (!q.empty()) {
+        size_t i = q.front();
+        q.pop();
+        m_executionOrder.push_back(i);
+        for (size_t j : adj[i])
+            if (--inDegree[j] == 0) q.push(j);
+    }
+    if (m_executionOrder.size() != n) {
+        core::Log::Warn("FrameGraph: cycle in pass dependencies; using insertion order.");
+        m_executionOrder.resize(n);
+        for (size_t i = 0; i < n; ++i) m_executionOrder[i] = i;
+    }
+
+    // Execution position for each pass (0 = first to run)
+    std::vector<size_t> execPos(n);
+    for (size_t i = 0; i < n; ++i) execPos[m_executionOrder[i]] = i;
+
+    // Recompute texture lifetimes in execution-order space for aliasing
+    for (size_t t = 0; t < m_textures.size(); ++t) {
+        int first = -1, last = -1;
+        for (size_t p = 0; p < n; ++p) {
+            if (m_passes[p].culled) continue;
+            bool uses = false;
+            for (FGTextureHandle rh : m_passes[p].reads)
+                if (rh >= 0 && static_cast<size_t>(rh) == t) { uses = true; break; }
+            if (!uses)
+                for (FGTextureHandle wh : m_passes[p].writes)
+                    if (wh >= 0 && static_cast<size_t>(wh) == t) { uses = true; break; }
+            if (!uses) continue;
+            size_t pos = execPos[p];
+            if (first < 0 || static_cast<size_t>(first) > pos) first = static_cast<int>(pos);
+            if (last < 0 || static_cast<size_t>(last) < pos) last = static_cast<int>(pos);
+        }
+        m_textures[t].firstUsePass = first;
+        m_textures[t].lastUsePass = last;
+    }
+}
+
 void FrameGraph::Execute(rhi::ICommandList* cmd) {
     FGPassResources res{
         [this](FGTextureHandle h) { return Resolve(h); },
@@ -278,7 +356,10 @@ void FrameGraph::Execute(rhi::ICommandList* cmd) {
         m_width,
         m_height
     };
-    for (size_t i = 0; i < m_passes.size(); ++i) {
+    const bool useDAGOrder = !m_executionOrder.empty();
+    const size_t numPasses = useDAGOrder ? m_executionOrder.size() : m_passes.size();
+    for (size_t idx = 0; idx < numPasses; ++idx) {
+        const size_t i = useDAGOrder ? m_executionOrder[idx] : idx;
         auto& p = m_passes[i];
         if (p.culled) continue;
         TransitionPassResources(i, cmd);

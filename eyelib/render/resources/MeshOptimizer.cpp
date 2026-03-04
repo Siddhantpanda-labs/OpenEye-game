@@ -1,28 +1,20 @@
 #include "eyelib/render/resources/MeshOptimizer.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 
 namespace eyelib {
 namespace render {
 
-void MeshOptimizer::OptimizeVertexCache(Mesh& mesh) {
-    mesh.Optimize();
+void MeshOptimizer::OptimizeVertexCache(MeshDescriptor& desc) {
+    MeshDescriptorUtils::Optimize(desc);
 }
 
-std::shared_ptr<Mesh> MeshOptimizer::GenerateLOD(const Mesh& mesh, size_t targetVertexCount) {
+std::shared_ptr<Mesh> MeshOptimizer::GenerateLOD(const MeshDescriptor& desc, size_t targetVertexCount, rhi::IDevice* device) {
     (void)targetVertexCount;
-    /* Stub: full simplification would use mesh simplification (e.g. quadric). */
-    auto copy = std::make_shared<Mesh>();
-    copy->SetVertices(mesh.GetVertices());
-    if (mesh.GetIndexFormat() == IndexFormat::UInt32)
-        copy->SetIndices(mesh.GetIndices32());
-    else
-        copy->SetIndices(mesh.GetIndices16());
-    for (size_t i = 0; i < mesh.GetSubmeshCount(); ++i) {
-        const auto& s = mesh.GetSubmesh(i);
-        copy->AddSubmesh(s.indexOffset, s.indexCount, s.materialIndex);
-    }
-    copy->UploadToGPU();
-    return copy;
+    /* Stub: full simplification would reduce desc.vertices/indices. */
+    if (!device || desc.vertices.empty()) return nullptr;
+    return Mesh::Create(device, desc);
 }
 
 } // namespace render

@@ -23,7 +23,16 @@ float distanceToCamera(const math::Mat4& transform, const math::Vec3& viewPos) {
 
 } // namespace
 
+void TransparencyPass::Render(const RenderContext& ctx,
+                              const std::vector<Drawable>& transparent,
+                              const math::Mat4& view,
+                              const math::Mat4& projection,
+                              const math::Vec3& viewPos) {
+    Render(ctx.cmd, ctx.device, transparent, view, projection, viewPos);
+}
+
 void TransparencyPass::Render(rhi::ICommandList* cmd,
+                              rhi::IDevice* device,
                               const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
@@ -55,9 +64,9 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         const auto& d = transparent[e.idx];
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (d.materialInstance) {
-            d.materialInstance->Bind();
+            d.materialInstance->Bind(device);
         } else if (material) {
-            material->Bind();
+            material->Bind(device);
         }
         Shader* sh = material ? material->GetShader().get() : nullptr;
         if (!sh) continue;
@@ -72,8 +81,11 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         }
         const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
         sh->SetFloat("u_Alpha", alpha);
-        d.mesh->Bind();
-        d.mesh->Draw();
+        if (device) {
+            sh->Bind(device);
+            d.mesh->Bind(device);
+            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device); }
+        }
         d.mesh->Unbind();
         sh->Unbind();
     }

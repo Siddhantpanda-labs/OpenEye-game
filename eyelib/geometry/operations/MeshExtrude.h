@@ -1,9 +1,11 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace eyelib {
 namespace geometry {
@@ -27,7 +29,7 @@ public:
      * @param amount Extrusion distance (positive = outward, negative = inward)
      * @param mask Optional mask to control extrusion amount per vertex
      */
-    static void Extrude(render::Mesh& mesh, const Selection& selection,
+    static void Extrude(assets::EditableMesh& editable, const Selection& selection,
                        float amount, const Mask* mask = nullptr);
     
     /**
@@ -39,16 +41,16 @@ public:
      * @param amount Extrusion distance
      * @param mask Optional mask to control extrusion amount per vertex
      */
-    static void ExtrudeAlongDirection(render::Mesh& mesh, const Selection& selection,
+    static void ExtrudeAlongDirection(assets::EditableMesh& editable, const Selection& selection,
                                      const math::Vec3& direction, float amount,
                                      const Mask* mask = nullptr);
 
 private:
     // Helper to compute face normal
-    static math::Vec3 ComputeFaceNormal(const render::Mesh& mesh, uint32_t v0, uint32_t v1, uint32_t v2);
+    static math::Vec3 ComputeFaceNormal(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1, uint32_t v2);
     
     // Helper to extrude a single face
-    static void ExtrudeFace(render::Mesh& mesh, uint32_t faceIndex,
+    static void ExtrudeFace(const assets::EditableMesh& editable, uint32_t faceIndex,
                            const std::unordered_set<uint32_t>& selectedFaces,
                            float amount, const math::Vec3& direction,
                            const Mask* mask,

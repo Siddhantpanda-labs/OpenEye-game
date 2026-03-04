@@ -4,8 +4,8 @@
 #include "GameRuntime.h"
 #include "api/platform/All.h"
 #include "api/core/All.h"
+#include "api/render/RenderDevice.h"
 #include "eyelib/render/RenderBackend.h"
-#include "eyelib/render/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -113,14 +113,10 @@ void ShowMenuBar(EditorContext& ctx) {
             } else {
                 ctx.playSnapshotPath = snapshotPath;
                 ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
+                eyelib::api::RenderDevice editorDevice = ctx.sceneViewPipeline ? ctx.sceneViewPipeline->GetDevice() : eyelib::api::RenderDevice();
                 if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
-                                               *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
+                                               *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL, editorDevice)) {
                     ctx.isPlaying = true;
-                    // Keep global default device as scene view so no editor-owned resource ever holds the game device.
-                    if (ctx.sceneViewPipeline) {
-                        void* dev = ctx.sceneViewPipeline->GetDevice();
-                        eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
-                    }
                 } else {
                     ctx.gameRuntime.reset();
                     (void)eyelib::api::platform::filesystem::DeleteFile(ctx.playSnapshotPath);

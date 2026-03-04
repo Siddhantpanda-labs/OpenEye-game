@@ -33,13 +33,16 @@ public:
     GameRuntime(const GameRuntime&) = delete;
     GameRuntime& operator=(const GameRuntime&) = delete;
 
-    /** Initialize physics, render, animation, scripting, audio; build from world; bind assets. */
+    /** Initialize physics, render, animation, scripting, audio; build from world; bind assets.
+     * When sharedDevice (e.g. from pipeline.GetDevice()) is valid, render uses that device (Model A).
+     * When sharedDevice is null (default), render creates its own device from window. */
     bool Initialize(eyelib::api::world::World& world,
                     eyelib::api::AssetRegistry& assetRegistry,
                     const std::vector<std::string>& assetRoots,
                     eyelib::api::Window& window,
                     uint32_t width, uint32_t height,
-                    eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default);
+                    eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default,
+                    eyelib::api::RenderDevice sharedDevice = eyelib::api::RenderDevice());
 
     void Shutdown();
 

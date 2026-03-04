@@ -15,8 +15,9 @@ InstancedRenderer::~InstancedRenderer() {
 }
 
 InstancedRenderer::InstancedRenderer(InstancedRenderer&& other) noexcept
-    : m_batches(std::move(other.m_batches)), m_totalInstances(other.m_totalInstances) {
+    : m_batches(std::move(other.m_batches)), m_totalInstances(other.m_totalInstances), m_device(other.m_device) {
     other.m_totalInstances = 0;
+    other.m_device = nullptr;
 }
 
 InstancedRenderer& InstancedRenderer::operator=(InstancedRenderer&& other) noexcept {
@@ -24,7 +25,9 @@ InstancedRenderer& InstancedRenderer::operator=(InstancedRenderer&& other) noexc
         Clear();
         m_batches = std::move(other.m_batches);
         m_totalInstances = other.m_totalInstances;
+        m_device = other.m_device;
         other.m_totalInstances = 0;
+        other.m_device = nullptr;
     }
     return *this;
 }
@@ -80,34 +83,35 @@ void InstancedRenderer::SetInstanceData(std::shared_ptr<Mesh> mesh, std::shared_
 }
 
 void InstancedRenderer::Render(std::shared_ptr<Mesh> mesh, std::shared_ptr<Material> material, size_t instanceCount) {
-    if (!mesh || !material || instanceCount == 0) return;
+    if (!m_device || !mesh || !material || instanceCount == 0) return;
     BatchKey key{mesh.get(), material.get()};
     auto it = m_batches.find(key);
     if (it == m_batches.end() || it->second.instances.size() < instanceCount) return;
     auto& batch = it->second;
-    batch.material->Bind();
+    batch.material->Bind(m_device);
     Shader* sh = batch.material->GetShader().get();
     for (size_t i = 0; i < instanceCount; ++i) {
         if (sh) {
             sh->SetMat4("u_Model", batch.instances[i].modelMatrix);
             sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(batch.instances[i].modelMatrix)));
         }
-        batch.mesh->Draw();
+        { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
     }
     if (sh) sh->Unbind();
 }
 
 void InstancedRenderer::RenderAll() {
+    if (!m_device) return;
     for (auto& [k, batch] : m_batches) {
         if (batch.instances.empty() || !batch.mesh || !batch.material) continue;
-        batch.material->Bind();
+        batch.material->Bind(m_device);
         Shader* sh = batch.material->GetShader().get();
         for (const auto& inst : batch.instances) {
             if (sh) {
                 sh->SetMat4("u_Model", inst.modelMatrix);
                 sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(inst.modelMatrix)));
             }
-            batch.mesh->Draw();
+            { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         }
         if (sh) sh->Unbind();
     }

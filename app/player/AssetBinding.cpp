@@ -1,6 +1,7 @@
 #include "AssetBinding.h"
 
 #include "api/core/All.h"
+#include "api/geometry/BuiltinMeshIds.h"
 #include "api/platform/All.h"
 
 namespace openeye::player {
@@ -38,6 +39,10 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
     const auto refs = world.CollectAssetReferences();
     for (const auto& ref : refs) {
         if (ref.id.empty()) {
+            continue;
+        }
+        // Builtins are procedural primitives, not file assets; skip to avoid "Missing asset" noise.
+        if (eyelib::api::geometry::IsBuiltinMeshId(ref.id)) {
             continue;
         }
         stats.referenced += 1;
@@ -88,9 +93,9 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
 
         try {
             const bool alreadyRegistered = registry.IsRegistered(resolved);
-            registry.LoadAsset(resolved, type);
+            registry.LoadAssetDescriptorOnly(resolved, type);
             if (!alreadyRegistered) {
-                eyelib::api::core::Log::InfoF("Loaded asset: %s", resolved.c_str());
+                eyelib::api::core::Log::InfoF("Loaded asset (descriptor): %s", resolved.c_str());
             }
             stats.loaded += 1;
         } catch (const std::exception& e) {

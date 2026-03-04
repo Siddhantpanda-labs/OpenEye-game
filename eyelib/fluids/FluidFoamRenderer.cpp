@@ -1,5 +1,5 @@
 #include "eyelib/fluids/FluidFoamRenderer.h"
-
+#include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/resources/Shader.h"
 
 #include <algorithm>
@@ -16,11 +16,12 @@ void FluidFoamRenderer::SetMaterial(const std::shared_ptr<render::Material>& mat
     m_material = material;
 }
 
-void FluidFoamRenderer::EnsureMaterial() {
+void FluidFoamRenderer::EnsureMaterial(render::rhi::IDevice* device) {
     if (m_material) return;
+    if (!device) return;
     auto shader = std::make_shared<render::Shader>();
-    shader->LoadFromFile("assets/shaders/fluids/foam/foam.vert",
-                         "assets/shaders/fluids/foam/foam.frag");
+    if (!shader->LoadFromFile(device, "assets/shaders/fluids/foam/foam.vert",
+                              "assets/shaders/fluids/foam/foam.frag", render::Mesh::GetVertexLayoutRHI())) return;
     m_material = std::make_shared<render::Material>(shader);
     m_material->SetAlpha(0.8f);
 }
@@ -99,30 +100,27 @@ void FluidFoamRenderer::UpdateFromSimulation(const FluidSimulation& sim, float d
     }
 }
 
-std::shared_ptr<render::Mesh> FluidFoamRenderer::BuildMesh(const render::CameraView& camera) {
+std::shared_ptr<render::Mesh> FluidFoamRenderer::BuildMesh(render::rhi::IDevice* device, const render::CameraView& camera) {
     if (!m_mesh) m_mesh = std::make_shared<render::Mesh>();
-    EnsureMaterial();
+    EnsureMaterial(device);
 
-    if (m_particles.empty()) {
-        m_mesh->SetVertices(std::vector<render::Vertex>{});
-        m_mesh->SetIndices(std::vector<uint32_t>{});
-        return m_mesh;
-    }
+    if (m_particles.empty()) return m_mesh;
 
+    render::MeshDescriptor desc;
+    desc.indexFormat = render::IndexFormat::UInt32;
+    desc.indices16.clear();
     math::Mat4 invView = glm::inverse(camera.view);
     const math::Vec3 camRight(invView[0]);
     const math::Vec3 camUp(invView[1]);
     const math::Vec3 normal = glm::normalize(glm::cross(camRight, camUp));
 
-    std::vector<render::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(m_particles.size() * 4);
-    indices.reserve(m_particles.size() * 6);
+    desc.vertices.reserve(m_particles.size() * 4);
+    desc.indices32.reserve(m_particles.size() * 6);
 
     auto pushQuad = [&](const math::Vec3& center, float size, const math::Vec4& color) {
         const math::Vec3 right = camRight * (size * 0.5f);
         const math::Vec3 up = camUp * (size * 0.5f);
-        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        const uint32_t base = static_cast<uint32_t>(desc.vertices.size());
         render::Vertex v0{}, v1{}, v2{}, v3{};
         v0.position = center - right - up;
         v1.position = center + right - up;
@@ -134,16 +132,16 @@ std::shared_ptr<render::Mesh> FluidFoamRenderer::BuildMesh(const render::CameraV
         v3.uv = math::Vec2(0, 1);
         v0.color = v1.color = v2.color = v3.color = color;
         v0.normal = v1.normal = v2.normal = v3.normal = normal;
-        vertices.push_back(v0);
-        vertices.push_back(v1);
-        vertices.push_back(v2);
-        vertices.push_back(v3);
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+        desc.vertices.push_back(v0);
+        desc.vertices.push_back(v1);
+        desc.vertices.push_back(v2);
+        desc.vertices.push_back(v3);
+        desc.indices32.push_back(base + 0);
+        desc.indices32.push_back(base + 1);
+        desc.indices32.push_back(base + 2);
+        desc.indices32.push_back(base + 0);
+        desc.indices32.push_back(base + 2);
+        desc.indices32.push_back(base + 3);
     };
 
     for (const auto& p : m_particles) {
@@ -153,9 +151,8 @@ std::shared_ptr<render::Mesh> FluidFoamRenderer::BuildMesh(const render::CameraV
         pushQuad(p.position, p.size, col);
     }
 
-    m_mesh->SetVertices(vertices);
-    m_mesh->SetIndices(indices);
-    m_mesh->UploadToGPU();
+    desc.submeshes.clear();
+    if (device) m_mesh->CreateFromDescriptor(device, desc);
     return m_mesh;
 }
 

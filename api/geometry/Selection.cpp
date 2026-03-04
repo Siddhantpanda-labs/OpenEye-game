@@ -86,11 +86,11 @@ class SelectionBuilder::Impl {
 public:
     ::eyelib::geometry::SelectionBuilder builder;
     
-    explicit Impl(const ::eyelib::render::Mesh& mesh) : builder(mesh) {}
+    explicit Impl(const ::eyelib::assets::EditableMesh& editable) : builder(editable) {}
 };
 
 SelectionBuilder::SelectionBuilder(const Mesh& mesh) 
-    : m_impl(std::make_unique<Impl>(*mesh.GetInternal())) {}
+    : m_impl(std::make_unique<Impl>(*mesh.GetEditableMesh())) {}
 
 SelectionBuilder::~SelectionBuilder() = default;
 

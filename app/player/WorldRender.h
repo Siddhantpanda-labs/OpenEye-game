@@ -1,6 +1,8 @@
 #pragma once
 
 #include "PlayerConfig.h"
+#include "BuiltinResourceManager.h"
+#include "RendererGPUResourceCache.h"
 
 #include "api/assets/All.h"
 #include "api/core/FrameAllocator.h"
@@ -22,9 +24,11 @@ class WorldAnimationBridge;
 
 class WorldRenderBridge {
 public:
-    /** Single init path: window + size + backend (e.g. from --renderer). */
+    /** Standalone: create pipeline and device from window (player app). */
     bool Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
                     eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default);
+    /** Editor Model A: use shared device (same as editor). No second device; resources stay in same lifetime domain. */
+    bool Initialize(void* sharedDevice, uint32_t width, uint32_t height);
     void Shutdown();
 
     /** Full render path (BuildScene + pipeline). Use only when render runs on same thread as game. */
@@ -73,6 +77,12 @@ public:
     /** Native texture handle of pipeline output (after RenderSceneOnly). For ImGui use as ImTextureID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** Device for asset loading / SetRenderDevice. Null if not initialized. */
+    eyelib::api::RenderDevice GetDevice() const;
+
+    /** Create default and skinned materials once after Initialize(). Call before BindAssets/scene build so primitives are visible. No-op if already created or headless. */
+    void InitializeDefaultResources();
+
 private:
     struct ModelEntry {
         std::shared_ptr<eyelib::api::Mesh> mesh;
@@ -91,6 +101,9 @@ private:
     std::shared_ptr<eyelib::api::MaterialInstance> GetSkinnedMaterialInstance(
         ::eyelib::world::EntityId entity,
         const std::shared_ptr<eyelib::api::Material>& baseMaterial);
+    /** Resolve asset id to GPU material (renderer-owned resolution; scene building uses this instead of registry). */
+    std::shared_ptr<eyelib::api::Material> ResolveMaterial(eyelib::api::AssetId id);
+    /** Resolve material by path using registry only for GetId, then ResolveMaterial(id). */
     std::shared_ptr<eyelib::api::Material> ResolveMaterial(const std::string& materialId,
                                                            eyelib::api::AssetRegistry* registry);
     ModelEntry LoadModelEntry(const std::string& path);
@@ -117,12 +130,13 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
 
+    std::unique_ptr<BuiltinResourceManager> m_builtinManager;
+    std::unique_ptr<RendererGPUResourceCache> m_gpuResourceCache;
     std::shared_ptr<eyelib::api::Shader> m_defaultShader;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;
     std::shared_ptr<eyelib::api::Shader> m_skinnedShader;
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, ModelEntry> m_modelCache;
-    std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     bool m_captureCallbackSet = false;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;

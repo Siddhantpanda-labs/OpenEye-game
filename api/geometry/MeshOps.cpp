@@ -20,19 +20,19 @@ namespace api {
 namespace geometry {
 
 void MeshOps::Subdivide(Mesh& mesh, const Selection& selection, int levels) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshSubdivide::Subdivide(*internalMesh, selection.GetInternal(), levels);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshSubdivide::Subdivide(*editable, selection.GetInternal(), levels);
 }
 
 void MeshOps::Smooth(Mesh& mesh, const Selection& selection,
                     float strength, int iterations, const Mask* mask) {
     const ::eyelib::geometry::Mask* internalMask = nullptr;
-    if (mask) {
-        internalMask = &mask->GetInternal();
-    }
+    if (mask) internalMask = &mask->GetInternal();
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshSmooth::Smooth(*internalMesh, selection.GetInternal(), strength, iterations, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshSmooth::Smooth(*editable, selection.GetInternal(), strength, iterations, internalMask);
 }
 
 void MeshOps::Displace(Mesh& mesh, const Selection& selection,
@@ -42,8 +42,9 @@ void MeshOps::Displace(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDisplace::DisplaceAlongNormal(*internalMesh, selection.GetInternal(), amount, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDisplace::DisplaceAlongNormal(*editable, selection.GetInternal(), amount, internalMask);
 }
 
 void MeshOps::ApplyNoise(Mesh& mesh, const Selection& selection,
@@ -54,11 +55,12 @@ void MeshOps::ApplyNoise(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
     if (octaves > 1) {
-        ::eyelib::geometry::MeshNoise::ApplyFBMNoise(*internalMesh, selection.GetInternal(), scale, strength, octaves, 0.5f, seed, internalMask);
+        ::eyelib::geometry::MeshNoise::ApplyFBMNoise(*editable, selection.GetInternal(), scale, strength, octaves, 0.5f, seed, internalMask);
     } else {
-        ::eyelib::geometry::MeshNoise::ApplyPerlinNoise(*internalMesh, selection.GetInternal(), scale, strength, seed, internalMask);
+        ::eyelib::geometry::MeshNoise::ApplyPerlinNoise(*editable, selection.GetInternal(), scale, strength, seed, internalMask);
     }
 }
 
@@ -69,8 +71,9 @@ void MeshOps::Extrude(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshExtrude::Extrude(*internalMesh, selection.GetInternal(), amount, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshExtrude::Extrude(*editable, selection.GetInternal(), amount, internalMask);
 }
 
 void MeshOps::ExtrudeAlongDirection(Mesh& mesh, const Selection& selection,
@@ -81,8 +84,9 @@ void MeshOps::ExtrudeAlongDirection(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshExtrude::ExtrudeAlongDirection(*internalMesh, selection.GetInternal(), direction, amount, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshExtrude::ExtrudeAlongDirection(*editable, selection.GetInternal(), direction, amount, internalMask);
 }
 
 void MeshOps::BevelEdges(Mesh& mesh, const Selection& selection,
@@ -92,8 +96,9 @@ void MeshOps::BevelEdges(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshBevel::BevelEdges(*internalMesh, selection.GetInternal(), amount, segments, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshBevel::BevelEdges(*editable, selection.GetInternal(), amount, segments, internalMask);
 }
 
 void MeshOps::BevelVertices(Mesh& mesh, const Selection& selection,
@@ -103,26 +108,30 @@ void MeshOps::BevelVertices(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshBevel::BevelVertices(*internalMesh, selection.GetInternal(), amount, segments, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshBevel::BevelVertices(*editable, selection.GetInternal(), amount, segments, internalMask);
 }
 
 void MeshOps::Union(Mesh& meshA, const Mesh& meshB) {
-    auto internalMeshA = meshA.GetInternal();
-    auto internalMeshB = meshB.GetInternal();
-    ::eyelib::geometry::MeshBoolean::Union(*internalMeshA, *internalMeshB);
+    auto* editableA = meshA.GetEditableMesh();
+    auto* editableB = meshB.GetEditableMesh();
+    if (!editableA || !editableB) return;
+    ::eyelib::geometry::MeshBoolean::Union(*editableA, *editableB);
 }
 
 void MeshOps::Difference(Mesh& meshA, const Mesh& meshB) {
-    auto internalMeshA = meshA.GetInternal();
-    auto internalMeshB = meshB.GetInternal();
-    ::eyelib::geometry::MeshBoolean::Difference(*internalMeshA, *internalMeshB);
+    auto* editableA = meshA.GetEditableMesh();
+    auto* editableB = meshB.GetEditableMesh();
+    if (!editableA || !editableB) return;
+    ::eyelib::geometry::MeshBoolean::Difference(*editableA, *editableB);
 }
 
 void MeshOps::Intersection(Mesh& meshA, const Mesh& meshB) {
-    auto internalMeshA = meshA.GetInternal();
-    auto internalMeshB = meshB.GetInternal();
-    ::eyelib::geometry::MeshBoolean::Intersection(*internalMeshA, *internalMeshB);
+    auto* editableA = meshA.GetEditableMesh();
+    auto* editableB = meshB.GetEditableMesh();
+    if (!editableA || !editableB) return;
+    ::eyelib::geometry::MeshBoolean::Intersection(*editableA, *editableB);
 }
 
 void MeshOps::Decimate(Mesh& mesh, size_t targetTriangleCount,
@@ -132,8 +141,9 @@ void MeshOps::Decimate(Mesh& mesh, size_t targetTriangleCount,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDecimate::Decimate(*internalMesh, targetTriangleCount, selection.GetInternal(), internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDecimate::Decimate(*editable, targetTriangleCount, selection.GetInternal(), internalMask);
 }
 
 void MeshOps::DecimateByPercentage(Mesh& mesh, float reductionFactor,
@@ -143,8 +153,9 @@ void MeshOps::DecimateByPercentage(Mesh& mesh, float reductionFactor,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDecimate::DecimateByPercentage(*internalMesh, reductionFactor, selection.GetInternal(), internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDecimate::DecimateByPercentage(*editable, reductionFactor, selection.GetInternal(), internalMask);
 }
 
 void MeshOps::Inflate(Mesh& mesh, const Selection& selection,
@@ -154,8 +165,9 @@ void MeshOps::Inflate(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDeform::Inflate(*internalMesh, selection.GetInternal(), amount, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDeform::Inflate(*editable, selection.GetInternal(), amount, internalMask);
 }
 
 void MeshOps::Deflate(Mesh& mesh, const Selection& selection,
@@ -165,8 +177,9 @@ void MeshOps::Deflate(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDeform::Deflate(*internalMesh, selection.GetInternal(), amount, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDeform::Deflate(*editable, selection.GetInternal(), amount, internalMask);
 }
 
 void MeshOps::Relax(Mesh& mesh, const Selection& selection,
@@ -176,8 +189,9 @@ void MeshOps::Relax(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDeform::Relax(*internalMesh, selection.GetInternal(), strength, iterations, internalMask);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDeform::Relax(*editable, selection.GetInternal(), strength, iterations, internalMask);
 }
 
 void MeshOps::Lattice(Mesh& mesh, const Selection& selection,
@@ -190,48 +204,56 @@ void MeshOps::Lattice(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshDeform::Lattice(*internalMesh, selection.GetInternal(), 
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshDeform::Lattice(*editable, selection.GetInternal(), 
                                            latticeOrigin, latticeSize, latticeResolution,
                                            controlPoints, internalMask);
 }
 
 void MeshOps::GenerateUVs(Mesh& mesh, UVProjection projection, int axis, const Selection& selection) {
-    auto internalMesh = mesh.GetInternal();
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
     ::eyelib::geometry::MeshTexturePaint::UVProjection proj = 
         static_cast<::eyelib::geometry::MeshTexturePaint::UVProjection>(static_cast<int>(projection));
-    ::eyelib::geometry::MeshTexturePaint::GenerateUVs(*internalMesh, proj, axis, selection.GetInternal());
+    ::eyelib::geometry::MeshTexturePaint::GenerateUVs(*editable, proj, axis, selection.GetInternal());
 }
 
 void MeshOps::GeneratePlanarUVs(Mesh& mesh, const math::Vec3& normal, const math::Vec3& up,
                                const Selection& selection) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::GeneratePlanarUVs(*internalMesh, normal, up, selection.GetInternal());
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::GeneratePlanarUVs(*editable, normal, up, selection.GetInternal());
 }
 
 void MeshOps::GenerateCylindricalUVs(Mesh& mesh, int axis, const Selection& selection) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::GenerateCylindricalUVs(*internalMesh, axis, selection.GetInternal());
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::GenerateCylindricalUVs(*editable, axis, selection.GetInternal());
 }
 
 void MeshOps::GenerateSphericalUVs(Mesh& mesh, const Selection& selection) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::GenerateSphericalUVs(*internalMesh, selection.GetInternal());
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::GenerateSphericalUVs(*editable, selection.GetInternal());
 }
 
 void MeshOps::GenerateBoxUVs(Mesh& mesh, const Selection& selection) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::GenerateBoxUVs(*internalMesh, selection.GetInternal());
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::GenerateBoxUVs(*editable, selection.GetInternal());
 }
 
 void MeshOps::UnwrapUVs(Mesh& mesh, float padding) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::UnwrapUVs(*internalMesh, padding);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::UnwrapUVs(*editable, padding);
 }
 
 void MeshOps::PackUVs(Mesh& mesh, float padding) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::PackUVs(*internalMesh, padding);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshTexturePaint::PackUVs(*editable, padding);
 }
 
 // Vertex Color Painting Operations
@@ -244,14 +266,16 @@ void MeshOps::PaintVertexColor(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::PaintVertexColor(*internalMesh, selection.GetInternal(),
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshColorPaint::PaintVertexColor(*editable, selection.GetInternal(),
                                                          color, strength, falloff, internalMask);
 }
 
 void MeshOps::FillColor(Mesh& mesh, const Selection& selection, const math::Vec4& color) {
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::FillColor(*internalMesh, selection.GetInternal(), color);
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshColorPaint::FillColor(*editable, selection.GetInternal(), color);
 }
 
 void MeshOps::GradientColor(Mesh& mesh, const Selection& selection,
@@ -262,8 +286,9 @@ void MeshOps::GradientColor(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::GradientColor(*internalMesh, selection.GetInternal(),
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshColorPaint::GradientColor(*editable, selection.GetInternal(),
                                                       startColor, endColor, direction, internalMask);
 }
 
@@ -275,8 +300,9 @@ void MeshOps::NoisePaint(Mesh& mesh, const Selection& selection,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::NoisePaint(*internalMesh, selection.GetInternal(),
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshColorPaint::NoisePaint(*editable, selection.GetInternal(),
                                                    baseColor, noiseColor, scale, strength, seed, internalMask);
 }
 
@@ -300,16 +326,18 @@ void MeshOps::BlendColors(Mesh& mesh, const Selection& selection,
         default: internalMode = ::eyelib::geometry::BlendMode::Replace; break;
     }
     
-    auto internalMesh = mesh.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::BlendColors(*internalMesh, selection.GetInternal(),
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
+    ::eyelib::geometry::MeshColorPaint::BlendColors(*editable, selection.GetInternal(),
                                                     blendColor, internalMode, strength, internalMask);
 }
 
 void MeshOps::SampleColor(const Mesh& source, Mesh& target,
                          const Selection& sourceSelection, const Selection& targetSelection) {
-    auto sourceInternal = source.GetInternal();
-    auto targetInternal = target.GetInternal();
-    ::eyelib::geometry::MeshColorPaint::SampleColor(*sourceInternal, *targetInternal,
+    auto* sourceEditable = source.GetEditableMesh();
+    auto* targetEditable = target.GetEditableMesh();
+    if (!sourceEditable || !targetEditable) return;
+    ::eyelib::geometry::MeshColorPaint::SampleColor(*sourceEditable, *targetEditable,
                                                     sourceSelection.GetInternal(), targetSelection.GetInternal());
 }
 
@@ -323,18 +351,20 @@ void MeshOps::PaintTexture(Mesh& mesh, api::Texture& texture,
         internalMask = &mask->GetInternal();
     }
     
-    auto internalMesh = mesh.GetInternal();
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
     auto internalTexture = texture.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::PaintTexture(*internalMesh, *internalTexture,
+    ::eyelib::geometry::MeshTexturePaint::PaintTexture(*editable, *internalTexture,
                                                        selection.GetInternal(), color,
                                                        brushSize, strength, internalMask);
 }
 
 void MeshOps::FillTexture(Mesh& mesh, api::Texture& texture,
                           const Selection& selection, const math::Vec4& color) {
-    auto internalMesh = mesh.GetInternal();
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
     auto internalTexture = texture.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::FillTexture(*internalMesh, *internalTexture,
+    ::eyelib::geometry::MeshTexturePaint::FillTexture(*editable, *internalTexture,
                                                       selection.GetInternal(), color);
 }
 
@@ -358,9 +388,10 @@ void MeshOps::BlendTexture(Mesh& mesh, api::Texture& texture,
         default: internalMode = ::eyelib::geometry::BlendMode::Replace; break;
     }
     
-    auto internalMesh = mesh.GetInternal();
+    auto* editable = mesh.GetEditableMesh();
+    if (!editable) return;
     auto internalTexture = texture.GetInternal();
-    ::eyelib::geometry::MeshTexturePaint::BlendTexture(*internalMesh, *internalTexture,
+    ::eyelib::geometry::MeshTexturePaint::BlendTexture(*editable, *internalTexture,
                                                        selection.GetInternal(), blendColor,
                                                        internalMode, strength, internalMask);
 }

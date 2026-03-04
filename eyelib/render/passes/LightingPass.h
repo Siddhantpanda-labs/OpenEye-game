@@ -1,7 +1,8 @@
 #pragma once
 
-#include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/GBuffer.h"
+#include "eyelib/render/RenderContext.h"
+#include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <memory>
 
@@ -18,12 +19,23 @@ public:
     LightingPass();
     ~LightingPass();
 
-    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
 
-    /** Render to currently bound FBO. cmd used for shadow bind and depth state (GL-free). */
+    /** Render to currently bound FBO (context-based). */
     void Render(GBuffer& gbuffer,
+                const RenderContext& ctx,
+                const LightParams& light,
+                const math::Mat4& view,
+                const math::Mat4& projection,
+                const math::Vec3& viewPos,
+                ShadowMap* shadowMap = nullptr,
+                const std::vector<PointLight>* pointLights = nullptr,
+                const std::vector<SpotLight>* spotLights = nullptr);
+
+    /** Render to currently bound FBO. device and cmd must be non-null. */
+    void Render(GBuffer& gbuffer,
+                rhi::IDevice* device,
                 rhi::ICommandList* cmd,
                 const LightParams& light,
                 const math::Mat4& view,
@@ -37,10 +49,9 @@ public:
     void ReloadShaders();
 
 private:
-    void EnsureDefaultShader();
+    void EnsureDefaultShader(rhi::IDevice* device);
 
     std::shared_ptr<Shader> m_lightingShader;
-    rhi::IDevice* m_device = nullptr;
 };
 
 } // namespace render

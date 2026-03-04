@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include "eyelib/math/Types.h"
@@ -25,7 +25,7 @@ public:
      * @param amount Displacement amount (positive = outward, negative = inward)
      * @param mask Optional mask to control displacement strength per vertex
      */
-    static void DisplaceAlongNormal(render::Mesh& mesh, const Selection& selection,
+    static void DisplaceAlongNormal(assets::EditableMesh& editable, const Selection& selection,
                                     float amount, const Mask* mask = nullptr);
     
     /**
@@ -37,7 +37,7 @@ public:
      * @param amount Displacement amount
      * @param mask Optional mask to control displacement strength per vertex
      */
-    static void DisplaceAlongDirection(render::Mesh& mesh, const Selection& selection,
+    static void DisplaceAlongDirection(assets::EditableMesh& editable, const Selection& selection,
                                       const math::Vec3& direction, float amount,
                                       const Mask* mask = nullptr);
     
@@ -50,7 +50,7 @@ public:
      * @param direction Displacement direction (or use normals if nullptr)
      * @param mask Optional mask to control displacement strength per vertex
      */
-    static void DisplaceWithField(render::Mesh& mesh, const Selection& selection,
+    static void DisplaceWithField(assets::EditableMesh& editable, const Selection& selection,
                                   std::function<float(const math::Vec3&)> field,
                                   const math::Vec3* direction = nullptr,
                                   const Mask* mask = nullptr);

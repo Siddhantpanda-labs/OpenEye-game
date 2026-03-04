@@ -68,14 +68,15 @@ void FluidFoamRenderer::UpdateFromSimulation(const FluidSimulation& sim, float d
     m_impl->renderer.UpdateFromSimulation(*sim.GetInternal(), dt);
 }
 
-std::shared_ptr<Mesh> FluidFoamRenderer::BuildMesh(const render::Camera& camera) {
+std::shared_ptr<Mesh> FluidFoamRenderer::BuildMesh(RenderDevice device, const render::Camera& camera) {
     ::eyelib::render::CameraView view{};
     view.view = camera.GetViewMatrix();
     view.projection = camera.GetProjectionMatrix();
     view.viewPos = camera.GetPosition();
     view.nearPlane = 0.1f;
     view.farPlane = 1000.0f;
-    auto internalMesh = m_impl->renderer.BuildMesh(view);
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    auto internalMesh = m_impl->renderer.BuildMesh(rhiDevice, view);
     return Mesh::WrapInternal(internalMesh);
 }
 

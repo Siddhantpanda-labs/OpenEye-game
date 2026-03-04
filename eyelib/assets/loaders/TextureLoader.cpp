@@ -1,12 +1,24 @@
 #include "TextureLoader.h"
 
 #include "eyelib/assets/AssetManager.h"
+#include "eyelib/render/TextureDescriptor.h"
 #include "eyelib/render/resources/TextureLoader.h"
 
 #include <thread>
 
 namespace eyelib {
 namespace assets {
+
+AssetId TextureLoader::LoadTextureDescriptorOnly(const std::string& path, bool isSRGB) {
+    auto& manager = AssetManager::Get();
+    const AssetId id = manager.Registry().RegisterAsset(path, "Texture");
+    render::TextureDescriptor desc;
+    desc.filePath = path;
+    desc.isSRGB = isSRGB;
+    desc.generateMipmaps = true;
+    manager.StoreTextureDescriptor(id, desc);
+    return id;
+}
 
 AssetId TextureLoader::LoadTexture(const std::string& path, bool isSRGB) {
     auto& manager = AssetManager::Get();
@@ -22,6 +34,9 @@ AssetId TextureLoader::LoadTexture(const std::string& path, bool isSRGB) {
     if (tex) {
         tex->SetAssetId(id);
         manager.Cache().Store(id, tex, "Texture");
+        manager.StoreTextureDescriptor(id, tex->GetDescriptor());
+        void* device = manager.GetRenderDevice();
+        if (device) manager.RegisterTextureInstance(id, device, tex);
     }
     return id;
 }

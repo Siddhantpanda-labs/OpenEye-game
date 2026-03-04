@@ -14,12 +14,12 @@ LightCullPass::~LightCullPass() {
     Shutdown();
 }
 
-bool LightCullPass::IsSupported() const {
-    return m_device != nullptr && m_device->GetCapabilities().supportsCompute;
+bool LightCullPass::IsSupported(rhi::IDevice* device) const {
+    return device != nullptr && device->GetCapabilities().supportsCompute;
 }
 
 void LightCullPass::EnsureResources() {
-    if (!m_device || m_initialized || !IsSupported()) return;
+    if (!m_device || m_initialized || !IsSupported(m_device)) return;
 
     std::string compSrc;
     if (!LoadShaderSource(kLightCullCompPath, compSrc)) {
@@ -43,8 +43,10 @@ void LightCullPass::EnsureResources() {
     m_initialized = true;
 }
 
-bool LightCullPass::Initialize() {
+bool LightCullPass::Initialize(rhi::IDevice* device) {
+    if (!device) return false;
     Shutdown();
+    m_device = device;
     EnsureResources();
     return m_initialized;
 }
@@ -85,7 +87,7 @@ void LightCullPass::SetParams(uint32_t tileCountX, uint32_t tileCountY, uint32_t
 }
 
 void LightCullPass::Execute(rhi::ICommandList* cmd) {
-    if (!cmd || !IsSupported()) return;
+    if (!cmd || !m_device || !IsSupported(m_device)) return;
     EnsureResources();
     if (!m_computePipeline || !m_outputBuffer) return;
 

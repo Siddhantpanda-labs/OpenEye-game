@@ -18,6 +18,7 @@ std::shared_ptr<Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& system, 
     if (particles.empty()) {
         m_mesh->SetVertices(std::vector<Mesh::Vertex>{});
         m_mesh->SetIndices(std::vector<uint32_t>{});
+        m_mesh->ClearSubmeshes();
         return m_mesh;
     }
 
@@ -77,7 +78,8 @@ std::shared_ptr<Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& system, 
 
     m_mesh->SetVertices(vertices);
     m_mesh->SetIndices(indices);
-    m_mesh->UploadToGPU();
+    m_mesh->ClearSubmeshes();
+    m_mesh->AddSubmesh(0, static_cast<uint32_t>(indices.size()), -1);
     return m_mesh;
 }
 

@@ -1,5 +1,5 @@
 #include "eyelib/render/resources/Shader.h"
-#include "eyelib/render/rhi/RHIContext.h"
+#include <cstring>
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/render/ShaderSourceLoader.h"
@@ -12,19 +12,15 @@ namespace render {
 
 Shader::Shader() = default;
 
-rhi::IDevice* Shader::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
-}
-
 Shader::~Shader() {
     Destroy();
 }
 
 Shader::Shader(Shader&& other) noexcept {
-    m_injectedDevice = other.m_injectedDevice;
     m_deviceRHI = other.m_deviceRHI;
     m_pipelineRHI = other.m_pipelineRHI;
-    other.m_injectedDevice = nullptr;
+    m_reflection = std::move(other.m_reflection);
+    m_descriptor = std::move(other.m_descriptor);
     other.m_deviceRHI = nullptr;
     other.m_pipelineRHI = nullptr;
 }
@@ -32,39 +28,13 @@ Shader::Shader(Shader&& other) noexcept {
 Shader& Shader::operator=(Shader&& other) noexcept {
     if (this == &other) return *this;
     Destroy();
-    m_injectedDevice = other.m_injectedDevice;
     m_deviceRHI = other.m_deviceRHI;
     m_pipelineRHI = other.m_pipelineRHI;
-    other.m_injectedDevice = nullptr;
+    m_reflection = std::move(other.m_reflection);
+    m_descriptor = std::move(other.m_descriptor);
     other.m_deviceRHI = nullptr;
     other.m_pipelineRHI = nullptr;
     return *this;
-}
-
-bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
-    rhi::IDevice* device = GetDevice();
-    if (!device) return false;
-    return BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList);
-}
-
-bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
-    rhi::IDevice* device = GetDevice();
-    if (device) {
-        std::string logicalName = ShaderPathToLogicalName(vertexPath);
-        if (!logicalName.empty() && Load(device, logicalName, Mesh::GetVertexLayoutRHI()))
-            return true;
-    }
-    std::string vertexSrc;
-    if (!LoadShaderSource(vertexPath, vertexSrc)) {
-        core::Log::ErrorF("Failed to load vertex shader: %s", vertexPath.c_str());
-        return false;
-    }
-    std::string fragmentSrc;
-    if (!LoadShaderSource(fragmentPath, fragmentSrc)) {
-        core::Log::ErrorF("Failed to load fragment shader: %s", fragmentPath.c_str());
-        return false;
-    }
-    return BuildFromSource(vertexSrc, fragmentSrc);
 }
 
 bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout) {
@@ -103,9 +73,30 @@ bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, c
     return LoadFromFile(device, vertexPath, fragmentPath, layout, rhi::PrimitiveTopology::TriangleList);
 }
 
+static bool HasShaderExtension(const std::string& path) {
+    const char* exts[] = { ".vert", ".frag", ".vsh", ".psh" };
+    for (const char* ext : exts) {
+        size_t len = std::strlen(ext);
+        if (path.size() >= len && path.compare(path.size() - len, len, ext) == 0)
+            return true;
+    }
+    return false;
+}
+
 bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
                           const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
     if (!device) return false;
+    if (vertexPath == fragmentPath && !HasShaderExtension(vertexPath)) {
+        std::string logicalName = ShaderPathToLogicalName(vertexPath);
+        if (!logicalName.empty() && Load(device, logicalName, layout, topology))
+            return true;
+    }
+    m_descriptor = {};
+    m_descriptor.loadByName = false;
+    m_descriptor.vertexPath = vertexPath;
+    m_descriptor.fragmentPath = fragmentPath;
+    m_descriptor.layout = layout;
+    m_descriptor.topology = topology;
     rhi::IShader* vs = nullptr;
     rhi::IShader* fs = nullptr;
     if (device->TryLoadShaderFromPaths(vertexPath.c_str(), fragmentPath.c_str(), vs, fs) && vs && fs) {
@@ -143,10 +134,12 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
 }
 
 bool Shader::Reload() {
-    if (!m_lastLoadByName || m_lastShaderName.empty()) return false;
+    bool canReload = (m_descriptor.loadByName && !m_descriptor.shaderName.empty()) ||
+                     !m_descriptor.vertexPath.empty() || !m_descriptor.fragmentPath.empty();
+    if (!canReload) return false;
     rhi::IDevice* device = GetDevice();
     if (!device) return false;
-    return Load(device, m_lastShaderName, m_lastLayout, m_lastTopology, m_lastKeywords);
+    return LoadFromDescriptor(device, m_descriptor);
 }
 
 static std::string ApplyDefinesToSource(const std::string& source, const std::vector<std::string>& keywords) {
@@ -165,11 +158,12 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
                   rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
                   const rhi::DepthStencilState* depthStencilOverride) {
     if (!device || shaderName.empty()) return false;
-    m_lastLoadByName = true;
-    m_lastShaderName = shaderName;
-    m_lastLayout = layout;
-    m_lastTopology = topology;
-    m_lastKeywords = keywords;
+    m_descriptor = {};
+    m_descriptor.loadByName = true;
+    m_descriptor.shaderName = shaderName;
+    m_descriptor.layout = layout;
+    m_descriptor.topology = topology;
+    m_descriptor.keywords = keywords;
     if (keywords.empty()) {
         if (m_deviceRHI) Destroy(m_deviceRHI);
         rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology, depthStencilOverride);
@@ -217,6 +211,19 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     return true;
 }
 
+ShaderDescriptor Shader::GetDescriptor() const {
+    return m_descriptor;
+}
+
+bool Shader::LoadFromDescriptor(rhi::IDevice* device, const ShaderDescriptor& desc) {
+    if (!device) return false;
+    if (desc.loadByName && !desc.shaderName.empty())
+        return Load(device, desc.shaderName, desc.layout, desc.topology, desc.keywords);
+    if (!desc.vertexPath.empty() || !desc.fragmentPath.empty())
+        return LoadFromFile(device, desc.vertexPath, desc.fragmentPath, desc.layout, desc.topology);
+    return false;
+}
+
 void Shader::Destroy() {
     if (m_deviceRHI) Destroy(m_deviceRHI);
 }
@@ -230,8 +237,7 @@ void Shader::Destroy(rhi::IDevice* device) {
     m_deviceRHI = nullptr;
 }
 
-void Shader::Bind() const {
-    rhi::IDevice* device = GetDevice();
+void Shader::Bind(rhi::IDevice* device) const {
     if (!device || !m_pipelineRHI) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->BindPipeline(m_pipelineRHI);

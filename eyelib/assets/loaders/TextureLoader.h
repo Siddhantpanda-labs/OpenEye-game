@@ -14,6 +14,9 @@ public:
 
     static AssetId LoadTexture(const std::string& path, bool isSRGB = true);
     static void LoadTextureAsync(const std::string& path, LoadCallback callback, bool isSRGB = true);
+
+    /** CPU-only: store TextureDescriptor (path + options); no pixel load or GPU. For binding phase. */
+    static AssetId LoadTextureDescriptorOnly(const std::string& path, bool isSRGB = true);
 };
 
 } // namespace assets

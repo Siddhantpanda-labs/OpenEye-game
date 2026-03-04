@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include <memory>
@@ -27,7 +27,7 @@ public:
      * @param selection Optional region to decimate (if empty, decimates entire mesh)
      * @param mask Optional mask to protect certain regions from decimation
      */
-    static void Decimate(render::Mesh& mesh, size_t targetTriangleCount,
+    static void Decimate(assets::EditableMesh& editable, size_t targetTriangleCount,
                         const Selection& selection = Selection::Empty(Selection::Type::Faces),
                         const Mask* mask = nullptr);
     
@@ -41,7 +41,7 @@ public:
      * @param selection Optional region to decimate
      * @param mask Optional mask to protect regions
      */
-    static void DecimateByPercentage(render::Mesh& mesh, float reductionFactor,
+    static void DecimateByPercentage(assets::EditableMesh& editable, float reductionFactor,
                                     const Selection& selection = Selection::Empty(Selection::Type::Faces),
                                     const Mask* mask = nullptr);
 
@@ -55,11 +55,11 @@ private:
     };
     
     // Compute quadric error for an edge collapse
-    static float ComputeEdgeError(const render::Mesh& mesh, uint32_t v0, uint32_t v1,
+    static float ComputeEdgeError(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                   const MeshTopology& topology, math::Vec3& optimalPos);
     
     // Collapse an edge (merge v1 into v0)
-    static void CollapseEdge(render::Mesh& mesh, uint32_t v0, uint32_t v1,
+    static void CollapseEdge(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                             const MeshTopology& topology,
                             std::vector<render::Vertex>& newVertices,
                             std::vector<uint32_t>& newIndices,

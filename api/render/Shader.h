@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
 #include "eyelib/math/Types.h"
 #include <cstddef>
 #include <memory>
@@ -19,11 +20,14 @@ public:
     Shader(Shader&& other) noexcept;
     Shader& operator=(Shader&& other) noexcept;
 
-    bool BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc);
-    bool LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath);
+    bool BuildFromSource(RenderDevice device, const std::string& vertexSrc, const std::string& fragmentSrc);
+    /** Load shader by logical name (e.g. passes/forward/lit). Single path: resolve backend and create pipeline. */
+    bool Load(RenderDevice device, const std::string& logicalName);
+    bool LoadFromFile(RenderDevice device, const std::string& vertexPath, const std::string& fragmentPath);
     void Destroy();
 
-    void Bind() const;
+    /** Bind pipeline. Device must be non-null. */
+    void Bind(RenderDevice device) const;
     void Unbind() const;
 
     void SetBool(const std::string& name, bool value) const;

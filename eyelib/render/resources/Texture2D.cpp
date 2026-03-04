@@ -1,5 +1,5 @@
 #include "eyelib/render/resources/Texture2D.h"
-#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/TextureDescriptor.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 
@@ -94,7 +94,8 @@ void Texture2D::WrapRHI(rhi::ITexture* texture) {
 Texture2D::Texture2D(Texture2D&& other) noexcept
     : m_width(other.m_width), m_height(other.m_height), m_format(other.m_format),
       m_injectedDevice(other.m_injectedDevice), m_deviceRHI(other.m_deviceRHI),
-      m_textureRHI(other.m_textureRHI), m_wrappedRHI(other.m_wrappedRHI) {
+      m_textureRHI(other.m_textureRHI), m_wrappedRHI(other.m_wrappedRHI),
+      m_descriptor(std::move(other.m_descriptor)) {
     other.m_injectedDevice = nullptr;
     other.m_deviceRHI = nullptr;
     other.m_textureRHI = nullptr;
@@ -111,6 +112,7 @@ Texture2D& Texture2D::operator=(Texture2D&& other) noexcept {
         m_deviceRHI = other.m_deviceRHI;
         m_textureRHI = other.m_textureRHI;
         m_wrappedRHI = other.m_wrappedRHI;
+        m_descriptor = std::move(other.m_descriptor);
         other.m_injectedDevice = nullptr;
         other.m_deviceRHI = nullptr;
         other.m_textureRHI = nullptr;
@@ -120,7 +122,7 @@ Texture2D& Texture2D::operator=(Texture2D&& other) noexcept {
 }
 
 rhi::IDevice* Texture2D::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    return m_injectedDevice ? m_injectedDevice : m_deviceRHI;
 }
 
 bool Texture2D::Create(int width, int height, TextureFormat format, const void* data) {
@@ -164,12 +166,25 @@ void Texture2D::Destroy(rhi::IDevice* device) {
 }
 
 bool Texture2D::LoadFromFile(const std::string& path, bool isSRGB, bool generateMipmaps) {
+    m_descriptor.filePath = path;
+    m_descriptor.isSRGB = isSRGB;
+    m_descriptor.generateMipmaps = generateMipmaps;
     std::vector<uint8_t> bytes = eyelib::platform::filesystem::ReadFile(path);
     if (bytes.empty()) {
         core::Log::ErrorF("Texture2D: failed to read file: %s", path.c_str());
         return false;
     }
     return LoadFromMemory(bytes.data(), bytes.size(), isSRGB, generateMipmaps);
+}
+
+TextureDescriptor Texture2D::GetDescriptor() const {
+    return m_descriptor;
+}
+
+bool Texture2D::LoadFromDescriptor(rhi::IDevice* device, const TextureDescriptor& desc) {
+    if (!device || desc.filePath.empty()) return false;
+    SetDevice(device);
+    return LoadFromFile(desc.filePath, desc.isSRGB, desc.generateMipmaps);
 }
 
 bool Texture2D::LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB, bool generateMipmaps) {

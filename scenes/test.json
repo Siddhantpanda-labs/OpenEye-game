@@ -1,0 +1,525 @@
+{
+  "components": {
+    "Camera": {
+      "items": [
+        {
+          "data": {
+            "aspect": 1.7777777910232544,
+            "far": 1000.0,
+            "fov": 60.0,
+            "isPerspective": true,
+            "isPrimary": false,
+            "near": 0.10000000149011612,
+            "orthoSize": 10.0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Collider": {
+      "items": [
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 2.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              0.009999999776482582,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Light": {
+      "items": [
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 0.30000001192092896,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 20.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Renderable": {
+      "items": [
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cylinder",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Sphere",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Plane",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        }
+      ],
+      "version": 1
+    },
+    "RigidBody": {
+      "items": [
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": false
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Transform": {
+      "items": [
+        {
+          "data": {
+            "position": [
+              -2.207940101623535,
+              -38.7989501953125,
+              7.127083778381348
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              3.487881660461426,
+              3.487881660461426,
+              3.487881660461426
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "position": [
+              12.27048110961914,
+              -44.63644027709961,
+              0.26888084411621094
+            ],
+            "rotation": [
+              0.9962022304534912,
+              0.0,
+              0.0,
+              0.08706942945718765
+            ],
+            "scale": [
+              77.68547058105469,
+              0.9999997019767761,
+              44.4963264465332
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "position": [
+              5.893913269042969,
+              6.726797580718994,
+              0.0
+            ],
+            "rotation": [
+              0.5440839529037476,
+              -0.35014331340789795,
+              0.6107676029205322,
+              0.4564375877380371
+            ],
+            "scale": [
+              1.0000041723251343,
+              1.0000090599060059,
+              1.0000039339065552
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "position": [
+              33.51506423950195,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              -0.4443744122982025,
+              0.7520608305931091,
+              -0.2656712234020233,
+              -0.4078660309314728
+            ],
+            "scale": [
+              1.0000207424163818,
+              1.0000160932540894,
+              1.0000410079956055
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              5.654880046844482,
+              5.654880046844482,
+              5.654880046844482
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "position": [
+              19.04718780517578,
+              -37.62021255493164,
+              0.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.82613205909729,
+              -42.84366989135742,
+              -1.1687052249908447
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              5.0,
+              24.21297264099121,
+              5.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        }
+      ],
+      "version": 1
+    }
+  },
+  "graph": {
+    "hierarchy": [
+      {
+        "child": {
+          "generation": 0,
+          "index": 2
+        },
+        "parent": {
+          "generation": 0,
+          "index": 4
+        }
+      }
+    ],
+    "metadata": [
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "Cylinder"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "Sphere"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "Camera"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 0
+        },
+        "flags": 0,
+        "name": "Cube"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "Plane"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Directional Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Point Light"
+      }
+    ],
+    "tags": []
+  },
+  "registry": {
+    "freeList": [],
+    "generations": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "version": 1
+}

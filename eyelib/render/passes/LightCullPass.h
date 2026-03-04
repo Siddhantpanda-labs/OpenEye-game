@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 
@@ -19,9 +20,9 @@ public:
     LightCullPass(const LightCullPass&) = delete;
     LightCullPass& operator=(const LightCullPass&) = delete;
 
-    void SetDevice(rhi::IDevice* device) { m_device = device; }
-
-    bool Initialize();
+    bool IsSupported(rhi::IDevice* device) const;
+    /** Create compute pipeline. Device must be non-null. */
+    bool Initialize(rhi::IDevice* device);
     void Shutdown();
 
     /** Set input light buffers (binding 3 = point, binding 4 = spot). Call before Execute. */
@@ -38,9 +39,8 @@ public:
                    uint32_t screenWidth, uint32_t screenHeight);
 
     /** Dispatch compute to fill output buffer. No-op if not supported or buffers missing. */
+    void Execute(const RenderContext& ctx) { Execute(ctx.cmd); }
     void Execute(rhi::ICommandList* cmd);
-
-    bool IsSupported() const;
 
 private:
     void EnsureResources();

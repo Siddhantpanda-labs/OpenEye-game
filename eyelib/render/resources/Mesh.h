@@ -5,10 +5,13 @@
 #include "eyelib/assets/AssetId.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace eyelib {
 namespace render {
+
+struct MeshDescriptor;
 
 struct Vertex {
     math::Vec3 position{0, 0, 0};
@@ -30,8 +33,24 @@ struct Submesh {
 enum class IndexFormat { UInt16, UInt32 };
 
 /**
- * @brief Mesh with multiple attributes, submeshes, AABB. GenerateNormals/Tangents, Optimize.
+ * GPU-only mesh view for the draw path (Phase 2 CPU vs GPU split).
+ * Holds only device buffers and submesh metadata; no CPU geometry.
+ * Use Mesh::GetHandle() when Mesh has been uploaded; draw with handle.Bind(device), handle.Draw(device).
  */
+struct MeshHandle {
+    rhi::IBuffer* vertexBuffer = nullptr;
+    rhi::IBuffer* indexBuffer = nullptr;
+    rhi::IndexType indexType = rhi::IndexType::UInt32;
+    uint32_t totalIndexCount = 0;
+    std::vector<Submesh> submeshes;
+
+    bool IsValid() const { return vertexBuffer != nullptr && indexBuffer != nullptr; }
+    void Bind(rhi::IDevice* device) const;
+    void Draw(rhi::IDevice* device, int submeshIndex = -1) const;
+};
+
+/** GPU-only mesh instance (Phase 2.4). No CPU geometry; create via CreateFromDescriptor(device, desc).
+ *  CPU data lives in MeshDescriptor / EditableMesh. */
 class Mesh {
 public:
     Mesh();
@@ -42,79 +61,53 @@ public:
     Mesh(Mesh&& other) noexcept;
     Mesh& operator=(Mesh&& other) noexcept;
 
-    void SetVertices(const std::vector<Vertex>& vertices);
-    void SetIndices(const std::vector<uint32_t>& indices);
-    void SetIndices(const std::vector<uint16_t>& indices);
-
-    void AddSubmesh(uint32_t indexOffset, uint32_t indexCount, int materialIndex = -1);
-    void SetSubmesh(size_t index, uint32_t indexOffset, uint32_t indexCount);
-    void ClearSubmeshes();
-
-    void UploadToGPU();
-    /** Upload to RHI buffers (explicit device). */
-    void UploadToGPU(rhi::IDevice* device);
-    /** Recreate only the vertex buffer (e.g. after geometry/skin edit). Device must match prior UploadToGPU. */
-    void UploadVertexBufferOnly(rhi::IDevice* device = nullptr);
-    /** Recreate only the index buffer (e.g. after topology edit). Device must match prior UploadToGPU. */
-    void UploadIndexBufferOnly(rhi::IDevice* device = nullptr);
     void Destroy();
-    /** Release RHI buffers if they were created via UploadToGPU(device). Call with same device. */
+    /** Release RHI buffers. Call with same device used at creation. */
     void Destroy(rhi::IDevice* device);
 
-    void Bind() const;
+    /** Bind vertex/index buffers. Device must be non-null. */
+    void Bind(rhi::IDevice* device) const;
     void Unbind() const;
-    void Draw(int submeshIndex = -1) const;
+    /** Draw. Device must be non-null. */
+    void Draw(rhi::IDevice* device, int submeshIndex = -1) const;
 
-    size_t GetVertexCount() const { return m_vertices.size(); }
-    size_t GetIndexCount() const { return m_indices32.empty() ? m_indices16.size() : m_indices32.size(); }
+    size_t GetVertexCount() const { return m_vertexCount; }
+    size_t GetIndexCount() const { return m_indexCount; }
     size_t GetSubmeshCount() const { return m_submeshes.size(); }
     const Submesh& GetSubmesh(size_t i) const { return m_submeshes[i]; }
 
-    math::AABB GetAABB() const;
-    void ComputeAABB();
-    void InvalidateAABB() { m_aabbDirty = true; }
-
-    void GenerateNormals();
-    void GenerateTangents();
-    void Optimize();
-
-    const std::vector<Vertex>& GetVertices() const { return m_vertices; }
-    std::vector<Vertex>& GetVertices() { return m_vertices; }
-    const std::vector<uint32_t>& GetIndices32() const { return m_indices32; }
-    const std::vector<uint16_t>& GetIndices16() const { return m_indices16; }
-    IndexFormat GetIndexFormat() const { return m_indexFormat; }
+    math::AABB GetAABB() const { return m_aabb; }
+    IndexFormat GetIndexFormat() const { return m_indexType == rhi::IndexType::UInt16 ? IndexFormat::UInt16 : IndexFormat::UInt32; }
 
     bool IsValid() const { return m_vertexBufferRHI != nullptr; }
     /** Legacy: returns 0 (no VAO in RHI path). */
     unsigned int GetVAO() const { return 0; }
 
-    /** RHI path: return vertex/index buffers and layout when UploadToGPU(device) was used. */
     rhi::IBuffer* GetVertexBufferRHI() const { return m_vertexBufferRHI; }
     rhi::IBuffer* GetIndexBufferRHI() const { return m_indexBufferRHI; }
-    rhi::IndexType GetRHIIndexType() const;
+    rhi::IndexType GetRHIIndexType() const { return m_indexType; }
     static rhi::VertexLayout GetVertexLayoutRHI();
     /** Fullscreen quad (vec2 pos + vec2 uv). For skybox, post-process, lighting fullscreen. */
     static rhi::VertexLayout GetFullscreenQuadVertexLayoutRHI();
-
-    /** Set device to use for UploadToGPU() without device, Bind(), Draw(). */
-    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
 
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
     const assets::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
-private:
-    rhi::IDevice* GetDevice() const;
-    void Invalidate();
+    /** Create GPU instance from CPU descriptor. Replaces any existing buffers. */
+    bool CreateFromDescriptor(rhi::IDevice* device, const MeshDescriptor& desc);
+    /** Factory: create a new GPU mesh from descriptor. */
+    static std::shared_ptr<Mesh> Create(rhi::IDevice* device, const MeshDescriptor& desc);
 
-    rhi::IDevice* m_injectedDevice = nullptr;
-    std::vector<Vertex> m_vertices;
-    std::vector<uint32_t> m_indices32;
-    std::vector<uint16_t> m_indices16;
-    IndexFormat m_indexFormat = IndexFormat::UInt32;
+    /** GPU-only view for draw path. Valid only after CreateFromDescriptor. */
+    MeshHandle GetHandle() const;
+
+private:
+    size_t m_vertexCount = 0;
+    size_t m_indexCount = 0;
+    rhi::IndexType m_indexType = rhi::IndexType::UInt32;
     std::vector<Submesh> m_submeshes;
-    mutable math::AABB m_aabb;
-    mutable bool m_aabbDirty = true;
+    math::AABB m_aabb;
 
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IBuffer* m_vertexBufferRHI = nullptr;

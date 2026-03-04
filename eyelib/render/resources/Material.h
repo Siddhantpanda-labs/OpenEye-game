@@ -12,7 +12,7 @@
 namespace eyelib {
 namespace render {
 
-namespace rhi { struct ITexture; }
+namespace rhi { struct IDevice; struct ITexture; }
 class Shader;
 class Texture2D;
 
@@ -70,7 +70,8 @@ public:
     void SetKeyword(const std::string& keyword, bool enabled);
     bool IsKeywordEnabled(const std::string& keyword) const;
 
-    void Bind() const;
+    /** Bind shader and textures. Device must be non-null. */
+    void Bind(rhi::IDevice* device) const;
     size_t GetHash() const;
 
     void SetAssetId(const assets::AssetId& id) { m_assetId = id; }

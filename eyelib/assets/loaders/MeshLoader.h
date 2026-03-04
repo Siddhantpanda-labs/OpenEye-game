@@ -9,9 +9,10 @@
 #include <vector>
 
 namespace eyelib {
+namespace render { namespace rhi { struct IDevice; } }
 namespace assets {
 
-/** Decoded mesh data (CPU-side). Create Mesh on main thread via CreateFromDecoded. */
+/** Decoded mesh data (CPU-side). Create Mesh via CreateFromDecoded(device, data). */
 struct DecodedMeshData {
     std::vector<render::Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -29,26 +30,32 @@ public:
     /** Import interchange (GLTF/FBX/etc) to canonical .oea. Exports first mesh only. Returns true on success. */
     static bool ImportToCanonical(const std::string& interchangePath, const std::string& outputPath);
 
-    /** Load from canonical .oea or .mesh.bin (Mesh Pipeline). Returns single mesh or nullptr. */
-    static std::shared_ptr<render::Mesh> LoadFromCanonical(const std::string& path);
+    /** Load from canonical .oea or .mesh.bin. Device required for GPU mesh. */
+    static std::shared_ptr<render::Mesh> LoadFromCanonical(render::rhi::IDevice* device, const std::string& path);
 
-    /** Load all meshes from file. Supports OBJ, GLTF, FBX, DAE. */
-    static std::vector<std::shared_ptr<render::Mesh>> LoadFromFile(const std::string& path);
+    /** Load all meshes from file. Device required for GPU meshes. */
+    static std::vector<std::shared_ptr<render::Mesh>> LoadFromFile(render::rhi::IDevice* device, const std::string& path);
 
-    /** Load single mesh (first from file). */
-    static std::shared_ptr<render::Mesh> LoadSingle(const std::string& path);
+    /** Load single mesh (first from file). Device required. */
+    static std::shared_ptr<render::Mesh> LoadSingle(render::rhi::IDevice* device, const std::string& path);
 
-    /** Async decode only. Callback runs on worker; create Mesh via CreateFromDecoded on main thread. */
+    /** Decode file to CPU data only (no device). For descriptor-only or later CreateFromDecoded. */
+    static std::vector<DecodedMeshData> LoadToDecoded(const std::string& path);
+
+    /** Async decode only. Callback runs on worker; create Mesh via CreateFromDecoded(device, data) on main thread. */
     static void LoadAsync(const std::string& path, std::function<void(std::vector<DecodedMeshData>)> callback);
 
-    /** Create Mesh from decoded data. Call on main thread (uses GL). */
-    static std::shared_ptr<render::Mesh> CreateFromDecoded(const DecodedMeshData& data);
+    /** Create GPU Mesh from decoded data. Device required. */
+    static std::shared_ptr<render::Mesh> CreateFromDecoded(render::rhi::IDevice* device, const DecodedMeshData& data);
 
-    /** Load mesh and register with AssetManager. Returns AssetId. */
+    /** Load mesh and register with AssetManager (uses manager's device). Returns AssetId. */
     static AssetId LoadMesh(const std::string& path);
 
     /** Load mesh asynchronously and register with AssetManager. */
     static void LoadMeshAsync(const std::string& path, LoadCallback callback);
+
+    /** CPU-only: build and store MeshDescriptor; no GPU upload or instance. For binding phase. */
+    static AssetId LoadMeshDescriptorOnly(const std::string& path);
 };
 
 } // namespace assets

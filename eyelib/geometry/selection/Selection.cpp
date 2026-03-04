@@ -1,5 +1,5 @@
 #include "eyelib/geometry/selection/Selection.h"
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/geometry/core/MeshTopology.h"
 #include <algorithm>
@@ -99,8 +99,8 @@ Selection Selection::Invert(size_t totalCount) const {
 
 // SelectionBuilder implementation
 
-SelectionBuilder::SelectionBuilder(const render::Mesh& mesh) 
-    : m_mesh(mesh), m_current(Selection::Empty(Selection::Type::Vertices)) {}
+SelectionBuilder::SelectionBuilder(const assets::EditableMesh& editable) 
+    : m_mesh(editable), m_current(Selection::Empty(Selection::Type::Vertices)) {}
 
 SelectionBuilder& SelectionBuilder::ByVertexIDs(const std::vector<uint32_t>& vertexIDs) {
     EnsureType(Selection::Type::Vertices);
@@ -163,16 +163,7 @@ SelectionBuilder& SelectionBuilder::ByCurvature(float minCurvature, float maxCur
     
     // Build topology for curvature computation
     MeshTopology topology;
-    std::vector<uint32_t> indices;
-    if (m_mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = m_mesh.GetIndices32();
-    } else {
-        const auto& indices16 = m_mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = m_mesh.GetIndices();
     
     if (indices.empty()) return *this;
     topology.BuildFromIndices(vertices.size(), indices);

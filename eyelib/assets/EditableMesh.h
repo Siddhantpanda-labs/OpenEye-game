@@ -7,6 +7,7 @@
 #include <vector>
 
 namespace eyelib {
+namespace render { struct MeshDescriptor; }
 namespace assets {
 
 /**
@@ -62,14 +63,17 @@ public:
         m_gpuLayoutDirty = false;
     }
 
-    /** Build or update a render::Mesh from this EditableMesh. Applies dirty rules and clears dirty flags. */
-    void BuildRenderMesh(render::Mesh& out);
+    /** CPU descriptor for CreateFromDescriptor. */
+    render::MeshDescriptor GetDescriptor() const;
 
-    /** Copy CPU data into a render::Mesh and upload to GPU (full upload). Use when no dirty tracking on target. */
-    void CopyToRenderMesh(render::Mesh& out) const;
+    /** Build or update a render::Mesh from this EditableMesh. Device required for GPU upload. */
+    void BuildRenderMesh(render::Mesh& out, render::rhi::IDevice* device);
 
-    /** Build EditableMesh from an existing render::Mesh (e.g. after Assimp load). Optional skeletonId. */
-    static EditableMesh FromRenderMesh(const render::Mesh& mesh, const assets::AssetId& skeletonId = assets::AssetId::Invalid());
+    /** Copy CPU data into a render::Mesh and upload to GPU (full upload). */
+    void CopyToRenderMesh(render::Mesh& out, render::rhi::IDevice* device) const;
+
+    /** Build EditableMesh from a CPU descriptor (e.g. after load). */
+    static EditableMesh FromDescriptor(const render::MeshDescriptor& desc, const assets::AssetId& skeletonId = assets::AssetId::Invalid());
 
 private:
     std::vector<Vertex> m_vertices;

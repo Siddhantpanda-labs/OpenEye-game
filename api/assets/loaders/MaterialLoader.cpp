@@ -25,7 +25,7 @@ AssetId MaterialLoader::LoadMaterial(const std::string& path) {
 }
 
 bool MaterialLoader::SaveMaterial(const std::string& path, const AssetId& materialAssetId) {
-    auto mat = assets::AssetManager::Get().Cache().Get<eyelib::render::Material>(ToCore(materialAssetId));
+    auto mat = assets::AssetManager::Get().GetMaterial(ToCore(materialAssetId));
     return assets::MaterialLoader::SaveMaterial(path, mat);
 }
 

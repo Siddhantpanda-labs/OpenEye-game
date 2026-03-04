@@ -2,6 +2,7 @@
 
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
 #include <cstddef>
 #include <memory>
@@ -28,6 +29,7 @@ public:
     InstancedRenderer(InstancedRenderer&& other) noexcept;
     InstancedRenderer& operator=(InstancedRenderer&& other) noexcept;
 
+    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void Clear();
 
     bool AddInstance(std::shared_ptr<Mesh> mesh, std::shared_ptr<Material> material, const math::Mat4& transform);
@@ -60,6 +62,7 @@ private:
 
     std::unordered_map<BatchKey, InstanceBatch, BatchKeyHash> m_batches;
     size_t m_totalInstances = 0;
+    rhi::IDevice* m_device = nullptr;
 
 };
 

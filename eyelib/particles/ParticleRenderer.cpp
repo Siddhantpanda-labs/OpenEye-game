@@ -1,5 +1,5 @@
 #include "eyelib/particles/ParticleRenderer.h"
-
+#include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/math/Types.h"
 
 #include <algorithm>
@@ -7,23 +7,19 @@
 namespace eyelib {
 namespace particles {
 
-ParticleRenderer::ParticleRenderer() : m_mesh(std::make_shared<render::Mesh>()) {}
-
 void ParticleRenderer::SetMaterial(const std::shared_ptr<render::Material>& material) {
     m_material = material;
 }
 
-std::shared_ptr<render::Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& system, EmitterHandle emitter,
+std::shared_ptr<render::Mesh> ParticleRenderer::BuildMesh(render::rhi::IDevice* device,
+                                                          const ParticleSystem& system, EmitterHandle emitter,
                                                           const render::CameraView& camera) {
-    if (!m_mesh) m_mesh = std::make_shared<render::Mesh>();
-
+    render::MeshDescriptor desc;
     const auto particles = system.Snapshot(emitter);
     const auto cfg = system.GetEmitterConfig(emitter);
 
-    if (particles.empty()) {
-        m_mesh->SetVertices(std::vector<render::Vertex>{});
-        m_mesh->SetIndices(std::vector<uint32_t>{});
-        return m_mesh;
+    if (particles.empty() || !device) {
+        return render::Mesh::Create(device, desc);
     }
 
     math::Mat4 invView = glm::inverse(camera.view);
@@ -33,13 +29,12 @@ std::shared_ptr<render::Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& 
 
     const size_t trailCount = cfg.enableTrails ? particles.size() : 0;
     const size_t quadCount = particles.size() + trailCount;
-    std::vector<render::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(quadCount * 4);
-    indices.reserve(quadCount * 6);
+    desc.vertices.reserve(quadCount * 4);
+    desc.indices32.reserve(quadCount * 6);
+    desc.indexFormat = render::IndexFormat::UInt32;
 
     auto pushQuad = [&](const math::Vec3& center, const math::Vec3& right, const math::Vec3& up, const math::Vec4& color) {
-        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        const uint32_t base = static_cast<uint32_t>(desc.vertices.size());
         render::Vertex v0{}, v1{}, v2{}, v3{};
         v0.position = center - right - up;
         v1.position = center + right - up;
@@ -51,16 +46,16 @@ std::shared_ptr<render::Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& 
         v3.uv = math::Vec2(0, 1);
         v0.color = v1.color = v2.color = v3.color = color;
         v0.normal = v1.normal = v2.normal = v3.normal = normal;
-        vertices.push_back(v0);
-        vertices.push_back(v1);
-        vertices.push_back(v2);
-        vertices.push_back(v3);
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
+        desc.vertices.push_back(v0);
+        desc.vertices.push_back(v1);
+        desc.vertices.push_back(v2);
+        desc.vertices.push_back(v3);
+        desc.indices32.push_back(base + 0);
+        desc.indices32.push_back(base + 1);
+        desc.indices32.push_back(base + 2);
+        desc.indices32.push_back(base + 0);
+        desc.indices32.push_back(base + 2);
+        desc.indices32.push_back(base + 3);
     };
 
     for (const auto& p : particles) {
@@ -80,10 +75,8 @@ std::shared_ptr<render::Mesh> ParticleRenderer::BuildMesh(const ParticleSystem& 
         }
     }
 
-    m_mesh->SetVertices(vertices);
-    m_mesh->SetIndices(indices);
-    m_mesh->UploadToGPU();
-    return m_mesh;
+    desc.submeshes.push_back(render::Submesh{ 0, static_cast<uint32_t>(desc.indices32.size()), -1 });
+    return render::Mesh::Create(device, desc);
 }
 
 } // namespace particles

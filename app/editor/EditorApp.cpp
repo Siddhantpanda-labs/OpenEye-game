@@ -15,9 +15,12 @@
 #include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
+#include "api/render/RenderDevice.h"
 #include "eyelib/assets/ShaderWatcher.h"
+#include "eyelib/platform/window/GraphicsDevice.h"
+#include "eyelib/render/2d/Primitives.h"
+#include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/RenderBackend.h"
-#include "eyelib/render/rhi/RHIContext.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -134,12 +137,34 @@ int RunEditor(int argc, char** argv) {
         return 3;
     }
 
+    // One RHI device per window; pipelines are view configs only (no pipeline-owned device).
+    void* platformWindow = window.GetPlatformWindow();
+    auto editorDevice = platformWindow
+        ? eyelib::platform::CreateGraphicsDevice(
+              static_cast<eyelib::platform::Window*>(platformWindow), 256, 256,
+              eyelib::render::RenderBackend::OpenGL)
+        : nullptr;
+    eyelib::api::RenderDevice editorRenderDevice(editorDevice.get());
+
     eyelib::api::Renderer sceneViewRenderer;
     eyelib::api::RenderPipeline sceneViewPipeline;
-    if (!sceneViewRenderer.Initialize() || !sceneViewPipeline.Initialize(window, 256, 256, eyelib::render::RenderBackend::OpenGL)) {
-        std::fprintf(stderr, "Editor: Scene view pipeline init failed (scene view will show placeholder).\n");
+    eyelib::api::RenderPipeline gameViewPipeline;
+    if (!sceneViewRenderer.Initialize()) {
+        std::fprintf(stderr, "Editor: Renderer init failed.\n");
+    }
+    if (!editorDevice) {
+        std::fprintf(stderr, "Editor: CreateGraphicsDevice failed (scene/game view will show placeholder).\n");
     } else {
-        sceneViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+        if (!sceneViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
+            std::fprintf(stderr, "Editor: Scene view pipeline init failed (scene view will show placeholder).\n");
+        } else {
+            sceneViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+        }
+        if (!gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
+            std::fprintf(stderr, "Editor: Game view pipeline init failed (debug camera preview disabled).\n");
+        } else {
+            gameViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+        }
     }
 
     std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
@@ -178,37 +203,38 @@ int RunEditor(int argc, char** argv) {
     }
 
     eyelib::api::AssetRegistry assetRegistry;
+    if (editorDevice)
+        assetRegistry.SetRenderDevice(editorRenderDevice);
 
     openeye::editor::EditorContext ctx;
     ctx.sceneViewPipeline = &sceneViewPipeline;
+    ctx.gameViewPipeline = &gameViewPipeline;
     ctx.assetRegistry = &assetRegistry;
     ctx.assetRoots = { "assets" };
     ctx.window = &window;
+
+    if (editorRenderDevice) {
+        auto defaultShader = std::make_shared<eyelib::api::Shader>();
+        if (defaultShader->Load(editorRenderDevice, "passes/forward/lit")) {
+            auto defaultMat = std::make_shared<eyelib::api::Material>();
+            defaultMat->SetShader(defaultShader);
+            ctx.defaultMaterial = std::move(defaultMat);
+        }
+    }
 
     while (!window.ShouldClose()) {
         window.PollEvents();
         window.MakeContextCurrent();
         window.RefreshFramebufferSize();
         if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
-            // Sever world's references to the runtime so no callback/pointer outlives it (avoids use-after-free on second Play).
             ctx.world.SetFrameSnapshot(nullptr);
             ctx.world.SetCaptureSnapshotCallback(nullptr);
-            // Restore default device before teardown so nothing during shutdown sees the game device as default.
-            if (ctx.sceneViewPipeline) {
-                void* dev = ctx.sceneViewPipeline->GetDevice();
-                eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
-            }
             try {
                 ctx.gameRuntime.reset();
-            } catch (...) {
-                // Ensure we restore the default device even if shutdown throws.
-            }
-            ctx.world.SetFrameSnapshot(nullptr);  // ensure clean for next Play (GetObservation() uses live world)
+            } catch (...) {}
+            ctx.world.SetFrameSnapshot(nullptr);
             ctx.gameRuntimeStopRequested = false;
-            if (ctx.sceneViewPipeline) {
-                void* dev = ctx.sceneViewPipeline->GetDevice();
-                eyelib::render::rhi::SetDefaultDevice(static_cast<eyelib::render::rhi::IDevice*>(dev));
-            }
+            // Model A: single device; no restore needed.
             // Revert world to pre-Play snapshot so edits during Play are discarded.
             if (!ctx.playSnapshotPath.empty()) {
                 if (ctx.world.LoadScene(ctx.playSnapshotPath)) {
@@ -248,12 +274,23 @@ int RunEditor(int argc, char** argv) {
 
         ImGui::Render();
         // Restore default framebuffer and full-window viewport so ImGui draws to the window.
-        // The scene view pipeline leaves its FBO and a small viewport bound.
+        // The scene view and game view pipelines leave their FBO bound after Render().
         if (ctx.sceneViewPipeline)
             ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(
                 static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
+        if (ctx.gameViewPipeline)
+            ctx.gameViewPipeline->RestoreDefaultFramebufferAndViewport(
+                static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         window.SwapBuffers();
+    }
+
+    // Teardown: pipelines release FBOs; then static GPU resources; device is destroyed when editorDevice goes out of scope.
+    sceneViewPipeline.Shutdown();
+    gameViewPipeline.Shutdown();
+    if (editorDevice) {
+        eyelib::render::DebugDrawRenderer::Shutdown();
+        eyelib::render::Primitives::ShutdownStaticResources();
     }
 
     return 0;

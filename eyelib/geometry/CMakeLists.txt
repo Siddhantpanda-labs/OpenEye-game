@@ -76,6 +76,7 @@ target_include_directories(EyelibGeometry
 
 target_link_libraries(EyelibGeometry
     PUBLIC
+        EyelibAssets
         EyelibRender
         EyelibMath
     PRIVATE

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
@@ -40,7 +40,7 @@ public:
      * @param axis Projection axis (for planar/cylindrical: 0=X, 1=Y, 2=Z)
      * @param selection Optional region to generate UVs for (if empty, all vertices)
      */
-    static void GenerateUVs(render::Mesh& mesh, UVProjection projection,
+    static void GenerateUVs(assets::EditableMesh& editable, UVProjection projection,
                            int axis = 1, const Selection& selection = Selection::Empty(Selection::Type::Vertices));
     
     /**
@@ -53,7 +53,7 @@ public:
      * @param up Up vector for UV orientation
      * @param selection Optional region to generate UVs for
      */
-    static void GeneratePlanarUVs(render::Mesh& mesh, const math::Vec3& normal, const math::Vec3& up,
+    static void GeneratePlanarUVs(assets::EditableMesh& editable, const math::Vec3& normal, const math::Vec3& up,
                                  const Selection& selection = Selection::Empty(Selection::Type::Vertices));
     
     /**
@@ -66,7 +66,7 @@ public:
      * @param axis Cylinder axis (0=X, 1=Y, 2=Z)
      * @param selection Optional region to generate UVs for
      */
-    static void GenerateCylindricalUVs(render::Mesh& mesh, int axis = 1,
+    static void GenerateCylindricalUVs(assets::EditableMesh& editable, int axis = 1,
                                      const Selection& selection = Selection::Empty(Selection::Type::Vertices));
     
     /**
@@ -78,7 +78,7 @@ public:
      * @param mesh Mesh to generate UVs for
      * @param selection Optional region to generate UVs for
      */
-    static void GenerateSphericalUVs(render::Mesh& mesh,
+    static void GenerateSphericalUVs(assets::EditableMesh& editable,
                                     const Selection& selection = Selection::Empty(Selection::Type::Vertices));
     
     /**
@@ -90,7 +90,7 @@ public:
      * @param mesh Mesh to generate UVs for
      * @param selection Optional region to generate UVs for
      */
-    static void GenerateBoxUVs(render::Mesh& mesh,
+    static void GenerateBoxUVs(assets::EditableMesh& editable,
                               const Selection& selection = Selection::Empty(Selection::Type::Vertices));
     
     /**
@@ -103,7 +103,7 @@ public:
      * @param mesh Mesh to unwrap
      * @param padding Padding between UV islands (0.0 to 1.0)
      */
-    static void UnwrapUVs(render::Mesh& mesh, float padding = 0.01f);
+    static void UnwrapUVs(assets::EditableMesh& editable, float padding = 0.01f);
     
     /**
      * @brief Pack UV islands into texture space.
@@ -113,7 +113,7 @@ public:
      * @param mesh Mesh to pack UVs for
      * @param padding Padding between islands
      */
-    static void PackUVs(render::Mesh& mesh, float padding = 0.01f);
+    static void PackUVs(assets::EditableMesh& editable, float padding = 0.01f);
     
     // ============================================
     // Texture-Space Painting Operations
@@ -133,7 +133,7 @@ public:
      * @param strength Paint strength (0.0 to 1.0)
      * @param mask Optional mask to control paint strength per vertex
      */
-    static void PaintTexture(render::Mesh& mesh, render::Texture2D& texture,
+    static void PaintTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                             const Selection& selection, const math::Vec4& color,
                             float brushSize = 0.1f, float strength = 1.0f,
                             const Mask* mask = nullptr);
@@ -148,7 +148,7 @@ public:
      * @param selection Region to fill (if empty, fills all vertices)
      * @param color Fill color (RGBA)
      */
-    static void FillTexture(render::Mesh& mesh, render::Texture2D& texture,
+    static void FillTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                            const Selection& selection, const math::Vec4& color);
     
     /**
@@ -164,14 +164,14 @@ public:
      * @param strength Blend strength (0.0 to 1.0)
      * @param mask Optional mask to control blend strength
      */
-    static void BlendTexture(render::Mesh& mesh, render::Texture2D& texture,
+    static void BlendTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                             const Selection& selection, const math::Vec4& blendColor,
                             BlendMode blendMode, float strength = 1.0f,
                             const Mask* mask = nullptr);
 
 private:
     // Helper to compute mesh bounds for UV scaling
-    static math::AABB ComputeMeshBounds(const render::Mesh& mesh, const Selection& selection);
+    static math::AABB ComputeMeshBounds(const assets::EditableMesh& editable, const Selection& selection);
     
     // Helper to get axis vectors
     static void GetAxisVectors(int axis, math::Vec3& forward, math::Vec3& right, math::Vec3& up);

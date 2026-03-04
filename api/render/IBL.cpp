@@ -1,5 +1,6 @@
 #include "api/render/IBL.h"
 #include "eyelib/render/IBL.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/resources/TextureCube.h"
 
 namespace eyelib {
@@ -17,6 +18,10 @@ IBL::~IBL() = default;
 IBL::IBL(IBL&& other) noexcept = default;
 
 IBL& IBL::operator=(IBL&& other) noexcept = default;
+
+void IBL::SetDevice(RenderDevice device) {
+    m_impl->ibl->SetDevice(static_cast<::eyelib::render::rhi::IDevice*>(device.Get()));
+}
 
 bool IBL::Initialize(const TextureCube& environment, uint32_t irradianceRes, uint32_t prefilterRes) {
     auto internal = environment.GetInternal();

@@ -30,9 +30,9 @@ bool RenderTarget::Create(RenderPipeline* pipeline, uint32_t width, uint32_t hei
                           const std::vector<TextureFormat>& colorFormats,
                           TextureFormat depthFormat, int samples) {
     if (!pipeline) return false;
-    void* dev = pipeline->GetDevice();
+    RenderDevice dev = pipeline->GetDevice();
     if (!dev) return false;
-    auto* device = static_cast<::eyelib::render::rhi::IDevice*>(dev);
+    auto* device = static_cast<::eyelib::render::rhi::IDevice*>(dev.Get());
     std::vector<::eyelib::render::TextureFormat> internalFormats;
     internalFormats.reserve(colorFormats.size());
     for (auto format : colorFormats) {
@@ -93,9 +93,9 @@ void RenderTarget::Blit(const RenderTarget& source, const RenderTarget& dest, bo
 
 int RenderTarget::GetMaxSamples(RenderPipeline* pipeline, int samples) {
     if (!pipeline) return 0;
-    void* dev = pipeline->GetDevice();
+    RenderDevice dev = pipeline->GetDevice();
     if (!dev) return 0;
-    return ::eyelib::render::RenderTarget::GetMaxSamples(static_cast<::eyelib::render::rhi::IDevice*>(dev), samples);
+    return ::eyelib::render::RenderTarget::GetMaxSamples(static_cast<::eyelib::render::rhi::IDevice*>(dev.Get()), samples);
 }
 
 RenderTarget RenderTarget::CreateColorDepth(RenderPipeline* pipeline, uint32_t width, uint32_t height,

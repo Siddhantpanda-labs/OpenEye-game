@@ -7,11 +7,14 @@
 #include <vector>
 
 namespace eyelib {
+namespace assets { class EditableMesh; }
+
 namespace animation {
 
 /**
  * @brief Utilities for automatic rigging and bone weight calculation.
  * Supports distance-based and heat diffusion weight assignment.
+ * Operates on CPU mesh (EditableMesh); caller syncs to GPU via UploadToGPU(device).
  */
 class RiggingUtils {
 public:
@@ -19,13 +22,13 @@ public:
      * @brief Calculate bone weights for vertices based on distance to bone positions.
      * Uses inverse distance weighting (closer vertices get higher weights).
      * 
-     * @param mesh Mesh to assign weights to
+     * @param editable CPU mesh to assign weights to (modified in-place)
      * @param skeleton Skeleton with bones
      * @param falloffDistance Maximum distance for bone influence
      * @param power Power for distance weighting (higher = sharper falloff, default 2.0)
      */
     static void CalculateDistanceWeights(
-        std::shared_ptr<render::Mesh> mesh,
+        assets::EditableMesh& editable,
         std::shared_ptr<Skeleton> skeleton,
         float falloffDistance = 1.0f,
         float power = 2.0f);
@@ -49,12 +52,12 @@ public:
     /**
      * @brief Calculate bone weights using heat diffusion method (smoother, more natural).
      * 
-     * @param mesh Mesh to assign weights to
+     * @param editable CPU mesh to assign weights to (modified in-place)
      * @param skeleton Skeleton with bones
      * @param iterations Number of diffusion iterations (more = smoother, default 10)
      */
     static void CalculateHeatDiffusionWeights(
-        std::shared_ptr<render::Mesh> mesh,
+        assets::EditableMesh& editable,
         std::shared_ptr<Skeleton> skeleton,
         int iterations = 10);
 

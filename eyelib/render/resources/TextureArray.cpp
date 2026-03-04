@@ -1,5 +1,4 @@
 #include "eyelib/render/resources/TextureArray.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include <cstdint>
 #include <cstring>
@@ -59,7 +58,7 @@ TextureArray& TextureArray::operator=(TextureArray&& other) noexcept {
 }
 
 rhi::IDevice* TextureArray::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    return m_injectedDevice ? m_injectedDevice : m_deviceRHI;
 }
 
 bool TextureArray::Create(int width, int height, int layers, TextureFormat format, const void* data) {

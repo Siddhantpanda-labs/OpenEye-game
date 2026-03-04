@@ -9,30 +9,30 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshTexturePaint::GenerateUVs(render::Mesh& mesh, UVProjection projection,
+void MeshTexturePaint::GenerateUVs(assets::EditableMesh& editable, UVProjection projection,
                                    int axis, const Selection& selection) {
     switch (projection) {
         case UVProjection::Planar: {
             math::Vec3 forward, right, up;
             GetAxisVectors(axis, forward, right, up);
-            GeneratePlanarUVs(mesh, forward, up, selection);
+            GeneratePlanarUVs(editable, forward, up, selection);
             break;
         }
         case UVProjection::Cylindrical:
-            GenerateCylindricalUVs(mesh, axis, selection);
+            GenerateCylindricalUVs(editable, axis, selection);
             break;
         case UVProjection::Spherical:
-            GenerateSphericalUVs(mesh, selection);
+            GenerateSphericalUVs(editable, selection);
             break;
         case UVProjection::Box:
-            GenerateBoxUVs(mesh, selection);
+            GenerateBoxUVs(editable, selection);
             break;
     }
 }
 
-void MeshTexturePaint::GeneratePlanarUVs(render::Mesh& mesh, const math::Vec3& normal, const math::Vec3& up,
+void MeshTexturePaint::GeneratePlanarUVs(assets::EditableMesh& editable, const math::Vec3& normal, const math::Vec3& up,
                                          const Selection& selection) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     math::Vec3 n = glm::normalize(normal);
@@ -55,7 +55,7 @@ void MeshTexturePaint::GeneratePlanarUVs(render::Mesh& mesh, const math::Vec3& n
     }
     
     // Compute bounds for scaling
-    math::AABB bounds = ComputeMeshBounds(mesh, selection);
+    math::AABB bounds = ComputeMeshBounds(editable, selection);
     math::Vec3 size = bounds.GetSize();
     math::Vec3 center = bounds.GetCenter();
     
@@ -79,12 +79,11 @@ void MeshTexturePaint::GeneratePlanarUVs(render::Mesh& mesh, const math::Vec3& n
         vertices[vid].uv = math::Vec2(uCoord, vCoord);
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshTexturePaint::GenerateCylindricalUVs(render::Mesh& mesh, int axis,
+void MeshTexturePaint::GenerateCylindricalUVs(assets::EditableMesh& editable, int axis,
                                               const Selection& selection) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to process
@@ -102,7 +101,7 @@ void MeshTexturePaint::GenerateCylindricalUVs(render::Mesh& mesh, int axis,
     }
     
     // Compute bounds
-    math::AABB bounds = ComputeMeshBounds(mesh, selection);
+    math::AABB bounds = ComputeMeshBounds(editable, selection);
     math::Vec3 size = bounds.GetSize();
     math::Vec3 center = bounds.GetCenter();
     
@@ -130,11 +129,10 @@ void MeshTexturePaint::GenerateCylindricalUVs(render::Mesh& mesh, int axis,
         vertices[vid].uv = math::Vec2(uCoord, vCoord);
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshTexturePaint::GenerateSphericalUVs(render::Mesh& mesh, const Selection& selection) {
-    auto& vertices = mesh.GetVertices();
+void MeshTexturePaint::GenerateSphericalUVs(assets::EditableMesh& editable, const Selection& selection) {
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to process
@@ -152,7 +150,7 @@ void MeshTexturePaint::GenerateSphericalUVs(render::Mesh& mesh, const Selection&
     }
     
     // Compute bounds
-    math::AABB bounds = ComputeMeshBounds(mesh, selection);
+    math::AABB bounds = ComputeMeshBounds(editable, selection);
     math::Vec3 center = bounds.GetCenter();
     
     // Generate spherical UVs
@@ -180,11 +178,10 @@ void MeshTexturePaint::GenerateSphericalUVs(render::Mesh& mesh, const Selection&
         vertices[vid].uv = math::Vec2(uCoord, vCoord);
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshTexturePaint::GenerateBoxUVs(render::Mesh& mesh, const Selection& selection) {
-    auto& vertices = mesh.GetVertices();
+void MeshTexturePaint::GenerateBoxUVs(assets::EditableMesh& editable, const Selection& selection) {
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to process
@@ -202,7 +199,7 @@ void MeshTexturePaint::GenerateBoxUVs(render::Mesh& mesh, const Selection& selec
     }
     
     // Compute bounds
-    math::AABB bounds = ComputeMeshBounds(mesh, selection);
+    math::AABB bounds = ComputeMeshBounds(editable, selection);
     math::Vec3 size = bounds.GetSize();
     math::Vec3 center = bounds.GetCenter();
     
@@ -253,27 +250,16 @@ void MeshTexturePaint::GenerateBoxUVs(render::Mesh& mesh, const Selection& selec
         vertices[vid].uv = math::Vec2(uCoord, vCoord);
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshTexturePaint::UnwrapUVs(render::Mesh& mesh, float padding) {
+void MeshTexturePaint::UnwrapUVs(assets::EditableMesh& editable, float padding) {
     // Simplified UV unwrapping: uses planar projection per face
     // Full implementation would use LSCM or ABF algorithms
     
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
-    // Get indices
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
@@ -330,14 +316,13 @@ void MeshTexturePaint::UnwrapUVs(render::Mesh& mesh, float padding) {
         }
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshTexturePaint::PackUVs(render::Mesh& mesh, float padding) {
+void MeshTexturePaint::PackUVs(assets::EditableMesh& editable, float padding) {
     // Simplified UV packing: scales UVs to fit in [0, 1] with padding
     // Full implementation would use bin-packing algorithms
     
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Find UV bounds
@@ -365,11 +350,10 @@ void MeshTexturePaint::PackUVs(render::Mesh& mesh, float padding) {
         }
     }
     
-    mesh.UploadToGPU();
 }
 
-math::AABB MeshTexturePaint::ComputeMeshBounds(const render::Mesh& mesh, const Selection& selection) {
-    const auto& vertices = mesh.GetVertices();
+math::AABB MeshTexturePaint::ComputeMeshBounds(const assets::EditableMesh& editable, const Selection& selection) {
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) {
         return math::AABB();
     }
@@ -429,12 +413,12 @@ void MeshTexturePaint::GetAxisVectors(int axis, math::Vec3& forward, math::Vec3&
 
 // Texture-Space Painting Implementation
 
-void MeshTexturePaint::PaintTexture(render::Mesh& mesh, render::Texture2D& texture,
+void MeshTexturePaint::PaintTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                                     const Selection& selection, const math::Vec4& color,
                                     float brushSize, float strength, const Mask* mask) {
     if (!texture.IsValid()) return;
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     int texWidth = texture.GetWidth();
@@ -535,11 +519,11 @@ void MeshTexturePaint::PaintTexture(render::Mesh& mesh, render::Texture2D& textu
     texture.SetData(texData.data(), 0, 0, texWidth, texHeight);
 }
 
-void MeshTexturePaint::FillTexture(render::Mesh& mesh, render::Texture2D& texture,
+void MeshTexturePaint::FillTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                                    const Selection& selection, const math::Vec4& color) {
     if (!texture.IsValid()) return;
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     int texWidth = texture.GetWidth();
@@ -593,12 +577,12 @@ void MeshTexturePaint::FillTexture(render::Mesh& mesh, render::Texture2D& textur
     texture.SetData(texData.data(), 0, 0, texWidth, texHeight);
 }
 
-void MeshTexturePaint::BlendTexture(render::Mesh& mesh, render::Texture2D& texture,
+void MeshTexturePaint::BlendTexture(assets::EditableMesh& editable, render::Texture2D& texture,
                                    const Selection& selection, const math::Vec4& blendColor,
                                    BlendMode blendMode, float strength, const Mask* mask) {
     if (!texture.IsValid()) return;
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     int texWidth = texture.GetWidth();

@@ -1,9 +1,11 @@
 #include "eyelib/assets/loaders/ModelLoader.h"
 
+#include "eyelib/assets/AssetManager.h"
 #include "eyelib/animation/KeyframeEditor.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
+#include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Shader.h"
@@ -369,20 +371,22 @@ void CollectMeshTransforms(const aiNode* node,
 std::shared_ptr<render::Mesh> BuildMesh(const aiMesh* ai,
                                         animation::Skeleton* skeleton,
                                         int materialIndex,
-                                        int defaultBoneIndex) {
-    auto mesh = std::make_shared<render::Mesh>();
+                                        int defaultBoneIndex,
+                                        render::rhi::IDevice* device) {
+    if (!ai || !device) return nullptr;
+
     std::vector<math::IVec4> boneIndicesPerVertex;
     std::vector<math::Vec4> boneWeightsPerVertex;
-    if (ai && ai->HasBones() && skeleton) {
+    if (ai->HasBones() && skeleton) {
         ExtractBoneWeights(ai, *skeleton, boneIndicesPerVertex, boneWeightsPerVertex);
     }
 
-    std::vector<render::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.resize(ai->mNumVertices);
+    render::MeshDescriptor desc;
+    desc.vertices.resize(ai->mNumVertices);
+    desc.indexFormat = render::IndexFormat::UInt32;
 
     for (unsigned i = 0; i < ai->mNumVertices; ++i) {
-        auto& v = vertices[i];
+        auto& v = desc.vertices[i];
         math::Vec3 pos(ai->mVertices[i].x, ai->mVertices[i].y, ai->mVertices[i].z);
         v.position = pos;
         if (ai->mNormals) {
@@ -409,20 +413,21 @@ std::shared_ptr<render::Mesh> BuildMesh(const aiMesh* ai,
         }
     }
 
-    indices.reserve(ai->mNumFaces * 3);
+    desc.indices32.reserve(ai->mNumFaces * 3);
     for (unsigned i = 0; i < ai->mNumFaces; ++i) {
         const aiFace& f = ai->mFaces[i];
         for (unsigned j = 0; j < f.mNumIndices; ++j) {
-            indices.push_back(f.mIndices[j]);
+            desc.indices32.push_back(f.mIndices[j]);
         }
     }
 
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    mesh->ClearSubmeshes();
-    mesh->AddSubmesh(0, static_cast<uint32_t>(indices.size()), materialIndex);
-    mesh->UploadToGPU();
-    return mesh;
+    render::Submesh sub;
+    sub.indexOffset = 0;
+    sub.indexCount = static_cast<uint32_t>(desc.indices32.size());
+    sub.materialIndex = materialIndex;
+    desc.submeshes.push_back(sub);
+
+    return render::Mesh::Create(device, desc);
 }
 
 // ---- Deterministic texture resolution (no CWD dependency) ----
@@ -655,7 +660,12 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
     auto clips = BuildClips(scene, *result.skeleton);
     result.clip = clips.empty() ? nullptr : clips.front();
     std::shared_ptr<render::Shader> skinnedShader = std::make_shared<render::Shader>();
-    skinnedShader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned");
+    render::rhi::IDevice* device = static_cast<render::rhi::IDevice*>(AssetManager::Get().GetRenderDevice());
+    if (!device) {
+        core::Log::Error("ModelLoader: render device is null; cannot load skinned shader 'passes/forward/skinned'.");
+    } else if (!skinnedShader->Load(device, "passes/forward/skinned", render::Mesh::GetVertexLayoutRHI())) {
+        core::Log::Error("ModelLoader: failed to load skinned shader 'passes/forward/skinned'.");
+    }
 
     // Default textures for materials without textures (gray albedo avoids "white FBX" syndrome)
     auto defaultAlbedo = std::make_shared<render::Texture2D>();
@@ -774,12 +784,11 @@ LoadedModel ModelLoader::LoadModel(const std::string& path) {
         if (!aiMesh) continue;
 
         const int matIndex = static_cast<int>(aiMesh->mMaterialIndex);
-        // For skinned meshes, bone weights come from aiBones (defaultBoneIndex not used).
-        // For static meshes, use the placement bone index from unified skeleton.
         const int defaultBoneIndex = (aiMesh->HasBones()) ? 0
                                                           : ((i < skeletonResult.meshToBoneIndex.size()) 
                                                              ? skeletonResult.meshToBoneIndex[i] : 0);
-        result.meshes.push_back(BuildMesh(aiMesh, result.skeleton.get(), matIndex, defaultBoneIndex));
+        auto mesh = BuildMesh(aiMesh, result.skeleton.get(), matIndex, defaultBoneIndex, device);
+        result.meshes.push_back(mesh);
     }
 
     return result;

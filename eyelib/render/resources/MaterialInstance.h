@@ -9,7 +9,7 @@
 namespace eyelib {
 namespace render {
 
-namespace rhi { struct ITexture; }
+namespace rhi { struct IDevice; struct ITexture; }
 class Material;
 class Shader;
 class Texture2D;
@@ -53,7 +53,8 @@ public:
     math::Vec4 GetVec4(const std::string& name, const math::Vec4& defaultValue = math::Vec4(0.0f)) const;
     void ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const;
 
-    void Bind() const;
+    /** Bind base material shader and textures. Device must be non-null. */
+    void Bind(rhi::IDevice* device) const;
 
 private:
     std::shared_ptr<Material> m_base;

@@ -72,6 +72,10 @@ AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
     return ToApi(m_impl->reg.LoadAsset(filePath, ToCoreType(type)));
 }
 
+AssetId AssetRegistry::LoadAssetDescriptorOnly(const std::string& filePath, AssetType type) {
+    return ToApi(m_impl->reg.LoadAssetDescriptorOnly(filePath, ToCoreType(type)));
+}
+
 void AssetRegistry::UnloadAsset(const AssetId& id) {
     m_impl->reg.UnloadAsset(ToCore(id));
 }
@@ -146,7 +150,7 @@ std::shared_ptr<Material> AssetRegistry::GetMaterial(const AssetId& id) const {
     if (!id.IsValid()) {
         return nullptr;
     }
-    auto material = m_impl->reg.Cache().Get<eyelib::render::Material>(ToCore(id));
+    auto material = eyelib::assets::AssetManager::Get().GetMaterial(ToCore(id));
     if (!material) {
         return nullptr;
     }
@@ -180,6 +184,22 @@ std::vector<AssetId> AssetRegistry::GetDependents(const AssetId& id) const {
     out.reserve(deps.size());
     for (const auto& d : deps) out.push_back(ToApi(d));
     return out;
+}
+
+void AssetRegistry::SetRenderDevice(RenderDevice device) {
+    eyelib::assets::AssetManager::Get().SetRenderDevice(device.Get());
+}
+
+RenderDevice AssetRegistry::GetRenderDevice() const {
+    return RenderDevice(eyelib::assets::AssetManager::Get().GetRenderDevice());
+}
+
+bool AssetRegistry::IsReadyForResolution() const {
+    return eyelib::assets::AssetManager::Get().IsReadyForResolution();
+}
+
+void AssetRegistry::OnDeviceLost() {
+    eyelib::assets::AssetManager::Get().OnDeviceLost();
 }
 
 bool AssetRegistry::SaveToFile(const std::string& filepath) const {

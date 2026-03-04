@@ -1,12 +1,15 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace eyelib {
 namespace geometry {
+class MeshTopology;
 
 /**
  * @brief MeshBevel: Edge and vertex beveling operations.
@@ -28,7 +31,7 @@ public:
      * @param segments Number of segments in bevel (1 = chamfer, >1 = rounded)
      * @param mask Optional mask to control bevel amount per vertex
      */
-    static void BevelEdges(render::Mesh& mesh, const Selection& selection,
+    static void BevelEdges(assets::EditableMesh& editable, const Selection& selection,
                           float amount, int segments = 1,
                           const Mask* mask = nullptr);
     
@@ -43,13 +46,13 @@ public:
      * @param segments Number of segments
      * @param mask Optional mask to control bevel amount
      */
-    static void BevelVertices(render::Mesh& mesh, const Selection& selection,
+    static void BevelVertices(assets::EditableMesh& editable, const Selection& selection,
                              float amount, int segments = 1,
                              const Mask* mask = nullptr);
 
 private:
     // Helper to bevel a single edge
-    static void BevelEdge(render::Mesh& mesh, uint32_t edgeIndex,
+    static void BevelEdge(assets::EditableMesh& editable, uint32_t edgeIndex,
                          const std::unordered_set<uint32_t>& selectedEdges,
                          float amount, int segments,
                          const Mask* mask,
@@ -59,7 +62,7 @@ private:
                          std::unordered_map<uint32_t, uint32_t>& vertexMap);
     
     // Helper to compute edge direction and offset
-    static math::Vec3 ComputeEdgeOffset(const render::Mesh& mesh, uint32_t v0, uint32_t v1,
+    static math::Vec3 ComputeEdgeOffset(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                        const MeshTopology& topology, float amount);
 };
 

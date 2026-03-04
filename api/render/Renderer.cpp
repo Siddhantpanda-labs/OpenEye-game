@@ -1,6 +1,7 @@
 #include "api/render/Renderer.h"
 
 #include "eyelib/render/Renderer.h"
+#include "eyelib/render/rhi/RHI.h"
 
 namespace eyelib {
 namespace api {
@@ -11,6 +12,10 @@ public:
 };
 
 Renderer::Renderer() : m_impl(new Impl()) {}
+
+void Renderer::SetDevice(RenderDevice device) {
+    m_impl->r.SetDevice(static_cast<eyelib::render::rhi::IDevice*>(device.Get()));
+}
 
 Renderer::~Renderer() {
     Shutdown();

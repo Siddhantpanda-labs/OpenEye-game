@@ -1,5 +1,5 @@
 #include "eyelib/render/IBL.h"
-#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/core/Log.h"
@@ -16,9 +16,9 @@ unsigned int NativeId(rhi::ITexture* texture) {
     return native ? static_cast<unsigned int>(reinterpret_cast<uintptr_t>(native)) : 0u;
 }
 
-std::shared_ptr<Mesh> CreateCubeMesh() {
-    auto mesh = std::make_shared<Mesh>();
-    std::vector<Vertex> vertices = {
+std::shared_ptr<Mesh> CreateCubeMesh(rhi::IDevice* device) {
+    MeshDescriptor desc;
+    desc.vertices = {
         {{-1.0f, -1.0f,  1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
         {{ 1.0f, -1.0f,  1.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
         {{ 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
@@ -44,7 +44,7 @@ std::shared_ptr<Mesh> CreateCubeMesh() {
         {{-1.0f,  1.0f,  1.0f}, {-1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},
         {{-1.0f,  1.0f, -1.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}
     };
-    std::vector<uint32_t> indices = {
+    desc.indices32 = {
         0, 1, 2, 2, 3, 0,
         4, 5, 6, 6, 7, 4,
         8, 9, 10, 10, 11, 8,
@@ -52,10 +52,11 @@ std::shared_ptr<Mesh> CreateCubeMesh() {
         16, 17, 18, 18, 19, 16,
         20, 21, 22, 22, 23, 20
     };
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    mesh->UploadToGPU();
-    return mesh;
+    desc.indices16.clear();
+    desc.indexFormat = IndexFormat::UInt32;
+    desc.submeshes.clear();
+    if (!device) return nullptr;
+    return Mesh::Create(device, desc);
 }
 
 std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
@@ -194,7 +195,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         core::Log::ErrorF("IBL::Initialize: Invalid environment cubemap");
         return false;
     }
-    m_deviceRHI = m_injectedDevice ? m_injectedDevice : rhi::GetDefaultDevice();
+    m_deviceRHI = m_injectedDevice;
     if (!m_deviceRHI) return false;
 
     if (m_irradianceRHI) { m_deviceRHI->DestroyTexture(m_irradianceRHI); m_irradianceRHI = nullptr; }
@@ -203,7 +204,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
 
     m_environmentRHI = environmentCubemap;
 
-    auto cubeMesh = CreateCubeMesh();
+    auto cubeMesh = CreateCubeMesh(m_deviceRHI);
     if (!cubeMesh || !cubeMesh->IsValid()) {
         core::Log::ErrorF("IBL: Failed to create cube mesh");
         return false;
@@ -276,12 +277,12 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         cmd->SetDepthWrite(false);
         cmd->SetCullFace(false);
 
-        irradianceShader->Bind();
+        irradianceShader->Bind(m_deviceRHI);
         irradianceShader->SetInt("u_EnvironmentMap", 0);
         irradianceShader->SetMat4("u_View", captureViews[face]);
         irradianceShader->SetMat4("u_Projection", captureProjection);
         cmd->BindTexture(m_environmentRHI, 0);
-        cubeMesh->Draw();
+        cubeMesh->Draw(m_deviceRHI);
         irradianceShader->Unbind();
         m_deviceRHI->DestroyRenderTarget(rt);
     }
@@ -302,13 +303,13 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
 
-            prefilterShader->Bind();
+            prefilterShader->Bind(m_deviceRHI);
             prefilterShader->SetInt("u_EnvironmentMap", 0);
             prefilterShader->SetFloat("u_Roughness", roughness);
             prefilterShader->SetMat4("u_View", captureViews[face]);
             prefilterShader->SetMat4("u_Projection", captureProjection);
             cmd->BindTexture(m_environmentRHI, 0);
-            cubeMesh->Draw();
+            cubeMesh->Draw(m_deviceRHI);
             prefilterShader->Unbind();
             m_deviceRHI->DestroyRenderTarget(rt);
         }

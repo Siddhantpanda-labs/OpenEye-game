@@ -2,7 +2,6 @@
 
 set(RENDER_SOURCES
     # RHI (graphics backend abstraction)
-    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIContext.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/GLEnums.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BindlessHeapGL.cpp
@@ -54,6 +53,7 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraphRecipe.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderSourceLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderReflection.cpp
@@ -76,6 +76,8 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Texture2D.cpp

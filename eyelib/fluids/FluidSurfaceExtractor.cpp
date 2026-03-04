@@ -1,4 +1,6 @@
 #include "eyelib/fluids/FluidSurfaceExtractor.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/resources/Mesh.h"
 
 #include <array>
 #include <vector>
@@ -235,21 +237,22 @@ static math::Vec3 GradientAt(const std::vector<float>& field, const math::IVec3&
 }
 } // namespace
 
-std::shared_ptr<render::Mesh> FluidSurfaceExtractor::BuildMesh(const FluidSimulation& sim, float isoValue) const {
+std::shared_ptr<render::Mesh> FluidSurfaceExtractor::BuildMesh(render::rhi::IDevice* device, const FluidSimulation& sim, float isoValue) const {
     const auto& field = sim.GetDensityField();
     if (field.empty()) return std::make_shared<render::Mesh>();
 
-    const auto desc = sim.GetDesc();
-    const math::IVec3 res = desc.resolution;
-    const math::Vec3 cellSize = desc.volumeSize / math::Vec3(
+    const auto simDesc = sim.GetDesc();
+    const math::IVec3 res = simDesc.resolution;
+    const math::Vec3 cellSize = simDesc.volumeSize / math::Vec3(
         static_cast<float>(res.x - 1),
         static_cast<float>(res.y - 1),
         static_cast<float>(res.z - 1));
-    const math::Vec3 halfVolume = desc.volumeSize * 0.5f;
+    const math::Vec3 halfVolume = simDesc.volumeSize * 0.5f;
 
-    std::vector<render::Vertex> vertices;
-    std::vector<uint32_t> indices;
-    vertices.reserve(res.x * res.y * res.z);
+    render::MeshDescriptor meshDesc;
+    meshDesc.vertices.reserve(res.x * res.y * res.z);
+    meshDesc.indexFormat = render::IndexFormat::UInt32;
+    meshDesc.indices16.clear();
 
     auto sample = [&](int x, int y, int z) {
         x = std::max(0, std::min(res.x - 1, x));
@@ -312,26 +315,24 @@ std::shared_ptr<render::Mesh> FluidSurfaceExtractor::BuildMesh(const FluidSimula
                         const int e = kTriTable[cubeIndex][i + k];
                         const math::Vec3 pos = vertList[e];
                         const math::Vec3 pos01 = math::Vec3(
-                            pos.x / std::max(0.0001f, desc.volumeSize.x) + 0.5f,
-                            pos.y / std::max(0.0001f, desc.volumeSize.y) + 0.5f,
-                            pos.z / std::max(0.0001f, desc.volumeSize.z) + 0.5f);
+                            pos.x / std::max(0.0001f, simDesc.volumeSize.x) + 0.5f,
+                            pos.y / std::max(0.0001f, simDesc.volumeSize.y) + 0.5f,
+                            pos.z / std::max(0.0001f, simDesc.volumeSize.z) + 0.5f);
                         render::Vertex v{};
                         v.position = pos;
                         v.normal = GradientAt(field, res, pos01);
                         v.uv = math::Vec2(0, 0);
-                        vertices.push_back(v);
-                        indices.push_back(static_cast<uint32_t>(indices.size()));
+                        meshDesc.vertices.push_back(v);
+                        meshDesc.indices32.push_back(static_cast<uint32_t>(meshDesc.indices32.size()));
                     }
                 }
             }
         }
     }
 
-    auto mesh = std::make_shared<render::Mesh>();
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    mesh->UploadToGPU();
-    return mesh;
+    meshDesc.submeshes.clear();
+    if (!device || meshDesc.vertices.empty()) return std::make_shared<render::Mesh>();
+    return render::Mesh::Create(device, meshDesc);
 }
 
 } // namespace fluids

@@ -7,9 +7,9 @@
 #include "eyelib/render/2d/TextRenderer.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/debug/Validation.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <algorithm>
 
@@ -17,34 +17,10 @@ namespace eyelib {
 namespace render {
 
 namespace {
-rhi::IDevice*& GetDebugDrawInjectedDevice() {
-    static rhi::IDevice* s_injected = nullptr;
-    return s_injected;
-}
-} // namespace
-
-void DebugDrawRenderer::SetDevice(rhi::IDevice* device) {
-    GetDebugDrawInjectedDevice() = device;
-}
-
-namespace {
 struct LineVertex {
     math::Vec3 position;
     math::Vec4 color;
 };
-
-static std::shared_ptr<Shader> s_shader;
-static TextRenderer s_textRenderer;
-static Font s_font;
-static bool s_fontReady = false;
-static bool s_fontAttempted = false;
-static float s_textSize = 16.0f;
-static std::string s_fontPath;
-static bool s_initialized = false;
-static bool s_shaderLoadLogged = false;
-static rhi::IDevice* s_deviceRHI = nullptr;
-static rhi::IBuffer* s_vertexBufferRHI = nullptr;
-static size_t s_vertexCapacity = 0;
 
 static rhi::VertexLayout GetLineLayout() {
     rhi::VertexLayout layout;
@@ -56,18 +32,37 @@ static rhi::VertexLayout GetLineLayout() {
     return layout;
 }
 
-static void EnsureResources() {
-    if (s_initialized) return;
-    s_initialized = true;
-    s_deviceRHI = GetDebugDrawInjectedDevice() ? GetDebugDrawInjectedDevice() : rhi::GetDefaultDevice();
+struct PerDeviceResources {
+    std::shared_ptr<Shader> shader;
+    rhi::IBuffer* vertexBufferRHI = nullptr;
+    size_t vertexCapacity = 0;
+    bool valid = false;
+};
+static std::unordered_map<rhi::IDevice*, PerDeviceResources> s_perDevice;
+static bool s_shaderLoadLogged = false;
 
-    s_shader = std::make_shared<Shader>();
-    if (!s_deviceRHI || !s_shader->Load(s_deviceRHI, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
+static TextRenderer s_textRenderer;
+static Font s_font;
+static bool s_fontReady = false;
+static bool s_fontAttempted = false;
+static float s_textSize = 16.0f;
+static std::string s_fontPath;
+
+static PerDeviceResources& EnsureResources(rhi::IDevice* device) {
+    auto it = s_perDevice.find(device);
+    if (it != s_perDevice.end() && it->second.valid) return it->second;
+    PerDeviceResources res;
+    res.shader = std::make_shared<Shader>();
+    if (device && res.shader->Load(device, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
+        res.valid = true;
+    } else {
         if (!s_shaderLoadLogged) {
             core::Log::Warn("DebugDraw: failed to load debug line shader (assets/shaders/debug/lines.*). Run from project root or set working directory. Skeleton/debug lines will not be visible.");
             s_shaderLoadLogged = true;
         }
     }
+    auto inserted = s_perDevice.insert({device, std::move(res)});
+    return inserted.first->second;
 }
 
 static void TryLoadFont() {
@@ -100,32 +95,37 @@ static void TryLoadFont() {
     s_fontReady = true;
 }
 
-static void ShutdownStaticResources() {
-    if (s_deviceRHI && s_vertexBufferRHI) {
-        s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
-        s_vertexBufferRHI = nullptr;
-    }
-    s_vertexCapacity = 0;
-    s_shader.reset();
-    s_deviceRHI = nullptr;
-    s_initialized = false;
-}
 } // namespace
 
 void DebugDrawRenderer::Shutdown() {
-    ShutdownStaticResources();
+    for (auto& kv : s_perDevice) {
+        rhi::IDevice* dev = kv.first;
+        PerDeviceResources& res = kv.second;
+        if (dev && res.vertexBufferRHI) {
+            dev->DestroyBuffer(res.vertexBufferRHI);
+            res.vertexBufferRHI = nullptr;
+        }
+        res.vertexCapacity = 0;
+        res.shader.reset();
+        res.valid = false;
+    }
+    s_perDevice.clear();
 }
 
-void DebugDrawRenderer::Render(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
+void DebugDrawRenderer::Render(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
+    Render(ctx.device, camera, target, width, height);
+}
+
+void DebugDrawRenderer::Render(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
     const auto lines = debug::DebugDraw::GetLines();
     const auto texts = debug::DebugDraw::GetTexts();
     if (lines.empty() && texts.empty()) return;
-    if (width == 0 || height == 0) return;
+    if (width == 0 || height == 0 || !device) return;
 
-    EnsureResources();
-    if (!s_shader || !s_shader->IsValid()) return;
-    if (!s_deviceRHI) return;
-    rhi::ICommandList* cmd = s_deviceRHI->GetImmediateCommandList();
+    s_textRenderer.SetDevice(device);
+    PerDeviceResources& res = EnsureResources(device);
+    if (!res.shader || !res.shader->IsValid()) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd) return;
 
     cmd->SetRenderTarget(target);
@@ -138,28 +138,28 @@ void DebugDrawRenderer::Render(const CameraView& camera, rhi::IRenderTarget* tar
             vertices.push_back({ l.a, l.color });
             vertices.push_back({ l.b, l.color });
         }
-        if (!s_vertexBufferRHI || vertices.size() * sizeof(LineVertex) > s_vertexCapacity) {
-            if (s_vertexBufferRHI) s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
+        if (!res.vertexBufferRHI || vertices.size() * sizeof(LineVertex) > res.vertexCapacity) {
+            if (res.vertexBufferRHI) device->DestroyBuffer(res.vertexBufferRHI);
             rhi::BufferDesc desc;
             desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
             desc.usage = rhi::BufferUsage::Vertex;
             desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-            s_vertexBufferRHI = s_deviceRHI->CreateBuffer(desc);
-            s_vertexCapacity = desc.sizeInBytes;
+            res.vertexBufferRHI = device->CreateBuffer(desc);
+            res.vertexCapacity = desc.sizeInBytes;
         }
-        if (!s_vertexBufferRHI) return;
-        s_vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
+        if (!res.vertexBufferRHI) return;
+        res.vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
 
         cmd->SetDepthTest(false);
         cmd->SetDepthWrite(false);
         cmd->SetBlend(true);
         cmd->SetCullFace(false);
-        s_shader->Bind();
-        s_shader->SetMat4("u_View", camera.view);
-        s_shader->SetMat4("u_Projection", camera.projection);
-        cmd->BindVertexBuffer(s_vertexBufferRHI, 0);
+        res.shader->Bind(device);
+        res.shader->SetMat4("u_View", camera.view);
+        res.shader->SetMat4("u_Projection", camera.projection);
+        cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
         cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
-        s_shader->Unbind();
+        res.shader->Unbind();
     }
 
     if (!texts.empty()) {
@@ -185,12 +185,17 @@ void DebugDrawRenderer::Render(const CameraView& camera, rhi::IRenderTarget* tar
     }
 }
 
-void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
     const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
-    if (lines.empty() || width == 0 || height == 0) return;
-    EnsureResources();
-    if (!s_shader || !s_shader->IsValid() || !s_deviceRHI) return;
-    rhi::ICommandList* cmd = s_deviceRHI->GetImmediateCommandList();
+    RenderLinesWithDepth(ctx.device, camera, target, width, height, lines, color);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
+    if (lines.empty() || width == 0 || height == 0 || !device) return;
+    PerDeviceResources& res = EnsureResources(device);
+    if (!res.shader || !res.shader->IsValid()) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd || !target) return;
 
     std::vector<LineVertex> vertices;
@@ -199,17 +204,17 @@ void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRen
         vertices.push_back({ l.first, color });
         vertices.push_back({ l.second, color });
     }
-    if (!s_vertexBufferRHI || vertices.size() * sizeof(LineVertex) > s_vertexCapacity) {
-        if (s_vertexBufferRHI) s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
+    if (!res.vertexBufferRHI || vertices.size() * sizeof(LineVertex) > res.vertexCapacity) {
+        if (res.vertexBufferRHI) device->DestroyBuffer(res.vertexBufferRHI);
         rhi::BufferDesc desc;
         desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
         desc.usage = rhi::BufferUsage::Vertex;
         desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        s_vertexBufferRHI = s_deviceRHI->CreateBuffer(desc);
-        s_vertexCapacity = desc.sizeInBytes;
+        res.vertexBufferRHI = device->CreateBuffer(desc);
+        res.vertexCapacity = desc.sizeInBytes;
     }
-    if (!s_vertexBufferRHI) return;
-    s_vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
+    if (!res.vertexBufferRHI) return;
+    res.vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
 
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, width, height);
@@ -218,21 +223,26 @@ void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRen
     cmd->SetBlend(false);
     cmd->SetCullFace(false);
     cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
-    s_shader->Bind();
-    s_shader->SetMat4("u_View", camera.view);
-    s_shader->SetMat4("u_Projection", camera.projection);
-    cmd->BindVertexBuffer(s_vertexBufferRHI, 0);
+    res.shader->Bind(device);
+    res.shader->SetMat4("u_View", camera.view);
+    res.shader->SetMat4("u_Projection", camera.projection);
+    cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
     cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
     cmd->SetPolygonOffsetLine(false, 0.f, 0.f);
-    s_shader->Unbind();
+    res.shader->Unbind();
 }
 
-void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
     const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
-    if (linesWithColors.empty() || width == 0 || height == 0) return;
-    EnsureResources();
-    if (!s_shader || !s_shader->IsValid() || !s_deviceRHI) return;
-    rhi::ICommandList* cmd = s_deviceRHI->GetImmediateCommandList();
+    RenderLinesWithDepth(ctx.device, camera, target, width, height, linesWithColors);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
+    if (linesWithColors.empty() || width == 0 || height == 0 || !device) return;
+    PerDeviceResources& res = EnsureResources(device);
+    if (!res.shader || !res.shader->IsValid()) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd || !target) return;
 
     std::vector<LineVertex> vertices;
@@ -242,17 +252,17 @@ void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRen
         vertices.push_back({ lc.first.first, color });
         vertices.push_back({ lc.first.second, color });
     }
-    if (!s_vertexBufferRHI || vertices.size() * sizeof(LineVertex) > s_vertexCapacity) {
-        if (s_vertexBufferRHI) s_deviceRHI->DestroyBuffer(s_vertexBufferRHI);
+    if (!res.vertexBufferRHI || vertices.size() * sizeof(LineVertex) > res.vertexCapacity) {
+        if (res.vertexBufferRHI) device->DestroyBuffer(res.vertexBufferRHI);
         rhi::BufferDesc desc;
         desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
         desc.usage = rhi::BufferUsage::Vertex;
         desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        s_vertexBufferRHI = s_deviceRHI->CreateBuffer(desc);
-        s_vertexCapacity = desc.sizeInBytes;
+        res.vertexBufferRHI = device->CreateBuffer(desc);
+        res.vertexCapacity = desc.sizeInBytes;
     }
-    if (!s_vertexBufferRHI) return;
-    s_vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
+    if (!res.vertexBufferRHI) return;
+    res.vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
 
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, width, height);
@@ -261,13 +271,13 @@ void DebugDrawRenderer::RenderLinesWithDepth(const CameraView& camera, rhi::IRen
     cmd->SetBlend(false);
     cmd->SetCullFace(false);
     cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
-    s_shader->Bind();
-    s_shader->SetMat4("u_View", camera.view);
-    s_shader->SetMat4("u_Projection", camera.projection);
-    cmd->BindVertexBuffer(s_vertexBufferRHI, 0);
+    res.shader->Bind(device);
+    res.shader->SetMat4("u_View", camera.view);
+    res.shader->SetMat4("u_Projection", camera.projection);
+    cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
     cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
     cmd->SetPolygonOffsetLine(false, 0.f, 0.f);
-    s_shader->Unbind();
+    res.shader->Unbind();
 }
 
 void DebugDrawRenderer::SetTextFontPath(const std::string& path, float pixelHeight) {

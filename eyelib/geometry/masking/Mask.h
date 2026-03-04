@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 namespace eyelib {
+namespace assets { class EditableMesh; }
 namespace render { class Mesh; }
 namespace geometry {
 
@@ -30,14 +31,14 @@ enum class BlendMode {
 class Mask {
 public:
     /**
-     * @brief Create empty mask for a mesh.
+     * @brief Create empty mask for a mesh (vertex count from editable).
      */
-    static Mask Create(const render::Mesh& mesh);
+    static Mask Create(const assets::EditableMesh& editable);
     
     /**
      * @brief Create mask with all weights set to a value.
      */
-    static Mask CreateFilled(const render::Mesh& mesh, float value);
+    static Mask CreateFilled(const assets::EditableMesh& editable, float value);
     
     Mask();
     ~Mask() = default;
@@ -78,11 +79,12 @@ public:
     
     /**
      * @brief Paint weight in a region with falloff.
+     * @param editable Mesh vertices (for positions)
      * @param selection Region to paint
      * @param value Target weight value
      * @param falloff Falloff radius (0 = hard edge, >0 = smooth falloff)
      */
-    void Paint(const render::Mesh& mesh, const Selection& selection, float value, float falloff = 0.0f);
+    void Paint(const assets::EditableMesh& editable, const Selection& selection, float value, float falloff = 0.0f);
     
     /**
      * @brief Blend this mask with another mask.

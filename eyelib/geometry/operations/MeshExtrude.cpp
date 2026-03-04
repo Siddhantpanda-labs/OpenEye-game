@@ -1,5 +1,7 @@
 #include "eyelib/geometry/operations/MeshExtrude.h"
 #include "eyelib/geometry/core/MeshTopology.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <unordered_map>
@@ -8,24 +10,15 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshExtrude::Extrude(render::Mesh& mesh, const Selection& selection,
+void MeshExtrude::Extrude(assets::EditableMesh& editable, const Selection& selection,
                          float amount, const Mask* mask) {
     if (amount == 0.0f) return;
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Get indices (handle both formats)
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
@@ -82,7 +75,7 @@ void MeshExtrude::Extrude(render::Mesh& mesh, const Selection& selection,
         uint32_t v2 = indices[baseIdx + 2];
         
         // Compute face normal
-        math::Vec3 faceNormal = ComputeFaceNormal(mesh, v0, v1, v2);
+        math::Vec3 faceNormal = ComputeFaceNormal(editable, v0, v1, v2);
         if (glm::length(faceNormal) < 0.001f) {
             // Degenerate face, skip
             newIndices.push_back(v0);
@@ -97,22 +90,20 @@ void MeshExtrude::Extrude(render::Mesh& mesh, const Selection& selection,
         newIndices.push_back(v2);
         
         // Extrude this face (creates new top face and side faces)
-        ExtrudeFace(mesh, fid, facesToExtrude, amount, faceNormal, mask,
+        ExtrudeFace(editable, fid, facesToExtrude, amount, faceNormal, mask,
                    newVertices, newIndices, vertexMap);
     }
     
     // Update mesh
-    mesh.SetVertices(newVertices);
-    mesh.SetIndices(newIndices);
-    
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.GenerateTangents();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    editable.SetVertices(std::move(newVertices));
+    editable.SetIndices(std::move(newIndices));
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshExtrude::ExtrudeAlongDirection(render::Mesh& mesh, const Selection& selection,
+void MeshExtrude::ExtrudeAlongDirection(assets::EditableMesh& editable, const Selection& selection,
                                        const math::Vec3& direction, float amount,
                                        const Mask* mask) {
     if (amount == 0.0f) return;
@@ -122,20 +113,11 @@ void MeshExtrude::ExtrudeAlongDirection(render::Mesh& mesh, const Selection& sel
         normalizedDir = math::Vec3(0, 1, 0); // Fallback
     }
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Get indices (handle both formats)
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
@@ -180,23 +162,21 @@ void MeshExtrude::ExtrudeAlongDirection(render::Mesh& mesh, const Selection& sel
             continue;
         }
         
-        ExtrudeFace(mesh, fid, facesToExtrude, amount, normalizedDir, mask,
+        ExtrudeFace(editable, fid, facesToExtrude, amount, normalizedDir, mask,
                    newVertices, newIndices, vertexMap);
     }
     
     // Update mesh
-    mesh.SetVertices(newVertices);
-    mesh.SetIndices(newIndices);
-    
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.GenerateTangents();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    editable.SetVertices(std::move(newVertices));
+    editable.SetIndices(std::move(newIndices));
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshExtrude::ComputeFaceNormal(const render::Mesh& mesh, uint32_t v0, uint32_t v1, uint32_t v2) {
-    const auto& vertices = mesh.GetVertices();
+math::Vec3 MeshExtrude::ComputeFaceNormal(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1, uint32_t v2) {
+    const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size() || v2 >= vertices.size()) {
         return math::Vec3(0, 1, 0);
     }
@@ -217,26 +197,15 @@ math::Vec3 MeshExtrude::ComputeFaceNormal(const render::Mesh& mesh, uint32_t v0,
     return math::Vec3(0, 1, 0);
 }
 
-void MeshExtrude::ExtrudeFace(render::Mesh& mesh, uint32_t faceIndex,
+void MeshExtrude::ExtrudeFace(const assets::EditableMesh& editable, uint32_t faceIndex,
                               const std::unordered_set<uint32_t>& selectedFaces,
                               float amount, const math::Vec3& direction,
                               const Mask* mask,
                               std::vector<render::Vertex>& newVertices,
                               std::vector<uint32_t>& newIndices,
                               std::unordered_map<uint32_t, uint32_t>& vertexMap) {
-    const auto& vertices = mesh.GetVertices();
-    
-    // Get indices (handle both formats)
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& vertices = editable.GetVertices();
+    const auto& indices = editable.GetIndices();
     
     uint32_t baseIdx = faceIndex * 3;
     if (baseIdx + 2 >= indices.size()) return;

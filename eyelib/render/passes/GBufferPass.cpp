@@ -5,7 +5,6 @@
 #include "eyelib/render/resources/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <cstdint>
@@ -19,10 +18,9 @@ constexpr size_t kMaxBones = 128;
 
 GBufferPass::GBufferPass() = default;
 
-void GBufferPass::EnsureDefaultShader() {
+void GBufferPass::EnsureDefaultShader(rhi::IDevice* device) {
     if (m_geometryShader && m_geometryShader->IsValid()) return;
-    if (!m_device) return;
-    rhi::IDevice* device = m_device;
+    if (!device) return;
     m_geometryShader = std::make_shared<Shader>();
     m_geometryShader->Load(device, "passes/deferred/gbuffer_skinned", Mesh::GetVertexLayoutRHI());
 }
@@ -36,13 +34,13 @@ void GBufferPass::ReloadShaders() {
 }
 
 void GBufferPass::Render(GBuffer& gbuffer,
-                         rhi::ICommandList* cmd,
+                         const RenderContext& ctx,
                          const std::vector<Drawable>& drawables,
                          const math::Mat4& view,
                          const math::Mat4& projection,
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection) {
-    RenderDrawables(gbuffer, cmd,
+    RenderDrawables(gbuffer, ctx.cmd, ctx.device,
                     [&drawables](std::function<void(const Drawable&)> c) {
                         for (const auto& d : drawables) c(d);
                     },
@@ -50,23 +48,50 @@ void GBufferPass::Render(GBuffer& gbuffer,
 }
 
 void GBufferPass::Render(GBuffer& gbuffer,
+                         rhi::IDevice* device,
+                         rhi::ICommandList* cmd,
+                         const std::vector<Drawable>& drawables,
+                         const math::Mat4& view,
+                         const math::Mat4& projection,
+                         const math::Mat4& prevView,
+                         const math::Mat4& prevProjection) {
+    RenderDrawables(gbuffer, cmd, device,
+                    [&drawables](std::function<void(const Drawable&)> c) {
+                        for (const auto& d : drawables) c(d);
+                    },
+                    view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::Render(GBuffer& gbuffer,
+                         const RenderContext& ctx,
+                         DrawableFeed feedDrawables,
+                         const math::Mat4& view,
+                         const math::Mat4& projection,
+                         const math::Mat4& prevView,
+                         const math::Mat4& prevProjection) {
+    RenderDrawables(gbuffer, ctx.cmd, ctx.device, std::move(feedDrawables), view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::Render(GBuffer& gbuffer,
+                         rhi::IDevice* device,
                          rhi::ICommandList* cmd,
                          DrawableFeed feedDrawables,
                          const math::Mat4& view,
                          const math::Mat4& projection,
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection) {
-    RenderDrawables(gbuffer, cmd, std::move(feedDrawables), view, projection, prevView, prevProjection);
+    RenderDrawables(gbuffer, cmd, device, std::move(feedDrawables), view, projection, prevView, prevProjection);
 }
 
 void GBufferPass::RenderDrawables(GBuffer& gbuffer,
                                   rhi::ICommandList* cmd,
+                                  rhi::IDevice* device,
                                   DrawableFeed feedDrawables,
                                   const math::Mat4& view,
                                   const math::Mat4& projection,
                                   const math::Mat4& prevView,
                                   const math::Mat4& prevProjection) {
-    EnsureDefaultShader();
+    EnsureDefaultShader(device);
     if (!m_geometryShader || !m_geometryShader->IsValid()) return;
     rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
     if (pipe && !pipe->HasValidProgram()) return;
@@ -74,7 +99,7 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
     m_currentGBuffer = &gbuffer;
     gbuffer.BindForGeometryPass(cmd);
 
-    m_geometryShader->Bind();
+    m_geometryShader->Bind(device);
     m_geometryShader->SetMat4("u_View", view);
     m_geometryShader->SetMat4("u_Projection", projection);
     m_geometryShader->SetMat4("u_PrevView", prevView);
@@ -84,13 +109,15 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         cmd->SetDepthTest(true);
         cmd->SetDepthWrite(true);
         cmd->SetCullFace(false);
+        // Clear texture units so materials with no albedo don't sample stale bindings (e.g. previous frame's HDR).
+        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
     }
 
-    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && m_device && m_device->GetCapabilities().supportsBindless);
+    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && device->GetCapabilities().supportsBindless);
     if (useBindless && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
-    feedDrawables([this, &gbuffer, cmd, view, projection, prevView, prevProjection, useBindless](const Drawable& d) {
+    feedDrawables([this, &gbuffer, cmd, device, view, projection, prevView, prevProjection, useBindless](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
@@ -182,8 +209,8 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         m_geometryShader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
         m_geometryShader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
 
-        d.mesh->Bind();
-        d.mesh->Draw();
+        d.mesh->Bind(device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device); }
         d.mesh->Unbind();
     });
 
@@ -197,6 +224,20 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
 }
 
 void GBufferPass::RenderIndirect(GBuffer& gbuffer,
+                                  const RenderContext& ctx,
+                                  rhi::IBuffer* indirectBuffer,
+                                  uint32_t drawCount,
+                                  uint32_t stride,
+                                  const Mesh* mesh,
+                                  const math::Mat4& view,
+                                  const math::Mat4& projection,
+                                  const math::Mat4* prevView,
+                                  const math::Mat4* prevProjection) {
+    RenderIndirect(gbuffer, ctx.device, ctx.cmd, indirectBuffer, drawCount, stride, mesh, view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::RenderIndirect(GBuffer& gbuffer,
+                                  rhi::IDevice* device,
                                   rhi::ICommandList* cmd,
                                   rhi::IBuffer* indirectBuffer,
                                   uint32_t drawCount,
@@ -206,19 +247,19 @@ void GBufferPass::RenderIndirect(GBuffer& gbuffer,
                                   const math::Mat4& projection,
                                   const math::Mat4* prevView,
                                   const math::Mat4* prevProjection) {
-    if (!m_device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid())
+    if (!device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid())
         return;
-    if (!m_device->GetCapabilities().supportsMultiDrawIndirect)
+    if (!device->GetCapabilities().supportsMultiDrawIndirect)
         return;
 
-    EnsureDefaultShader();
+    EnsureDefaultShader(device);
     if (!m_geometryShader || !m_geometryShader->IsValid()) return;
     rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
     if (pipe && !pipe->HasValidProgram()) return;
 
     m_currentGBuffer = &gbuffer;
     gbuffer.BindForGeometryPass(cmd);
-    m_geometryShader->Bind();
+    m_geometryShader->Bind(device);
     m_geometryShader->SetMat4("u_View", view);
     m_geometryShader->SetMat4("u_Projection", projection);
     if (prevView && prevProjection) {
@@ -244,6 +285,22 @@ void GBufferPass::RenderIndirect(GBuffer& gbuffer,
 }
 
 void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
+                                                 const RenderContext& ctx,
+                                                 rhi::IBuffer* indirectBuffer,
+                                                 uint32_t drawCount,
+                                                 uint32_t stride,
+                                                 const Mesh* mesh,
+                                                 rhi::IBuffer* perDrawTransformBuffer,
+                                                 uint32_t transformCount,
+                                                 const math::Mat4& view,
+                                                 const math::Mat4& projection,
+                                                 const math::Mat4* prevView,
+                                                 const math::Mat4* prevProjection) {
+    RenderIndirectWithPerDrawData(gbuffer, ctx.device, ctx.cmd, indirectBuffer, drawCount, stride, mesh, perDrawTransformBuffer, transformCount, view, projection, prevView, prevProjection);
+}
+
+void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
+                                                 rhi::IDevice* device,
                                                  rhi::ICommandList* cmd,
                                                  rhi::IBuffer* indirectBuffer,
                                                  uint32_t drawCount,
@@ -255,20 +312,20 @@ void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
                                                  const math::Mat4& projection,
                                                  const math::Mat4* prevView,
                                                  const math::Mat4* prevProjection) {
-    if (!m_device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid()
+    if (!device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid()
         || !perDrawTransformBuffer || transformCount == 0)
         return;
-    if (!m_device->GetCapabilities().supportsMultiDrawIndirect)
+    if (!device->GetCapabilities().supportsMultiDrawIndirect)
         return;
 
-    EnsureDefaultShader();
+    EnsureDefaultShader(device);
     if (!m_geometryShader || !m_geometryShader->IsValid()) return;
     rhi::IPipeline* pipe = m_geometryShader->GetPipelineRHI();
     if (pipe && !pipe->HasValidProgram()) return;
 
     m_currentGBuffer = &gbuffer;
     gbuffer.BindForGeometryPass(cmd);
-    m_geometryShader->Bind();
+    m_geometryShader->Bind(device);
     m_geometryShader->SetMat4("u_View", view);
     m_geometryShader->SetMat4("u_Projection", projection);
     if (prevView && prevProjection) {

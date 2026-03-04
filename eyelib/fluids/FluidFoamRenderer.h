@@ -4,6 +4,7 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/rhi/RHI.h"
 
 #include <cstdint>
 #include <memory>
@@ -42,7 +43,8 @@ public:
     const FluidFoamSettings& GetSettings() const { return m_settings; }
 
     void UpdateFromSimulation(const FluidSimulation& sim, float dt);
-    std::shared_ptr<render::Mesh> BuildMesh(const render::CameraView& camera);
+    /** Device required for lazy material creation. */
+    std::shared_ptr<render::Mesh> BuildMesh(render::rhi::IDevice* device, const render::CameraView& camera);
 
     void SetMaterial(const std::shared_ptr<render::Material>& material);
     std::shared_ptr<render::Material> GetMaterial() const { return m_material; }
@@ -57,7 +59,7 @@ private:
         float maxLife = 0.0f;
     };
 
-    void EnsureMaterial();
+    void EnsureMaterial(render::rhi::IDevice* device);
     void SpawnParticle(const math::Vec3& pos01, const math::Vec3& vel, bool splash);
 
     FluidFoamSettings m_settings{};

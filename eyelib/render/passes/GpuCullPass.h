@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include <cstddef>
@@ -39,10 +40,10 @@ public:
     GpuCullPass(const GpuCullPass&) = delete;
     GpuCullPass& operator=(const GpuCullPass&) = delete;
 
-    void SetDevice(rhi::IDevice* device) { m_device = device; }
-
-    /** Create indirect buffer and compute pipeline if caps support it. Call after SetDevice. */
-    bool Initialize();
+    /** Check if device supports compute and multi-draw indirect. */
+    bool IsSupported(rhi::IDevice* device) const;
+    /** Create indirect buffer and compute pipeline. Device must be non-null. */
+    bool Initialize(rhi::IDevice* device);
     void Shutdown();
 
     /** Set draw list for frustum culling (A1). Data is uploaded into the pass's combined buffer. Call before Execute. */
@@ -52,6 +53,8 @@ public:
     /** Optional: depth texture from previous frame for occlusion culling. Same view-proj as current. Pass nullptr to disable. */
     void SetOcclusionDepth(rhi::ITexture* depthTexture, uint32_t width, uint32_t height);
 
+    /** Run compute to fill indirect buffer (context-based). */
+    void Execute(const RenderContext& ctx) { Execute(ctx.cmd); }
     /** Run compute to fill indirect buffer; inserts barrier for IndirectDraw. No-op if not supported. */
     void Execute(rhi::ICommandList* cmd);
 
@@ -60,8 +63,6 @@ public:
     uint32_t GetDrawCount() const { return m_effectiveDrawCount; }
     /** Stride between DrawIndexedIndirectCommand entries (sizeof(DrawIndexedIndirectCommand)). */
     uint32_t GetIndirectStride() const { return static_cast<uint32_t>(sizeof(rhi::DrawIndexedIndirectCommand)); }
-
-    bool IsSupported() const;
 
 private:
     void EnsureResources();

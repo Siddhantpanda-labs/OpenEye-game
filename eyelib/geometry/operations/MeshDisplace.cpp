@@ -1,13 +1,16 @@
 #include "eyelib/geometry/operations/MeshDisplace.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 namespace eyelib {
 namespace geometry {
 
-void MeshDisplace::DisplaceAlongNormal(render::Mesh& mesh, const Selection& selection,
+void MeshDisplace::DisplaceAlongNormal(assets::EditableMesh& editable, const Selection& selection,
                                        float amount, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to displace
@@ -39,16 +42,15 @@ void MeshDisplace::DisplaceAlongNormal(render::Mesh& mesh, const Selection& sele
         vert.position += normal * finalAmount;
     }
     
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDisplace::DisplaceAlongDirection(render::Mesh& mesh, const Selection& selection,
+void MeshDisplace::DisplaceAlongDirection(assets::EditableMesh& editable, const Selection& selection,
                                           const math::Vec3& direction, float amount,
                                           const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     math::Vec3 normalizedDir = glm::normalize(direction);
@@ -79,16 +81,15 @@ void MeshDisplace::DisplaceAlongDirection(render::Mesh& mesh, const Selection& s
         vertices[vid].position += normalizedDir * finalAmount;
     }
     
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDisplace::DisplaceWithField(render::Mesh& mesh, const Selection& selection,
+void MeshDisplace::DisplaceWithField(assets::EditableMesh& editable, const Selection& selection,
                                      std::function<float(const math::Vec3&)> field,
                                      const math::Vec3* direction, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to displace
@@ -127,10 +128,9 @@ void MeshDisplace::DisplaceWithField(render::Mesh& mesh, const Selection& select
         vert.position += dispDir * finalAmount;
     }
     
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
 } // namespace geometry

@@ -1,5 +1,7 @@
 #include "eyelib/geometry/operations/MeshDecimate.h"
 #include "eyelib/geometry/core/MeshTopology.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <unordered_map>
@@ -11,22 +13,13 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshDecimate::Decimate(render::Mesh& mesh, size_t targetTriangleCount,
+void MeshDecimate::Decimate(assets::EditableMesh& editable, size_t targetTriangleCount,
                             const Selection& selection, const Mask* mask) {
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Get indices
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    std::vector<uint32_t> indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
@@ -92,7 +85,7 @@ void MeshDecimate::Decimate(render::Mesh& mesh, size_t targetTriangleCount,
             
             // Compute error
             math::Vec3 optimalPos;
-            float error = ComputeEdgeError(mesh, edge.v0, edge.v1, topology, optimalPos);
+            float error = ComputeEdgeError(editable, edge.v0, edge.v1, topology, optimalPos);
             
             // Apply mask if provided
             if (mask) {
@@ -133,7 +126,7 @@ void MeshDecimate::Decimate(render::Mesh& mesh, size_t targetTriangleCount,
         if (!CanCollapseEdge(collapse.v0, collapse.v1, topology)) continue;
         
         // Perform collapse
-        CollapseEdge(mesh, collapse.v0, collapse.v1, topology, newVertices, newIndices, vertexMap);
+        CollapseEdge(editable, collapse.v0, collapse.v1, topology, newVertices, newIndices, vertexMap);
         
         // Rebuild topology for next iteration
         topology.BuildFromIndices(newVertices.size(), newIndices);
@@ -147,43 +140,32 @@ void MeshDecimate::Decimate(render::Mesh& mesh, size_t targetTriangleCount,
     }
     
     // Update mesh
-    mesh.SetVertices(newVertices);
-    mesh.SetIndices(newIndices);
-    
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.GenerateTangents();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    editable.SetVertices(std::move(newVertices));
+    editable.SetIndices(std::move(newIndices));
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDecimate::DecimateByPercentage(render::Mesh& mesh, float reductionFactor,
+void MeshDecimate::DecimateByPercentage(assets::EditableMesh& editable, float reductionFactor,
                                         const Selection& selection, const Mask* mask) {
     reductionFactor = std::clamp(reductionFactor, 0.0f, 1.0f);
     
     // Get current triangle count
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
     size_t currentTriangleCount = indices.size() / 3;
     size_t targetTriangleCount = static_cast<size_t>(currentTriangleCount * (1.0f - reductionFactor));
     
-    Decimate(mesh, targetTriangleCount, selection, mask);
+    Decimate(editable, targetTriangleCount, selection, mask);
 }
 
-float MeshDecimate::ComputeEdgeError(const render::Mesh& mesh, uint32_t v0, uint32_t v1,
+float MeshDecimate::ComputeEdgeError(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                     const MeshTopology& topology, math::Vec3& optimalPos) {
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size()) {
         optimalPos = vertices[std::min(v0, v1)].position;
         return 1000000.0f; // High error for invalid edges
@@ -232,7 +214,7 @@ bool MeshDecimate::CanCollapseEdge(uint32_t v0, uint32_t v1, const MeshTopology&
     return true;
 }
 
-void MeshDecimate::CollapseEdge(render::Mesh& mesh, uint32_t v0, uint32_t v1,
+void MeshDecimate::CollapseEdge(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                 const MeshTopology& topology,
                                 std::vector<render::Vertex>& newVertices,
                                 std::vector<uint32_t>& newIndices,
@@ -240,7 +222,7 @@ void MeshDecimate::CollapseEdge(render::Mesh& mesh, uint32_t v0, uint32_t v1,
     // Collapse v1 into v0 (merge v1 into v0)
     // Update v0 position to optimal collapse position
     math::Vec3 optimalPos;
-    ComputeEdgeError(mesh, v0, v1, topology, optimalPos);
+    ComputeEdgeError(editable, v0, v1, topology, optimalPos);
     
     if (v0 >= newVertices.size() || v1 >= newVertices.size()) return;
     

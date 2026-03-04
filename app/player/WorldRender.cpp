@@ -1,15 +1,20 @@
 #include "WorldRender.h"
 
+#include "BuiltinResourceManager.h"
+#include "RendererGPUResourceCache.h"
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
 #include "api/geometry/BuiltinMeshIds.h"
-#include "api/geometry/Primitives.h"
 #include "api/math/TransformUtils.h"
 #include "api/platform/All.h"
+#include "api/render/Material.h"
 #include "api/render/RenderScene.h"
 #include "WorldAnimation.h"
+#include "eyelib/assets/AssetManager.h"
+#include "eyelib/assets/AssetId.h"
 
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -105,9 +110,37 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
         m_renderer.Shutdown();
         return false;
     }
+    m_renderer.SetDevice(m_pipeline.GetDevice());
     m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     m_width = width;
     m_height = height;
+    m_builtinManager = std::make_unique<BuiltinResourceManager>();
+    m_builtinManager->SetDevice(m_pipeline.GetDevice());
+    m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), &eyelib::assets::AssetManager::Get());
+    eyelib::assets::AssetManager::Get().SetGPUResolver(m_gpuResourceCache.get());
+    m_ready = true;
+    return true;
+}
+
+bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t height) {
+    if (!sharedDevice) {
+        return false;
+    }
+    if (!m_renderer.Initialize()) {
+        return false;
+    }
+    if (!m_pipeline.InitializeWithSharedDevice(eyelib::api::RenderDevice(sharedDevice), width, height)) {
+        m_renderer.Shutdown();
+        return false;
+    }
+    m_renderer.SetDevice(m_pipeline.GetDevice());
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    m_width = width;
+    m_height = height;
+    m_builtinManager = std::make_unique<BuiltinResourceManager>();
+    m_builtinManager->SetDevice(m_pipeline.GetDevice());
+    m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), &eyelib::assets::AssetManager::Get());
+    eyelib::assets::AssetManager::Get().SetGPUResolver(m_gpuResourceCache.get());
     m_ready = true;
     return true;
 }
@@ -118,8 +151,10 @@ void WorldRenderBridge::Shutdown() {
     }
     // Destroy caches and shaders/materials first; their destructors call into the RHI device.
     // Only then shut down the pipeline (which destroys the device).
+    eyelib::assets::AssetManager::Get().SetGPUResolver(nullptr);
+    m_gpuResourceCache.reset();
     m_modelCache.clear();
-    m_primitiveCache.clear();
+    m_builtinManager.reset();
     m_skyboxCache.clear();
     m_skinnedMaterials.clear();
     m_defaultMaterial.reset();
@@ -134,33 +169,63 @@ void* WorldRenderBridge::GetOutputColorTextureNativeHandle() const {
     return m_ready ? m_pipeline.GetOutputColorTextureNativeHandle() : nullptr;
 }
 
+eyelib::api::RenderDevice WorldRenderBridge::GetDevice() const {
+    return m_pipeline.GetDevice();
+}
+
+void WorldRenderBridge::InitializeDefaultResources() {
+    if (!m_pipeline.GetDevice()) return;
+    if (m_builtinManager) m_builtinManager->InitializeDefaultResources();
+    EnsureDefaultMaterial();
+    EnsureSkinnedMaterial();
+}
+
 void WorldRenderBridge::EnsureDefaultMaterial() {
-    if (m_defaultMaterial) {
+    if (m_defaultMaterial) return;
+    if (m_builtinManager) {
+        m_defaultMaterial = m_builtinManager->GetDefaultMaterial();
         return;
     }
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (shader->LoadFromFile("passes/forward/basic", "passes/forward/basic")) {
+    eyelib::api::RenderDevice device = m_pipeline.GetDevice();
+    if (device && shader->Load(device, "passes/forward/basic")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
         m_defaultShader = shader;
         m_defaultMaterial = mat;
         return;
     }
-
-    eyelib::api::core::Log::Warn("Default shader missing; using empty material.");
+    if (!device) {
+        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader not loaded — render device is null (passes/forward/basic). Primitives will be invisible.");
+    } else {
+        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader failed to load (passes/forward/basic). Check assets/shaders/opengl/ and working directory. Using empty material; primitives will be invisible.");
+    }
+#ifndef NDEBUG
+    assert(false && "WorldRenderBridge: default shader for primitives failed. Set device before scene build; ensure passes/forward/basic exists.");
+#endif
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
 
 void WorldRenderBridge::EnsureSkinnedMaterial() {
-    if (m_skinnedShader) {
+    if (m_skinnedShader) return;
+    if (m_builtinManager) {
+        m_skinnedShader = m_builtinManager->GetSkinnedShader();
         return;
     }
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (shader->LoadFromFile("passes/forward/skinned", "passes/forward/skinned")) {
+    eyelib::api::RenderDevice device = m_pipeline.GetDevice();
+    if (device && shader->Load(device, "passes/forward/skinned")) {
         m_skinnedShader = shader;
         return;
     }
-    eyelib::api::core::Log::Warn("Skinned shader missing; falling back to default material.");
+    if (!device) {
+        eyelib::api::core::Log::Warn("WorldRenderBridge: skinned shader not loaded — render device is null (passes/forward/skinned).");
+    } else {
+        eyelib::api::core::Log::Warn("WorldRenderBridge: skinned shader failed to load (passes/forward/skinned). Skinned meshes will fall back to default material.");
+    }
+#ifndef NDEBUG
+    assert(false && "WorldRenderBridge: skinned shader failed. Set device before scene build; ensure passes/forward/skinned exists.");
+#endif
 }
 
 std::shared_ptr<eyelib::api::MaterialInstance> WorldRenderBridge::GetSkinnedMaterialInstance(
@@ -238,47 +303,34 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::strin
 WorldRenderBridge::ModelEntry WorldRenderBridge::GetPrimitiveEntry(const std::string& meshId) {
     using namespace eyelib::api::geometry;
     if (!IsBuiltinMeshId(meshId)) return ModelEntry{};
-    auto it = m_primitiveCache.find(meshId);
-    if (it != m_primitiveCache.end()) return it->second;
+    if (m_builtinManager) {
+        auto pe = m_builtinManager->GetPrimitiveEntry(meshId);
+        ModelEntry entry{};
+        entry.mesh = pe.mesh;
+        entry.material = pe.material;
+        return entry;
+    }
+    return ModelEntry{};
+}
 
-    ModelEntry entry{};
-    std::shared_ptr<eyelib::api::Mesh> mesh;
-    if (meshId == BuiltinMesh::Cube) {
-        mesh = Primitives::CreateCube(0.5f);
-    } else if (meshId == BuiltinMesh::Sphere) {
-        mesh = Primitives::CreateSphere(0.5f, 32, 16);
-    } else if (meshId == BuiltinMesh::Plane) {
-        mesh = Primitives::CreatePlane(1.0f, 1.0f, 1, 1);
-    } else if (meshId == BuiltinMesh::Cylinder) {
-        mesh = Primitives::CreateCylinder(0.5f, 1.0f, 32, 1, true, true);
-    } else if (meshId == BuiltinMesh::Cone) {
-        mesh = Primitives::CreateCone(0.5f, 1.0f, 32, true);
-    } else if (meshId == BuiltinMesh::Torus) {
-        mesh = Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
-    }
-    if (mesh) {
-        entry.mesh = std::move(mesh);
-        EnsureDefaultMaterial();
-        entry.material = m_defaultMaterial;
-    }
-    m_primitiveCache[meshId] = entry;
-    return entry;
+std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(eyelib::api::AssetId id) {
+    if (!id.IsValid()) return nullptr;
+    eyelib::assets::AssetId coreId(id.high, id.low);
+    auto internal = eyelib::assets::AssetManager::Get().GetMaterial(coreId);
+    return internal ? eyelib::api::Material::WrapInternal(internal) : nullptr;
 }
 
 std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
     const std::string& materialId,
     eyelib::api::AssetRegistry* registry) {
-    if (materialId.empty() || !registry) {
-        return nullptr;
-    }
-    auto id = eyelib::api::AssetId::FromString(materialId);
+    if (materialId.empty() || !registry) return nullptr;
+    eyelib::api::AssetId id = eyelib::api::AssetId::FromString(materialId);
     if (id.IsValid()) {
-        auto mat = registry->GetMaterial(id);
-        if (mat) {
-            return mat;
-        }
+        auto mat = ResolveMaterial(id);
+        if (mat) return mat;
     }
-    return registry->GetMaterial(materialId);
+    id = registry->GetId(materialId);
+    return id.IsValid() ? ResolveMaterial(id) : nullptr;
 }
 
 std::shared_ptr<eyelib::api::TextureCube> WorldRenderBridge::GetOrLoadSkybox(const std::string& assetId,
@@ -452,9 +504,8 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (!renderable.materialAssetId.empty()) {
             const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, options.assetRoots);
             if (!matResolved.empty() && assetRegistry) {
-                if (auto material = assetRegistry->GetMaterial(matResolved)) {
-                    drawable.material = material;
-                }
+                auto matId = assetRegistry->GetId(matResolved);
+                if (auto material = ResolveMaterial(matId)) drawable.material = material;
             }
         }
         if (const auto transform = getTransform(entry.entity)) {
@@ -515,9 +566,8 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (!renderer.materialAssetId.empty()) {
             const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, options.assetRoots);
             if (!matResolved.empty() && assetRegistry) {
-                if (auto material = assetRegistry->GetMaterial(matResolved)) {
-                    drawable.material = material;
-                }
+                auto matId = assetRegistry->GetId(matResolved);
+                if (auto material = ResolveMaterial(matId)) drawable.material = material;
             }
         }
         if (const auto transform = getTransform(entry.entity)) {

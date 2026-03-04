@@ -2,6 +2,7 @@
 
 #include "eyelib/fluids/FluidVolumeRenderer.h"
 #include "eyelib/render/RenderTypes.h"
+#include "eyelib/render/rhi/RHI.h"
 
 namespace eyelib {
 namespace api {
@@ -13,6 +14,10 @@ public:
 
 FluidVolumeRenderer::FluidVolumeRenderer() : m_impl(new Impl()) {}
 FluidVolumeRenderer::~FluidVolumeRenderer() = default;
+
+void FluidVolumeRenderer::SetDevice(RenderDevice device) {
+    m_impl->renderer.SetDevice(static_cast<::eyelib::render::rhi::IDevice*>(device.Get()));
+}
 
 bool FluidVolumeRenderer::Initialize() {
     return m_impl->renderer.Initialize();

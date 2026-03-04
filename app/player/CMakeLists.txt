@@ -2,6 +2,8 @@
 
 # Shared game runtime (used by both Player exe and Editor Game view)
 set(GAME_RUNTIME_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/BuiltinResourceManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/BuiltinResourceManager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/GameRuntime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/GameRuntime.h
     ${CMAKE_CURRENT_SOURCE_DIR}/PlayerConfig.cpp
@@ -10,6 +12,8 @@ set(GAME_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/AssetBinding.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldRender.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RendererGPUResourceCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RendererGPUResourceCache.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.cpp

@@ -2,6 +2,7 @@
 
 #include "api/fluids/FluidSimulation.h"
 #include "api/render/Camera.h"
+#include "api/render/RenderDevice.h"
 #include "api/render/Texture.h"
 
 namespace eyelib {
@@ -15,6 +16,8 @@ public:
     FluidVolumeRenderer();
     ~FluidVolumeRenderer();
 
+    /** Set device before Initialize. Call once at app/render startup. */
+    void SetDevice(RenderDevice device);
     bool Initialize();
     void Shutdown();
 

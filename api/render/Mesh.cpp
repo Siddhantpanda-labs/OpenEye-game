@@ -1,4 +1,7 @@
 #include "api/render/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/render/resources/Mesh.h"
 
 namespace eyelib {
@@ -6,6 +9,7 @@ namespace api {
 
 class Mesh::Impl {
 public:
+    assets::EditableMesh editable;
     std::shared_ptr<::eyelib::render::Mesh> mesh = std::make_shared<::eyelib::render::Mesh>();
 };
 
@@ -32,11 +36,11 @@ void Mesh::SetVertices(const std::vector<Vertex>& vertices) {
         rv.boneWeights = vert.boneWeights;
         v.push_back(rv);
     }
-    m_impl->mesh->SetVertices(v);
+    m_impl->editable.SetVertices(std::move(v));
 }
 
 std::vector<Mesh::Vertex> Mesh::GetVertices() const {
-    const auto& internalVerts = m_impl->mesh->GetVertices();
+    const auto& internalVerts = m_impl->editable.GetVertices();
     std::vector<Vertex> vertices;
     vertices.reserve(internalVerts.size());
     for (const auto& iv : internalVerts) {
@@ -55,9 +59,8 @@ std::vector<Mesh::Vertex> Mesh::GetVertices() const {
 }
 
 void Mesh::UpdateVertices(const std::vector<Vertex>& vertices, size_t startIndex) {
-    auto& internalVerts = m_impl->mesh->GetVertices();
+    auto& internalVerts = m_impl->editable.GetVertices();
     if (startIndex + vertices.size() > internalVerts.size()) {
-        // Extend if needed
         internalVerts.resize(startIndex + vertices.size());
     }
     for (size_t i = 0; i < vertices.size(); ++i) {
@@ -72,46 +75,53 @@ void Mesh::UpdateVertices(const std::vector<Vertex>& vertices, size_t startIndex
         rv.boneIndices = vert.boneIndices;
         rv.boneWeights = vert.boneWeights;
     }
-    // Mark as dirty so GPU update is needed
-    m_impl->mesh->InvalidateAABB();
-    // Re-upload to GPU (full upload for now, can be optimized later with glBufferSubData)
-    m_impl->mesh->UploadToGPU();
 }
 
 void Mesh::SetIndices(const std::vector<uint32_t>& indices) {
-    m_impl->mesh->SetIndices(indices);
+    m_impl->editable.SetIndices(indices);
 }
 
 void Mesh::SetIndices(const std::vector<uint16_t>& indices) {
-    m_impl->mesh->SetIndices(indices);
+    std::vector<uint32_t> inds(indices.begin(), indices.end());
+    m_impl->editable.SetIndices(std::move(inds));
 }
 
 void Mesh::AddSubmesh(uint32_t indexOffset, uint32_t indexCount, int materialIndex) {
-    m_impl->mesh->AddSubmesh(indexOffset, indexCount, materialIndex);
+    m_impl->editable.AddSubmesh(indexOffset, indexCount, materialIndex);
 }
 
 void Mesh::SetSubmesh(size_t index, uint32_t indexOffset, uint32_t indexCount) {
-    m_impl->mesh->SetSubmesh(index, indexOffset, indexCount);
+    auto& submeshes = m_impl->editable.GetSubmeshes();
+    if (index < submeshes.size()) {
+        submeshes[index].indexOffset = indexOffset;
+        submeshes[index].indexCount = indexCount;
+    }
 }
 
 void Mesh::ClearSubmeshes() {
-    m_impl->mesh->ClearSubmeshes();
+    m_impl->editable.GetSubmeshes().clear();
 }
 
-void Mesh::UploadToGPU() {
-    m_impl->mesh->UploadToGPU();
+void Mesh::UploadToGPU(RenderDevice device) {
+    if (!device) return;
+    m_impl->editable.CopyToRenderMesh(*m_impl->mesh, static_cast<::eyelib::render::rhi::IDevice*>(device.Get()));
 }
 
 size_t Mesh::GetVertexCount() const {
+    size_t n = m_impl->editable.GetVertices().size();
+    if (n > 0) return n;
     return m_impl->mesh->GetVertexCount();
 }
 
 size_t Mesh::GetIndexCount() const {
+    size_t n = m_impl->editable.GetIndices().size();
+    if (n > 0) return n;
     return m_impl->mesh->GetIndexCount();
 }
 
 math::AABB Mesh::GetAABB() const {
-    return m_impl->mesh->GetAABB();
+    if (m_impl->mesh->IsValid()) return m_impl->mesh->GetAABB();
+    return ::eyelib::render::MeshDescriptorUtils::ComputeAABB(m_impl->editable.GetDescriptor());
 }
 
 size_t Mesh::GetSubmeshCount() const {
@@ -134,15 +144,21 @@ Mesh::IndexFormat Mesh::GetIndexFormat() const {
 }
 
 void Mesh::GenerateNormals() {
-    m_impl->mesh->GenerateNormals();
+    auto desc = m_impl->editable.GetDescriptor();
+    ::eyelib::render::MeshDescriptorUtils::GenerateNormals(desc);
+    m_impl->editable.SetVertices(std::move(desc.vertices));
 }
 
 void Mesh::GenerateTangents() {
-    m_impl->mesh->GenerateTangents();
+    auto desc = m_impl->editable.GetDescriptor();
+    ::eyelib::render::MeshDescriptorUtils::GenerateTangents(desc);
+    m_impl->editable.SetVertices(std::move(desc.vertices));
 }
 
 void Mesh::Optimize() {
-    m_impl->mesh->Optimize();
+    auto desc = m_impl->editable.GetDescriptor();
+    ::eyelib::render::MeshDescriptorUtils::Optimize(desc);
+    m_impl->editable.SetIndices(std::move(desc.indices32));
 }
 
 bool Mesh::IsValid() const {
@@ -151,12 +167,23 @@ bool Mesh::IsValid() const {
 
 std::shared_ptr<Mesh> Mesh::WrapInternal(const std::shared_ptr<::eyelib::render::Mesh>& mesh) {
     auto apiMesh = std::make_shared<Mesh>();
-    if (mesh) apiMesh->m_impl->mesh = mesh;
+    if (mesh) {
+        apiMesh->m_impl->mesh = mesh;
+        /* CPU editable is empty; GetVertices() will be empty, counts/AABB from GPU mesh */
+    }
     return apiMesh;
 }
 
 std::shared_ptr<::eyelib::render::Mesh> Mesh::GetInternal() const {
     return m_impl->mesh;
+}
+
+::eyelib::assets::EditableMesh* Mesh::GetEditableMesh() {
+    return &m_impl->editable;
+}
+
+const ::eyelib::assets::EditableMesh* Mesh::GetEditableMesh() const {
+    return &m_impl->editable;
 }
 
 } // namespace api

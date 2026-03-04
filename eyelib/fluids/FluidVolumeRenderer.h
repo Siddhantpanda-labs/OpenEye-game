@@ -20,7 +20,8 @@ public:
     FluidVolumeRenderer();
     ~FluidVolumeRenderer();
 
-    /** Initialize; uses rhi::GetDefaultDevice() so call after render pipeline has set the device. */
+    /** Set device before Initialize. Call once at app/render startup. */
+    void SetDevice(render::rhi::IDevice* device) { m_device = device; }
     bool Initialize();
     void Shutdown();
 

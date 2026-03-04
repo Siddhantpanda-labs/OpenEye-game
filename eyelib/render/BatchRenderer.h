@@ -2,6 +2,7 @@
 
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
+#include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
 #include <cstddef>
 #include <memory>
@@ -23,6 +24,7 @@ public:
     BatchRenderer(BatchRenderer&& other) noexcept;
     BatchRenderer& operator=(BatchRenderer&& other) noexcept;
 
+    void SetDevice(rhi::IDevice* device) { m_device = device; }
     void AddMesh(std::shared_ptr<Mesh> mesh, std::shared_ptr<Material> material, const math::Mat4& transform);
     void Clear();
     void Flush();
@@ -30,6 +32,7 @@ public:
     size_t GetBatchCount() const { return m_batches.size(); }
 
 private:
+    rhi::IDevice* m_device = nullptr;
     struct BatchEntry {
         std::shared_ptr<Mesh> mesh;
         std::shared_ptr<Material> material;

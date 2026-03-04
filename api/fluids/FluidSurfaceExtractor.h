@@ -2,6 +2,7 @@
 
 #include "api/fluids/FluidSimulation.h"
 #include "api/render/Mesh.h"
+#include "api/render/RenderDevice.h"
 
 #include <memory>
 
@@ -16,7 +17,8 @@ public:
     FluidSurfaceExtractor();
     ~FluidSurfaceExtractor();
 
-    std::shared_ptr<Mesh> BuildMesh(const FluidSimulation& sim, float isoValue = 0.2f) const;
+    /** Pass device for GPU mesh creation. */
+    std::shared_ptr<Mesh> BuildMesh(RenderDevice device, const FluidSimulation& sim, float isoValue = 0.2f) const;
 
 private:
     class Impl;

@@ -5,6 +5,7 @@
 #include "eyelib/assets/loaders/TextureLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/math/Types.h"
+#include "eyelib/render/MaterialDescriptor.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
@@ -71,7 +72,7 @@ AssetId MaterialLoader::LoadMaterial(const std::string& path) {
         std::string shaderName = j["shader"].get<std::string>();
         if (!shaderName.empty()) {
             const AssetId shaderId = ShaderLoader::LoadShaderByName(shaderName);
-            auto shader = manager.Cache().Get<render::Shader>(shaderId);
+            auto shader = manager.GetShader(shaderId);
             if (shader) mat->SetShader(shader);
         }
     }
@@ -87,12 +88,12 @@ AssetId MaterialLoader::LoadMaterial(const std::string& path) {
                 const AssetId tid = AssetId::FromString(val.substr(8));
                 if (tid.IsValid()) {
                     reg.LoadAsset(tid);
-                    tex = manager.Cache().Get<render::Texture2D>(tid);
+                    tex = manager.GetTexture(tid);
                 }
             } else {
                 const std::string resolved = ResolvePath(baseDir, val);
                 const AssetId tid = TextureLoader::LoadTexture(resolved, true);
-                if (tid.IsValid()) tex = manager.Cache().Get<render::Texture2D>(tid);
+                if (tid.IsValid()) tex = manager.GetTexture(tid);
             }
             if (tex) mat->SetTexture(slot, tex);
         }
@@ -130,6 +131,77 @@ AssetId MaterialLoader::LoadMaterial(const std::string& path) {
 
     mat->SetAssetId(id);
     manager.Cache().Store(id, mat, "Material");
+    void* device = manager.GetRenderDevice();
+    if (device) manager.RegisterMaterialInstance(id, device, mat);
+    return id;
+}
+
+AssetId MaterialLoader::LoadMaterialDescriptorOnly(const std::string& path) {
+    auto& manager = AssetManager::Get();
+    const AssetId id = manager.Registry().RegisterAsset(path, "Material");
+
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        core::Log::WarnF("MaterialLoader: cannot open %s", path.c_str());
+        return AssetId::Invalid();
+    }
+    nlohmann::json j;
+    try {
+        f >> j;
+    } catch (const std::exception& e) {
+        core::Log::WarnF("MaterialLoader: JSON parse error %s: %s", path.c_str(), e.what());
+        return AssetId::Invalid();
+    }
+
+    const std::string baseDir = DirOf(path);
+    render::MaterialDescriptor desc;
+
+    if (j.contains("shader") && j["shader"].is_string())
+        desc.shaderName = j["shader"].get<std::string>();
+
+    if (j.contains("textures") && j["textures"].is_object()) {
+        for (auto it = j["textures"].begin(); it != j["textures"].end(); ++it) {
+            if (!it.value().is_string()) continue;
+            const std::string slot = it.key();
+            std::string val = it.value().get<std::string>();
+            if (val.size() > 8 && val.compare(0, 8, "assetId:") == 0) {
+                continue;
+            }
+            desc.texturePaths[slot] = ResolvePath(baseDir, val);
+        }
+    }
+
+    if (j.contains("albedo")) { math::Vec3 v; if (ParseVec3(j["albedo"], v)) desc.albedo = v; }
+    if (j.contains("metallic") && j["metallic"].is_number()) desc.metallic = j["metallic"].get<float>();
+    if (j.contains("roughness") && j["roughness"].is_number()) desc.roughness = j["roughness"].get<float>();
+    if (j.contains("emission")) { math::Vec3 v; if (ParseVec3(j["emission"], v)) desc.emission = v; }
+    if (j.contains("ao") && j["ao"].is_number()) desc.ao = j["ao"].get<float>();
+    if (j.contains("alpha") && j["alpha"].is_number()) desc.alpha = j["alpha"].get<float>();
+
+    if (j.contains("floats") && j["floats"].is_object()) {
+        for (auto it = j["floats"].begin(); it != j["floats"].end(); ++it)
+            if (it.value().is_number()) desc.floats[it.key()] = it.value().get<float>();
+    }
+    if (j.contains("vec3s") && j["vec3s"].is_object()) {
+        for (auto it = j["vec3s"].begin(); it != j["vec3s"].end(); ++it) {
+            math::Vec3 v;
+            if (ParseVec3(it.value(), v)) desc.vec3s[it.key()] = v;
+        }
+    }
+    if (j.contains("vec4s") && j["vec4s"].is_object()) {
+        for (auto it = j["vec4s"].begin(); it != j["vec4s"].end(); ++it) {
+            if (!it.value().is_array() || it.value().size() != 4) continue;
+            desc.vec4s[it.key()] = math::Vec4(
+                it.value()[0].get<float>(), it.value()[1].get<float>(),
+                it.value()[2].get<float>(), it.value()[3].get<float>());
+        }
+    }
+    if (j.contains("keywords") && j["keywords"].is_object()) {
+        for (auto it = j["keywords"].begin(); it != j["keywords"].end(); ++it)
+            if (it.value().is_boolean()) desc.keywords[it.key()] = it.value().get<bool>();
+    }
+
+    manager.StoreMaterialDescriptor(id, desc);
     return id;
 }
 

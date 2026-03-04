@@ -24,7 +24,7 @@ void TransparencyPass::Render(::eyelib::render::rhi::ICommandList* cmd,
     for (const auto& d : transparent) {
         internal.push_back(ToInternal(d));
     }
-    ::eyelib::render::TransparencyPass::Render(cmd, internal, view, projection, viewPos);
+    ::eyelib::render::TransparencyPass::Render(cmd, nullptr, internal, view, projection, viewPos);
 }
 
 } // namespace api

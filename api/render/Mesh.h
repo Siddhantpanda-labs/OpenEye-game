@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
 #include <cstdint>
@@ -7,6 +8,7 @@
 #include <vector>
 
 namespace eyelib {
+namespace assets { class EditableMesh; }
 namespace render { class Mesh; }
 namespace api {
 
@@ -60,8 +62,8 @@ public:
     void SetSubmesh(size_t index, uint32_t indexOffset, uint32_t indexCount);
     void ClearSubmeshes();
 
-    /** Upload to GPU. Call after setting vertices/indices. */
-    void UploadToGPU();
+    /** Upload to GPU. Device must be non-null. Call after setting vertices/indices. */
+    void UploadToGPU(RenderDevice device);
 
     /** Get vertex count. */
     size_t GetVertexCount() const;
@@ -84,6 +86,10 @@ public:
 
     static std::shared_ptr<Mesh> WrapInternal(const std::shared_ptr<::eyelib::render::Mesh>& mesh);
     std::shared_ptr<::eyelib::render::Mesh> GetInternal() const;
+
+    /** CPU mesh for geometry ops (Phase 2.4). Ops modify this; call UploadToGPU(device) to sync to GPU. */
+    ::eyelib::assets::EditableMesh* GetEditableMesh();
+    const ::eyelib::assets::EditableMesh* GetEditableMesh() const;
 
 private:
     class Impl;

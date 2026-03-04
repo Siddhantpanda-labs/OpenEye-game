@@ -159,6 +159,74 @@ AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
     return id;
 }
 
+AssetId AssetRegistry::LoadAssetDescriptorOnly(const std::string& filePath, AssetType type) {
+    const std::string typeStr = ToString(type);
+    const AssetId id = RegisterAsset(filePath, typeStr);
+    if (!id.IsValid()) return id;
+
+    auto it = m_refCounts.find(id);
+    if (it != m_refCounts.end()) {
+        it->second += 1;
+        return id;
+    }
+    m_refCounts[id] = 1;
+
+    try {
+        switch (type) {
+            case AssetType::Mesh:
+                MeshLoader::LoadMeshDescriptorOnly(filePath);
+                break;
+            case AssetType::Texture:
+                TextureLoader::LoadTextureDescriptorOnly(filePath, true);
+                break;
+            case AssetType::Shader: {
+                if (filePath.size() > 5 && filePath.compare(0, 5, "name:") == 0) {
+                    ShaderLoader::LoadShaderByNameDescriptorOnly(filePath.substr(5));
+                } else {
+                    const std::string lower = filePath;
+                    if (lower.rfind(".vert") != std::string::npos) {
+                        const std::string frag = filePath.substr(0, filePath.size() - 5) + ".frag";
+                        ShaderLoader::LoadShaderDescriptorOnly(filePath, frag);
+                    } else if (lower.rfind(".frag") != std::string::npos) {
+                        const std::string vert = filePath.substr(0, filePath.size() - 5) + ".vert";
+                        ShaderLoader::LoadShaderDescriptorOnly(vert, filePath);
+                    } else {
+                        ShaderLoader::LoadShaderDescriptorOnly(filePath, filePath);
+                    }
+                }
+                break;
+            }
+            case AssetType::Material:
+                MaterialLoader::LoadMaterialDescriptorOnly(filePath);
+                break;
+            case AssetType::Audio:
+                AudioLoader::LoadAudio(filePath);
+                break;
+            case AssetType::Animation:
+                AnimationLoader::LoadAnimation(filePath);
+                break;
+            default:
+                break;
+        }
+    } catch (const std::exception& e) {
+        core::Log::ErrorF("AssetRegistry: descriptor-only load failed for '%s' - %s", filePath.c_str(), e.what());
+        return id;
+    } catch (...) {
+        core::Log::ErrorF("AssetRegistry: descriptor-only load failed for '%s' (unknown exception)", filePath.c_str());
+        return id;
+    }
+
+    m_memoryUsage += GetAssetSize(id);
+    return id;
+}
+
+AssetId AssetRegistry::LoadAssetDescriptorOnly(const AssetId& id) {
+    const auto* md = GetMetadata(id);
+    if (!md) return AssetId::Invalid();
+    const auto type = AssetTypeFromString(md->assetType);
+    return LoadAssetDescriptorOnly(md->filePath, type);
+}
+
 AssetId AssetRegistry::LoadAsset(const AssetId& id) {
     const auto* md = GetMetadata(id);
     if (!md) return AssetId::Invalid();
@@ -387,6 +455,7 @@ void AssetRegistry::Clear() {
     m_refCounts.clear();
     m_memoryUsage = 0;
     m_cache.Clear();
+    AssetManager::Get().ClearDescriptorsAndInstances();
     core::Log::Info("AssetRegistry: cleared");
 }
 

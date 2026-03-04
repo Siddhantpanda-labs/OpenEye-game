@@ -13,7 +13,8 @@ namespace fluids {
  */
 class FluidSurfaceExtractor {
 public:
-    std::shared_ptr<render::Mesh> BuildMesh(const FluidSimulation& sim, float isoValue = 0.2f) const;
+    /** Device required to create GPU mesh from extracted geometry. */
+    std::shared_ptr<render::Mesh> BuildMesh(render::rhi::IDevice* device, const FluidSimulation& sim, float isoValue = 0.2f) const;
 };
 
 } // namespace fluids

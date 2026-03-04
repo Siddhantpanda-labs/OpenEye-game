@@ -1,5 +1,6 @@
 #include "api/render/passes/GBufferPass.h"
 #include "eyelib/render/passes/GBufferPass.h"
+#include "eyelib/render/RenderContext.h"
 
 namespace eyelib {
 namespace api {
@@ -46,7 +47,8 @@ void GBufferPass::Render(GBuffer& gbuffer,
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));
     }
-    m_impl->pass->Render(*gbuffer.GetInternal(), nullptr, internal, view, projection, prevView, prevProjection);
+    auto ctx = m_device ? ::eyelib::render::RenderContext::FromDevice(static_cast<::eyelib::render::rhi::IDevice*>(m_device.Get())) : ::eyelib::render::RenderContext{};
+    m_impl->pass->Render(*gbuffer.GetInternal(), ctx, internal, view, projection, prevView, prevProjection);
 }
 
 } // namespace api

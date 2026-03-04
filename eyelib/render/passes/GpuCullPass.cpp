@@ -19,14 +19,14 @@ GpuCullPass::~GpuCullPass() {
     Shutdown();
 }
 
-bool GpuCullPass::IsSupported() const {
-    if (!m_device) return false;
-    const auto& caps = m_device->GetCapabilities();
+bool GpuCullPass::IsSupported(rhi::IDevice* device) const {
+    if (!device) return false;
+    const auto& caps = device->GetCapabilities();
     return caps.supportsCompute && caps.supportsMultiDrawIndirect;
 }
 
 void GpuCullPass::EnsureResources() {
-    if (!m_device || m_initialized || !IsSupported()) return;
+    if (!m_device || m_initialized || !IsSupported(m_device)) return;
 
     const size_t combinedSize = kIndirectRegionSize + kDrawListRegionSize;
     rhi::BufferDesc bd;
@@ -141,8 +141,10 @@ void GpuCullPass::EnsureResources() {
     m_initialized = true;
 }
 
-bool GpuCullPass::Initialize() {
+bool GpuCullPass::Initialize(rhi::IDevice* device) {
+    if (!device) return false;
     Shutdown();
+    m_device = device;
     EnsureResources();
     return m_initialized;
 }
@@ -201,7 +203,7 @@ void GpuCullPass::SetOcclusionDepth(rhi::ITexture* depthTexture, uint32_t width,
 }
 
 void GpuCullPass::Execute(rhi::ICommandList* cmd) {
-    if (!cmd || !IsSupported()) return;
+    if (!cmd || !m_device || !IsSupported(m_device)) return;
     EnsureResources();
     if (!m_computePipelineWithDrawList || !m_computePipelineNoDrawList || !m_indirectBuffer) return;
 

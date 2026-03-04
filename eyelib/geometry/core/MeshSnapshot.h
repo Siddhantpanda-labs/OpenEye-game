@@ -6,10 +6,12 @@
 #include <cstdint>
 
 namespace eyelib {
+namespace assets { class EditableMesh; }
+
 namespace geometry {
 
 /**
- * @brief MeshSnapshot: Immutable snapshot of mesh state.
+ * @brief MeshSnapshot: Immutable snapshot of mesh state (CPU geometry).
  * 
  * Provides copy-on-write semantics for mesh operations.
  * Enables undo/redo and safe experimentation.
@@ -17,14 +19,14 @@ namespace geometry {
 class MeshSnapshot {
 public:
     /**
-     * @brief Create snapshot from mesh.
+     * @brief Create snapshot from editable mesh.
      */
-    static std::shared_ptr<MeshSnapshot> Create(const render::Mesh& mesh);
+    static std::shared_ptr<MeshSnapshot> Create(const assets::EditableMesh& editable);
     
     /**
-     * @brief Restore mesh from snapshot.
+     * @brief Restore editable mesh from snapshot.
      */
-    void Restore(render::Mesh& mesh) const;
+    void Restore(assets::EditableMesh& editable) const;
     
     /**
      * @brief Get vertex count.
@@ -47,7 +49,6 @@ public:
 private:
     std::vector<render::Vertex> m_vertices;
     std::vector<uint32_t> m_indices;
-    render::IndexFormat m_indexFormat = render::IndexFormat::UInt32;
     std::vector<render::Submesh> m_submeshes;
 };
 
@@ -64,19 +65,19 @@ public:
     /**
      * @brief Save current mesh state.
      */
-    void Save(const render::Mesh& mesh);
+    void Save(const assets::EditableMesh& editable);
     
     /**
      * @brief Undo last operation.
      * @return true if undo was successful
      */
-    bool Undo(render::Mesh& mesh);
+    bool Undo(assets::EditableMesh& editable);
     
     /**
      * @brief Redo last undone operation.
      * @return true if redo was successful
      */
-    bool Redo(render::Mesh& mesh);
+    bool Redo(assets::EditableMesh& editable);
     
     /**
      * @brief Check if undo is available.

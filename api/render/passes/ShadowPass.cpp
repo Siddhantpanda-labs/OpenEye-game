@@ -1,5 +1,6 @@
 #include "api/render/passes/ShadowPass.h"
 #include "eyelib/render/passes/ShadowPass.h"
+#include "eyelib/render/RenderContext.h"
 
 namespace eyelib {
 namespace api {
@@ -48,7 +49,8 @@ void ShadowPass::Render(ShadowMap& shadowMap,
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));
     }
-    m_impl->pass->Render(*shadowMap.GetInternal(), nullptr, internal, lightDir, view, projection, cameraPos, nearPlane, farPlane);
+    auto ctx = m_device ? ::eyelib::render::RenderContext::FromDevice(static_cast<::eyelib::render::rhi::IDevice*>(m_device.Get())) : ::eyelib::render::RenderContext{};
+    m_impl->pass->Render(*shadowMap.GetInternal(), ctx, internal, lightDir, view, projection, cameraPos, nearPlane, farPlane);
 }
 
 } // namespace api

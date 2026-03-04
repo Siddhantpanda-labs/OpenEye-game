@@ -1,5 +1,7 @@
 #include "eyelib/geometry/operations/MeshBevel.h"
 #include "eyelib/geometry/core/MeshTopology.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <unordered_map>
@@ -9,24 +11,15 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshBevel::BevelEdges(render::Mesh& mesh, const Selection& selection,
+void MeshBevel::BevelEdges(assets::EditableMesh& editable, const Selection& selection,
                            float amount, int segments, const Mask* mask) {
     if (amount <= 0.0f || segments < 1) return;
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Get indices (handle both formats)
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty() || indices.size() % 3 != 0) return;
     
@@ -173,23 +166,20 @@ void MeshBevel::BevelEdges(render::Mesh& mesh, const Selection& selection,
         } else {
             // Multi-segment bevel (rounded) - for now, fall back to chamfer
             // Full implementation would create multiple segments along the edge
-            BevelEdges(mesh, selection, amount, 1, mask);
+            BevelEdges(editable, selection, amount, 1, mask);
             return;
         }
     }
     
-    // Update mesh
-    mesh.SetVertices(newVertices);
-    mesh.SetIndices(newIndices);
-    
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.GenerateTangents();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    editable.SetVertices(std::move(newVertices));
+    editable.SetIndices(std::move(newIndices));
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshBevel::BevelVertices(render::Mesh& mesh, const Selection& selection,
+void MeshBevel::BevelVertices(assets::EditableMesh& editable, const Selection& selection,
                              float amount, int segments, const Mask* mask) {
     // Vertex beveling is more complex - for now, implement basic version
     // Full implementation would create chamfered geometry around selected vertices
@@ -197,20 +187,11 @@ void MeshBevel::BevelVertices(render::Mesh& mesh, const Selection& selection,
     
     // For now, vertex beveling can be approximated by beveling all edges connected to selected vertices
     // This is a simplified approach - proper vertex beveling requires more sophisticated geometry
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Get indices
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     
     if (indices.empty()) return;
     
@@ -236,10 +217,10 @@ void MeshBevel::BevelVertices(render::Mesh& mesh, const Selection& selection,
     // Convert to edge selection and use edge beveling
     std::vector<uint32_t> edgeIDs(edgesToBevel.begin(), edgesToBevel.end());
     Selection edgeSelection = Selection::FromEdgeIDs(edgeIDs);
-    BevelEdges(mesh, edgeSelection, amount, segments, mask);
+    BevelEdges(editable, edgeSelection, amount, segments, mask);
 }
 
-void MeshBevel::BevelEdge(render::Mesh& mesh, uint32_t edgeIndex,
+void MeshBevel::BevelEdge(assets::EditableMesh& editable, uint32_t edgeIndex,
                          const std::unordered_set<uint32_t>& selectedEdges,
                          float amount, int segments,
                          const Mask* mask,
@@ -251,9 +232,9 @@ void MeshBevel::BevelEdge(render::Mesh& mesh, uint32_t edgeIndex,
     // Full implementation would use this for proper multi-segment beveling
 }
 
-math::Vec3 MeshBevel::ComputeEdgeOffset(const render::Mesh& mesh, uint32_t v0, uint32_t v1,
+math::Vec3 MeshBevel::ComputeEdgeOffset(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                         const MeshTopology& topology, float amount) {
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size()) {
         return math::Vec3(0, 0, 0);
     }

@@ -1,4 +1,6 @@
 #include "eyelib/geometry/operations/MeshBoolean.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/math/Intersection.h"
 #include "eyelib/math/Ray.h"
 #include "eyelib/core/Log.h"
@@ -8,30 +10,30 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshBoolean::Union(render::Mesh& meshA, const render::Mesh& meshB) {
+void MeshBoolean::Union(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
     // Union: Keep all faces from A that are outside B, and all faces from B that are outside A
     ClassifyAndMerge(meshA, meshA, meshB, false, true, false, true);
 }
 
-void MeshBoolean::Difference(render::Mesh& meshA, const render::Mesh& meshB) {
+void MeshBoolean::Difference(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
     // Difference: Keep faces from A that are outside B, remove faces from A that are inside B
     ClassifyAndMerge(meshA, meshA, meshB, false, true, false, false);
 }
 
-void MeshBoolean::Intersection(render::Mesh& meshA, const render::Mesh& meshB) {
+void MeshBoolean::Intersection(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
     // Intersection: Keep only faces that are inside both meshes
     ClassifyAndMerge(meshA, meshA, meshB, true, false, true, false);
 }
 
-bool MeshBoolean::IsVertexInside(const render::Mesh& mesh, const math::Vec3& point) {
+bool MeshBoolean::IsVertexInside(const assets::EditableMesh& editable, const math::Vec3& point) {
     // Use ray casting to determine if point is inside mesh
     // Cast ray in random direction and count intersections
     math::Vec3 direction(1.0f, 0.0f, 0.0f); // Simple direction
-    return RayCastInsideTest(mesh, point, direction);
+    return RayCastInsideTest(editable, point, direction);
 }
 
-math::AABB MeshBoolean::ComputeMeshBounds(const render::Mesh& mesh) {
-    const auto& vertices = mesh.GetVertices();
+math::AABB MeshBoolean::ComputeMeshBounds(const assets::EditableMesh& editable) {
+    const auto& vertices = editable.GetVertices();
     if (vertices.empty()) {
         return math::AABB();
     }
@@ -47,25 +49,15 @@ math::AABB MeshBoolean::ComputeMeshBounds(const render::Mesh& mesh) {
     return math::AABB(min, max);
 }
 
-bool MeshBoolean::RayCastInsideTest(const render::Mesh& mesh, const math::Vec3& point, const math::Vec3& direction) {
+bool MeshBoolean::RayCastInsideTest(const assets::EditableMesh& editable, const math::Vec3& point, const math::Vec3& direction) {
     // Cast ray from point and count triangle intersections
     // Odd number = inside, even number = outside
     
     math::Ray ray(point, direction);
     
     // Get indices
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
-    
-    const auto& vertices = mesh.GetVertices();
+    const auto& indices = editable.GetIndices();
+    const auto& vertices = editable.GetVertices();
     int intersectionCount = 0;
     
     // Test against all triangles
@@ -91,7 +83,7 @@ bool MeshBoolean::RayCastInsideTest(const render::Mesh& mesh, const math::Vec3& 
     return (intersectionCount % 2) == 1; // Odd = inside
 }
 
-void MeshBoolean::ClassifyAndMerge(render::Mesh& resultMesh, const render::Mesh& meshA, const render::Mesh& meshB,
+void MeshBoolean::ClassifyAndMerge(assets::EditableMesh& resultMesh, const assets::EditableMesh& meshA, const assets::EditableMesh& meshB,
                                   bool keepAInside, bool keepAOutside, bool keepBInside, bool keepBOutside) {
     const auto& verticesA = meshA.GetVertices();
     const auto& verticesB = meshB.GetVertices();
@@ -99,27 +91,8 @@ void MeshBoolean::ClassifyAndMerge(render::Mesh& resultMesh, const render::Mesh&
     if (verticesA.empty() && verticesB.empty()) return;
     
     // Get indices
-    std::vector<uint32_t> indicesA;
-    if (meshA.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indicesA = meshA.GetIndices32();
-    } else {
-        const auto& indices16 = meshA.GetIndices16();
-        indicesA.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indicesA.push_back(static_cast<uint32_t>(idx));
-        }
-    }
-    
-    std::vector<uint32_t> indicesB;
-    if (meshB.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indicesB = meshB.GetIndices32();
-    } else {
-        const auto& indices16 = meshB.GetIndices16();
-        indicesB.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indicesB.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indicesA = meshA.GetIndices();
+    const auto& indicesB = meshB.GetIndices();
     
     // Build new mesh
     std::vector<render::Vertex> newVertices;
@@ -206,14 +179,12 @@ void MeshBoolean::ClassifyAndMerge(render::Mesh& resultMesh, const render::Mesh&
     }
     
     // Update result mesh
-    resultMesh.SetVertices(newVertices);
-    resultMesh.SetIndices(newIndices);
-    
-    // Recalculate normals and update GPU
-    resultMesh.GenerateNormals();
-    resultMesh.GenerateTangents();
-    resultMesh.InvalidateAABB();
-    resultMesh.UploadToGPU();
+    resultMesh.SetVertices(std::move(newVertices));
+    resultMesh.SetIndices(std::move(newIndices));
+    auto desc = resultMesh.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    resultMesh.SetVertices(std::move(desc.vertices));
 }
 
 } // namespace geometry

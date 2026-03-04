@@ -4,12 +4,15 @@
 #include <string>
 #include "eyelib/math/Types.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/ShaderDescriptor.h"
 #include "eyelib/render/ShaderReflection.h"
 #include <vector>
 
 namespace eyelib {
 namespace render {
 
+/** GPU shader instance (device-bound). CPU representation is ShaderDescriptor (Phase 3 asset vs instance).
+ *  Device is passed explicitly to Load/BuildFromSource/Bind; no SetDevice/GetDevice. */
 class Shader {
 public:
     Shader();
@@ -21,8 +24,6 @@ public:
     Shader(Shader&& other) noexcept;
     Shader& operator=(Shader&& other) noexcept;
 
-    bool BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc);
-    bool LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath);
     /** Load by logical name; backend resolves paths/format (Option 2: backend-owned shader loading). */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
              rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList);
@@ -35,6 +36,10 @@ public:
              const rhi::DepthStencilState* depthStencilOverride = nullptr);
     /** E5.4: Re-run last Load(name, layout, topology, keywords). Returns true if reload succeeded. No-op if never loaded by name. */
     bool Reload();
+    /** CPU descriptor for last Load/LoadFromFile (for serialization or creating another instance). Empty if never loaded. */
+    ShaderDescriptor GetDescriptor() const;
+    /** Create GPU instance from CPU descriptor. Replaces current pipeline if any. */
+    bool LoadFromDescriptor(rhi::IDevice* device, const ShaderDescriptor& desc);
     /** RHI path: build pipeline from source with given vertex layout. */
     bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout);
     bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout);
@@ -46,7 +51,8 @@ public:
     void Destroy();
     void Destroy(rhi::IDevice* device);
 
-    void Bind() const;
+    /** Bind pipeline. Device must be non-null. */
+    void Bind(rhi::IDevice* device) const;
     void Unbind() const;
 
     void SetBool(const std::string& name, bool value) const;
@@ -67,21 +73,14 @@ public:
     /** E5.1: Reflected uniforms/samplers from last BuildFromSource (empty if loaded by name only). */
     const ShaderReflection& GetReflection() const { return m_reflection; }
 
-    /** Set device to use when calling LoadFromFile/BuildFromSource without device. Also used in Bind/Set* if set. */
-    void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
-
 private:
-    rhi::IDevice* GetDevice() const;
-    rhi::IDevice* m_injectedDevice = nullptr;
+    /** Used internally by Set* and Reload(); returns device that created the pipeline. */
+    rhi::IDevice* GetDevice() const { return m_deviceRHI; }
     rhi::IDevice* m_deviceRHI = nullptr;
     rhi::IPipeline* m_pipelineRHI = nullptr;
     ShaderReflection m_reflection;
-    /** E5.4: Last load params for Reload(). */
-    std::string m_lastShaderName;
-    rhi::VertexLayout m_lastLayout{};
-    rhi::PrimitiveTopology m_lastTopology = rhi::PrimitiveTopology::TriangleList;
-    std::vector<std::string> m_lastKeywords;
-    bool m_lastLoadByName = false;
+    /** CPU reload state (Phase 2.5). Reload() uses this; GetDescriptor() returns it. */
+    ShaderDescriptor m_descriptor;
 };
 
 } // namespace render

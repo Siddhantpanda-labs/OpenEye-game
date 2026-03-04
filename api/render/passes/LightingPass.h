@@ -1,6 +1,7 @@
 #pragma once
 
 #include "api/render/GBuffer.h"
+#include "api/render/RenderDevice.h"
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
 #include "eyelib/math/Types.h"
@@ -20,6 +21,7 @@ public:
     LightingPass(LightingPass&& other) noexcept;
     LightingPass& operator=(LightingPass&& other) noexcept;
 
+    void SetDevice(RenderDevice device) { m_device = device; }
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const;
 
@@ -32,6 +34,7 @@ public:
 private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
+    RenderDevice m_device;
 };
 
 } // namespace api

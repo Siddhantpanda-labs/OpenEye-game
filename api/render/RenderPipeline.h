@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
 #include "api/render/RenderScene.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/render/RenderBackend.h"
@@ -33,6 +34,8 @@ public:
     /** Create device and pipeline. Requires a window; backend chosen at runtime (e.g. --renderer opengl|diligent). */
     bool Initialize(Window& window, uint32_t width, uint32_t height,
                     ::eyelib::render::RenderBackend backend = ::eyelib::render::RenderBackend::Default);
+    /** Initialize with a shared RHI device (caller owns device; use for multiple pipelines per window). */
+    bool InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
     void Resize(const RenderTarget& target);
     void Shutdown();
@@ -62,8 +65,10 @@ public:
     void Finish();
     bool HasValidOutput() const;
 
-    /** Opaque device handle for creating RHI resources (e.g. RenderTarget). Null if not initialized. */
-    void* GetDevice() const;
+    /** True when this pipeline owns the device (Initialize(Window&) was used). Application must run global teardown before Shutdown() when true. */
+    bool OwnsDevice() const;
+    /** Device handle for asset loading, other pipelines, etc. Null if not initialized. */
+    RenderDevice GetDevice() const;
 
     /** Native texture handle of pipeline output (after Render). For ImGui: use as ImTextureID. OpenGL: texture ID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;

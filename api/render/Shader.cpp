@@ -1,4 +1,5 @@
 #include "api/render/Shader.h"
+#include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Shader.h"
 
 namespace eyelib {
@@ -17,20 +18,32 @@ Shader::Shader(Shader&& other) noexcept = default;
 
 Shader& Shader::operator=(Shader&& other) noexcept = default;
 
-bool Shader::BuildFromSource(const std::string& vertexSrc, const std::string& fragmentSrc) {
-    return m_impl->shader->BuildFromSource(vertexSrc, fragmentSrc);
+bool Shader::BuildFromSource(RenderDevice device, const std::string& vertexSrc, const std::string& fragmentSrc) {
+    if (!device) return false;
+    return m_impl->shader->BuildFromSource(
+        static_cast<::eyelib::render::rhi::IDevice*>(device.Get()),
+        vertexSrc, fragmentSrc, ::eyelib::render::Mesh::GetVertexLayoutRHI());
 }
 
-bool Shader::LoadFromFile(const std::string& vertexPath, const std::string& fragmentPath) {
-    return m_impl->shader->LoadFromFile(vertexPath, fragmentPath);
+bool Shader::Load(RenderDevice device, const std::string& logicalName) {
+    if (!device || logicalName.empty()) return false;
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    return m_impl->shader->Load(rhiDevice, logicalName, ::eyelib::render::Mesh::GetVertexLayoutRHI());
+}
+
+bool Shader::LoadFromFile(RenderDevice device, const std::string& vertexPath, const std::string& fragmentPath) {
+    if (!device) return false;
+    return m_impl->shader->LoadFromFile(
+        static_cast<::eyelib::render::rhi::IDevice*>(device.Get()),
+        vertexPath, fragmentPath, ::eyelib::render::Mesh::GetVertexLayoutRHI());
 }
 
 void Shader::Destroy() {
     m_impl->shader->Destroy();
 }
 
-void Shader::Bind() const {
-    m_impl->shader->Bind();
+void Shader::Bind(RenderDevice device) const {
+    if (device) m_impl->shader->Bind(static_cast<::eyelib::render::rhi::IDevice*>(device.Get()));
 }
 
 void Shader::Unbind() const {

@@ -1,5 +1,7 @@
 #include "eyelib/geometry/operations/MeshSmooth.h"
 #include "eyelib/geometry/core/MeshTopology.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 #include <cmath>
@@ -8,97 +10,62 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshSmooth::Smooth(render::Mesh& mesh, const Selection& selection, 
+void MeshSmooth::Smooth(assets::EditableMesh& editable, const Selection& selection, 
                        float strength, int iterations, const Mask* mask) {
-    // Use Taubin (HC) smoothing by default
     if (iterations <= 0 || strength <= 0.0f) return;
     
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
-    // Build topology for neighbor queries
-    MeshTopology topology;
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     if (indices.empty()) return;
     
+    MeshTopology topology;
     topology.BuildFromIndices(vertices.size(), indices);
     if (!topology.IsValid()) return;
     
-    // Taubin parameters (industry-tested defaults)
-    // lambda: smoothing step (positive)
-    // mu: shape restoration step (negative, typically mu = -0.53 * lambda)
-    float lambda = strength * 0.5f;  // Scale strength to reasonable range
-    float mu = -0.53f * lambda;      // Standard Taubin ratio
+    float lambda = strength * 0.5f;
+    float mu = -0.53f * lambda;
     
-    SmoothTaubin(mesh, selection, lambda, mu, iterations, mask, topology);
+    SmoothTaubin(editable, selection, lambda, mu, iterations, mask, topology);
 }
 
-void MeshSmooth::SmoothUniform(render::Mesh& mesh, const Selection& selection,
+void MeshSmooth::SmoothUniform(assets::EditableMesh& editable, const Selection& selection,
                                float strength, int iterations, const Mask* mask) {
     if (iterations <= 0 || strength <= 0.0f) return;
     
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
-    // Build topology for neighbor queries
-    MeshTopology topology;
-    std::vector<uint32_t> indices;
-    if (mesh.GetIndexFormat() == render::IndexFormat::UInt32) {
-        indices = mesh.GetIndices32();
-    } else {
-        const auto& indices16 = mesh.GetIndices16();
-        indices.reserve(indices16.size());
-        for (uint16_t idx : indices16) {
-            indices.push_back(static_cast<uint32_t>(idx));
-        }
-    }
+    const auto& indices = editable.GetIndices();
     if (indices.empty()) return;
     
+    MeshTopology topology;
     topology.BuildFromIndices(vertices.size(), indices);
     if (!topology.IsValid()) return;
     
-    // Determine which vertices to smooth
     std::unordered_set<uint32_t> verticesToSmooth;
     if (selection.IsEmpty() || selection.GetType() != Selection::Type::Vertices) {
-        // Smooth all vertices
         for (size_t i = 0; i < vertices.size(); ++i) {
             verticesToSmooth.insert(static_cast<uint32_t>(i));
         }
     } else {
-        // Smooth only selected vertices
         for (uint32_t vid : selection.GetIDs()) {
-            if (vid < vertices.size()) {
-                verticesToSmooth.insert(vid);
-            }
+            if (vid < vertices.size()) verticesToSmooth.insert(vid);
         }
     }
     
-    // Uniform Laplacian smoothing iterations
     for (int iter = 0; iter < iterations; ++iter) {
         std::vector<math::Vec3> newPositions(vertices.size());
-        
-        // Copy current positions
         for (size_t i = 0; i < vertices.size(); ++i) {
             newPositions[i] = vertices[i].position;
         }
         
-        // Apply uniform Laplacian smoothing
         for (uint32_t vid : verticesToSmooth) {
             if (vid >= vertices.size()) continue;
             
             math::Vec3 currentPos = vertices[vid].position;
-            
-            // Compute uniform Laplacian (one-ring average)
-            math::Vec3 laplacian = ComputeUniformLaplacian(mesh, vid, topology, vertices.size());
+            math::Vec3 laplacian = ComputeUniformLaplacian(editable, vid, topology, vertices.size());
             
             // Apply strength
             float finalStrength = strength;
@@ -116,16 +83,15 @@ void MeshSmooth::SmoothUniform(render::Mesh& mesh, const Selection& selection,
         }
     }
     
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshSmooth::SmoothTaubin(render::Mesh& mesh, const Selection& selection,
+void MeshSmooth::SmoothTaubin(assets::EditableMesh& editable, const Selection& selection,
                               float lambda, float mu, int iterations,
                               const Mask* mask, const MeshTopology& topology) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to smooth
@@ -234,15 +200,14 @@ void MeshSmooth::SmoothTaubin(render::Mesh& mesh, const Selection& selection,
         }
     }
     
-    // Recalculate normals and update GPU
-    mesh.GenerateNormals();
-    mesh.InvalidateAABB();
-    mesh.UploadToGPU();
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshSmooth::ComputeUniformLaplacian(const render::Mesh& mesh, uint32_t vertexID,
+math::Vec3 MeshSmooth::ComputeUniformLaplacian(const assets::EditableMesh& editable, uint32_t vertexID,
                                                 const MeshTopology& topology, size_t vertexCount) {
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     if (vertexID >= vertices.size()) return math::Vec3(0.0f);
     
     math::Vec3 currentPos = vertices[vertexID].position;

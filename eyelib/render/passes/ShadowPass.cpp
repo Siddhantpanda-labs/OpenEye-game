@@ -3,7 +3,6 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Material.h"
 #include "eyelib/render/resources/MaterialInstance.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
 
@@ -16,18 +15,16 @@ constexpr size_t kMaxBones = 128;
 
 ShadowPass::ShadowPass() = default;
 
-void ShadowPass::EnsureDefaultShader() {
+void ShadowPass::EnsureDefaultShader(rhi::IDevice* device) {
     if (m_depthShader && m_depthShader->IsValid()) return;
-    if (!m_device) return;
-    rhi::IDevice* device = m_device;
+    if (!device) return;
     m_depthShader = std::make_shared<Shader>();
     m_depthShader->Load(device, "passes/shadow/shadow", Mesh::GetVertexLayoutRHI());
 }
 
-void ShadowPass::EnsureSkinnedShader() {
+void ShadowPass::EnsureSkinnedShader(rhi::IDevice* device) {
     if (m_depthSkinnedShader && m_depthSkinnedShader->IsValid()) return;
-    if (!m_device) return;
-    rhi::IDevice* device = m_device;
+    if (!device) return;
     m_depthSkinnedShader = std::make_shared<Shader>();
     m_depthSkinnedShader->Load(device, "passes/shadow/shadow_skinned", Mesh::GetVertexLayoutRHI());
 }
@@ -36,12 +33,29 @@ void ShadowPass::SetDepthShader(std::shared_ptr<Shader> shader) {
     m_depthShader = std::move(shader);
 }
 
+void ShadowPass::SetDepthSkinnedShader(std::shared_ptr<Shader> shader) {
+    m_depthSkinnedShader = std::move(shader);
+}
+
 void ShadowPass::ReloadShaders() {
     if (m_depthShader) m_depthShader->Reload();
     if (m_depthSkinnedShader) m_depthSkinnedShader->Reload();
 }
 
 void ShadowPass::Render(ShadowMap& shadowMap,
+                        const RenderContext& ctx,
+                        const std::vector<Drawable>& drawables,
+                        const math::Vec3& lightDir,
+                        const math::Mat4& view,
+                        const math::Mat4& projection,
+                        const math::Vec3& cameraPos,
+                        float nearPlane,
+                        float farPlane) {
+    Render(shadowMap, ctx.device, ctx.cmd, drawables, lightDir, view, projection, cameraPos, nearPlane, farPlane);
+}
+
+void ShadowPass::Render(ShadowMap& shadowMap,
+                        rhi::IDevice* device,
                         rhi::ICommandList* cmd,
                         const std::vector<Drawable>& drawables,
                         const math::Vec3& lightDir,
@@ -50,7 +64,7 @@ void ShadowPass::Render(ShadowMap& shadowMap,
                         const math::Vec3& cameraPos,
                         float nearPlane,
                         float farPlane) {
-    RenderDrawables(shadowMap, cmd,
+    RenderDrawables(shadowMap, device, cmd,
                    [&drawables](std::function<void(const Drawable&)> c) {
                        for (const auto& d : drawables) c(d);
                    },
@@ -58,6 +72,19 @@ void ShadowPass::Render(ShadowMap& shadowMap,
 }
 
 void ShadowPass::Render(ShadowMap& shadowMap,
+                        const RenderContext& ctx,
+                        DrawableFeed feedDrawables,
+                        const math::Vec3& lightDir,
+                        const math::Mat4& view,
+                        const math::Mat4& projection,
+                        const math::Vec3& cameraPos,
+                        float nearPlane,
+                        float farPlane) {
+    Render(shadowMap, ctx.device, ctx.cmd, std::move(feedDrawables), lightDir, view, projection, cameraPos, nearPlane, farPlane);
+}
+
+void ShadowPass::Render(ShadowMap& shadowMap,
+                        rhi::IDevice* device,
                         rhi::ICommandList* cmd,
                         DrawableFeed feedDrawables,
                         const math::Vec3& lightDir,
@@ -66,10 +93,11 @@ void ShadowPass::Render(ShadowMap& shadowMap,
                         const math::Vec3& cameraPos,
                         float nearPlane,
                         float farPlane) {
-    RenderDrawables(shadowMap, cmd, std::move(feedDrawables), lightDir, view, projection, cameraPos, nearPlane, farPlane);
+    RenderDrawables(shadowMap, device, cmd, std::move(feedDrawables), lightDir, view, projection, cameraPos, nearPlane, farPlane);
 }
 
 void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
+                                rhi::IDevice* device,
                                 rhi::ICommandList* cmd,
                                 DrawableFeed feedDrawables,
                                 const math::Vec3& lightDir,
@@ -78,8 +106,8 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
                                 const math::Vec3& cameraPos,
                                 float nearPlane,
                                 float farPlane) {
-    EnsureDefaultShader();
-    EnsureSkinnedShader();
+    EnsureDefaultShader(device);
+    EnsureSkinnedShader(device);
     bool depthValid = m_depthShader && m_depthShader->IsValid();
     bool skinnedValid = m_depthSkinnedShader && m_depthSkinnedShader->IsValid();
     rhi::IPipeline* pipe = m_depthShader ? m_depthShader->GetPipelineRHI() : nullptr;
@@ -112,7 +140,7 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
 
     const math::Mat4 lightMatrix = shadowMap.GetShadowMatrix();
 
-    feedDrawables([this, &shadowMap, cmd, lightMatrix](const Drawable& d) {
+    feedDrawables([this, &shadowMap, device, cmd, lightMatrix](const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
@@ -139,17 +167,17 @@ void ShadowPass::RenderDrawables(ShadowMap& shadowMap,
 
         if (bonePtr && boneCount > 0 && m_depthSkinnedShader->IsValid()) {
             boneCount = std::min(boneCount, kMaxBones);
-            m_depthSkinnedShader->Bind();
+            m_depthSkinnedShader->Bind(device);
             m_depthSkinnedShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             m_depthSkinnedShader->SetMat4("u_Model", d.transform);
             m_depthSkinnedShader->SetMat4Array("u_Bones", bonePtr, boneCount);
         } else {
-            m_depthShader->Bind();
+            m_depthShader->Bind(device);
             m_depthShader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             m_depthShader->SetMat4("u_Model", d.transform);
         }
-        d.mesh->Bind();
-        d.mesh->Draw();
+        d.mesh->Bind(device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device); }
         d.mesh->Unbind();
     });
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include <cstdint>
@@ -45,12 +46,14 @@ public:
     FrameGraph();
     ~FrameGraph();
 
-    /** Requires SetDevice() before Compile(). */
     FGTextureHandle CreateTexture(const FGTextureDesc& desc);
     /** Import existing RHI texture into the graph (no backend-native handle). */
     FGTextureHandle ImportTextureRHI(const std::string& name, rhi::ITexture* texture, unsigned width, unsigned height);
 
-    void SetDevice(rhi::IDevice* device) { m_device = device; }
+    /** Compile the graph. Device must be non-null (used for resource creation). */
+    void Compile(rhi::IDevice* device);
+    /** @deprecated Use Compile(device). */
+    void Compile() { if (m_device) Compile(m_device); }
 
     using ExecuteFunc = std::function<void(const FGPassResources&)>;
 
@@ -60,7 +63,8 @@ public:
                 bool sideEffect = false);
 
     void Clear();
-    void Compile();
+    /** Execute with context (uses context command list). */
+    void Execute(const RenderContext& ctx) { Execute(ctx.cmd); }
     /** Pass command list for pass timing (BeginQuery/EndQuery). If null, passes run without timing. */
     void Execute(rhi::ICommandList* cmd = nullptr);
 
@@ -115,11 +119,15 @@ private:
     void ReleaseTransient(rhi::ITexture* tex, const FGTransientKey& key);
     /** Compute alias slots for non-imported textures with same key; assign rhiTexture from pool per slot. */
     void ResolveAliasing();
+    /** Build DAG from read/write deps, topological sort into m_executionOrder; recompute texture firstUsePass/lastUsePass in execution order. On cycle, fall back to insertion order. */
+    void BuildDAGAndComputeExecutionOrder();
 
     rhi::IDevice* m_device = nullptr;
     std::vector<TextureNode> m_textures;
     std::vector<PassNode> m_passes;
     std::vector<PassInfo> m_passInfos;
+    /** DAG-derived execution order: indices into m_passes. Empty means use insertion order (e.g. before first Compile). */
+    std::vector<size_t> m_executionOrder;
     unsigned m_width = 0, m_height = 0;
     /** Transient texture pool: key -> free list. Textures are returned on Clear(), reused on next Compile(). */
     std::map<FGTransientKey, std::vector<rhi::ITexture*>> m_transientPool;

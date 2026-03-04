@@ -1,5 +1,4 @@
 #include "eyelib/fluids/FluidVolumeRenderer.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_inverse.hpp>
@@ -13,9 +12,8 @@ FluidVolumeRenderer::FluidVolumeRenderer() = default;
 FluidVolumeRenderer::~FluidVolumeRenderer() { Shutdown(); }
 
 bool FluidVolumeRenderer::Initialize() {
-    m_device = render::rhi::GetDefaultDevice();
     if (!m_device) {
-        core::Log::Error("FluidVolumeRenderer::Initialize: no RHI device (set default device first)");
+        core::Log::Error("FluidVolumeRenderer::Initialize: no RHI device (call SetDevice first)");
         return false;
     }
     CreateCube();
@@ -52,9 +50,7 @@ void FluidVolumeRenderer::SetViewport(unsigned int width, unsigned int height) {
 }
 
 void FluidVolumeRenderer::UpdateFromSimulation(const FluidSimulation& sim, float densityScale) {
-    if (!sim.IsInitialized()) return;
-    m_device = render::rhi::GetDefaultDevice();
-    if (!m_device) return;
+    if (!sim.IsInitialized() || !m_device) return;
     const auto desc = sim.GetDesc();
     const math::IVec3 res = desc.resolution;
     if (res.x <= 0 || res.y <= 0 || res.z <= 0) return;
@@ -99,8 +95,6 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
                                        const math::Vec3& volumeSize,
                                        render::rhi::IRenderTarget* target) {
     if (!sim.IsInitialized() || !m_device || !target) return;
-    m_device = render::rhi::GetDefaultDevice();
-    if (!m_device) return;
 
     EnsureRayDataTargets();
     EnsureShaders();
@@ -129,7 +123,7 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
     cmd->SetRenderTarget(m_rayDataBackRT);
     cmd->SetViewport(0, 0, w, h);
     cmd->ClearRenderTarget(m_rayDataBackRT, clearBlack);
-    m_shRayDataBack->Bind();
+    m_shRayDataBack->Bind(m_device);
     m_shRayDataBack->SetMat4("model", model);
     m_shRayDataBack->SetMat4("view", camera.view);
     m_shRayDataBack->SetMat4("projection", camera.projection);
@@ -141,7 +135,7 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
     cmd->SetRenderTarget(m_rayDataFrontRT);
     cmd->SetViewport(0, 0, w, h);
     cmd->ClearRenderTarget(m_rayDataFrontRT, clearBlack);
-    m_shRayDataFront->Bind();
+    m_shRayDataFront->Bind(m_device);
     m_shRayDataFront->SetMat4("model", model);
     m_shRayDataFront->SetMat4("view", camera.view);
     m_shRayDataFront->SetMat4("projection", camera.projection);
@@ -151,7 +145,7 @@ void FluidVolumeRenderer::RenderVolume(const FluidSimulation& sim,
     // Raymarch to target
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, target->GetWidth(), target->GetHeight());
-    m_shRaymarch->Bind();
+    m_shRaymarch->Bind(m_device);
     m_shRaymarch->SetMat4("model", model);
     m_shRaymarch->SetMat4("view", camera.view);
     m_shRaymarch->SetMat4("projection", camera.projection);
@@ -207,7 +201,6 @@ void FluidVolumeRenderer::EnsureRayDataTargets() {
 }
 
 void FluidVolumeRenderer::EnsureShaders() {
-    if (!m_device) m_device = render::rhi::GetDefaultDevice();
     if (!m_device) return;
 
     render::rhi::VertexLayout posOnly;
@@ -246,7 +239,6 @@ void FluidVolumeRenderer::CreateCube() {
         -1.0f,-1.0f, 1.0f, -1.0f,-1.0f,-1.0f, -1.0f, 1.0f,-1.0f,
         -1.0f,-1.0f, 1.0f, -1.0f, 1.0f,-1.0f, -1.0f, 1.0f, 1.0f
     };
-    if (!m_device) m_device = render::rhi::GetDefaultDevice();
     if (!m_device) return;
 
     render::rhi::BufferDesc bd;

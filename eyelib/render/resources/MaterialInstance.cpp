@@ -112,11 +112,11 @@ void MaterialInstance::ForEachMat4Array(std::function<void(const std::string&, c
     }
 }
 
-void MaterialInstance::Bind() const {
-    if (!m_base || !m_base->GetShader() || !m_base->GetShader()->IsValid()) return;
+void MaterialInstance::Bind(rhi::IDevice* device) const {
+    if (!device || !m_base || !m_base->GetShader() || !m_base->GetShader()->IsValid()) return;
 
     Shader* sh = m_base->GetShader().get();
-    sh->Bind();
+    sh->Bind(device);
 
     int unit = 0;
     m_base->ForEachTexture([this, sh, &unit](const std::string& name, const std::shared_ptr<Texture2D>& baseTex) {

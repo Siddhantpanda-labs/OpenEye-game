@@ -29,7 +29,92 @@
       "version": 1
     },
     "Collider": {
-      "items": [],
+      "items": [
+        {
+          "data": {
+            "center": [
+              0.0,
+              1.1399999856948853,
+              0.0
+            ],
+            "height": 2.5,
+            "radius": 0.23100000619888306,
+            "size": [
+              0.38999998569488525,
+              1.8600000143051147,
+              0.38999998569488525
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "center": [
+              -0.1599999964237213,
+              0.3400000035762787,
+              -0.6100000143051147
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              7.510000228881836,
+              0.7710000276565552,
+              6.389999866485596
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 8
+          }
+        },
+        {
+          "data": {
+            "center": [
+              3.880000114440918,
+              68.18000030517578,
+              0.0
+            ],
+            "height": 184.42999267578125,
+            "radius": 20.0,
+            "size": [
+              50.0,
+              110.0,
+              20.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        }
+      ],
       "version": 1
     },
     "Light": {
@@ -116,6 +201,13 @@
     "Name": {
       "items": [
         {
+          "data": "CobbleStones",
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
           "data": "Eyeball",
           "entity": {
             "generation": 0,
@@ -165,17 +257,10 @@
           }
         },
         {
-          "data": "Cube",
+          "data": "Cubeo",
           "entity": {
             "generation": 0,
             "index": 5
-          }
-        },
-        {
-          "data": "CobbleStones",
-          "entity": {
-            "generation": 0,
-            "index": 6
           }
         }
       ],
@@ -238,12 +323,98 @@
             "generation": 0,
             "index": 8
           }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
         }
       ],
       "version": 1
     },
     "RigidBody": {
-      "items": [],
+      "items": [
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.8200000524520874,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": false
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": false
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        }
+      ],
       "version": 1
     },
     "Script": {
@@ -259,20 +430,20 @@
         {
           "data": {
             "position": [
-              -27.031633377075195,
-              18.127700805664063,
-              45.423030853271484
+              -29.513565063476563,
+              33.55619812011719,
+              55.02750015258789
             ],
             "rotation": [
-              0.9796286821365356,
-              -0.20081758499145508,
-              0.0,
-              0.0
+              0.9721226692199707,
+              -0.19927898049354553,
+              -0.12103631347417831,
+              -0.02481166459619999
             ],
             "scale": [
-              1.0,
-              0.9999967813491821,
-              0.9999967813491821
+              0.9999999403953552,
+              0.9999967217445374,
+              0.9999968409538269
             ]
           },
           "entity": {
@@ -381,7 +552,7 @@
             "position": [
               -13.923891067504883,
               22.806394577026367,
-              -12.663285255432129
+              -7.552999973297119
             ],
             "rotation": [
               1.0,
@@ -404,8 +575,8 @@
           "data": {
             "position": [
               -20.01486587524414,
-              8.732999801635742,
-              37.965415954589844
+              18.864421844482422,
+              6.790781021118164
             ],
             "rotation": [
               1.0,
@@ -471,6 +642,30 @@
             "generation": 0,
             "index": 8
           }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              29.663841247558594,
+              -16.800222396850586
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              12.088798522949219,
+              12.088798522949219,
+              12.088798522949219
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
         }
       ],
       "version": 1
@@ -479,6 +674,38 @@
   "graph": {
     "hierarchy": [],
     "metadata": [
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Cubeo"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "CobbleStones"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 9
+        },
+        "flags": 0,
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "SpotLight"
+      },
       {
         "entity": {
           "generation": 0,
@@ -526,30 +753,6 @@
         },
         "flags": 0,
         "name": "Entity"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 6
-        },
-        "flags": 0,
-        "name": "CobbleStones"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 5
-        },
-        "flags": 0,
-        "name": "Cube"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 4
-        },
-        "flags": 0,
-        "name": "SpotLight"
       }
     ],
     "tags": []
@@ -557,6 +760,7 @@
   "registry": {
     "freeList": [],
     "generations": [
+      0,
       0,
       0,
       0,

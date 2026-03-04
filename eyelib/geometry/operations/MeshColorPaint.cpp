@@ -8,10 +8,10 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshColorPaint::PaintVertexColor(render::Mesh& mesh, const Selection& selection,
+void MeshColorPaint::PaintVertexColor(assets::EditableMesh& editable, const Selection& selection,
                                      const math::Vec4& color, float strength,
                                      float falloff, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to paint
@@ -31,7 +31,7 @@ void MeshColorPaint::PaintVertexColor(render::Mesh& mesh, const Selection& selec
     // Compute falloff center if needed
     math::Vec3 falloffCenter(0.0f);
     if (falloff > 0.0f && !selection.IsEmpty()) {
-        falloffCenter = ComputeSelectionCenter(mesh, selection);
+        falloffCenter = ComputeSelectionCenter(editable, selection);
     }
     
     // Paint vertices
@@ -63,12 +63,11 @@ void MeshColorPaint::PaintVertexColor(render::Mesh& mesh, const Selection& selec
         );
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshColorPaint::FillColor(render::Mesh& mesh, const Selection& selection,
+void MeshColorPaint::FillColor(assets::EditableMesh& editable, const Selection& selection,
                                const math::Vec4& color) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to fill
@@ -91,13 +90,12 @@ void MeshColorPaint::FillColor(render::Mesh& mesh, const Selection& selection,
         vertices[vid].color = color;
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshColorPaint::GradientColor(render::Mesh& mesh, const Selection& selection,
+void MeshColorPaint::GradientColor(assets::EditableMesh& editable, const Selection& selection,
                                   const math::Vec4& startColor, const math::Vec4& endColor,
                                   const math::Vec3& direction, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     math::Vec3 normalizedDir = glm::normalize(direction);
@@ -105,7 +103,8 @@ void MeshColorPaint::GradientColor(render::Mesh& mesh, const Selection& selectio
     // Compute bounds for gradient range
     math::AABB bounds;
     if (selection.IsEmpty() || selection.GetType() != Selection::Type::Vertices) {
-        bounds = mesh.GetAABB();
+        bounds = math::AABB(vertices.front().position, vertices.front().position);
+        for (size_t i = 1; i < vertices.size(); ++i) bounds.Expand(vertices[i].position);
     } else {
         for (uint32_t vid : selection.GetIDs()) {
             if (vid < vertices.size()) {
@@ -166,14 +165,13 @@ void MeshColorPaint::GradientColor(render::Mesh& mesh, const Selection& selectio
         );
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshColorPaint::NoisePaint(render::Mesh& mesh, const Selection& selection,
+void MeshColorPaint::NoisePaint(assets::EditableMesh& editable, const Selection& selection,
                                const math::Vec4& baseColor, const math::Vec4& noiseColor,
                                float scale, float strength, uint32_t seed,
                                const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Create noise field
@@ -222,13 +220,12 @@ void MeshColorPaint::NoisePaint(render::Mesh& mesh, const Selection& selection,
         );
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshColorPaint::BlendColors(render::Mesh& mesh, const Selection& selection,
+void MeshColorPaint::BlendColors(assets::EditableMesh& editable, const Selection& selection,
                                 const math::Vec4& blendColor, BlendMode blendMode,
                                 float strength, const Mask* mask) {
-    auto& vertices = mesh.GetVertices();
+    auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
     // Determine which vertices to blend
@@ -258,10 +255,9 @@ void MeshColorPaint::BlendColors(render::Mesh& mesh, const Selection& selection,
         currentColor = BlendColor(currentColor, blendColor, blendMode, finalStrength);
     }
     
-    mesh.UploadToGPU();
 }
 
-void MeshColorPaint::SampleColor(const render::Mesh& source, render::Mesh& target,
+void MeshColorPaint::SampleColor(const assets::EditableMesh& source, assets::EditableMesh& target,
                                 const Selection& sourceSelection, const Selection& targetSelection) {
     const auto& sourceVertices = source.GetVertices();
     auto& targetVertices = target.GetVertices();
@@ -300,11 +296,10 @@ void MeshColorPaint::SampleColor(const render::Mesh& source, render::Mesh& targe
         }
     }
     
-    target.UploadToGPU();
 }
 
-math::Vec3 MeshColorPaint::ComputeSelectionCenter(const render::Mesh& mesh, const Selection& selection) {
-    const auto& vertices = mesh.GetVertices();
+math::Vec3 MeshColorPaint::ComputeSelectionCenter(const assets::EditableMesh& editable, const Selection& selection) {
+    const auto& vertices = editable.GetVertices();
     math::Vec3 center(0.0f);
     size_t count = 0;
     

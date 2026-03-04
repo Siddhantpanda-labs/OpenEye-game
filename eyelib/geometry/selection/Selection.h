@@ -9,6 +9,7 @@
 #include <memory>
 
 namespace eyelib {
+namespace assets { class EditableMesh; }
 namespace render { class Mesh; }
 namespace geometry {
 
@@ -127,7 +128,7 @@ private:
  */
 class SelectionBuilder {
 public:
-    explicit SelectionBuilder(const render::Mesh& mesh);
+    explicit SelectionBuilder(const assets::EditableMesh& editable);
     ~SelectionBuilder() = default;
     
     SelectionBuilder(const SelectionBuilder&) = delete;
@@ -239,7 +240,7 @@ public:
     Selection Build() const;
 
 private:
-    const render::Mesh& m_mesh;
+    const assets::EditableMesh& m_mesh;
     Selection m_current;
     
     void EnsureType(Selection::Type type);

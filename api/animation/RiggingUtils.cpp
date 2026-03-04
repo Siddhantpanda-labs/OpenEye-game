@@ -14,12 +14,12 @@ void RiggingUtils::CalculateDistanceWeights(
     
     if (!mesh || !skeleton) return;
     
-    auto internalMesh = mesh->GetInternal();
+    auto* editable = mesh->GetEditableMesh();
     auto internalSkeleton = skeleton->GetInternal();
-    if (!internalMesh || !internalSkeleton) return;
+    if (!editable || !internalSkeleton) return;
     
     animation::RiggingUtils::CalculateDistanceWeights(
-        internalMesh, internalSkeleton, falloffDistance, power);
+        *editable, internalSkeleton, falloffDistance, power);
 }
 
 void RiggingUtils::AssignDistanceWeights(
@@ -69,12 +69,12 @@ void RiggingUtils::CalculateHeatDiffusionWeights(
     
     if (!mesh || !skeleton) return;
     
-    auto internalMesh = mesh->GetInternal();
+    auto* editable = mesh->GetEditableMesh();
     auto internalSkeleton = skeleton->GetInternal();
-    if (!internalMesh || !internalSkeleton) return;
+    if (!editable || !internalSkeleton) return;
     
     animation::RiggingUtils::CalculateHeatDiffusionWeights(
-        internalMesh, internalSkeleton, iterations);
+        *editable, internalSkeleton, iterations);
 }
 
 void RiggingUtils::AssignSingleBone(

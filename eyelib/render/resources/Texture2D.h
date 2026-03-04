@@ -4,6 +4,8 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/assets/AssetId.h"
 #include <cstddef>
+
+#include "eyelib/render/TextureDescriptor.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,10 +13,7 @@
 namespace eyelib {
 namespace render {
 
-/**
- * @brief 2D texture. Create, load from file/memory, bind, filter/wrap, mipmaps.
- * Uses platform FileSystem for LoadFromFile; OpenGL implementation in .cpp.
- */
+/** GPU texture instance (device-bound). CPU representation is TextureDescriptor (Phase 3 asset vs instance). */
 class Texture2D {
 public:
     Texture2D();
@@ -32,6 +31,10 @@ public:
 
     /** Load from file (uses platform::filesystem::ReadFile + stb_image). */
     bool LoadFromFile(const std::string& path, bool isSRGB = false, bool generateMipmaps = true);
+    /** CPU descriptor for last LoadFromFile (path + options). Empty path if never loaded from file. */
+    TextureDescriptor GetDescriptor() const;
+    /** Create GPU instance from CPU descriptor (loads from file). */
+    bool LoadFromDescriptor(rhi::IDevice* device, const TextureDescriptor& desc);
 
     /** Load from image bytes (PNG/JPEG etc. via stb_image). */
     bool LoadFromMemory(const uint8_t* data, size_t size, bool isSRGB = false, bool generateMipmaps = true);
@@ -84,6 +87,8 @@ private:
     rhi::ITexture* m_textureRHI = nullptr;
     bool m_wrappedRHI = false;  // true = WrapRHI, do not destroy
     std::vector<uint8_t> m_cpuData;
+    /** CPU reload state (Phase 2.6). GetDescriptor() returns it; LoadFromFile sets it; Reload uses LoadFromDescriptor(device, m_descriptor). */
+    TextureDescriptor m_descriptor;
 
     assets::AssetId m_assetId = assets::AssetId::Invalid();
 };

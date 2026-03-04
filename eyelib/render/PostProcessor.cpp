@@ -2,7 +2,6 @@
 #include "eyelib/render/GBuffer.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Shader.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
 
@@ -260,7 +259,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
             cmd->SetBlend(false);
-            m_ssaoBlendShader->Bind();
+            m_ssaoBlendShader->Bind(m_deviceRHI);
             m_ssaoBlendShader->SetInt("u_Scene", 0);
             m_ssaoBlendShader->SetInt("u_SSAO", 1);
             cmd->BindTexture(toneMappedTexture, 0);
@@ -283,7 +282,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
             cmd->SetBlend(false);
-            m_bloomCompositeShader->Bind();
+            m_bloomCompositeShader->Bind(m_deviceRHI);
             m_bloomCompositeShader->SetInt("u_SceneTexture", 0);
             m_bloomCompositeShader->SetInt("u_BloomTexture", 1);
             m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
@@ -351,7 +350,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
     cmd->ClearRenderTarget(m_outputRT, clearBlack);
 
-    m_toneMappingShader->Bind();
+    m_toneMappingShader->Bind(m_deviceRHI);
     m_toneMappingShader->SetInt("u_HDRTexture", 0);
     m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
     m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
@@ -376,7 +375,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
 
-    m_bloomExtractShader->Bind();
+    m_bloomExtractShader->Bind(m_deviceRHI);
     m_bloomExtractShader->SetInt("u_HDRTexture", 0);
     m_bloomExtractShader->SetFloat("u_Threshold", threshold);
     cmd->BindTexture(hdrTexture, 0);
@@ -395,7 +394,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     bool horizontal = true;
     rhi::ITexture* currentTexture = texture;
 
-    m_bloomBlurShader->Bind();
+    m_bloomBlurShader->Bind(m_deviceRHI);
     m_bloomBlurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_bloomBlurShader->SetFloat("u_Intensity", 1.0f);
 
@@ -431,7 +430,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     bool horizontal = true;
     rhi::ITexture* currentTexture = texture;
 
-    m_blurShader->Bind();
+    m_blurShader->Bind(m_deviceRHI);
     m_blurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_blurShader->SetFloat("u_Intensity", intensity);
 
@@ -468,7 +467,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
-    m_chromaticAberrationShader->Bind();
+    m_chromaticAberrationShader->Bind(m_deviceRHI);
     m_chromaticAberrationShader->SetInt("u_Texture", 0);
     m_chromaticAberrationShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_chromaticAberrationShader->SetFloat("u_Intensity", intensity);
@@ -490,7 +489,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
-    m_fxaaShader->Bind();
+    m_fxaaShader->Bind(m_deviceRHI);
     m_fxaaShader->SetInt("u_Texture", 0);
     m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     if (m_singleTexSet) {
@@ -517,7 +516,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
 
-    m_ssaoShader->Bind();
+    m_ssaoShader->Bind(m_deviceRHI);
     m_ssaoShader->SetInt("g_Position", 0);
     m_ssaoShader->SetInt("g_Normal", 1);
     m_ssaoShader->SetInt("g_Depth", 2);
@@ -549,7 +548,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
 
-    m_ssrShader->Bind();
+    m_ssrShader->Bind(m_deviceRHI);
     m_ssrShader->SetInt("g_Position", 0);
     m_ssrShader->SetInt("g_Normal", 1);
     m_ssrShader->SetInt("g_Albedo", 2);
@@ -587,7 +586,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
 
-    m_motionBlurShader->Bind();
+    m_motionBlurShader->Bind(m_deviceRHI);
     m_motionBlurShader->SetInt("u_Texture", 0);
     m_motionBlurShader->SetInt("g_Velocity", 1);
     m_motionBlurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
@@ -612,7 +611,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
-    m_vignetteShader->Bind();
+    m_vignetteShader->Bind(m_deviceRHI);
     m_vignetteShader->SetInt("u_Texture", 0);
     m_vignetteShader->SetFloat("u_Intensity", settings.vignetteIntensity);
     m_vignetteShader->SetFloat("u_Radius", settings.vignetteRadius);
@@ -635,7 +634,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->SetDepthWrite(false);
     cmd->SetCullFace(false);
     cmd->SetBlend(false);
-    m_filmGrainShader->Bind();
+    m_filmGrainShader->Bind(m_deviceRHI);
     m_filmGrainShader->SetInt("u_Texture", 0);
     m_filmGrainShader->SetFloat("u_Intensity", settings.filmGrainIntensity);
     m_filmGrainShader->SetFloat("u_Time", time);
@@ -661,7 +660,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             cmd->SetBlend(false);
             rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
             cmd->ClearRenderTarget(m_pingPongRT[0], clearBlack);
-            m_toneMappingShader->Bind();
+            m_toneMappingShader->Bind(m_deviceRHI);
             m_toneMappingShader->SetInt("u_HDRTexture", 0);
             m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
             m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
@@ -682,7 +681,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
             cmd->SetBlend(false);
-            m_fxaaShader->Bind();
+            m_fxaaShader->Bind(m_deviceRHI);
             m_fxaaShader->SetInt("u_Texture", 0);
             m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(res.width), static_cast<float>(res.height)));
             cmd->BindTexture(toneMappedTex, 0);

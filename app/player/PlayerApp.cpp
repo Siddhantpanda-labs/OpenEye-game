@@ -323,9 +323,12 @@ int RunPlayer(int argc, char** argv) {
             eyelib::api::core::Log::Error("Failed to initialize renderer or pipeline.");
             return static_cast<int>(ExitCode::RenderInitFailed);
         }
+        renderBridge.InitializeDefaultResources();
     }
 
     eyelib::api::AssetRegistry assetRegistry;
+    if (!options.headless && renderBridge.GetDevice())
+        assetRegistry.SetRenderDevice(renderBridge.GetDevice());
     const bool allowGpuAssets = !options.headless;
     const auto assetStats = BindAssets(world, options.assetRoots, assetRegistry, allowGpuAssets);
     if (assetStats.referenced > 0) {

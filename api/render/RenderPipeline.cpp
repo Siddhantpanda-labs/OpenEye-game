@@ -3,6 +3,8 @@
 #include "api/render/RenderTarget.h"
 #include "api/platform/Window.h"
 #include "api/core/All.h"
+#include "eyelib/render/2d/Primitives.h"
+#include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/RenderPipeline.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
@@ -50,6 +52,20 @@ bool RenderPipeline::Initialize(Window& window, uint32_t width, uint32_t height,
     return true;
 }
 
+bool RenderPipeline::InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height) {
+    if (!device) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice: device is null");
+        return false;
+    }
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    if (!m_impl->pipeline->Initialize(rhiDevice, width, height)) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice: pipeline init failed");
+        return false;
+    }
+    core::Log::Info("RenderPipeline::InitializeWithSharedDevice: success");
+    return true;
+}
+
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     m_impl->pipeline->Resize(width, height);
 }
@@ -58,8 +74,8 @@ void RenderPipeline::Resize(const RenderTarget& target) {
     Resize(target.GetWidth(), target.GetHeight());
 }
 
-void* RenderPipeline::GetDevice() const {
-    return m_impl->pipeline ? m_impl->pipeline->GetRHIDevice() : nullptr;
+RenderDevice RenderPipeline::GetDevice() const {
+    return m_impl->pipeline ? RenderDevice(m_impl->pipeline->GetRHIDevice()) : RenderDevice();
 }
 
 void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
@@ -101,7 +117,15 @@ void RenderPipeline::WaitAndDestroyFence(void* fence) {
 }
 
 void RenderPipeline::Shutdown() {
+    if (m_impl->pipeline->OwnsDevice()) {
+        ::eyelib::render::DebugDrawRenderer::Shutdown();
+        ::eyelib::render::Primitives::ShutdownStaticResources();
+    }
     m_impl->pipeline->Shutdown();
+}
+
+bool RenderPipeline::OwnsDevice() const {
+    return m_impl->pipeline && m_impl->pipeline->OwnsDevice();
 }
 
 void RenderPipeline::SetMode(Mode mode) {

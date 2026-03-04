@@ -1,6 +1,6 @@
 #include "api/render/GBuffer.h"
 #include "eyelib/render/GBuffer.h"
-#include "eyelib/render/rhi/RHIContext.h"
+#include "eyelib/render/rhi/RHI.h"
 
 namespace eyelib {
 namespace api {
@@ -8,6 +8,7 @@ namespace api {
 class GBuffer::Impl {
 public:
     std::shared_ptr<::eyelib::render::GBuffer> gbuffer = std::make_shared<::eyelib::render::GBuffer>();
+    ::eyelib::render::rhi::IDevice* device = nullptr;
 };
 
 GBuffer::GBuffer() : m_impl(std::make_unique<Impl>()) {}
@@ -26,15 +27,17 @@ void GBuffer::Resize(uint32_t width, uint32_t height) {
     m_impl->gbuffer->Resize(width, height);
 }
 
+void GBuffer::SetDevice(RenderDevice device) {
+    m_impl->device = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+}
+
 void GBuffer::BindForGeometryPass() {
-    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
-    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    auto* cmd = m_impl->device ? m_impl->device->GetImmediateCommandList() : nullptr;
     m_impl->gbuffer->BindForGeometryPass(cmd);
 }
 
 void GBuffer::BindForLightingPass() {
-    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
-    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    auto* cmd = m_impl->device ? m_impl->device->GetImmediateCommandList() : nullptr;
     m_impl->gbuffer->BindForLightingPass(cmd);
 }
 
@@ -43,8 +46,7 @@ void GBuffer::BindDepthTexture(uint32_t textureUnit) {
 }
 
 void GBuffer::Unbind() {
-    auto* device = ::eyelib::render::rhi::GetDefaultDevice();
-    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    auto* cmd = m_impl->device ? m_impl->device->GetImmediateCommandList() : nullptr;
     m_impl->gbuffer->Unbind(cmd);
 }
 

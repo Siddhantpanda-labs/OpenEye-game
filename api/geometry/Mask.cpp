@@ -16,16 +16,16 @@ public:
 };
 
 Mask Mask::Create(const Mesh& mesh) {
-    auto internalMesh = mesh.GetInternal();
-    auto internalMask = ::eyelib::geometry::Mask::Create(*internalMesh);
+    const auto* editable = mesh.GetEditableMesh();
+    auto internalMask = editable ? ::eyelib::geometry::Mask::Create(*editable) : ::eyelib::geometry::Mask();
     Mask result;
     result.m_impl = std::make_unique<Impl>(internalMask);
     return result;
 }
 
 Mask Mask::CreateFilled(const Mesh& mesh, float value) {
-    auto internalMesh = mesh.GetInternal();
-    auto internalMask = ::eyelib::geometry::Mask::CreateFilled(*internalMesh, value);
+    const auto* editable = mesh.GetEditableMesh();
+    auto internalMask = editable ? ::eyelib::geometry::Mask::CreateFilled(*editable, value) : ::eyelib::geometry::Mask();
     Mask result;
     result.m_impl = std::make_unique<Impl>(internalMask);
     return result;
@@ -68,8 +68,8 @@ void Mask::Fill(const Selection& selection, float value) {
 }
 
 void Mask::Paint(const Mesh& mesh, const Selection& selection, float value, float falloff) {
-    auto internalMesh = mesh.GetInternal();
-    m_impl->mask.Paint(*internalMesh, selection.GetInternal(), value, falloff);
+    const auto* editable = mesh.GetEditableMesh();
+    if (editable) m_impl->mask.Paint(*editable, selection.GetInternal(), value, falloff);
 }
 
 void Mask::Blend(const Mask& other, BlendMode mode) {

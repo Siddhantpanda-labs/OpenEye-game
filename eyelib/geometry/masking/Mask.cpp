@@ -1,5 +1,5 @@
 #include "eyelib/geometry/masking/Mask.h"
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include <algorithm>
 #include <cmath>
@@ -7,12 +7,12 @@
 namespace eyelib {
 namespace geometry {
 
-Mask Mask::Create(const render::Mesh& mesh) {
-    return Mask(mesh.GetVertexCount());
+Mask Mask::Create(const assets::EditableMesh& editable) {
+    return Mask(editable.GetVertices().size());
 }
 
-Mask Mask::CreateFilled(const render::Mesh& mesh, float value) {
-    Mask mask(mesh.GetVertexCount());
+Mask Mask::CreateFilled(const assets::EditableMesh& editable, float value) {
+    Mask mask(editable.GetVertices().size());
     mask.Fill(value);
     return mask;
 }
@@ -58,12 +58,12 @@ void Mask::Fill(const Selection& selection, float value) {
     }
 }
 
-void Mask::Paint(const render::Mesh& mesh, const Selection& selection, float value, float falloff) {
+void Mask::Paint(const assets::EditableMesh& editable, const Selection& selection, float value, float falloff) {
     if (selection.GetType() != Selection::Type::Vertices) {
         return;
     }
     
-    const auto& vertices = mesh.GetVertices();
+    const auto& vertices = editable.GetVertices();
     float clampedValue = ClampWeight(value);
     
     if (falloff <= 0.0f) {

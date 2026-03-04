@@ -34,6 +34,9 @@ public:
     AssetId RegisterAsset(const std::string& filePath, const std::string& assetType);
     AssetId LoadAsset(const std::string& filePath, AssetType type);
     AssetId LoadAsset(const AssetId& id);
+    /** CPU-only: register and store descriptor; no GPU creation. Use from binding phase so GPU is created on first Get*. */
+    AssetId LoadAssetDescriptorOnly(const std::string& filePath, AssetType type);
+    AssetId LoadAssetDescriptorOnly(const AssetId& id);
     void UnloadAsset(const AssetId& id);
     bool ReloadAsset(const AssetId& id);
 

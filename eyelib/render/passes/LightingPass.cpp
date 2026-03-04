@@ -1,7 +1,6 @@
 #include "eyelib/render/passes/LightingPass.h"
 #include "eyelib/render/ShadowMap.h"
 #include "eyelib/render/resources/Shader.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
@@ -25,10 +24,8 @@ LightingPass::LightingPass() = default;
 
 LightingPass::~LightingPass() = default;
 
-void LightingPass::EnsureDefaultShader() {
+void LightingPass::EnsureDefaultShader(rhi::IDevice* device) {
     if (m_lightingShader && m_lightingShader->IsValid()) return;
-    if (!m_device) return;
-    rhi::IDevice* device = m_device;
     if (!device) return;
     m_lightingShader = std::make_shared<Shader>();
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
@@ -50,6 +47,19 @@ static const int kMaxPointLights = 8;
 static const int kMaxSpotLights = 4;
 
 void LightingPass::Render(GBuffer& gbuffer,
+                          const RenderContext& ctx,
+                          const LightParams& light,
+                          const math::Mat4& view,
+                          const math::Mat4& projection,
+                          const math::Vec3& viewPos,
+                          ShadowMap* shadowMap,
+                          const std::vector<PointLight>* pointLights,
+                          const std::vector<SpotLight>* spotLights) {
+    Render(gbuffer, ctx.device, ctx.cmd, light, view, projection, viewPos, shadowMap, pointLights, spotLights);
+}
+
+void LightingPass::Render(GBuffer& gbuffer,
+                          rhi::IDevice* device,
                           rhi::ICommandList* cmd,
                           const LightParams& light,
                           const math::Mat4& view,
@@ -60,13 +70,13 @@ void LightingPass::Render(GBuffer& gbuffer,
                           const std::vector<SpotLight>* spotLights) {
     (void)view;
     (void)projection;
-    EnsureDefaultShader();
+    EnsureDefaultShader(device);
     if (!m_lightingShader || !m_lightingShader->IsValid()) return;
     rhi::IPipeline* pipe = m_lightingShader->GetPipelineRHI();
     if (pipe && !pipe->HasValidProgram()) return;
 
     gbuffer.BindForLightingPass(cmd);
-    m_lightingShader->Bind();
+    m_lightingShader->Bind(device);
     m_lightingShader->SetInt("u_Position", 0);
     m_lightingShader->SetInt("u_Normal", 1);
     m_lightingShader->SetInt("u_Albedo", 2);

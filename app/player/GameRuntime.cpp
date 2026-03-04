@@ -40,7 +40,8 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
                              const std::vector<std::string>& assetRoots,
                              eyelib::api::Window& window,
                              uint32_t width, uint32_t height,
-                             eyelib::render::RenderBackend backend) {
+                             eyelib::render::RenderBackend backend,
+                             eyelib::api::RenderDevice sharedDevice) {
     if (m_ready) {
         Shutdown();
     }
@@ -57,11 +58,23 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
 
     BindAssets(world, assetRoots, assetRegistry, true);
 
+    // Lifetime domain: use sharedDevice (editor device in editor) so GPU resources created during Play
+    // use the same device as AssetRegistry; no shorter-lifetime resources stored in longer-lifetime caches.
     m_render = std::make_unique<WorldRenderBridge>();
-    if (!m_render->Initialize(window, width, height, backend)) {
-        m_render.reset();
-        return false;
+    if (sharedDevice) {
+        if (!m_render->Initialize(sharedDevice.Get(), width, height)) {
+            m_render.reset();
+            return false;
+        }
+    } else {
+        if (!m_render->Initialize(window, width, height, backend)) {
+            m_render.reset();
+            return false;
+        }
     }
+    // Required: device must be set before any GetMesh/GetMaterial (BuildScene). Otherwise asset resolution returns null → invisible meshes.
+    assetRegistry.SetRenderDevice(m_render->GetDevice());
+    m_render->InitializeDefaultResources();
 
     world.FlushTransforms();
 

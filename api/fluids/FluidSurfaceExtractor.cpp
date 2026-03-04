@@ -13,8 +13,9 @@ public:
 FluidSurfaceExtractor::FluidSurfaceExtractor() : m_impl(new Impl()) {}
 FluidSurfaceExtractor::~FluidSurfaceExtractor() = default;
 
-std::shared_ptr<Mesh> FluidSurfaceExtractor::BuildMesh(const FluidSimulation& sim, float isoValue) const {
-    auto internalMesh = m_impl->extractor.BuildMesh(*sim.GetInternal(), isoValue);
+std::shared_ptr<Mesh> FluidSurfaceExtractor::BuildMesh(RenderDevice device, const FluidSimulation& sim, float isoValue) const {
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    auto internalMesh = m_impl->extractor.BuildMesh(rhiDevice, *sim.GetInternal(), isoValue);
     return Mesh::WrapInternal(internalMesh);
 }
 

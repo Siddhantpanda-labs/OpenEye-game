@@ -5,6 +5,7 @@
 #include "api/animation/AnimationClip.h"
 #include "api/animation/Skeleton.h"
 #include "api/render/Material.h"
+#include "api/render/RenderDevice.h"
 
 #include <cstddef>
 #include <memory>
@@ -27,6 +28,8 @@ public:
     bool RegisterAsset(const AssetId& id, const std::string& filePath, const std::string& assetType);
     AssetId RegisterAsset(const std::string& filePath, const std::string& assetType);
     AssetId LoadAsset(const std::string& filePath, AssetType type);
+    /** CPU-only: register and store descriptor; no GPU creation. Use from binding so GPU is created on first Get*. */
+    AssetId LoadAssetDescriptorOnly(const std::string& filePath, AssetType type);
     void UnloadAsset(const AssetId& id);
     bool ReloadAsset(const AssetId& id);
 
@@ -51,6 +54,16 @@ public:
     void RemoveDependency(const AssetId& asset, const AssetId& dependency);
     std::vector<AssetId> GetDependencies(const AssetId& id) const;
     std::vector<AssetId> GetDependents(const AssetId& id) const;
+
+    /** Set device used when loading GPU assets (shaders, textures). Call once at app/render startup. Sets ready-for-resolution. */
+    void SetRenderDevice(RenderDevice device);
+    /** Device currently used for GPU asset resolution. Null if not set. */
+    RenderDevice GetRenderDevice() const;
+    /** True after SetRenderDevice(non-null). False after Clear or device loss. GetMesh/GetMaterial assert ready before resolving. */
+    bool IsReadyForResolution() const;
+
+    /** Device loss: clear GPU instance caches; descriptors kept. Call before destroying the device. Then: pipeline->Shutdown(), destroy device, create new device, SetRenderDevice(newDevice), pipeline->Initialize(newDevice, w, h). */
+    void OnDeviceLost();
 
     bool SaveToFile(const std::string& filepath) const;
     bool LoadFromFile(const std::string& filepath);

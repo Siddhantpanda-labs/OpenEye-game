@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorContext.h"
+#include "api/render/RenderDevice.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
 
@@ -23,7 +24,7 @@ public:
                                 const std::vector<std::string>& assetRoots,
                                 eyelib::api::AssetRegistry& registry);
 
-    /** \a world used for scene-level skybox (world->GetSkyboxAssetId()). Can be null. */
+    /** \a world used for scene-level skybox (world->GetSkyboxAssetId()). Can be null. \a defaultMaterial when non-null is used for primitives/untextured meshes (avoids lazy creation in Build). */
     void Build(eyelib::api::RenderScene& scene,
                const eyelib::api::world::World::RenderSnapshot& snapshot,
                const EditorCamera& editorCamera,
@@ -31,12 +32,17 @@ public:
                uint32_t viewportHeight,
                const std::vector<std::string>& assetRoots,
                eyelib::api::AssetRegistry* assetRegistry,
+               std::shared_ptr<eyelib::api::Material> defaultMaterial = nullptr,
                const eyelib::api::world::World* world = nullptr,
                std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr);
 
     /** Load skybox cubemap from scene asset id (e.g. "Skybox/Citadella"). Returns null if missing or failed. */
     static std::shared_ptr<eyelib::api::TextureCube> LoadSkyboxFromAssetId(const std::string& assetId,
                                                                            const std::vector<std::string>& assetRoots);
+
+    /** Resolve material for scene (registry used only for GetId; GPU resolution via AssetManager). Use instead of registry->GetMaterial in Build. */
+    static std::shared_ptr<eyelib::api::Material> ResolveMaterialForScene(eyelib::api::AssetRegistry* registry,
+                                                                          const std::string& pathOrId);
 
 private:
     struct ModelEntry {
@@ -53,6 +59,7 @@ private:
     std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;
+    eyelib::api::RenderDevice m_renderDevice;
 };
 
 } // namespace openeye::editor

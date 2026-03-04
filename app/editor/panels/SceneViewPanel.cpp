@@ -256,7 +256,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         if (canRender) {
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
-            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, &ctx->world, &drawableToEntity);
+            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, &drawableToEntity);
             drawableCount = scene.opaqueCount;
             for (EntityId e : drawableToEntity)
                 entityIdsForOpaque.push_back(PackEntityId(e));

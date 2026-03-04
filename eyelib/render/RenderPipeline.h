@@ -46,8 +46,10 @@ public:
     RenderPipeline(const RenderPipeline&) = delete;
     RenderPipeline& operator=(const RenderPipeline&) = delete;
 
-    /** Initialize with injected RHI device (no backend include in this module). */
+    /** Initialize with owned RHI device (pipeline takes ownership). */
     bool Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height);
+    /** Initialize with shared RHI device (caller owns device; pipeline does not mutate global state). */
+    bool Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height);
     /** Resize pipeline (GBuffer, HDR RT, post-process). May only be called at frame boundary, before Render() for this frame. Never call mid-frame or while a command list is active. */
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
@@ -80,8 +82,10 @@ public:
     /** Returns true when the pipeline has a valid render target to present. */
     bool HasValidOutput() const;
 
-    rhi::IDevice* GetRHIDevice() { return m_device.get(); }
+    rhi::IDevice* GetRHIDevice() { return m_device; }
     rhi::ICommandList* GetRHICommandList() { return m_device ? m_device->GetImmediateCommandList() : nullptr; }
+    /** True when this pipeline owns the device (Initialize(unique_ptr) was used). Caller must run global teardown before Shutdown() when true. */
+    bool OwnsDevice() const { return m_ownedDevice != nullptr; }
 
     GBuffer* GetGBuffer();
     ShadowMap* GetShadowMap();
@@ -110,6 +114,8 @@ public:
     rhi::ITexture* GetCurrentFrameOutputColorTextureRHI() const;
 
 private:
+    /** Shared init after m_device is set (owned or shared). */
+    bool InitializeDeviceResources(uint32_t width, uint32_t height);
     void EnsureResources(uint32_t width, uint32_t height);
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
@@ -134,7 +140,8 @@ private:
     /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
     uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
 
-    std::unique_ptr<rhi::IDevice> m_device;
+    rhi::IDevice* m_device = nullptr;
+    std::unique_ptr<rhi::IDevice> m_ownedDevice;
     std::unique_ptr<GBuffer> m_gbuffer;
     std::unique_ptr<ShadowMap> m_shadowMap;
     std::unique_ptr<GBufferPass> m_gbufferPass;

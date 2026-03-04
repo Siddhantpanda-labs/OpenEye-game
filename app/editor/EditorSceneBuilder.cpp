@@ -1,6 +1,7 @@
 #include "EditorSceneBuilder.h"
 
 #include "api/assets/AssetRegistry.h"
+#include "api/assets/AssetId.h"
 #include "api/assets/AssetTypes.h"
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/geometry/Primitives.h"
@@ -14,6 +15,8 @@
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
 #include "api/render/TextureCube.h"
+#include "eyelib/assets/AssetManager.h"
+#include "eyelib/assets/AssetId.h"
 
 #include <cmath>
 #include <exception>
@@ -119,16 +122,32 @@ std::string EditorSceneBuilder::ResolveAssetPath(const std::string& id, const st
     return {};
 }
 
+std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialForScene(eyelib::api::AssetRegistry* registry,
+                                                                                     const std::string& pathOrId) {
+    if (!registry || pathOrId.empty()) return nullptr;
+    eyelib::api::AssetId apiId = eyelib::api::AssetId::FromString(pathOrId);
+    if (!apiId.IsValid())
+        apiId = registry->GetId(pathOrId);
+    if (!apiId.IsValid()) return nullptr;
+    eyelib::assets::AssetId coreId(apiId.high, apiId.low);
+    auto internal = eyelib::assets::AssetManager::Get().GetMaterial(coreId);
+    return internal ? eyelib::api::Material::WrapInternal(internal) : nullptr;
+}
+
 void EditorSceneBuilder::EnsureDefaultMaterial() {
     if (m_defaultMaterial) return;
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (shader->LoadFromFile("passes/forward/lit", "passes/forward/lit")) {
+    if (m_renderDevice && shader->Load(m_renderDevice, "passes/forward/lit")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
         m_defaultMaterial = mat;
         return;
     }
-    eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader (passes/forward/lit) missing; using empty material.");
+    if (!m_renderDevice) {
+        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader not loaded — render device is null (passes/forward/lit). SetRenderDevice before Build.");
+    } else {
+        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader failed to load (passes/forward/lit). Check assets/shaders/opengl/ and runtime assets. Using empty material.");
+    }
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
 
@@ -218,8 +237,11 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               uint32_t viewportHeight,
                               const std::vector<std::string>& assetRoots,
                               eyelib::api::AssetRegistry* assetRegistry,
+                              std::shared_ptr<eyelib::api::Material> defaultMaterial,
                               const eyelib::api::world::World* world,
                               std::vector<::eyelib::world::EntityId>* outDrawableToEntity) {
+    m_renderDevice = assetRegistry ? assetRegistry->GetRenderDevice() : eyelib::api::RenderDevice();
+    if (defaultMaterial) m_defaultMaterial = std::move(defaultMaterial);
     scene.opaqueStorage.clear();
     scene.transparentStorage.clear();
     scene.pointLightsStorage.clear();
@@ -316,7 +338,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         if (!renderable.materialAssetId.empty() && assetRegistry) {
             const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, assetRoots);
             if (!matResolved.empty()) {
-                if (auto mat = assetRegistry->GetMaterial(matResolved))
+                if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
                     drawable.material = mat;
             }
         }
@@ -349,7 +371,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         if (!renderer.materialAssetId.empty() && assetRegistry) {
             const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, assetRoots);
             if (!matResolved.empty()) {
-                if (auto mat = assetRegistry->GetMaterial(matResolved))
+                if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
                     drawable.material = mat;
             }
         }

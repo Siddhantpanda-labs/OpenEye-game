@@ -13,6 +13,11 @@ public:
     static AssetId LoadShaderByName(const std::string& shaderName);
     static AssetId LoadShader(const std::string& vertexPath, const std::string& fragmentPath);
     static AssetId LoadComputeShader(const std::string& computePath);
+
+    /** CPU-only: store ShaderDescriptor by name; no compile or GPU. For binding phase. */
+    static AssetId LoadShaderByNameDescriptorOnly(const std::string& shaderName);
+    /** CPU-only: store ShaderDescriptor by paths; no compile or GPU. For binding phase. */
+    static AssetId LoadShaderDescriptorOnly(const std::string& vertexPath, const std::string& fragmentPath);
 };
 
 } // namespace assets

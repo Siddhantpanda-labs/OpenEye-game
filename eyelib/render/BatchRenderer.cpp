@@ -8,15 +8,19 @@ namespace render {
 
 BatchRenderer::BatchRenderer() = default;
 
-BatchRenderer::BatchRenderer(BatchRenderer&& other) noexcept : m_batches(std::move(other.m_batches)), m_sorted(other.m_sorted) {
+BatchRenderer::BatchRenderer(BatchRenderer&& other) noexcept
+    : m_batches(std::move(other.m_batches)), m_sorted(other.m_sorted), m_device(other.m_device) {
     other.m_sorted = false;
+    other.m_device = nullptr;
 }
 
 BatchRenderer& BatchRenderer::operator=(BatchRenderer&& other) noexcept {
     if (this != &other) {
         m_batches = std::move(other.m_batches);
         m_sorted = other.m_sorted;
+        m_device = other.m_device;
         other.m_sorted = false;
+        other.m_device = nullptr;
     }
     return *this;
 }
@@ -46,17 +50,17 @@ void BatchRenderer::SortByMaterial() {
 }
 
 void BatchRenderer::Flush() {
-    if (m_batches.empty()) return;
+    if (m_batches.empty() || !m_device) return;
     SortByMaterial();
     for (const auto& e : m_batches) {
         if (!e.mesh || !e.material) continue;
-        e.material->Bind();
-        e.mesh->Bind();
+        e.material->Bind(m_device);
+        e.mesh->Bind(m_device);
         Shader* sh = e.material->GetShader().get();
         if (sh) {
             sh->SetMat4("u_Model", e.transform);
             sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
-            e.mesh->Draw();
+            { MeshHandle h = e.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
             e.mesh->Unbind();
             sh->Unbind();
         }

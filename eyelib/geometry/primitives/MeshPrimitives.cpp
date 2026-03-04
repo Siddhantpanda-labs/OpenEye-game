@@ -1,4 +1,6 @@
 #include "eyelib/geometry/primitives/MeshPrimitives.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/math/Types.h"
 #include <cmath>
 #include <algorithm>
@@ -6,9 +8,7 @@
 namespace eyelib {
 namespace geometry {
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateCube(float size) {
-    auto mesh = std::make_shared<render::Mesh>();
-    
+void MeshPrimitives::CreateCube(assets::EditableMesh& editable, float size) {
     std::vector<render::Vertex> vertices;
     std::vector<uint32_t> indices;
     
@@ -62,14 +62,14 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreateCube(float size) {
         20, 21, 22, 22, 23, 20
     };
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t cubeIndexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(cubeIndexCount), -1);
+    FinalizeEditable(editable);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateSphere(float radius, int segments, int rings) {
-    auto mesh = std::make_shared<render::Mesh>();
+void MeshPrimitives::CreateSphere(assets::EditableMesh& editable, float radius, int segments, int rings) {
     
     segments = std::max(3, segments);
     rings = std::max(2, rings);
@@ -130,15 +130,14 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreateSphere(float radius, int seg
         }
     }
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t indexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(indexCount), -1);
+    FinalizeEditable(editable);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreatePlane(float width, float height, int widthSegments, int heightSegments) {
-    auto mesh = std::make_shared<render::Mesh>();
-    
+void MeshPrimitives::CreatePlane(assets::EditableMesh& editable, float width, float height, int widthSegments, int heightSegments) {
     widthSegments = std::max(1, widthSegments);
     heightSegments = std::max(1, heightSegments);
     
@@ -185,19 +184,18 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreatePlane(float width, float hei
         }
     }
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t planeIndexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(planeIndexCount), -1);
+    FinalizeEditable(editable);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateQuad() {
-    return CreatePlane(1.0f, 1.0f, 1, 1);
+void MeshPrimitives::CreateQuad(assets::EditableMesh& editable) {
+    CreatePlane(editable, 1.0f, 1.0f, 1, 1);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateCylinder(float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
-    auto mesh = std::make_shared<render::Mesh>();
-    
+void MeshPrimitives::CreateCylinder(assets::EditableMesh& editable, float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
     segments = std::max(3, segments);
     rings = std::max(1, rings);
     
@@ -326,15 +324,14 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreateCylinder(float radius, float
         }
     }
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t sphereIndexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(sphereIndexCount), -1);
+    FinalizeEditable(editable);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateCone(float radius, float height, int segments, bool capBase) {
-    auto mesh = std::make_shared<render::Mesh>();
-    
+void MeshPrimitives::CreateCone(assets::EditableMesh& editable, float radius, float height, int segments, bool capBase) {
     segments = std::max(3, segments);
     
     std::vector<render::Vertex> vertices;
@@ -400,15 +397,14 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreateCone(float radius, float hei
         }
     }
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t coneIndexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(coneIndexCount), -1);
+    FinalizeEditable(editable);
 }
 
-std::shared_ptr<render::Mesh> MeshPrimitives::CreateTorus(float radius, float tubeRadius, int segments, int tubeSegments) {
-    auto mesh = std::make_shared<render::Mesh>();
-    
+void MeshPrimitives::CreateTorus(assets::EditableMesh& editable, float radius, float tubeRadius, int segments, int tubeSegments) {
     segments = std::max(3, segments);
     tubeSegments = std::max(3, tubeSegments);
     
@@ -459,26 +455,20 @@ std::shared_ptr<render::Mesh> MeshPrimitives::CreateTorus(float radius, float tu
         }
     }
     
-    mesh->SetVertices(vertices);
-    mesh->SetIndices(indices);
-    FinalizeMesh(mesh);
-    return mesh;
+    const size_t torusIndexCount = indices.size();
+    editable.SetVertices(std::move(vertices));
+    editable.SetIndices(std::move(indices));
+    editable.AddSubmesh(0, static_cast<uint32_t>(torusIndexCount), -1);
+    FinalizeEditable(editable);
 }
 
-void MeshPrimitives::FinalizeMesh(std::shared_ptr<render::Mesh> mesh) {
-    if (!mesh) return;
-    
-    // Generate normals if not already set
-    mesh->GenerateNormals();
-    
-    // Generate tangents
-    mesh->GenerateTangents();
-    
-    // Compute AABB
-    mesh->ComputeAABB();
-    
-    // Upload to GPU
-    mesh->UploadToGPU();
+void MeshPrimitives::FinalizeEditable(assets::EditableMesh& editable) {
+    auto desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateNormals(desc);
+    editable.SetVertices(std::move(desc.vertices));
+    desc = editable.GetDescriptor();
+    render::MeshDescriptorUtils::GenerateTangents(desc);
+    editable.SetVertices(std::move(desc.vertices));
 }
 
 } // namespace geometry

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace eyelib { namespace api { class RenderPipeline; class AssetRegistry; class Window; } }
+namespace eyelib { namespace api { class AssetRegistry; class Material; class RenderPipeline; class Window; } }
 namespace openeye { namespace player { class GameRuntime; } }
 
 namespace openeye::editor {
@@ -46,7 +46,13 @@ struct EditorContext {
 
     /** Phase 4b: scene view render. Set by EditorApp; null if not available. */
     eyelib::api::RenderPipeline* sceneViewPipeline = nullptr;
+    /** Game panel debug preview (when not playing). Set by EditorApp; null if not available. */
+    eyelib::api::RenderPipeline* gameViewPipeline = nullptr;
+    /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
+    ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;
+    /** Default material for primitives/untextured meshes. Set once at init (EditorApp) so scene builder does not lazy-create. */
+    std::shared_ptr<eyelib::api::Material> defaultMaterial;
     std::vector<std::string> assetRoots;
 
     /** Set by EditorApp; used for Game view (Play mode). */

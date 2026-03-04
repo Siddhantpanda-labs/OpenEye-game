@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
 #include <cstdint>
 #include <memory>
 
@@ -19,6 +20,9 @@ public:
 
     bool Initialize(uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
+
+    /** Set device for Bind* and Unbind. Call after creation when using this GBuffer (e.g. from pipeline). */
+    void SetDevice(RenderDevice device);
 
     void BindForGeometryPass();
     void BindForLightingPass();

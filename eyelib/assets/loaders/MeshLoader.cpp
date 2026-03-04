@@ -2,6 +2,8 @@
 
 #include "eyelib/assets/AssetManager.h"
 #include "eyelib/assets/EditableMesh.h"
+#include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/resources/Mesh.h"
 #include "eyelib/assets/MeshBinaryFormat.h"
 #include "eyelib/assets/OEAFormat.h"
 #include "eyelib/core/Log.h"
@@ -181,7 +183,7 @@ bool MeshLoader::ImportToCanonical(const std::string& interchangePath, const std
     return OEA::WriteMeshToFile(editable, outputPath);
 }
 
-std::shared_ptr<render::Mesh> MeshLoader::LoadFromCanonical(const std::string& path) {
+std::shared_ptr<render::Mesh> MeshLoader::LoadFromCanonical(render::rhi::IDevice* device, const std::string& path) {
     EditableMesh editable;
     if (OEA::ReadMeshFromFile(path, editable)) {
         // .oea container (type = Mesh)
@@ -190,11 +192,11 @@ std::shared_ptr<render::Mesh> MeshLoader::LoadFromCanonical(const std::string& p
     }
     editable.SetEditable(false); // runtime-only: no edit/save
     auto mesh = std::make_shared<render::Mesh>();
-    editable.BuildRenderMesh(*mesh);
+    if (device) editable.CopyToRenderMesh(*mesh, device);
     return mesh;
 }
 
-std::vector<std::shared_ptr<render::Mesh>> MeshLoader::LoadFromFile(const std::string& path) {
+std::vector<std::shared_ptr<render::Mesh>> MeshLoader::LoadFromFile(render::rhi::IDevice* device, const std::string& path) {
     Assimp::Importer imp;
     unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
     if (!IsGLTF(path)) {
@@ -212,12 +214,12 @@ std::vector<std::shared_ptr<render::Mesh>> MeshLoader::LoadFromFile(const std::s
     std::vector<std::shared_ptr<render::Mesh>> result;
     result.reserve(decoded.size());
     for (auto& d : decoded)
-        result.push_back(CreateFromDecoded(d));
+        result.push_back(CreateFromDecoded(device, d));
     return result;
 }
 
-std::shared_ptr<render::Mesh> MeshLoader::LoadSingle(const std::string& path) {
-    auto vec = LoadFromFile(path);
+std::shared_ptr<render::Mesh> MeshLoader::LoadSingle(render::rhi::IDevice* device, const std::string& path) {
+    auto vec = LoadFromFile(device, path);
     return vec.empty() ? nullptr : vec[0];
 }
 
@@ -245,22 +247,35 @@ void MeshLoader::LoadAsync(const std::string& path, std::function<void(std::vect
     });
 }
 
-std::shared_ptr<render::Mesh> MeshLoader::CreateFromDecoded(const DecodedMeshData& data) {
-    auto m = std::make_shared<render::Mesh>();
-    m->SetVertices(data.vertices);
-    m->SetIndices(data.indices);
+std::shared_ptr<render::Mesh> MeshLoader::CreateFromDecoded(render::rhi::IDevice* device, const DecodedMeshData& data) {
+    render::MeshDescriptor desc;
+    desc.vertices = data.vertices;
+    desc.indices32 = data.indices;
+    desc.indices16.clear();
+    desc.indexFormat = render::IndexFormat::UInt32;
     for (const auto& s : data.submeshes)
-        m->AddSubmesh(s.indexOffset, s.indexCount, s.materialIndex);
-    m->UploadToGPU();
-    return m;
+        desc.submeshes.push_back({ s.indexOffset, s.indexCount, s.materialIndex });
+    if (!device || desc.vertices.empty()) return nullptr;
+    return render::Mesh::Create(device, desc);
+}
+
+static render::MeshDescriptor DescriptorFromDecoded(const DecodedMeshData& d) {
+    render::MeshDescriptor desc;
+    desc.vertices = d.vertices;
+    desc.indices32 = d.indices;
+    desc.indices16.clear();
+    desc.indexFormat = render::IndexFormat::UInt32;
+    desc.submeshes = d.submeshes;
+    return desc;
 }
 
 AssetId MeshLoader::LoadMesh(const std::string& path) {
     auto& manager = AssetManager::Get();
     const AssetId id = manager.Registry().RegisterAsset(path, "Mesh");
+    render::rhi::IDevice* device = static_cast<render::rhi::IDevice*>(manager.GetRenderDevice());
     std::shared_ptr<render::Mesh> mesh;
     try {
-        mesh = LoadSingle(path);
+        mesh = LoadSingle(device, path);
     } catch (const std::exception& e) {
         core::Log::ErrorF("MeshLoader: failed to load '%s' - %s", path.c_str(), e.what());
         return id;
@@ -270,7 +285,40 @@ AssetId MeshLoader::LoadMesh(const std::string& path) {
     }
     if (mesh) {
         mesh->SetAssetId(id);
+        std::vector<DecodedMeshData> decoded = LoadToDecoded(path);
+        if (!decoded.empty())
+            manager.StoreMeshDescriptor(id, DescriptorFromDecoded(decoded[0]));
+        if (device)
+            manager.RegisterMeshInstance(id, device, mesh);
         manager.Cache().Store(id, mesh, "Mesh");
+    }
+    return id;
+}
+
+std::vector<DecodedMeshData> MeshLoader::LoadToDecoded(const std::string& path) {
+    Assimp::Importer imp;
+    unsigned flags = aiProcess_Triangulate | aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_LimitBoneWeights;
+    if (!IsGLTF(path)) {
+        flags |= aiProcess_FlipUVs;
+        flags |= aiProcess_JoinIdenticalVertices;
+    }
+    const aiScene* scene = imp.ReadFile(path, flags);
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode)
+        return {};
+    return ImportToDecoded(scene);
+}
+
+AssetId MeshLoader::LoadMeshDescriptorOnly(const std::string& path) {
+    auto& manager = AssetManager::Get();
+    const AssetId id = manager.Registry().RegisterAsset(path, "Mesh");
+    std::vector<DecodedMeshData> decoded;
+    try {
+        decoded = LoadToDecoded(path);
+    } catch (...) {
+        return id;
+    }
+    if (!decoded.empty()) {
+        manager.StoreMeshDescriptor(id, DescriptorFromDecoded(decoded[0]));
     }
     return id;
 }

@@ -1,5 +1,4 @@
 #include "eyelib/render/resources/TextureCube.h"
-#include "eyelib/render/rhi/RHIContext.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -134,7 +133,7 @@ bool TextureCube::LoadFromFiles(const std::string& px, const std::string& nx,
 }
 
 rhi::IDevice* TextureCube::GetDevice() const {
-    return m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : rhi::GetDefaultDevice());
+    return m_injectedDevice ? m_injectedDevice : m_deviceRHI;
 }
 
 void TextureCube::Bind(int slot) const {

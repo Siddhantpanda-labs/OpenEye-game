@@ -1,12 +1,13 @@
 #pragma once
 
-#include "eyelib/render/resources/Mesh.h"
+#include "eyelib/assets/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include <memory>
 
 namespace eyelib {
 namespace geometry {
+class MeshTopology;
 
 /**
  * @brief MeshDeform: Advanced deformation operations.
@@ -28,7 +29,7 @@ public:
      * @param amount Inflate amount (positive = outward)
      * @param mask Optional mask to control inflation strength per vertex
      */
-    static void Inflate(render::Mesh& mesh, const Selection& selection,
+    static void Inflate(assets::EditableMesh& editable, const Selection& selection,
                        float amount, const Mask* mask = nullptr);
     
     /**
@@ -41,7 +42,7 @@ public:
      * @param amount Deflate amount (positive = inward)
      * @param mask Optional mask to control deflation strength per vertex
      */
-    static void Deflate(render::Mesh& mesh, const Selection& selection,
+    static void Deflate(assets::EditableMesh& editable, const Selection& selection,
                        float amount, const Mask* mask = nullptr);
     
     /**
@@ -56,7 +57,7 @@ public:
      * @param iterations Number of relaxation iterations
      * @param mask Optional mask to control relaxation strength
      */
-    static void Relax(render::Mesh& mesh, const Selection& selection,
+    static void Relax(assets::EditableMesh& editable, const Selection& selection,
                      float strength = 0.1f, int iterations = 1,
                      const Mask* mask = nullptr);
     
@@ -74,7 +75,7 @@ public:
      * @param controlPoints Control point offsets (flattened 3D array: [x][y][z])
      * @param mask Optional mask to control deformation strength
      */
-    static void Lattice(render::Mesh& mesh, const Selection& selection,
+    static void Lattice(assets::EditableMesh& editable, const Selection& selection,
                        const math::Vec3& latticeOrigin, const math::Vec3& latticeSize,
                        const math::IVec3& latticeResolution,
                        const std::vector<math::Vec3>& controlPoints,
@@ -82,7 +83,7 @@ public:
 
 private:
     // Helper to compute vertex normal
-    static math::Vec3 ComputeVertexNormal(const render::Mesh& mesh, uint32_t vertexID,
+    static math::Vec3 ComputeVertexNormal(const assets::EditableMesh& editable, uint32_t vertexID,
                                           const MeshTopology& topology, size_t vertexCount);
     
     // Helper to compute lattice weight for a point

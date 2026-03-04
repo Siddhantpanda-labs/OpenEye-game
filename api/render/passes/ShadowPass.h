@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api/render/RenderDevice.h"
 #include "api/render/RenderScene.h"
 #include "api/render/ShadowMap.h"
 #include "api/render/Shader.h"
@@ -21,6 +22,7 @@ public:
     ShadowPass(ShadowPass&& other) noexcept;
     ShadowPass& operator=(ShadowPass&& other) noexcept;
 
+    void SetDevice(RenderDevice device) { m_device = device; }
     void SetDepthShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetDepthShader() const;
 
@@ -36,6 +38,7 @@ public:
 private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
+    RenderDevice m_device;
 };
 
 } // namespace api
