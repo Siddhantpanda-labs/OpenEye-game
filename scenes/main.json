@@ -34,15 +34,15 @@
           "data": {
             "center": [
               0.0,
-              1.1399999856948853,
+              1.139,
               0.0
             ],
             "height": 2.5,
-            "radius": 0.23100000619888306,
+            "radius": 0.231,
             "size": [
-              0.38999998569488525,
-              1.8600000143051147,
-              0.38999998569488525
+              0.3899,
+              1.860,
+              0.389
             ],
             "type": 0
           },
@@ -194,12 +194,45 @@
             "generation": 0,
             "index": 4
           }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              0.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 12.0,
+            "outerCone": 30.0,
+            "range": 20.0,
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
+          }
         }
       ],
       "version": 1
     },
     "Name": {
       "items": [
+        {
+          "data": "SpotLight",
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": "Cubeo",
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
         {
           "data": "CobbleStones",
           "entity": {
@@ -247,20 +280,6 @@
           "entity": {
             "generation": 0,
             "index": 3
-          }
-        },
-        {
-          "data": "SpotLight",
-          "entity": {
-            "generation": 0,
-            "index": 4
-          }
-        },
-        {
-          "data": "Cubeo",
-          "entity": {
-            "generation": 0,
-            "index": 5
           }
         }
       ],
@@ -432,18 +451,18 @@
             "position": [
               -29.513565063476563,
               33.55619812011719,
-              55.02750015258789
+              54.23997497558594
             ],
             "rotation": [
-              0.9721226692199707,
-              -0.19927898049354553,
-              -0.12103631347417831,
-              -0.02481166459619999
+              0.9772540926933289,
+              -0.17235904932022095,
+              -0.12031009048223495,
+              -0.028147000819444656
             ],
             "scale": [
-              0.9999999403953552,
-              0.9999967217445374,
-              0.9999968409538269
+              0.999998927116394,
+              1.0000131130218506,
+              1.0000163316726685
             ]
           },
           "entity": {
@@ -526,7 +545,7 @@
         {
           "data": {
             "position": [
-              -30.90387725830078,
+              -13.718002319335938,
               9.77781867980957,
               1.4797569513320923
             ],
@@ -551,7 +570,7 @@
           "data": {
             "position": [
               -13.923891067504883,
-              22.806394577026367,
+              29.937095642089844,
               -7.552999973297119
             ],
             "rotation": [
@@ -574,8 +593,8 @@
         {
           "data": {
             "position": [
-              -20.01486587524414,
-              18.864421844482422,
+              -19.603435516357422,
+              6.406654357910156,
               6.790781021118164
             ],
             "rotation": [
@@ -666,6 +685,30 @@
             "generation": 0,
             "index": 9
           }
+        },
+        {
+          "data": {
+            "position": [
+              -30.513002395629883,
+              4.089962959289551,
+              -10.729433059692383
+            ],
+            "rotation": [
+              0.7560901641845703,
+              -0.539698600769043,
+              0.30727288126945496,
+              0.20648610591888428
+            ],
+            "scale": [
+              0.9999999403953552,
+              1.0000011920928955,
+              1.0000025033950806
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
+          }
         }
       ],
       "version": 1
@@ -677,50 +720,10 @@
       {
         "entity": {
           "generation": 0,
-          "index": 5
+          "index": 0
         },
         "flags": 0,
-        "name": "Cubeo"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 6
-        },
-        "flags": 0,
-        "name": "CobbleStones"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 9
-        },
-        "flags": 0,
-        "name": "Cube1"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 4
-        },
-        "flags": 0,
-        "name": "SpotLight"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 3
-        },
-        "flags": 0,
-        "name": "PointLightRight"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 2
-        },
-        "flags": 0,
-        "name": "PointLightLeft"
+        "name": "MainCamera"
       },
       {
         "entity": {
@@ -733,10 +736,50 @@
       {
         "entity": {
           "generation": 0,
-          "index": 0
+          "index": 2
         },
         "flags": 0,
-        "name": "MainCamera"
+        "name": "PointLightLeft"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "PointLightRight"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "SpotLight"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 9
+        },
+        "flags": 0,
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "CobbleStones"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Cubeo"
       },
       {
         "entity": {
@@ -753,6 +796,14 @@
         },
         "flags": 0,
         "name": "Entity"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 10
+        },
+        "flags": 0,
+        "name": "Spot Light"
       }
     ],
     "tags": []
@@ -760,6 +811,7 @@
   "registry": {
     "freeList": [],
     "generations": [
+      0,
       0,
       0,
       0,

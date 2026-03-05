@@ -188,20 +188,21 @@ void WorldRenderBridge::EnsureDefaultMaterial() {
     }
     auto shader = std::make_shared<eyelib::api::Shader>();
     eyelib::api::RenderDevice device = m_pipeline.GetDevice();
-    if (device && shader->Load(device, "passes/forward/basic")) {
+    if (device && shader->Load(device, "passes/forward/lit")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
+        mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
         m_defaultShader = shader;
         m_defaultMaterial = mat;
         return;
     }
     if (!device) {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader not loaded — render device is null (passes/forward/basic). Primitives will be invisible.");
+        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader not loaded — render device is null (passes/forward/lit). Primitives will be invisible.");
     } else {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader failed to load (passes/forward/basic). Check assets/shaders/opengl/ and working directory. Using empty material; primitives will be invisible.");
+        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader failed to load (passes/forward/lit). Check assets/shaders/opengl/ and working directory. Using empty material; primitives will be invisible.");
     }
 #ifndef NDEBUG
-    assert(false && "WorldRenderBridge: default shader for primitives failed. Set device before scene build; ensure passes/forward/basic exists.");
+    assert(false && "WorldRenderBridge: default shader for primitives failed. Set device before scene build; ensure passes/forward/lit exists.");
 #endif
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
