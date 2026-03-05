@@ -115,14 +115,20 @@ public:
     /** Convenience API for Scene/Scripting: create entity and apply name. Returns InvalidEntity on failure. */
     EntityId CreateEntity(const std::string& name = "");
     bool DestroyEntity(EntityId entity);
-    bool SetParent(EntityId child, EntityId parent, bool preserveWorldTransform = false);
+    /** Reparent child under parent. Default preserveWorldTransform = true (child stays visually in place). */
+    bool SetParent(EntityId child, EntityId parent, bool preserveWorldTransform = true);
     EntityId GetParent(EntityId child) const;
     std::vector<EntityId> GetChildren(EntityId parent) const;
     bool IsAlive(EntityId entity) const;
     std::optional<std::string> GetName(EntityId entity) const;
     void SetName(EntityId entity, const std::string& name);
+    /** Local transform (relative to parent). */
     std::optional<math::Transform> GetTransform(EntityId entity) const;
     void SetTransform(EntityId entity, const math::Transform& t);
+    /** World transform (cached after TransformSystem run). Call FlushTransforms() first if hierarchy/transforms changed. */
+    std::optional<math::Transform> GetWorldTransform(EntityId entity) const;
+    /** Set world transform; converts to local and stores. Keeps world = parentWorld ⊗ local. */
+    void SetWorldTransform(EntityId entity, const math::Transform& worldTr);
 
 private:
     void CopyTransformsToPrevious();

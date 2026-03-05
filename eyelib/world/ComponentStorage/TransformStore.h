@@ -106,17 +106,24 @@ public:
     std::span<math::Quat> RotationsSpanMutable() { return m_rotations; }
     std::span<math::Vec3> ScalesSpanMutable() { return m_scales; }
 
-    /** World matrices (derived by TransformSystem). Same order as EntitiesSpan(). */
+    /** World TRS (derived by TransformSystem). Same order as EntitiesSpan(). */
+    std::span<const math::Vec3> WorldPositionsSpan() const { return m_worldPositions; }
+    std::span<const math::Quat> WorldRotationsSpan() const { return m_worldRotations; }
+    std::span<const math::Vec3> WorldScalesSpan() const { return m_worldScales; }
+
+    /** World matrices (derived from world TRS by TransformSystem). Same order as EntitiesSpan(). */
     std::span<const math::Mat4> WorldMatricesSpan() const { return m_worldMatrices; }
     std::span<math::Mat4> WorldMatricesSpanMutable() { return m_worldMatrices; }
 
-    /** Get world matrix for entity. Identity if not found. Valid after TransformSystem run. */
+    /** Get world matrix for entity. Derived from cached world TRS. Identity if not found. Valid after TransformSystem run. */
     math::Mat4 GetWorldMatrix(EntityId entity) const;
+    /** Get world TRS for entity from cache. Returns false if entity not in store. Valid after TransformSystem run. */
+    bool GetWorldTRS(EntityId entity, math::Vec3& outPos, math::Quat& outRot, math::Vec3& outScale) const;
     /** Get store index for entity. Returns static_cast<size_t>(-1) if not found. */
     size_t GetIndex(EntityId entity) const;
-    /** Set world matrix by index (used by TransformSystem). Index must be < Size(). */
-    void SetWorldMatrixByIndex(size_t index, const math::Mat4& world);
-    /** Set world-computed version after computing world matrix (dirty propagation). */
+    /** Set world TRS and derived matrix by index (used by TransformSystem). Index must be < Size(). */
+    void SetWorldTRSByIndex(size_t index, const math::Vec3& worldPos, const math::Quat& worldRot, const math::Vec3& worldScale);
+    /** Set world-computed version after computing world TRS (dirty propagation). */
     void SetWorldComputedVersionByIndex(size_t index, uint32_t version);
 
     /** Dirty propagation: call when local transform is set. */
@@ -133,6 +140,9 @@ public:
     std::vector<math::Vec3> m_positions;
     std::vector<math::Quat> m_rotations;
     std::vector<math::Vec3> m_scales;
+    std::vector<math::Vec3> m_worldPositions;
+    std::vector<math::Quat> m_worldRotations;
+    std::vector<math::Vec3> m_worldScales;
     std::vector<math::Mat4> m_worldMatrices;
     std::vector<uint32_t> m_localDirtyVersion;
     std::vector<uint32_t> m_worldComputedVersion;
@@ -154,9 +164,9 @@ inline math::Mat4 TransformRef::WorldMatrix() const { return m_store->m_worldMat
 inline const math::Mat4& TransformRef::WorldMatrixRef() const { return m_store->m_worldMatrices[m_index]; }
 inline TransformRef::operator math::Transform() const { return { Position(), Rotation(), Scale() }; }
 inline TransformRef& TransformRef::operator=(const math::Transform& t) {
-    Position() = t.position;
-    Rotation() = t.rotation;
-    Scale() = t.scale;
+    Position() = math::SanitizePosition(t.position);
+    Rotation() = math::SanitizeRotation(t.rotation);
+    Scale() = math::SanitizeScale(t.scale);
     return *this;
 }
 
@@ -165,12 +175,15 @@ inline TransformStore::Range::Iterator::value_type TransformStore::Range::Iterat
 }
 
 inline TransformRef TransformStore::Add(EntityId entity, const math::Transform& value) {
+    const math::Vec3 safePos = math::SanitizePosition(value.position);
+    const math::Quat safeRotation = math::SanitizeRotation(value.rotation);
+    const math::Vec3 safeScale = math::SanitizeScale(value.scale);
     auto it = m_entityToIndex.find(entity);
     if (it != m_entityToIndex.end()) {
         const size_t i = it->second;
-        m_positions[i] = value.position;
-        m_rotations[i] = value.rotation;
-        m_scales[i] = value.scale;
+        m_positions[i] = safePos;
+        m_rotations[i] = safeRotation;
+        m_scales[i] = safeScale;
         m_globalTransformVersion++;
         m_localDirtyVersion[i] = m_globalTransformVersion;
         m_cachedRef = TransformRef(this, i);
@@ -178,10 +191,13 @@ inline TransformRef TransformStore::Add(EntityId entity, const math::Transform& 
     }
     const size_t i = m_entityIds.size();
     m_entityIds.push_back(entity);
-    m_positions.push_back(value.position);
-    m_rotations.push_back(value.rotation);
-    m_scales.push_back(value.scale);
-    m_worldMatrices.push_back(math::Compose(value.position, value.rotation, value.scale));
+    m_positions.push_back(safePos);
+    m_rotations.push_back(safeRotation);
+    m_scales.push_back(safeScale);
+    m_worldPositions.push_back(safePos);
+    m_worldRotations.push_back(safeRotation);
+    m_worldScales.push_back(safeScale);
+    m_worldMatrices.push_back(math::Compose(safePos, safeRotation, safeScale));
     m_globalTransformVersion++;
     m_localDirtyVersion.push_back(m_globalTransformVersion);
     m_worldComputedVersion.push_back(0u);
@@ -202,6 +218,9 @@ inline void TransformStore::Remove(EntityId entity) {
         m_positions[i] = std::move(m_positions[last]);
         m_rotations[i] = std::move(m_rotations[last]);
         m_scales[i] = std::move(m_scales[last]);
+        m_worldPositions[i] = std::move(m_worldPositions[last]);
+        m_worldRotations[i] = std::move(m_worldRotations[last]);
+        m_worldScales[i] = std::move(m_worldScales[last]);
         m_worldMatrices[i] = std::move(m_worldMatrices[last]);
         m_localDirtyVersion[i] = std::move(m_localDirtyVersion[last]);
         m_worldComputedVersion[i] = std::move(m_worldComputedVersion[last]);
@@ -211,6 +230,9 @@ inline void TransformStore::Remove(EntityId entity) {
     m_positions.pop_back();
     m_rotations.pop_back();
     m_scales.pop_back();
+    m_worldPositions.pop_back();
+    m_worldRotations.pop_back();
+    m_worldScales.pop_back();
     m_worldMatrices.pop_back();
     m_localDirtyVersion.pop_back();
     m_worldComputedVersion.pop_back();
@@ -226,6 +248,9 @@ inline void TransformStore::Clear() {
     m_positions.clear();
     m_rotations.clear();
     m_scales.clear();
+    m_worldPositions.clear();
+    m_worldRotations.clear();
+    m_worldScales.clear();
     m_worldMatrices.clear();
     m_localDirtyVersion.clear();
     m_worldComputedVersion.clear();
@@ -238,13 +263,30 @@ inline math::Mat4 TransformStore::GetWorldMatrix(EntityId entity) const {
     return m_worldMatrices[it->second];
 }
 
+inline bool TransformStore::GetWorldTRS(EntityId entity, math::Vec3& outPos, math::Quat& outRot, math::Vec3& outScale) const {
+    auto it = m_entityToIndex.find(entity);
+    if (it == m_entityToIndex.end()) return false;
+    const size_t i = it->second;
+    outPos = m_worldPositions[i];
+    outRot = m_worldRotations[i];
+    outScale = m_worldScales[i];
+    return true;
+}
+
 inline size_t TransformStore::GetIndex(EntityId entity) const {
     auto it = m_entityToIndex.find(entity);
     return it == m_entityToIndex.end() ? static_cast<size_t>(-1) : it->second;
 }
 
-inline void TransformStore::SetWorldMatrixByIndex(size_t index, const math::Mat4& world) {
-    if (index < m_worldMatrices.size()) m_worldMatrices[index] = world;
+inline void TransformStore::SetWorldTRSByIndex(size_t index, const math::Vec3& worldPos, const math::Quat& worldRot, const math::Vec3& worldScale) {
+    if (index >= m_worldPositions.size()) return;
+    const math::Vec3 p = math::SanitizePosition(worldPos);
+    const math::Quat r = math::SanitizeRotation(worldRot);
+    const math::Vec3 s = math::SanitizeScale(worldScale);
+    m_worldPositions[index] = p;
+    m_worldRotations[index] = r;
+    m_worldScales[index] = s;
+    m_worldMatrices[index] = math::Compose(p, r, s);
 }
 
 inline void TransformStore::SetWorldComputedVersionByIndex(size_t index, uint32_t version) {

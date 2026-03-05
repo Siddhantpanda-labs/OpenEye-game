@@ -348,5 +348,19 @@ void World::SetTransform(EntityId entity, const math::Transform& t) {
     ApplyPendingCommands();
 }
 
+std::optional<math::Transform> World::GetWorldTransform(EntityId entity) const {
+    math::Vec3 pos, scale;
+    math::Quat rot;
+    if (!m_state.GetTransformStore().GetWorldTRS(entity, pos, rot, scale))
+        return std::nullopt;
+    return math::Transform{ pos, rot, scale };
+}
+
+void World::SetWorldTransform(EntityId entity, const math::Transform& worldTr) {
+    const components::Transform ct{ worldTr.position, worldTr.rotation, worldTr.scale };
+    SubmitCommand(std::make_unique<SetWorldTransformCommand>(entity, ct));
+    ApplyPendingCommands();
+}
+
 } // namespace world
 } // namespace eyelib

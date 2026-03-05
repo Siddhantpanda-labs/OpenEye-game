@@ -17,6 +17,7 @@
 #include <imgui.h>
 #include <cmath>
 #include <cstring>
+#include <optional>
 
 namespace openeye::editor::panels {
 
@@ -194,6 +195,21 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             return;
         }
 
+        // Top-right: gizmo space switch (Local = entity axes, World = world axes)
+        const float availX = ImGui::GetContentRegionAvail().x;
+        const float gizmoSwitchWidth = 140.f;
+        if (availX > gizmoSwitchWidth) {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + availX - gizmoSwitchWidth);
+        }
+        ImGui::PushID("scene_gizmo_space");
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Gizmo:");
+        ImGui::SameLine();
+        if (ImGui::Selectable("Local", ctx->sceneGizmoLocal, 0, ImVec2(50.f, 0.f))) ctx->sceneGizmoLocal = true;
+        ImGui::SameLine();
+        if (ImGui::Selectable("World", !ctx->sceneGizmoLocal, 0, ImVec2(50.f, 0.f))) ctx->sceneGizmoLocal = false;
+        ImGui::PopID();
+
         ImVec2 size = ImGui::GetContentRegionAvail();
         if (size.x < 64.0f) size.x = 64.0f;
         if (size.y < 64.0f) size.y = 64.0f;
@@ -338,14 +354,22 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             }
         }
 
-        // Gizmo for selected entity
+        // Gizmo for selected entity: operate in world space (Current_advice.md)
         EntityId sel = ctx->selectedEntity;
         if (sel != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(sel)) {
-            ::eyelib::world::components::Transform tr;
-            if (ctx->world.GetTransform(sel, tr)) {
+            std::optional<::eyelib::world::components::Transform> worldOpt;
+            if (canRender)
+                worldOpt = snapshot.GetTransform(sel);
+            else {
+                ctx->world.FlushTransforms();
+                ::eyelib::world::components::Transform worldTrTemp;
+                if (ctx->world.GetWorldTransform(sel, worldTrTemp)) worldOpt = worldTrTemp;
+            }
+            if (worldOpt) {
+                const auto& worldTr = *worldOpt;
                 Mat4 view, proj;
                 BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
-                Mat4 model = eyelib::math::Compose(tr.position, tr.rotation, tr.scale);
+                Mat4 model = eyelib::math::Compose(worldTr.position, worldTr.rotation, worldTr.scale);
                 float modelMatrix[16];
                 std::memcpy(modelMatrix, &model[0][0], sizeof(modelMatrix));
 
@@ -353,15 +377,16 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 ImGuizmo::SetRect(pos.x, pos.y, size.x, size.y);
 
                 const ImGuizmo::OPERATION op = ImGuizmo::OPERATION::UNIVERSAL;  // translate + rotate + scale in one
-                if (ImGuizmo::Manipulate(&view[0][0], &proj[0][0], op, ImGuizmo::MODE::WORLD, modelMatrix)) {
+                const ImGuizmo::MODE mode = ctx->sceneGizmoLocal ? ImGuizmo::MODE::LOCAL : ImGuizmo::MODE::WORLD;
+                if (ImGuizmo::Manipulate(&view[0][0], &proj[0][0], op, mode, modelMatrix)) {
                     Vec3 posOut, scaleOut;
                     Quat rotOut;
                     eyelib::math::Decompose(*reinterpret_cast<Mat4*>(modelMatrix), posOut, rotOut, scaleOut);
-                    ::eyelib::world::components::Transform trOut;
-                    trOut.position = posOut;
-                    trOut.rotation = rotOut;
-                    trOut.scale = scaleOut;
-                    ctx->world.SetTransform(sel, trOut);
+                    ::eyelib::world::components::Transform newWorld;
+                    newWorld.position = posOut;
+                    newWorld.rotation = rotOut;
+                    newWorld.scale = scaleOut;
+                    ctx->world.SetWorldTransform(sel, newWorld);
                 }
             }
         }

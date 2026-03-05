@@ -44,6 +44,9 @@ struct EditorContext {
     /** Camera for scene view (viewport). Independent of game camera. */
     EditorCamera editorCamera;
 
+    /** Scene view: when true, entity gizmo uses local space; when false, world space. */
+    bool sceneGizmoLocal = false;
+
     /** Phase 4b: scene view render. Set by EditorApp; null if not available. */
     eyelib::api::RenderPipeline* sceneViewPipeline = nullptr;
     /** Game panel debug preview (when not playing). Set by EditorApp; null if not available. */

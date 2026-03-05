@@ -109,7 +109,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
 
             ::eyelib::world::components::Transform camTransform;
             ::eyelib::world::components::Camera camComp;
-            if (ctx->world.GetTransform(ctx->gameViewDebugCamera, camTransform) &&
+            if (ctx->world.GetWorldTransform(ctx->gameViewDebugCamera, camTransform) &&
                 ctx->world.GetCamera(ctx->gameViewDebugCamera, camComp)) {
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;

@@ -107,7 +107,8 @@ private:
 
 class ReparentEntityCommand final : public Command {
 public:
-    ReparentEntityCommand(EntityId child, EntityId parent, bool preserveWorldTransform = false)
+    /** preserveWorldTransform = true (default): child keeps same world transform, then follows parent. */
+    ReparentEntityCommand(EntityId child, EntityId parent, bool preserveWorldTransform = true)
         : m_child(child), m_parent(parent), m_preserveWorld(preserveWorldTransform) {}
 
     bool Apply(WorldState& state) override {
@@ -116,23 +117,29 @@ public:
         if (m_preserveWorld && store.Has(m_child)) {
             if (const auto* ref = store.TryGet(m_child))
                 m_prevLocal = math::Transform{ ref->Position(), ref->Rotation(), ref->Scale() };
-            const math::Mat4 childWorld = store.GetWorldMatrix(m_child);
-            math::Mat4 newLocal;
-            if (m_parent == InvalidEntity) {
-                newLocal = childWorld;
-            } else if (store.Has(m_parent)) {
-                const math::Mat4 parentWorld = store.GetWorldMatrix(m_parent);
-                newLocal = math::Inverse(parentWorld) * childWorld;
+            const size_t childIdx = store.GetIndex(m_child);
+            const auto wPos = store.WorldPositionsSpan();
+            const auto wRot = store.WorldRotationsSpan();
+            const auto wScale = store.WorldScalesSpan();
+            math::Vec3 newLocalPos, newLocalScale;
+            math::Quat newLocalRot;
+            if (m_parent == InvalidEntity || !store.Has(m_parent)) {
+                newLocalPos = wPos[childIdx];
+                newLocalRot = wRot[childIdx];
+                newLocalScale = wScale[childIdx];
             } else {
-                newLocal = childWorld;
+                const size_t parentIdx = store.GetIndex(m_parent);
+                math::Vec3 invParentPos, invParentScale;
+                math::Quat invParentRot;
+                math::InverseTRS(wPos[parentIdx], wRot[parentIdx], wScale[parentIdx], invParentPos, invParentRot, invParentScale);
+                math::ComposeTRS(invParentPos, invParentRot, invParentScale,
+                                wPos[childIdx], wRot[childIdx], wScale[childIdx],
+                                newLocalPos, newLocalRot, newLocalScale);
             }
-            math::Vec3 pos, scale;
-            math::Quat rot;
-            math::Decompose(newLocal, pos, rot, scale);
             if (auto* ref = store.TryGet(m_child)) {
-                ref->Position() = pos;
-                ref->Rotation() = rot;
-                ref->Scale() = scale;
+                ref->Position() = math::SanitizePosition(newLocalPos);
+                ref->Rotation() = math::SanitizeRotation(newLocalRot);
+                ref->Scale() = math::SanitizeScale(newLocalScale);
             }
         }
         if (m_parent == InvalidEntity) {
@@ -293,12 +300,13 @@ public:
 
     bool Apply(WorldState& state) override {
         auto& store = state.GetTransformStore();
+        const math::Transform safe{ math::SanitizePosition(m_value.position), math::SanitizeRotation(m_value.rotation), math::SanitizeScale(m_value.scale) };
         if (auto* ref = store.TryGet(m_entity)) {
-            *ref = m_value;
+            *ref = safe;
             store.MarkLocalDirty(m_entity);
             return true;
         }
-        store.Add(m_entity, m_value);
+        store.Add(m_entity, safe);
         return true;
     }
 
@@ -313,6 +321,67 @@ public:
 private:
     EntityId m_entity;
     components::Transform m_value;
+};
+
+/** Sets entity's world transform by converting world → local and storing local. Keeps world = parentWorld ⊗ local. */
+class SetWorldTransformCommand final : public Command {
+public:
+    SetWorldTransformCommand(EntityId entity, const components::Transform& worldValue)
+        : m_entity(entity), m_worldValue(worldValue) {}
+
+    bool Apply(WorldState& state) override {
+        auto& store = state.GetTransformStore();
+        const auto& hierarchy = state.GraphHierarchy();
+        const math::Vec3 worldPos = math::SanitizePosition(m_worldValue.position);
+        const math::Quat worldRot = math::SanitizeRotation(m_worldValue.rotation);
+        const math::Vec3 worldScale = math::SanitizeScale(m_worldValue.scale);
+
+        const EntityId parent = hierarchy.GetParent(m_entity);
+        const bool hasParentInStore = parent != InvalidEntity && store.Has(parent);
+
+        math::Vec3 localPos, localScale;
+        math::Quat localRot;
+        if (!hasParentInStore) {
+            localPos = worldPos;
+            localRot = worldRot;
+            localScale = worldScale;
+        } else {
+            math::Vec3 parentWorldPos, parentWorldScale;
+            math::Quat parentWorldRot;
+            if (!store.GetWorldTRS(parent, parentWorldPos, parentWorldRot, parentWorldScale)) {
+                localPos = worldPos;
+                localRot = worldRot;
+                localScale = worldScale;
+            } else {
+                math::Vec3 invPos, invScale;
+                math::Quat invRot;
+                math::InverseTRS(parentWorldPos, parentWorldRot, parentWorldScale, invPos, invRot, invScale);
+                math::ComposeTRS(invPos, invRot, invScale, worldPos, worldRot, worldScale, localPos, localRot, localScale);
+                localPos = math::SanitizePosition(localPos);
+                localRot = math::SanitizeRotation(localRot);
+                localScale = math::SanitizeScale(localScale);
+            }
+        }
+
+        const math::Transform local{ localPos, localRot, localScale };
+        if (auto* ref = store.TryGet(m_entity)) {
+            *ref = local;
+            store.MarkLocalDirty(m_entity);
+            return true;
+        }
+        store.Add(m_entity, local);
+        return true;
+    }
+
+    bool Revert(WorldState& /*state*/) override { return false; }
+
+    std::string GetName() const override { return "SetWorldTransform"; }
+    EntityId GetEntity() const { return m_entity; }
+    const components::Transform& GetWorldValue() const { return m_worldValue; }
+
+private:
+    EntityId m_entity;
+    components::Transform m_worldValue;
 };
 
 class SetNameCommand final : public Command {

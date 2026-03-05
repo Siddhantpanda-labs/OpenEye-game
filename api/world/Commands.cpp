@@ -36,6 +36,10 @@ CommandPtr SetTransform(::eyelib::world::EntityId entity, const ::eyelib::world:
     return std::make_unique<::eyelib::world::SetTransformCommand>(entity, value);
 }
 
+CommandPtr SetWorldTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& worldValue) {
+    return std::make_unique<::eyelib::world::SetWorldTransformCommand>(entity, worldValue);
+}
+
 CommandPtr ClearMetadata(::eyelib::world::EntityId entity) {
     return std::make_unique<::eyelib::world::ClearMetadataCommand>(entity);
 }

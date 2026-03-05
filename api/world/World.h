@@ -97,8 +97,9 @@ public:
 
     ::eyelib::world::EntityId CreateEntity(const std::string& name = "");
     bool DestroyEntity(::eyelib::world::EntityId entity);
-    bool SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent, bool preserveWorldTransform = false);
-    void ClearParent(::eyelib::world::EntityId child, bool preserveWorldTransform = false);
+    /** Reparent child under parent. Default preserveWorldTransform = true (child stays visually in place, then follows parent). */
+    bool SetParent(::eyelib::world::EntityId child, ::eyelib::world::EntityId parent, bool preserveWorldTransform = true);
+    void ClearParent(::eyelib::world::EntityId child, bool preserveWorldTransform = true);
     ::eyelib::world::EntityId GetParent(::eyelib::world::EntityId child) const;
     std::vector<::eyelib::world::EntityId> GetChildren(::eyelib::world::EntityId parent) const;
     std::vector<::eyelib::world::EntityId> GetAncestors(::eyelib::world::EntityId entity) const;
@@ -224,8 +225,12 @@ public:
     std::vector<ScriptEntry> GetScripts() const;
 
     bool IsAlive(::eyelib::world::EntityId entity) const;
+    /** Local transform (relative to parent). */
     bool GetTransform(::eyelib::world::EntityId entity,
                       ::eyelib::world::components::Transform& out) const;
+    /** World transform. Call FlushTransforms() first if hierarchy/transforms changed. */
+    bool GetWorldTransform(::eyelib::world::EntityId entity,
+                          ::eyelib::world::components::Transform& out) const;
     bool GetCamera(::eyelib::world::EntityId entity,
                    ::eyelib::world::components::Camera& out) const;
     bool GetLight(::eyelib::world::EntityId entity,
@@ -257,6 +262,9 @@ public:
 
     bool SetTransform(::eyelib::world::EntityId entity,
                       const ::eyelib::world::components::Transform& transform);
+    /** Set world transform; converts to local and stores. Keeps hierarchy consistent. */
+    bool SetWorldTransform(::eyelib::world::EntityId entity,
+                          const ::eyelib::world::components::Transform& worldTransform);
     bool SetCamera(::eyelib::world::EntityId entity,
                    const ::eyelib::world::components::Camera& camera);
     bool SetLight(::eyelib::world::EntityId entity,

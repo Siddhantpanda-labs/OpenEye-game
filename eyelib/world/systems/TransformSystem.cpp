@@ -72,13 +72,23 @@ void TransformSystem::Update(WorldState& state) const {
 
         const auto* ref = store.TryGet(entity);
         if (!ref) continue;
-        const math::Mat4 local = math::Compose(ref->Position(), ref->Rotation(), ref->Scale());
-        math::Mat4 world;
-        if (parent == InvalidEntity || transformEntities.count(parent) == 0)
-            world = local;
-        else
-            world = store.GetWorldMatrix(parent) * local;
-        store.SetWorldMatrixByIndex(index, world);
+        const math::Vec3 localPos = ref->Position();
+        const math::Quat localRot = ref->Rotation();
+        const math::Vec3 localScale = ref->Scale();
+        math::Vec3 worldPos, worldScale;
+        math::Quat worldRot;
+        if (parent == InvalidEntity || transformEntities.count(parent) == 0) {
+            worldPos = localPos;
+            worldRot = localRot;
+            worldScale = localScale;
+        } else {
+            const auto wPos = store.WorldPositionsSpan();
+            const auto wRot = store.WorldRotationsSpan();
+            const auto wScale = store.WorldScalesSpan();
+            math::ComposeTRS(wPos[parentIndex], wRot[parentIndex], wScale[parentIndex],
+                            localPos, localRot, localScale, worldPos, worldRot, worldScale);
+        }
+        store.SetWorldTRSByIndex(index, worldPos, worldRot, worldScale);
         store.SetWorldComputedVersionByIndex(index, localVer);
         m_updatedThisPass[index] = 1;
     }

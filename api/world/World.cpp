@@ -752,6 +752,21 @@ bool World::GetTransform(::eyelib::world::EntityId entity,
     return true;
 }
 
+bool World::GetWorldTransform(::eyelib::world::EntityId entity,
+                              ::eyelib::world::components::Transform& out) const {
+    if (!m_impl) {
+        return false;
+    }
+    const auto opt = m_impl->world.GetWorldTransform(entity);
+    if (!opt) {
+        return false;
+    }
+    out.position = opt->position;
+    out.rotation = opt->rotation;
+    out.scale = opt->scale;
+    return true;
+}
+
 bool World::GetCamera(::eyelib::world::EntityId entity,
                       ::eyelib::world::components::Camera& out) const {
     if (!m_impl) {
@@ -968,6 +983,12 @@ bool World::SetTransform(::eyelib::world::EntityId entity,
         return false;
     }
     return ApplyCommandSync(eyelib::api::world::SetTransform(entity, transform)).success;
+}
+
+bool World::SetWorldTransform(::eyelib::world::EntityId entity,
+                              const ::eyelib::world::components::Transform& worldTransform) {
+    if (!m_impl) return false;
+    return ApplyCommandSync(eyelib::api::world::SetWorldTransform(entity, worldTransform)).success;
 }
 
 bool World::SetCamera(::eyelib::world::EntityId entity,
