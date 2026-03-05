@@ -5,7 +5,7 @@
 #include "api/platform/All.h"
 #include "api/core/All.h"
 #include "api/render/RenderDevice.h"
-#include "eyelib/render/RenderBackend.h"
+#include "api/render/RenderBackend.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -115,7 +115,7 @@ void ShowMenuBar(EditorContext& ctx) {
                 ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
                 eyelib::api::RenderDevice editorDevice = ctx.sceneViewPipeline ? ctx.sceneViewPipeline->GetDevice() : eyelib::api::RenderDevice();
                 if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
-                                               *ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL, editorDevice)) {
+                                               ctx.window, 256, 256, eyelib::render::RenderBackend::OpenGL, editorDevice, nullptr)) {
                     ctx.isPlaying = true;
                 } else {
                     ctx.gameRuntime.reset();

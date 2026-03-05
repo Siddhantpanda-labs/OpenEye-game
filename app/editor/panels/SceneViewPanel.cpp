@@ -9,9 +9,6 @@
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 
-#include "eyelib/world/components/Collider.h"
-#include "eyelib/world/components/Light.h"
-
 #include "ImGuizmo.h"
 
 #include <imgui.h>

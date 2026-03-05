@@ -2,8 +2,7 @@
 
 #include "PlayerConfig.h"
 #include "api/world/All.h"
-#include "eyelib/audio/AudioDevice.h"
-#include "eyelib/audio/AudioListener.h"
+#include "api/audio/AudioBackend.h"
 
 namespace openeye::player {
 

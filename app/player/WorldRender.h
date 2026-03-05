@@ -83,6 +83,9 @@ public:
     /** Create default and skinned materials once after Initialize(). Call before BindAssets/scene build so primitives are visible. No-op if already created or headless. */
     void InitializeDefaultResources();
 
+    /** Reload pipeline shaders (e.g. after ShaderWatcher copy). */
+    void ReloadShaders();
+
 private:
     struct ModelEntry {
         std::shared_ptr<eyelib::api::Mesh> mesh;

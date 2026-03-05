@@ -7,7 +7,7 @@
 #include "WorldScripting.h"
 #include "WorldAudio.h"
 
-#include "eyelib/render/RenderBackend.h"
+#include "api/render/RenderBackend.h"
 
 namespace openeye::player {
 
@@ -38,10 +38,11 @@ GameRuntime::~GameRuntime() {
 bool GameRuntime::Initialize(eyelib::api::world::World& world,
                              eyelib::api::AssetRegistry& assetRegistry,
                              const std::vector<std::string>& assetRoots,
-                             eyelib::api::Window& window,
+                             eyelib::api::Window* window,
                              uint32_t width, uint32_t height,
                              eyelib::render::RenderBackend backend,
-                             eyelib::api::RenderDevice sharedDevice) {
+                             eyelib::api::RenderDevice sharedDevice,
+                             const RuntimeOptions* options) {
     if (m_ready) {
         Shutdown();
     }
@@ -51,30 +52,32 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
     m_assetRoots = assetRoots;
     m_options = {};
     m_options.assetRoots = assetRoots;
-    m_options.fixedTimestep = 0.0f;
-    m_options.maxSubsteps = 8;
+    m_options.fixedTimestep = options ? options->fixedTimestep : 0.0f;
+    m_options.maxSubsteps = options ? options->maxSubsteps : 8;
     m_options.overlay = false;
     m_options.stats = false;
 
-    BindAssets(world, assetRoots, assetRegistry, true);
+    const bool headless = (window == nullptr);
+    const bool allowGpuAssets = !headless;
+    m_assetBindStats = BindAssets(world, assetRoots, assetRegistry, allowGpuAssets);
 
-    // Lifetime domain: use sharedDevice (editor device in editor) so GPU resources created during Play
-    // use the same device as AssetRegistry; no shorter-lifetime resources stored in longer-lifetime caches.
-    m_render = std::make_unique<WorldRenderBridge>();
-    if (sharedDevice) {
-        if (!m_render->Initialize(sharedDevice.Get(), width, height)) {
-            m_render.reset();
-            return false;
+    if (!headless) {
+        // Lifetime domain: use sharedDevice (editor) when valid; otherwise create device from window.
+        m_render = std::make_unique<WorldRenderBridge>();
+        if (sharedDevice) {
+            if (!m_render->Initialize(sharedDevice.Get(), width, height)) {
+                m_render.reset();
+                return false;
+            }
+        } else {
+            if (!m_render->Initialize(*window, width, height, backend)) {
+                m_render.reset();
+                return false;
+            }
         }
-    } else {
-        if (!m_render->Initialize(window, width, height, backend)) {
-            m_render.reset();
-            return false;
-        }
+        assetRegistry.SetRenderDevice(m_render->GetDevice());
+        m_render->InitializeDefaultResources();
     }
-    // Required: device must be set before any GetMesh/GetMaterial (BuildScene). Otherwise asset resolution returns null → invisible meshes.
-    assetRegistry.SetRenderDevice(m_render->GetDevice());
-    m_render->InitializeDefaultResources();
 
     world.FlushTransforms();
 
@@ -151,7 +154,8 @@ void GameRuntime::Tick(float deltaSeconds) {
 }
 
 void* GameRuntime::Render(uint32_t width, uint32_t height) {
-    if (!m_ready || !m_world || !m_assetRegistry || !m_render) return nullptr;
+    if (!m_ready || !m_render) return nullptr;
+    if (!m_world || !m_assetRegistry) return nullptr;
 
     if (width != m_width || height != m_height) {
         m_render->ApplyResize(width, height);
@@ -168,6 +172,12 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
 
 void* GameRuntime::GetOutputColorTextureNativeHandle() const {
     return m_render ? m_render->GetOutputColorTextureNativeHandle() : nullptr;
+}
+
+void GameRuntime::ReloadShaders() {
+    if (m_render) {
+        m_render->ReloadShaders();
+    }
 }
 
 } // namespace openeye::player

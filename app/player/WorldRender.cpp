@@ -11,8 +11,7 @@
 #include "api/render/Material.h"
 #include "api/render/RenderScene.h"
 #include "WorldAnimation.h"
-#include "eyelib/assets/AssetManager.h"
-#include "eyelib/assets/AssetId.h"
+#include "api/assets/AssetManager.h"
 
 #include <cassert>
 #include <cmath>
@@ -178,6 +177,10 @@ void WorldRenderBridge::InitializeDefaultResources() {
     if (m_builtinManager) m_builtinManager->InitializeDefaultResources();
     EnsureDefaultMaterial();
     EnsureSkinnedMaterial();
+}
+
+void WorldRenderBridge::ReloadShaders() {
+    m_pipeline.ReloadShaders();
 }
 
 void WorldRenderBridge::EnsureDefaultMaterial() {

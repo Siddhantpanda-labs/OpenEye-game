@@ -6,8 +6,6 @@
 #include "api/math/TransformUtils.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
-#include "eyelib/world/components/Camera.h"
-#include "eyelib/world/components/Transform.h"
 
 #include <imgui.h>
 #include <cmath>

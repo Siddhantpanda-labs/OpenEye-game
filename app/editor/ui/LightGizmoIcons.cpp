@@ -1,7 +1,6 @@
 #include "LightGizmoIcons.h"
 #include "api/platform/All.h"
-
-#include "eyelib/world/components/Light.h"
+#include "api/world/All.h"
 
 #include <glad/glad.h>
 #include <cstring>

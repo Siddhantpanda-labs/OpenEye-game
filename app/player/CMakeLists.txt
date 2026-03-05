@@ -63,8 +63,6 @@ if(OPENEYE_BUILD_PLAYER)
         ${CMAKE_CURRENT_SOURCE_DIR}/PlayerApp.h
         ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrameSync.h
     )
 
     add_executable(OpenEyePlayer ${PLAYER_SOURCES})

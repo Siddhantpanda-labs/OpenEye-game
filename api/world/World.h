@@ -301,7 +301,8 @@ public:
 
     /** Scene-level skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
     std::string GetSkyboxAssetId() const;
-    void SetSkyboxAssetId(const std::string& assetId);
+    /** Set skybox asset id via command (mutation layer). Returns false if command application failed. */
+    bool SetSkyboxAssetId(const std::string& assetId);
 
     Observation GetObservation() const;
 

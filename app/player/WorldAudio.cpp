@@ -1,7 +1,7 @@
 #include "WorldAudio.h"
 
 #include "api/world/All.h"
-#include "eyelib/math/Types.h"
+#include "api/math/All.h"
 
 #include <glm/glm.hpp>
 

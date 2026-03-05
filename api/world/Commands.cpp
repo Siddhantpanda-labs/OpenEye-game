@@ -40,6 +40,10 @@ CommandPtr SetWorldTransform(::eyelib::world::EntityId entity, const ::eyelib::w
     return std::make_unique<::eyelib::world::SetWorldTransformCommand>(entity, worldValue);
 }
 
+CommandPtr SetSkyboxAssetId(const std::string& assetId) {
+    return std::make_unique<::eyelib::world::SetSkyboxAssetIdCommand>(assetId);
+}
+
 CommandPtr ClearMetadata(::eyelib::world::EntityId entity) {
     return std::make_unique<::eyelib::world::ClearMetadataCommand>(entity);
 }

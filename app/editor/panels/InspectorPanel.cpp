@@ -6,9 +6,6 @@
 #include "api/world/All.h"
 #include "api/world/Commands.h"
 
-#include "eyelib/world/components/Collider.h"
-#include "eyelib/world/components/RigidBody.h"
-
 #include <imgui.h>
 #include <json.hpp>
 #include <string>

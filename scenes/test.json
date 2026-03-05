@@ -1,23 +1,30 @@
 {
   "components": {
-    "ActiveSystems": {
-      "items": [],
-      "version": 1
-    },
-    "Animator": {
-      "items": [],
-      "version": 1
-    },
     "Camera": {
       "items": [
         {
           "data": {
-            "aspect": 1.7777777910232544,
+            "aspect": 1.7777778,
             "far": 1000.0,
             "fov": 60.0,
             "isPerspective": true,
             "isPrimary": true,
-            "near": 0.10000000149011612,
+            "near": 0.1,
+            "orthoSize": 10.0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
+          }
+        },
+        {
+          "data": {
+            "aspect": 1.7777778,
+            "far": 1000.0,
+            "fov": 60.0,
+            "isPerspective": true,
+            "isPrimary": false,
+            "near": 0.1,
             "orthoSize": 10.0
           },
           "entity": {
@@ -37,7 +44,7 @@
               0.0,
               0.0
             ],
-            "height": 2.0,
+            "height": 1.0,
             "radius": 0.5,
             "size": [
               1.0,
@@ -48,7 +55,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 6
+            "index": 11
           }
         },
         {
@@ -65,11 +72,32 @@
               1.0,
               1.0
             ],
-            "type": 1
+            "type": 0
           },
           "entity": {
             "generation": 0,
-            "index": 4
+            "index": 9
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              0.00999,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
           }
         },
         {
@@ -104,14 +132,35 @@
             "radius": 0.5,
             "size": [
               1.0,
-              0.009999999776482582,
+              1.0,
               1.0
             ],
-            "type": 0
+            "type": 1
           },
           "entity": {
             "generation": 0,
-            "index": 1
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 2.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
           }
         }
       ],
@@ -123,9 +172,9 @@
           "data": {
             "castShadows": true,
             "color": [
+              0.0,
               1.0,
-              1.0,
-              0.0
+              1.0
             ],
             "innerCone": 15.0,
             "intensity": 12.0,
@@ -135,26 +184,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 8
-          }
-        },
-        {
-          "data": {
-            "castShadows": true,
-            "color": [
-              1.0,
-              0.5,
-              0.30000001192092896
-            ],
-            "innerCone": 15.0,
-            "intensity": 0.10000000149011612,
-            "outerCone": 30.0,
-            "range": 10.0,
-            "type": 0
-          },
-          "entity": {
-            "generation": 0,
-            "index": 3
+            "index": 7
           }
         },
         {
@@ -180,9 +210,28 @@
           "data": {
             "castShadows": true,
             "color": [
-              0.0,
               1.0,
-              1.0
+              0.89999,
+              0.30000
+            ],
+            "innerCone": 15.0,
+            "intensity": 0.20000,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              0.0
             ],
             "innerCone": 15.0,
             "intensity": 12.0,
@@ -192,7 +241,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 7
+            "index": 8
           }
         }
       ],
@@ -210,7 +259,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 6
+            "index": 11
           }
         },
         {
@@ -218,12 +267,25 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
-            "meshAssetId": "builtin://Sphere",
+            "meshAssetId": "builtin://Cube",
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 4
+            "index": 9
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Plane",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
           }
         },
         {
@@ -244,12 +306,25 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
-            "meshAssetId": "builtin://Plane",
+            "meshAssetId": "builtin://Sphere",
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 1
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cylinder",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
           }
         }
       ],
@@ -264,7 +339,31 @@
               0.0,
               0.0
             ],
-            "friction": 0.30000001192092896,
+            "friction": 0.30000,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000,
             "isKinematic": false,
             "linearVelocity": [
               0.0,
@@ -288,7 +387,7 @@
               0.0,
               0.0
             ],
-            "friction": 0.30000001192092896,
+            "friction": 0.30000,
             "isKinematic": false,
             "linearVelocity": [
               0.0,
@@ -298,11 +397,11 @@
             "mass": 1.0,
             "restitution": 0.5,
             "syncTransform": true,
-            "useGravity": false
+            "useGravity": true
           },
           "entity": {
             "generation": 0,
-            "index": 0
+            "index": 9
           }
         }
       ],
@@ -313,9 +412,9 @@
         {
           "data": {
             "position": [
-              -2.207940101623535,
-              -38.7989501953125,
-              7.127083778381348
+              -2.20794,
+              -44.28765,
+              7.12708
             ],
             "rotation": [
               1.0,
@@ -324,9 +423,9 @@
               0.0
             ],
             "scale": [
-              3.487881660461426,
-              3.487881660461426,
-              3.487881660461426
+              3.48788,
+              3.48788,
+              3.48788
             ]
           },
           "entity": {
@@ -337,20 +436,20 @@
         {
           "data": {
             "position": [
-              12.27048110961914,
-              -44.63644027709961,
-              0.26888084411621094
+              12.27048,
+              -44.63644,
+              0.26888
             ],
             "rotation": [
-              0.9962022304534912,
+              0.9962022,
               0.0,
               0.0,
-              0.08706942945718765
+              0.0870694
             ],
             "scale": [
-              77.68547058105469,
-              0.9999997019767761,
-              44.4963264465332
+              77.68547,
+              0.9999997,
+              44.49632
             ]
           },
           "entity": {
@@ -361,20 +460,20 @@
         {
           "data": {
             "position": [
-              -41.876914978027344,
-              2.052351713180542,
-              4.604152679443359
+              -41.87691,
+              2.05235,
+              4.60415
             ],
             "rotation": [
-              0.6391214728355408,
-              -0.2872718870639801,
-              -0.6573588848114014,
-              -0.2772687077522278
+              0.6391214,
+              -0.2872718,
+              -0.6573588,
+              -0.2772687
             ],
             "scale": [
-              1.0000269412994385,
-              1.0000042915344238,
-              1.0000228881835938
+              1.0000269,
+              1.0000042,
+              1.0000228
             ]
           },
           "entity": {
@@ -385,20 +484,20 @@
         {
           "data": {
             "position": [
-              33.51506423950195,
+              33.51506,
               0.0,
               0.0
             ],
             "rotation": [
-              -0.4443744122982025,
-              0.7520608305931091,
-              -0.2656712234020233,
-              -0.4078660309314728
+              -0.4443744,
+              0.7520608,
+              -0.2656712,
+              -0.4078660
             ],
             "scale": [
-              1.0000207424163818,
-              1.0000160932540894,
-              1.0000410079956055
+              1.0000207,
+              1.0000160,
+              1.0000410
             ]
           },
           "entity": {
@@ -409,20 +508,20 @@
         {
           "data": {
             "position": [
-              0.0,
+              7.223212,
               0.0,
               0.0
             ],
             "rotation": [
-              1.0,
-              0.0,
-              0.0,
-              0.0
+              0.9999806,
+              -0.001402957,
+              0.000383433,
+              0.006041861
             ],
             "scale": [
-              3.129999876022339,
-              3.129999876022339,
-              3.129999876022339
+              2.980059,
+              2.980048,
+              2.979989
             ]
           },
           "entity": {
@@ -433,8 +532,8 @@
         {
           "data": {
             "position": [
-              19.04718780517578,
-              -37.62021255493164,
+              19.04718,
+              -37.62021,
               0.0
             ],
             "rotation": [
@@ -457,9 +556,9 @@
         {
           "data": {
             "position": [
-              0.82613205909729,
-              -42.84366989135742,
-              -1.1687052249908447
+              0.8261320,
+              -42.84366,
+              -1.1687052
             ],
             "rotation": [
               1.0,
@@ -469,7 +568,7 @@
             ],
             "scale": [
               5.0,
-              24.21297264099121,
+              24.21297,
               5.0
             ]
           },
@@ -481,20 +580,20 @@
         {
           "data": {
             "position": [
-              -5.188931465148926,
-              -34.183555603027344,
-              -9.637311935424805
+              -5.188931,
+              -34.18355,
+              -9.637311
             ],
             "rotation": [
-              0.7466619610786438,
-              -0.6345394253730774,
-              -0.05713573098182678,
-              0.1912882775068283
+              0.7466619,
+              -0.6345394,
+              -0.0571357,
+              0.1912882
             ],
             "scale": [
-              0.9999982714653015,
-              1.0000008344650269,
-              1.0000004768371582
+              0.9999982,
+              1.0000008,
+              1.0000004
             ]
           },
           "entity": {
@@ -506,24 +605,96 @@
           "data": {
             "position": [
               0.0,
-              -0.19466018676757813,
-              0.0
+              0.0,
+              -0.0009801
             ],
             "rotation": [
-              -0.23479364812374115,
-              -0.20016059279441833,
-              0.673624575138092,
-              0.6715933084487915
+              -0.2358712,
+              0.9706563,
+              -0.0401807,
+              0.0240124
             ],
             "scale": [
-              1.000016689300537,
-              1.0000141859054565,
-              1.0000109672546387
+              1.0000166,
+              1.0000181,
+              1.0
             ]
           },
           "entity": {
             "generation": 0,
             "index": 8
+          }
+        },
+        {
+          "data": {
+            "position": [
+              10.12412,
+              3.84662,
+              -5.67250
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0001452,
+              0.0
+            ],
+            "scale": [
+              2.169999,
+              2.170032,
+              2.169999
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        },
+        {
+          "data": {
+            "position": [
+              3.7894,
+              2.4274,
+              -0.4305
+            ],
+            "rotation": [
+              0.6328,
+              -0.2856,
+              0.6660,
+              0.2725
+            ],
+            "scale": [
+              0.3355,
+              0.3355,
+              0.3355
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
+          }
+        },
+        {
+          "data": {
+            "position": [
+              1.7243,
+              0.0,
+              0.00
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              -0.0,
+              0.0
+            ],
+            "scale": [
+              0.7181,
+              0.7181,
+              0.7181
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 11
           }
         }
       ],
@@ -532,6 +703,26 @@
   },
   "graph": {
     "hierarchy": [
+      {
+        "child": {
+          "generation": 0,
+          "index": 10
+        },
+        "parent": {
+          "generation": 0,
+          "index": 4
+        }
+      },
+      {
+        "child": {
+          "generation": 0,
+          "index": 11
+        },
+        "parent": {
+          "generation": 0,
+          "index": 4
+        }
+      },
       {
         "child": {
           "generation": 0,
@@ -547,10 +738,18 @@
       {
         "entity": {
           "generation": 0,
-          "index": 4
+          "index": 11
         },
         "flags": 0,
-        "name": "Sphere"
+        "name": "Cylinder1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 0
+        },
+        "flags": 0,
+        "name": "Cube"
       },
       {
         "entity": {
@@ -563,10 +762,50 @@
       {
         "entity": {
           "generation": 0,
-          "index": 0
+          "index": 4
         },
         "flags": 0,
-        "name": "Cube"
+        "name": "Sphere"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "Cylinder"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 8
+        },
+        "flags": 0,
+        "name": "Spot Light1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 7
+        },
+        "flags": 0,
+        "name": "Spot Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 9
+        },
+        "flags": 0,
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 10
+        },
+        "flags": 0,
+        "name": "Camera1"
       },
       {
         "entity": {
@@ -591,30 +830,6 @@
         },
         "flags": 0,
         "name": "Point Light"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 7
-        },
-        "flags": 0,
-        "name": "Spot Light"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 8
-        },
-        "flags": 0,
-        "name": "Spot Light1"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 6
-        },
-        "flags": 0,
-        "name": "Cylinder"
       }
     ],
     "tags": []
@@ -630,9 +845,11 @@
       0,
       0,
       0,
+      0,
+      0,
+      0,
       0
     ]
   },
-  "skybox": "Skybox/Green2",
   "version": 1
 }

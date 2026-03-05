@@ -1,28 +1,18 @@
 #include "PlayerApp.h"
 
-#include "AssetBinding.h"
+#include "GameRuntime.h"
 #include "Overlay.h"
 #include "PlayerConfig.h"
-#include "WorldAudio.h"
-#include "WorldRender.h"
-#include "WorldPhysics.h"
-#include "WorldAnimation.h"
-#include "WorldScripting.h"
-#include "RenderFrameSync.h"
 
-#include "api/assets/All.h"
 #include "api/core/All.h"
 #include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
 #include "api/world/All.h"
-#include "eyelib/assets/ShaderWatcher.h"
-#include "eyelib/render/RenderBackend.h"
+#include "api/assets/ShaderWatcher.h"
+#include "api/render/RenderBackend.h"
 
-#include <functional>
 #include <iostream>
-#include <utility>
 #include <cstdio>
-#include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -314,23 +304,25 @@ int RunPlayer(int argc, char** argv) {
     }
     ScopedOverlay overlayGuard(overlay);
 
-    WorldRenderBridge renderBridge;
-    if (!options.headless) {
-        if (!renderBridge.Initialize(window,
-                                     static_cast<uint32_t>(window.Width()),
-                                     static_cast<uint32_t>(window.Height()),
-                                     options.renderBackend)) {
-            eyelib::api::core::Log::Error("Failed to initialize renderer or pipeline.");
-            return static_cast<int>(ExitCode::RenderInitFailed);
+    eyelib::api::AssetRegistry assetRegistry;
+    openeye::player::GameRuntime gameRuntime;
+    const uint32_t initWidth = options.headless ? 0u : static_cast<uint32_t>(window.Width());
+    const uint32_t initHeight = options.headless ? 0u : static_cast<uint32_t>(window.Height());
+    if (!gameRuntime.Initialize(world, assetRegistry, options.assetRoots,
+                                options.headless ? nullptr : &window,
+                                initWidth, initHeight,
+                                options.renderBackend,
+                                eyelib::api::RenderDevice(),
+                                &options)) {
+        if (options.headless) {
+            eyelib::api::core::Log::Error("Failed to initialize game runtime (headless).");
+            return static_cast<int>(ExitCode::EngineInitFailed);
         }
-        renderBridge.InitializeDefaultResources();
+        eyelib::api::core::Log::Error("Failed to initialize renderer or game runtime.");
+        return static_cast<int>(ExitCode::RenderInitFailed);
     }
 
-    eyelib::api::AssetRegistry assetRegistry;
-    if (!options.headless && renderBridge.GetDevice())
-        assetRegistry.SetRenderDevice(renderBridge.GetDevice());
-    const bool allowGpuAssets = !options.headless;
-    const auto assetStats = BindAssets(world, options.assetRoots, assetRegistry, allowGpuAssets);
+    const auto assetStats = gameRuntime.GetAssetBindingStats();
     if (assetStats.referenced > 0) {
         eyelib::api::core::Log::InfoF(
             "Assets: referenced=%d loaded=%d missing=%d unknownType=%d",
@@ -340,34 +332,6 @@ int RunPlayer(int argc, char** argv) {
     if (options.strictAssets && (assetStats.missing > 0 || assetStats.unknownType > 0)) {
         eyelib::api::core::Log::Error("Strict asset mode: missing or unknown assets detected.");
         return static_cast<int>(ExitCode::AssetStrictFailed);
-    }
-
-    world.FlushTransforms();
-
-    WorldPhysicsBridge physicsBridge;
-    if (!physicsBridge.Initialize(eyelib::api::physics::PhysicsWorld::PhysicsBackendType::Jolt)) {
-        eyelib::api::core::Log::Error("Failed to initialize physics world.");
-        return static_cast<int>(ExitCode::PhysicsInitFailed);
-    }
-    if (!physicsBridge.BuildFromWorld(world)) {
-        eyelib::api::core::Log::Warn("Physics binding reported issues; continuing.");
-    }
-
-    WorldAnimationBridge animationBridge;
-    animationBridge.BuildFromWorld(world, assetRegistry);
-
-    WorldScriptingBridge scriptingBridge;
-    scriptingBridge.SetPhysicsBridge(&physicsBridge);
-    scriptingBridge.SetAnimationBridge(&animationBridge);
-    scriptingBridge.BuildFromWorld(world, options.assetRoots);
-
-    WorldAudioBridge audioBridge;
-    if (!options.headless) {
-        if (!audioBridge.Initialize()) {
-            eyelib::api::core::Log::Warn("Audio bridge init failed; continuing without audio.");
-        } else {
-            audioBridge.BuildFromWorld(world);
-        }
     }
 
     std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher;
@@ -406,81 +370,20 @@ int RunPlayer(int argc, char** argv) {
         eyelib::api::core::Log::InfoF("ShaderWatcher runtime: %s", runtimeAssets.c_str());
     }
 
-    struct RuntimeStats {
-        float accum = 0.0f;
-        int frames = 0;
-    } stats;
-
-    // Job pool for parallelizable work (physics step, animation update). 0 = use hardware concurrency.
-    eyelib::api::core::ThreadPool jobPool(0);
-
-    RenderFrameSync frameSync;
-    std::thread renderThread;
+    struct RuntimeStats { float accum = 0.0f; int frames = 0; } stats;
     eyelib::api::platform::time::FramePacer framePacer;
     if (!options.headless && !options.vsync)
         framePacer.SetTargetFPS(60.0);
 
-    if (!options.headless) {
-        // Warmup: run one BuildScene + RenderSceneOnly on the main thread (which still has the GL
-        // context) so all materials/shaders used by the scene are loaded and compiled here. After
-        // we start the render thread, the context moves there and the game thread must not touch GL.
-        renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
-            frameSync.GetSceneBuffer(0), frameSync.GetFrameAllocator(0));
-        renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(0),
-            static_cast<uint32_t>(window.Width()),
-            static_cast<uint32_t>(window.Height()));
-
-        frameSync.SetFenceWaiter([&renderBridge](void* f) { renderBridge.WaitAndDestroyFence(f); });
-
-        if (kUseRenderThread) {
-            renderThread = std::thread([&window, &frameSync, &renderBridge, &overlay, &options]() {
-                window.MakeContextCurrent();
-                for (;;) {
-                    std::optional<RenderFrameSync::AcquiredFrame> frame = frameSync.AcquireFrame();
-                    if (!frame) {
-                        break;
-                    }
-                    window.RefreshFramebufferSize();
-                    const int fbWidth = window.Width();
-                    const int fbHeight = window.Height();
-                    if (fbWidth <= 0 || fbHeight <= 0) {
-                        frameSync.ReleaseFrame(frame->slot, nullptr);
-                        continue;
-                    }
-                    window.ApplyVsync();
-                    const uint32_t w = static_cast<uint32_t>(fbWidth);
-                    const uint32_t h = static_cast<uint32_t>(fbHeight);
-                    renderBridge.ApplyResize(w, h);
-                    const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(frame->slot), w, h);
-                    void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
-                    if (rendered) {
-                        const bool kFlickerTestSkipOverlay = true;
-                        if (!kFlickerTestSkipOverlay && options.overlay && overlay.IsReady()) {
-                            overlay.Render(frame->overlay);
-                        }
-                        renderBridge.Finish();
-                        if (gpuFence) {
-                            renderBridge.WaitFence(gpuFence);
-                        } else {
-                            renderBridge.Finish();
-                        }
-                        renderBridge.Finish();
-                        window.SwapBuffers();
-                    }
-                    frameSync.ReleaseFrame(frame->slot, gpuFence);
-                }
-            });
-        }
-    }
-
-    auto update = [&world, &window, &options, &stats, &physicsBridge, &animationBridge,
-                   &scriptingBridge, &audioBridge, &shaderWatcher, &jobPool,
-                   &frameSync, &renderBridge, &overlay, &assetRegistry, &framePacer](float deltaSeconds) {
+    auto update = [&](float deltaSeconds) {
         if (!options.headless && !options.vsync)
             framePacer.WaitForNextFrame();
         world.SetFrameSnapshot(nullptr);
         if (!options.headless) {
-            if (shaderWatcher) shaderWatcher->Tick();
+            if (shaderWatcher) {
+                const int copied = shaderWatcher->Tick();
+                if (copied > 0) gameRuntime.ReloadShaders();
+            }
             window.PollEvents();
             if (window.ShouldClose()) {
                 eyelib::api::core::Engine::RequestShutdown();
@@ -488,111 +391,47 @@ int RunPlayer(int argc, char** argv) {
             }
         }
 
-        // Read phase: no world mutation yet (observation is built on demand in sync).
-        // Jobs phase: run physics and animation in parallel (read from cached/observation, write to job-local state).
-        const float fixedStep = options.fixedTimestep > 0.0f ? options.fixedTimestep : 0.0f;
-        jobPool.Submit([&physicsBridge, deltaSeconds, maxSub = options.maxSubsteps, fixedStep]() {
-            physicsBridge.StepPhysicsOnly(deltaSeconds, maxSub, fixedStep);
-        });
-        jobPool.Submit([&animationBridge, deltaSeconds]() {
-            animationBridge.Update(deltaSeconds);
-        });
-        jobPool.Wait();
-
-        // Write phase: sync job results to world, then main-thread-only systems.
-        physicsBridge.SyncTransformsToWorld(world);
-        if (!options.headless) {
-            audioBridge.Update(world, deltaSeconds);
-        }
-        scriptingBridge.Update(world, options.assetRoots, deltaSeconds);
-        world.Update(deltaSeconds);
+        gameRuntime.Tick(deltaSeconds);
 
         if (options.stats) {
             stats.accum += deltaSeconds;
             stats.frames += 1;
             if (stats.accum >= 1.0f) {
-                const float fps = eyelib::api::core::Time::FPS();
-                const size_t entities = world.GetEntityCount();
-                eyelib::api::core::Log::InfoF("Stats: fps=%.1f entities=%zu", fps, entities);
+                eyelib::api::core::Log::InfoF("Stats: fps=%.1f entities=%zu",
+                    eyelib::api::core::Time::FPS(), world.GetEntityCount());
                 stats.accum = 0.0f;
                 stats.frames = 0;
             }
         }
 
-        // Build scene and either submit to render thread or render inline.
         if (!options.headless) {
-            OverlaySnapshot snap;
-            snap.fps = eyelib::api::core::Time::FPS();
-            snap.frameTimeMs = eyelib::api::core::Time::SmoothedDeltaTime() * 1000.0f;
-            snap.entityCount = world.GetEntityCount();
-            snap.scenePath = options.scenePath;
-            const int slot = frameSync.GetFillSlot();
-            if (slot < 0) {
-                return;
-            }
-            renderBridge.BuildScene(world, options, &animationBridge, &assetRegistry,
-                frameSync.GetSceneBuffer(slot), frameSync.GetFrameAllocator(slot));
+            window.RefreshFramebufferSize();
             const int w = window.Width();
             const int h = window.Height();
-
-            if (kUseRenderThread) {
-                frameSync.SubmitFrame(slot,
-                    static_cast<uint32_t>(w > 0 ? w : 1),
-                    static_cast<uint32_t>(h > 0 ? h : 1),
-                    snap);
-            } else {
-                // Single-threaded: render and present inline (same ordering as render thread).
-                window.RefreshFramebufferSize();
-                const int fbWidth = window.Width();
-                const int fbHeight = window.Height();
-                if (fbWidth > 0 && fbHeight > 0) {
-                    window.ApplyVsync();
-                    const uint32_t rw = static_cast<uint32_t>(fbWidth);
-                    const uint32_t rh = static_cast<uint32_t>(fbHeight);
-                    renderBridge.ApplyResize(rw, rh);
-                    if (options.overlay && overlay.IsReady()) {
-                        overlay.Render(snap);
-                    }
-                    const bool rendered = renderBridge.RenderSceneOnly(frameSync.GetSceneBuffer(slot), rw, rh);
-                    void* gpuFence = rendered ? renderBridge.InsertFrameFence() : nullptr;
-                    if (rendered) {
-                        renderBridge.Finish();
-                        if (gpuFence) {
-                            renderBridge.WaitFence(gpuFence);
-                        } else {
-                            renderBridge.Finish();
-                        }
-                        renderBridge.Finish();
-                        window.SwapBuffers();
-                    }
-                    frameSync.ReleaseFrame(slot, gpuFence);
-                } else {
-                    frameSync.ReleaseFrame(slot, nullptr);
+            if (w > 0 && h > 0) {
+                window.ApplyVsync();
+                const uint32_t rw = static_cast<uint32_t>(w);
+                const uint32_t rh = static_cast<uint32_t>(h);
+                (void)gameRuntime.Render(rw, rh);
+                if (options.overlay && overlay.IsReady()) {
+                    OverlaySnapshot snap;
+                    snap.fps = eyelib::api::core::Time::FPS();
+                    snap.frameTimeMs = eyelib::api::core::Time::SmoothedDeltaTime() * 1000.0f;
+                    snap.entityCount = world.GetEntityCount();
+                    snap.scenePath = options.scenePath;
+                    overlay.Render(snap);
                 }
+                window.SwapBuffers();
             }
         }
     };
 
     eyelib::api::core::Engine::Run(update, nullptr);
 
-    if (!options.headless && kUseRenderThread && renderThread.joinable()) {
-        frameSync.SignalShutdown();
-        renderThread.join();
-    }
-
     if (!options.headless) {
-        audioBridge.Shutdown();
-        // GL context was on the render thread; make it current here so pipeline/renderer shutdown can destroy GL resources
         window.MakeContextCurrent();
     }
-    renderBridge.Shutdown();
-    try {
-        physicsBridge.Shutdown();
-    } catch (const std::exception& e) {
-        eyelib::api::core::Log::ErrorF("Physics shutdown exception: %s", e.what());
-    } catch (...) {
-        eyelib::api::core::Log::Error("Physics shutdown unknown exception");
-    }
+    gameRuntime.Shutdown();
 
     eyelib::api::core::Log::Info("Shutdown sequence completed");
     // Explicit engine shutdown so "Shutting down Eyelib Engine..." and "Log system shutting down" appear in order.

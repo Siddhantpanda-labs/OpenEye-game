@@ -1,0 +1,12 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+third_party/bullet3/
+third_party/bgfx.cmake/
+third_party/diligent/DiligentCore/
+third_party/imgui/
+third_party/glfw/
+third_party/glm/
+third_party/nlohmann/
+third_party/stb/
+third_party/assimp/
+third_party/glad/
+third_party/openal-soft/

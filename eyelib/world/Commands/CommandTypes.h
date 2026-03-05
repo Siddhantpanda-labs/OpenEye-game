@@ -954,5 +954,31 @@ private:
     std::string m_path;
 };
 
+/** Scene-level: set skybox asset id. All mutations go through commands. */
+class SetSkyboxAssetIdCommand final : public Command {
+public:
+    explicit SetSkyboxAssetIdCommand(std::string assetId)
+        : m_assetId(std::move(assetId)) {}
+
+    bool Apply(WorldState& state) override {
+        m_prev = state.GetSkyboxAssetId();
+        state.SetSkyboxAssetId(m_assetId);
+        return true;
+    }
+
+    bool Revert(WorldState& state) override {
+        state.SetSkyboxAssetId(m_prev);
+        return true;
+    }
+
+    std::string GetName() const override { return "SetSkyboxAssetId"; }
+
+    const std::string& GetAssetId() const { return m_assetId; }
+
+private:
+    std::string m_assetId;
+    std::string m_prev;
+};
+
 } // namespace world
 } // namespace eyelib

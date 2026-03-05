@@ -42,6 +42,8 @@ CommandPtr RemoveComponent(::eyelib::world::EntityId entity) {
 CommandPtr SetTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& value);
 /** Set world transform; engine converts to local and stores. */
 CommandPtr SetWorldTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& worldValue);
+/** Scene-level: set skybox asset id. Goes through command/mutation layer. */
+CommandPtr SetSkyboxAssetId(const std::string& assetId);
 
 template<typename T>
 CommandPtr SetComponentData(::eyelib::world::EntityId entity, const T& value) {

@@ -6,7 +6,7 @@
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/geometry/Primitives.h"
 #include "api/render/Light.h"
-#include "eyelib/world/components/Light.h"
+#include "api/world/All.h"
 #include "api/assets/loaders/ModelLoader.h"
 #include "api/core/All.h"
 #include "api/math/TransformUtils.h"
@@ -15,8 +15,7 @@
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
 #include "api/render/TextureCube.h"
-#include "eyelib/assets/AssetManager.h"
-#include "eyelib/assets/AssetId.h"
+#include "api/assets/AssetManager.h"
 
 #include <cmath>
 #include <exception>

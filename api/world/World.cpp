@@ -1130,10 +1130,11 @@ std::string World::GetSkyboxAssetId() const {
     return m_impl->world.GetState().GetSkyboxAssetId();
 }
 
-void World::SetSkyboxAssetId(const std::string& assetId) {
-    if (m_impl) {
-        m_impl->world.GetState().SetSkyboxAssetId(assetId);
+bool World::SetSkyboxAssetId(const std::string& assetId) {
+    if (!m_impl) {
+        return false;
     }
+    return ApplyCommandSync(eyelib::api::world::SetSkyboxAssetId(assetId)).success;
 }
 
 void World::CaptureRenderSnapshot(RenderSnapshot& out) const {

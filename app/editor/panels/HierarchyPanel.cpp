@@ -5,10 +5,6 @@
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/world/All.h"
 #include "api/world/Commands.h"
-#include "eyelib/world/components/Camera.h"
-#include "eyelib/world/components/Collider.h"
-#include "eyelib/world/components/Light.h"
-#include "eyelib/world/components/Renderable.h"
 
 #include <imgui.h>
 #include <cstdio>

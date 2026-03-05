@@ -1,21 +1,8 @@
 #pragma once
 
-#include "eyelib/assets/IGPUResourceResolver.h"
-#include "eyelib/assets/AssetId.h"
+#include "api/assets/GPUResourceResolverBackend.h"
 #include <memory>
 #include <unordered_map>
-
-namespace eyelib {
-namespace assets {
-class AssetManager;
-}
-namespace render {
-class Shader;
-class Mesh;
-class Texture2D;
-class Material;
-}
-}
 
 namespace openeye::player {
 

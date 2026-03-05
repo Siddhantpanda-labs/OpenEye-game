@@ -16,11 +16,10 @@
 #include "api/platform/All.h"
 #include "api/render/All.h"
 #include "api/render/RenderDevice.h"
-#include "eyelib/assets/ShaderWatcher.h"
-#include "eyelib/platform/window/GraphicsDevice.h"
-#include "eyelib/render/2d/Primitives.h"
-#include "eyelib/render/DebugDrawRenderer.h"
-#include "eyelib/render/RenderBackend.h"
+#include "api/assets/ShaderWatcher.h"
+#include "api/platform/GraphicsDevice.h"
+#include "api/render/RenderBackend.h"
+#include "api/render/StaticResources.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
