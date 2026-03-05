@@ -49,6 +49,8 @@ struct RuntimeOptions {
     bool showHelp = false;
     /** Render backend (e.g. from --renderer opengl|diligent). */
     eyelib::render::RenderBackend renderBackend = eyelib::render::RenderBackend::Default;
+    /** If > 0, exit after this many frames (for smoke tests). */
+    int maxFrames = 0;
 };
 
 void PrintUsage(const char* exeName);

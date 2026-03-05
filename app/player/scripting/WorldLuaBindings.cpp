@@ -2,6 +2,7 @@
 
 #include "api/core/All.h"
 #include "api/platform/All.h"
+#include "api/platform/Input.h"
 
 #include "WorldAnimation.h"
 #include "WorldPhysics.h"
@@ -11,7 +12,9 @@
 
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <json.hpp>
+#include <unordered_map>
 
 extern "C" {
 #include <lua.h>
@@ -150,6 +153,137 @@ bool ParseTimeMode(const char* value, ::eyelib::world::WorldScheduler::TimeMode&
         return true;
     }
     return false;
+}
+
+// Key name to GLFW-style key code for Input bindings (script-friendly names).
+static int GetKeyCodeFromLua(lua_State* L, int argIndex) {
+    if (lua_isnumber(L, argIndex)) {
+        return static_cast<int>(lua_tonumber(L, argIndex));
+    }
+    if (lua_type(L, argIndex) != LUA_TSTRING) {
+        return -1;
+    }
+    size_t len = 0;
+    const char* s = lua_tolstring(L, argIndex, &len);
+    if (!s || len == 0) return -1;
+    if (len == 1) {
+        return static_cast<int>(static_cast<unsigned char>(s[0]));
+    }
+    static const std::unordered_map<std::string, int> kKeyNames = {
+        {"Space", 32}, {"Escape", 256}, {"Enter", 257}, {"Tab", 258},
+        {"Right", 262}, {"Left", 263}, {"Down", 264}, {"Up", 265},
+    };
+    auto it = kKeyNames.find(s);
+    return it != kKeyNames.end() ? it->second : -1;
+}
+
+static int GetMouseButtonFromLua(lua_State* L, int argIndex) {
+    if (lua_isnumber(L, argIndex)) {
+        int b = static_cast<int>(lua_tonumber(L, argIndex));
+        return (b >= 0 && b <= 2) ? b : -1;
+    }
+    if (lua_type(L, argIndex) != LUA_TSTRING) return -1;
+    const char* s = lua_tostring(L, argIndex);
+    if (!s) return -1;
+    if (strcmp(s, "Left") == 0) return 0;
+    if (strcmp(s, "Right") == 0) return 1;
+    if (strcmp(s, "Middle") == 0) return 2;
+    return -1;
+}
+
+int lua_Input_GetKey(lua_State* L) {
+    int key = GetKeyCodeFromLua(L, 1);
+    if (key < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsKeyPressed(key) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetKeyDown(lua_State* L) {
+    int key = GetKeyCodeFromLua(L, 1);
+    if (key < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsKeyJustPressed(key) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetKeyUp(lua_State* L) {
+    int key = GetKeyCodeFromLua(L, 1);
+    if (key < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsKeyJustReleased(key) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetMouseButton(lua_State* L) {
+    int btn = GetMouseButtonFromLua(L, 1);
+    if (btn < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsMouseButtonPressed(btn) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetMouseButtonDown(lua_State* L) {
+    int btn = GetMouseButtonFromLua(L, 1);
+    if (btn < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsMouseButtonJustPressed(btn) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetMouseButtonUp(lua_State* L) {
+    int btn = GetMouseButtonFromLua(L, 1);
+    if (btn < 0) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    lua_pushboolean(L, eyelib::api::Input::IsMouseButtonJustReleased(btn) ? 1 : 0);
+    return 1;
+}
+
+int lua_Input_GetMouseDelta(lua_State* L) {
+    auto d = eyelib::api::Input::MouseDelta();
+    lua_pushnumber(L, static_cast<lua_Number>(d.x));
+    lua_pushnumber(L, static_cast<lua_Number>(d.y));
+    return 2;
+}
+
+int lua_Input_GetMousePosition(lua_State* L) {
+    auto p = eyelib::api::Input::MousePosition();
+    lua_pushnumber(L, static_cast<lua_Number>(p.x));
+    lua_pushnumber(L, static_cast<lua_Number>(p.y));
+    return 2;
+}
+
+static void RegisterInputBindings(lua_State* L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, lua_Input_GetKey);
+    lua_setfield(L, -2, "GetKey");
+    lua_pushcfunction(L, lua_Input_GetKeyDown);
+    lua_setfield(L, -2, "GetKeyDown");
+    lua_pushcfunction(L, lua_Input_GetKeyUp);
+    lua_setfield(L, -2, "GetKeyUp");
+    lua_pushcfunction(L, lua_Input_GetMouseButton);
+    lua_setfield(L, -2, "GetMouseButton");
+    lua_pushcfunction(L, lua_Input_GetMouseButtonDown);
+    lua_setfield(L, -2, "GetMouseButtonDown");
+    lua_pushcfunction(L, lua_Input_GetMouseButtonUp);
+    lua_setfield(L, -2, "GetMouseButtonUp");
+    lua_pushcfunction(L, lua_Input_GetMouseDelta);
+    lua_setfield(L, -2, "GetMouseDelta");
+    lua_pushcfunction(L, lua_Input_GetMousePosition);
+    lua_setfield(L, -2, "GetMousePosition");
+    lua_setglobal(L, "Input");
 }
 
 int lua_World_GetPosition(lua_State* L) {
@@ -2228,6 +2362,7 @@ void RegisterWorldBindings(lua_State* L,
     lua_setfield(L, -2, "SetAnimTrigger");
 
     lua_setglobal(L, "World");
+    RegisterInputBindings(L);
 }
 
 bool BindScriptInstance(lua_State* L,

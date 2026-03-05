@@ -186,10 +186,31 @@ Reason: this unlocks gameplay value early, then hardens quality without blocking
 
 ## 7) Immediate Next Tasks (start now)
 
-- [ ] Add Script component to editor Add Component popup.
-- [ ] Add Script inspector UI fields (`scriptName`, enable/reload, properties).
-- [ ] Add minimal `Input` Lua bindings.
-- [ ] Create `assets/scripts/CharacterController.lua` sample.
-- [ ] Create scripting smoke test scene and runner.
+- [x] Add Script component to editor Add Component popup.
+- [x] Add Script inspector UI fields (`scriptName`, enable/reload, properties).
+- [x] Add minimal `Input` Lua bindings.
+- [x] Create `assets/scripts/CharacterController.lua` sample.
+- [x] Create scripting smoke test scene and runner.
 
 If these 5 are done, scripting is practically usable for main-character logic and gameplay iteration; remaining phases raise it to professional long-term quality.
+
+---
+
+## 8) Progress tracker (updated as work proceeds)
+
+| Phase | Status | Notes |
+|-------|--------|--------|
+| **Phase 0** | Done | `scenes/scripting_test.json` (3 entities: MainCharacter, Interactable, EnvironmentTrigger with Script). Smoke test: run player with `--scene scenes/scripting_test.json --headless --max-frames 300` (exit 0 = pass). |
+| **Phase 1** | Done | Script in Add Component popup; Script inspector (scriptName, Enabled, Needs Reload, Properties key-value, Remove Script). All edits via World API (SetScript / AddComponent / RemoveComponent). |
+| **Phase 2** | Done | Input Lua: `Input.GetKey`, `GetKeyDown`, `GetKeyUp`, `GetMouseButton`, `GetMouseButtonDown`/`Up`, `GetMouseDelta`, `GetMousePosition` (key names e.g. "W", "Space", "Left"). CharacterController.lua uses Input + World.SetVelocity / SetRotation for WASD, jump, mouse look. |
+| **Phase 3** | Pending | Reload policy; error isolation; lifecycle guarantees. |
+| **Phase 4** | Pending | Safety and typing (entity validation, binding helpers). |
+| **Phase 5** | Pending | API polish (World, Input, Time, Physics, Debug); docs; version marker. |
+| **Phase 6** | Pending | Profiler basics; editor error panel; tests. |
+
+**Smoke test command (Phase 0):**
+```bash
+# From project root; run from build/bin/Debug or set asset roots as needed
+OpenEyePlayer --scene scenes/scripting_test.json --headless --max-frames 300
+```
+Success: process exits with 0 and log line "Smoke test: 300 frames completed."

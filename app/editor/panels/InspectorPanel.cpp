@@ -85,6 +85,78 @@ void ShowColliderComponent(eyelib::api::world::World& world, EntityId entity) {
     ImGui::PopID();
 }
 
+void ShowScriptComponent(eyelib::api::world::World& world, EntityId entity) {
+    ::eyelib::world::components::Script script;
+    if (!world.GetScript(entity, script)) return;
+    ImGui::PushID("InspectorScript");
+    ImGui::PushID(static_cast<int>(entity.index));
+    ImGui::PushID(static_cast<int>(entity.generation));
+
+    char scriptNameBuf[512];
+    std::snprintf(scriptNameBuf, sizeof(scriptNameBuf), "%.511s", script.scriptName.c_str());
+    if (ImGui::InputText("Script (path/id)", scriptNameBuf, sizeof(scriptNameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        script.scriptName = scriptNameBuf;
+        world.SetScript(entity, script);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        script.scriptName = scriptNameBuf;
+        world.SetScript(entity, script);
+    }
+
+    if (ImGui::Checkbox("Enabled", &script.isEnabled))
+        world.SetScript(entity, script);
+    if (ImGui::Checkbox("Needs Reload", &script.needsReload))
+        world.SetScript(entity, script);
+
+    if (ImGui::TreeNodeEx("Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
+        std::vector<std::string> keys;
+        keys.reserve(script.properties.size());
+        for (const auto& kv : script.properties) keys.push_back(kv.first);
+        for (size_t i = 0; i < keys.size(); ++i) {
+            const std::string& key = keys[i];
+            auto it = script.properties.find(key);
+            if (it == script.properties.end()) continue;
+            const auto& val = it->second;
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::SetNextItemWidth(-80.f);
+            std::string displayVal;
+            if (val.type == ::eyelib::world::components::ScriptValue::Type::String && std::holds_alternative<std::string>(val.value))
+                displayVal = std::get<std::string>(val.value);
+            else if (val.type == ::eyelib::world::components::ScriptValue::Type::Number && std::holds_alternative<double>(val.value))
+                displayVal = std::to_string(std::get<double>(val.value));
+            else if (val.type == ::eyelib::world::components::ScriptValue::Type::Bool && std::holds_alternative<bool>(val.value))
+                displayVal = std::get<bool>(val.value) ? "true" : "false";
+            else
+                displayVal = "(other)";
+            char valBuf[256];
+            std::snprintf(valBuf, sizeof(valBuf), "%.255s", displayVal.c_str());
+            if (ImGui::InputText(key.c_str(), valBuf, sizeof(valBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                script.properties[key] = ::eyelib::world::components::ScriptValue(std::string(valBuf));
+                world.SetScript(entity, script);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("X")) {
+                script.properties.erase(key);
+                world.SetScript(entity, script);
+            }
+            ImGui::PopID();
+        }
+        if (ImGui::Button("Add Property")) {
+            script.properties["newKey"] = ::eyelib::world::components::ScriptValue(std::string(""));
+            world.SetScript(entity, script);
+        }
+        ImGui::TreePop();
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Remove Script", ImVec2(-1, 0)))
+        world.ApplyCommandSync(eyelib::api::world::RemoveComponent<::eyelib::world::components::Script>(entity));
+
+    ImGui::PopID();
+    ImGui::PopID();
+    ImGui::PopID();
+}
+
 void ShowRigidBodyComponent(eyelib::api::world::World& world, EntityId entity) {
     ::eyelib::world::components::RigidBody rb;
     if (!world.GetRigidBody(entity, rb)) return;
@@ -204,6 +276,11 @@ void ShowComponent(EditorContext* ctx, const std::string& componentName) {
             ShowRigidBodyComponent(world, entity);
         return;
     }
+    if (componentName == "Script") {
+        if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
+            ShowScriptComponent(world, entity);
+        return;
+    }
 
     ShowGenericComponent(world, entity, componentName, jsonStr);
 }
@@ -273,6 +350,25 @@ void ShowAddComponentPopup(EditorContext* ctx) {
         ImGui::PopID();
         ImGui::TreePop();
     }
+
+    using Script = ::eyelib::world::components::Script;
+    ::eyelib::world::components::Script scriptProbe;
+    bool hasScript = world.GetScript(entity, scriptProbe);
+    if (ImGui::TreeNodeEx("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushID("Script");
+        if (!hasScript && ImGui::Selectable("Script")) {
+            Script s;
+            s.scriptName = "";
+            s.isEnabled = true;
+            s.needsReload = false;
+            world.ApplyCommandSync(eyelib::api::world::AddComponent<Script>(entity, s));
+        }
+        if (hasScript)
+            ImGui::Selectable("Script (already added)", false);
+        ImGui::PopID();
+        ImGui::TreePop();
+    }
+
     ImGui::PopID();
     ImGui::PopID();
 

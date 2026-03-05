@@ -371,6 +371,7 @@ int RunPlayer(int argc, char** argv) {
     }
 
     struct RuntimeStats { float accum = 0.0f; int frames = 0; } stats;
+    int frameCount = 0;
     eyelib::api::platform::time::FramePacer framePacer;
     if (!options.headless && !options.vsync)
         framePacer.SetTargetFPS(60.0);
@@ -379,6 +380,14 @@ int RunPlayer(int argc, char** argv) {
         if (!options.headless && !options.vsync)
             framePacer.WaitForNextFrame();
         world.SetFrameSnapshot(nullptr);
+        if (options.maxFrames > 0) {
+            frameCount += 1;
+            if (frameCount >= options.maxFrames) {
+                eyelib::api::core::Log::InfoF("Smoke test: %d frames completed.", options.maxFrames);
+                eyelib::api::core::Engine::RequestShutdown();
+                return;
+            }
+        }
         if (!options.headless) {
             if (shaderWatcher) {
                 const int copied = shaderWatcher->Tick();

@@ -35,6 +35,7 @@ void PrintUsage(const char* exeName) {
         << "  --stats            Log fps/entity stats every second\n"
         << "  --strict-assets    Fail if any referenced asset is missing\n"
         << "  --overlay          Show a lightweight on-screen overlay\n"
+        << "  --max-frames <n>   Exit after N frames (for smoke tests, e.g. 300)\n"
         << "  --help             Show this help message\n";
 }
 
@@ -174,6 +175,7 @@ bool LoadConfig(const std::string& path, RuntimeOptions& options, std::string& e
     ApplyInt(j, "width", options.width);
     ApplyInt(j, "height", options.height);
     ApplyInt(j, "maxSubsteps", options.maxSubsteps);
+    ApplyInt(j, "maxFrames", options.maxFrames);
 
     ApplyFloat(j, "fixedTimestep", options.fixedTimestep);
     ApplyFloat(j, "timeScale", options.timeScale);
@@ -345,6 +347,13 @@ bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& erro
             else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
             else {
                 error = "Invalid --renderer value; use opengl, diligent, or default.";
+                return false;
+            }
+            continue;
+        }
+        if (arg == "--max-frames" && i + 1 < argc) {
+            if (!ParseInt(argv[++i], options.maxFrames) || options.maxFrames < 0) {
+                error = "Invalid --max-frames value; must be non-negative.";
                 return false;
             }
             continue;
