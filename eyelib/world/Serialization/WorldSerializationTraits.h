@@ -275,7 +275,7 @@ struct SerializationTraits<eyelib::world::components::ScriptValue> {
             out.value = SerializationTraits<eyelib::math::Vec3>::Deserialize(payload, {});
             break;
         case eyelib::world::components::ScriptValue::Type::Entity: {
-            eyelib::world::EntityId id;
+            eyelib::world::EntityId id = eyelib::world::InvalidEntity;
             if (payload.is_object()) {
                 id.index = payload.value("index", 0u);
                 id.generation = payload.value("generation", 0u);

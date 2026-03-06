@@ -177,11 +177,34 @@ bool WorldPhysicsBridge::BuildBodyForRigidBodyOnly(
     return true;
 }
 
+::eyelib::world::EntityId WorldPhysicsBridge::EntityFromBody(eyelib::api::physics::RigidBodyHandle body) const {
+    for (const auto& binding : m_bindings) {
+        if (binding.body.Raw() == body.Raw()) {
+            return binding.entity;
+        }
+    }
+    return eyelib::world::InvalidEntity;
+}
+
+void WorldPhysicsBridge::InstallContactCallback() {
+    m_physics->SetContactCallback([this](eyelib::api::physics::RigidBodyHandle a,
+                                         eyelib::api::physics::RigidBodyHandle b,
+                                         const eyelib::math::Vec3& /*pos*/,
+                                         const eyelib::math::Vec3& /*n*/) {
+        const auto ea = EntityFromBody(a);
+        const auto eb = EntityFromBody(b);
+        if (ea != eyelib::world::InvalidEntity && eb != eyelib::world::InvalidEntity) {
+            m_contactPairs.emplace_back(ea, eb);
+        }
+    });
+}
+
 bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
     if (!m_ready) {
         return false;
     }
     m_bindings.clear();
+    m_contactPairs.clear();
     const auto obs = world.GetObservation();
     const auto colliders = obs.GetCollidersView();
     const auto rigidBodies = obs.GetRigidBodiesView();
@@ -215,6 +238,7 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
         }
     }
 
+    InstallContactCallback();
     return ok;
 }
 
@@ -222,6 +246,7 @@ void WorldPhysicsBridge::StepPhysicsOnly(float deltaSeconds, int maxSubSteps, fl
     if (!m_ready) {
         return;
     }
+    m_contactPairs.clear();
     const float fixedStep = fixedTimeStep > 0.0f ? fixedTimeStep : (1.0f / 60.0f);
 
     if (m_physicsFirstFrame) {
@@ -264,6 +289,34 @@ void WorldPhysicsBridge::Step(eyelib::api::world::World& world, float deltaSecon
                               int maxSubSteps, float fixedTimeStep) {
     StepPhysicsOnly(deltaSeconds, maxSubSteps, fixedTimeStep);
     SyncTransformsToWorld(world);
+}
+
+std::vector<::eyelib::world::EntityId> WorldPhysicsBridge::GetCollisions(::eyelib::world::EntityId entity) const {
+    std::vector<::eyelib::world::EntityId> out;
+    for (const auto& p : m_contactPairs) {
+        if (p.first == entity) {
+            out.push_back(p.second);
+        } else if (p.second == entity) {
+            out.push_back(p.first);
+        }
+    }
+    return out;
+}
+
+bool WorldPhysicsBridge::SetTransform(eyelib::api::world::World& world, ::eyelib::world::EntityId entity,
+                                      const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation) {
+    auto* binding = FindBinding(entity);
+    if (!binding || !binding->body) {
+        return false;
+    }
+    if (!eyelib::api::physics::RigidBody::SetTransform(*m_physics, binding->body, position, rotation)) {
+        return false;
+    }
+    auto transform = world.GetObservation().GetTransform(entity).value_or(eyelib::math::Transform{});
+    transform.position = position;
+    transform.rotation = rotation;
+    world.SetTransform(entity, transform);
+    return true;
 }
 
 bool WorldPhysicsBridge::GetVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out) {

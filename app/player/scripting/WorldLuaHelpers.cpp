@@ -1,5 +1,7 @@
 #include "scripting/WorldLuaHelpers.h"
 
+#include <variant>
+
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
@@ -20,12 +22,13 @@ void PushVec3(lua_State* L, const ::eyelib::math::Vec3& v) {
 }
 
 bool ReadVec3(lua_State* L, int index, ::eyelib::math::Vec3& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
-    lua_getfield(L, index, "x");
-    lua_getfield(L, index, "y");
-    lua_getfield(L, index, "z");
+    lua_getfield(L, absIndex, "x");
+    lua_getfield(L, absIndex, "y");
+    lua_getfield(L, absIndex, "z");
     if (lua_isnumber(L, -3) && lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
         out.x = static_cast<float>(lua_tonumber(L, -3));
         out.y = static_cast<float>(lua_tonumber(L, -2));
@@ -50,13 +53,14 @@ void PushQuat(lua_State* L, const ::eyelib::math::Quat& q) {
 }
 
 bool ReadQuat(lua_State* L, int index, ::eyelib::math::Quat& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
-    lua_getfield(L, index, "w");
-    lua_getfield(L, index, "x");
-    lua_getfield(L, index, "y");
-    lua_getfield(L, index, "z");
+    lua_getfield(L, absIndex, "w");
+    lua_getfield(L, absIndex, "x");
+    lua_getfield(L, absIndex, "y");
+    lua_getfield(L, absIndex, "z");
     if (lua_isnumber(L, -4) && lua_isnumber(L, -3) && lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
         out.w = static_cast<float>(lua_tonumber(L, -4));
         out.x = static_cast<float>(lua_tonumber(L, -3));
@@ -109,11 +113,12 @@ bool ReadEntityArray(lua_State* L, int index, std::vector<::eyelib::world::Entit
 
 ::eyelib::world::EntityId ReadEntity(lua_State* L, int index) {
     ::eyelib::world::EntityId entity = ::eyelib::world::InvalidEntity;
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return entity;
     }
-    lua_getfield(L, index, "index");
-    lua_getfield(L, index, "generation");
+    lua_getfield(L, absIndex, "index");
+    lua_getfield(L, absIndex, "generation");
     if (lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
         entity.index = static_cast<uint32_t>(lua_tointeger(L, -2));
         entity.generation = static_cast<uint32_t>(lua_tointeger(L, -1));
@@ -123,11 +128,12 @@ bool ReadEntityArray(lua_State* L, int index, std::vector<::eyelib::world::Entit
 }
 
 bool ReadEntityTable(lua_State* L, int index, ::eyelib::world::EntityId& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
-    lua_getfield(L, index, "index");
-    lua_getfield(L, index, "generation");
+    lua_getfield(L, absIndex, "index");
+    lua_getfield(L, absIndex, "generation");
     if (lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
         out.index = static_cast<uint32_t>(lua_tointeger(L, -2));
         out.generation = static_cast<uint32_t>(lua_tointeger(L, -1));
@@ -154,7 +160,10 @@ void PushScriptValue(lua_State* L, const ::eyelib::world::components::ScriptValu
             PushVec3(L, std::get<::eyelib::math::Vec3>(value.value));
             break;
         case Type::Entity:
-            PushEntity(L, std::get<::eyelib::world::EntityId>(value.value));
+            if (std::holds_alternative<::eyelib::world::EntityId>(value.value))
+                PushEntity(L, std::get<::eyelib::world::EntityId>(value.value));
+            else
+                lua_pushnil(L);
             break;
         case Type::Nil:
         default:
@@ -196,7 +205,8 @@ bool ReadScriptValue(lua_State* L, int index, ::eyelib::world::components::Scrip
 }
 
 bool ReadBoolField(lua_State* L, int index, const char* field, bool& out) {
-    lua_getfield(L, index, field);
+    const int absIndex = lua_absindex(L, index);
+    lua_getfield(L, absIndex, field);
     if (!lua_isnil(L, -1)) {
         out = lua_toboolean(L, -1) != 0;
         lua_pop(L, 1);
@@ -207,7 +217,8 @@ bool ReadBoolField(lua_State* L, int index, const char* field, bool& out) {
 }
 
 bool ReadNumberField(lua_State* L, int index, const char* field, float& out) {
-    lua_getfield(L, index, field);
+    const int absIndex = lua_absindex(L, index);
+    lua_getfield(L, absIndex, field);
     if (lua_isnumber(L, -1)) {
         out = static_cast<float>(lua_tonumber(L, -1));
         lua_pop(L, 1);
@@ -218,7 +229,8 @@ bool ReadNumberField(lua_State* L, int index, const char* field, float& out) {
 }
 
 bool ReadStringField(lua_State* L, int index, const char* field, std::string& out) {
-    lua_getfield(L, index, field);
+    const int absIndex = lua_absindex(L, index);
+    lua_getfield(L, absIndex, field);
     if (lua_isstring(L, -1)) {
         out = lua_tostring(L, -1);
         lua_pop(L, 1);
@@ -229,7 +241,8 @@ bool ReadStringField(lua_State* L, int index, const char* field, std::string& ou
 }
 
 bool ReadIntField(lua_State* L, int index, const char* field, int& out) {
-    lua_getfield(L, index, field);
+    const int absIndex = lua_absindex(L, index);
+    lua_getfield(L, absIndex, field);
     if (lua_isnumber(L, -1)) {
         out = static_cast<int>(lua_tointeger(L, -1));
         lua_pop(L, 1);
@@ -240,7 +253,8 @@ bool ReadIntField(lua_State* L, int index, const char* field, int& out) {
 }
 
 bool ReadVec3Field(lua_State* L, int index, const char* field, ::eyelib::math::Vec3& out) {
-    lua_getfield(L, index, field);
+    const int absIndex = lua_absindex(L, index);
+    lua_getfield(L, absIndex, field);
     if (lua_istable(L, -1)) {
         const bool ok = ReadVec3Table(L, lua_gettop(L), out);
         lua_pop(L, 1);
@@ -260,14 +274,15 @@ void PushStringArray(lua_State* L, const std::vector<std::string>& values) {
 }
 
 bool ReadStringArray(lua_State* L, int index, std::vector<std::string>& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
     out.clear();
-    const size_t len = lua_rawlen(L, index);
+    const size_t len = lua_rawlen(L, absIndex);
     out.reserve(len);
     for (size_t i = 1; i <= len; ++i) {
-        lua_rawgeti(L, index, static_cast<lua_Integer>(i));
+        lua_rawgeti(L, absIndex, static_cast<lua_Integer>(i));
         if (lua_isstring(L, -1)) {
             out.emplace_back(lua_tostring(L, -1));
         }
@@ -277,12 +292,13 @@ bool ReadStringArray(lua_State* L, int index, std::vector<std::string>& out) {
 }
 
 static bool ReadVec3Table(lua_State* L, int index, ::eyelib::math::Vec3& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
-    lua_getfield(L, index, "x");
-    lua_getfield(L, index, "y");
-    lua_getfield(L, index, "z");
+    lua_getfield(L, absIndex, "x");
+    lua_getfield(L, absIndex, "y");
+    lua_getfield(L, absIndex, "z");
     if (lua_isnumber(L, -3) && lua_isnumber(L, -2) && lua_isnumber(L, -1)) {
         out.x = static_cast<float>(lua_tonumber(L, -3));
         out.y = static_cast<float>(lua_tonumber(L, -2));
@@ -655,12 +671,13 @@ void PushMetadata(lua_State* L, const std::string& name, uint32_t flags) {
 }
 
 bool ReadMetadata(lua_State* L, int index, std::string& name, uint32_t& flags) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
-    ReadStringField(L, index, "name", name);
+    ReadStringField(L, absIndex, "name", name);
     int flagsValue = static_cast<int>(flags);
-    if (ReadIntField(L, index, "flags", flagsValue) && flagsValue >= 0) {
+    if (ReadIntField(L, absIndex, "flags", flagsValue) && flagsValue >= 0) {
         flags = static_cast<uint32_t>(flagsValue);
     }
     return true;
@@ -668,12 +685,13 @@ bool ReadMetadata(lua_State* L, int index, std::string& name, uint32_t& flags) {
 
 bool ReadPropertiesTable(lua_State* L, int index,
                          std::unordered_map<std::string, ::eyelib::world::components::ScriptValue>& out) {
-    if (!lua_istable(L, index)) {
+    const int absIndex = lua_absindex(L, index);
+    if (!lua_istable(L, absIndex)) {
         return false;
     }
     out.clear();
     lua_pushnil(L);
-    while (lua_next(L, index) != 0) {
+    while (lua_next(L, absIndex) != 0) {
         if (lua_isstring(L, -2)) {
             const char* key = lua_tostring(L, -2);
             if (key) {

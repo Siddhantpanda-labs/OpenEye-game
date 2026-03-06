@@ -2085,6 +2085,51 @@ int lua_World_SetAngularVelocity(lua_State* L) {
     return 0;
 }
 
+int lua_World_GetCollisions(lua_State* L) {
+    auto* physics = GetPhysics(L);
+    if (!physics) {
+        lua_newtable(L);
+        return 1;
+    }
+    const auto entity = ReadEntity(L, 1);
+    const auto collisions = physics->GetCollisions(entity);
+    PushEntityArray(L, collisions);
+    return 1;
+}
+
+int lua_World_Teleport(lua_State* L) {
+    auto* world = GetWorld(L);
+    auto* physics = GetPhysics(L);
+    if (!world || !physics) {
+        return 0;
+    }
+    const auto entity = ReadEntity(L, 1);
+    if (!world->IsAlive(entity)) {
+        return 0;
+    }
+    ::eyelib::math::Vec3 pos(0.0f);
+    if (lua_istable(L, 2)) {
+        if (!ReadVec3(L, 2, pos)) {
+            return 0;
+        }
+    } else {
+        pos.x = static_cast<float>(luaL_checknumber(L, 2));
+        pos.y = static_cast<float>(luaL_checknumber(L, 3));
+        pos.z = static_cast<float>(luaL_checknumber(L, 4));
+    }
+    ::eyelib::math::Quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+    if (lua_gettop(L) >= 5 && lua_istable(L, 5)) {
+        ReadQuat(L, 5, rot);
+    } else {
+        ::eyelib::world::components::Transform transform;
+        if (world->GetTransform(entity, transform)) {
+            rot = transform.rotation;
+        }
+    }
+    physics->SetTransform(*world, entity, pos, rot);
+    return 0;
+}
+
 int lua_World_SetAnimFloat(lua_State* L) {
     auto* animation = GetAnimation(L);
     if (!animation) {
@@ -2352,6 +2397,10 @@ void RegisterWorldBindings(lua_State* L,
     lua_setfield(L, -2, "GetAngularVelocity");
     lua_pushcfunction(L, lua_World_SetAngularVelocity);
     lua_setfield(L, -2, "SetAngularVelocity");
+    lua_pushcfunction(L, lua_World_GetCollisions);
+    lua_setfield(L, -2, "GetCollisions");
+    lua_pushcfunction(L, lua_World_Teleport);
+    lua_setfield(L, -2, "Teleport");
 
     // Animation (parameters)
     lua_pushcfunction(L, lua_World_SetAnimFloat);

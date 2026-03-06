@@ -4,9 +4,11 @@
 #include "api/physics/PhysicsWorld.h"
 #include "api/physics/RigidBody.h"
 #include "api/world/All.h"
+#include "eyelib/math/Types.h"
 
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace openeye::player {
@@ -41,6 +43,13 @@ public:
     bool GetAngularVelocity(::eyelib::world::EntityId entity, eyelib::math::Vec3& out);
     bool SetAngularVelocity(::eyelib::world::EntityId entity, const eyelib::math::Vec3& value);
 
+    /** Collisions from last physics step: entities that touched this frame. */
+    std::vector<::eyelib::world::EntityId> GetCollisions(::eyelib::world::EntityId entity) const;
+
+    /** Set physics body and world transform (teleport). */
+    bool SetTransform(eyelib::api::world::World& world, ::eyelib::world::EntityId entity,
+                      const eyelib::math::Vec3& position, const eyelib::math::Quat& rotation);
+
 private:
     struct BodyBinding {
         ::eyelib::world::EntityId entity;
@@ -57,6 +66,8 @@ private:
         ::eyelib::world::EntityId entity) const;
     const BodyBinding* FindBinding(::eyelib::world::EntityId entity) const;
     BodyBinding* FindBinding(::eyelib::world::EntityId entity);
+    ::eyelib::world::EntityId EntityFromBody(eyelib::api::physics::RigidBodyHandle body) const;
+    void InstallContactCallback();
 
     bool BuildBodyForEntity(eyelib::api::world::World& world,
                             const eyelib::api::world::World::ColliderEntry& collider,
@@ -67,6 +78,8 @@ private:
     std::unique_ptr<eyelib::api::physics::PhysicsWorld> m_physics;
     bool m_ready = false;
     std::vector<BodyBinding> m_bindings;
+    /** Contact pairs from the last Step (entity A, entity B). Cleared at start of each step. */
+    std::vector<std::pair<::eyelib::world::EntityId, ::eyelib::world::EntityId>> m_contactPairs;
 
     /** Fixed-timestep accumulator. Only advance physics for time elapsed while simulation was running. */
     float m_physicsAccumulator = 0.0f;

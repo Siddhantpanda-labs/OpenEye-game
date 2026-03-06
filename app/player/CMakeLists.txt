@@ -28,6 +28,7 @@ set(GAME_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaJson.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldLuaJson.h
     ${CMAKE_CURRENT_SOURCE_DIR}/scripting/WorldScriptingBridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scripting/ScriptSchema.cpp
 )
 
 add_library(OpenEyeGameRuntime STATIC ${GAME_RUNTIME_SOURCES})

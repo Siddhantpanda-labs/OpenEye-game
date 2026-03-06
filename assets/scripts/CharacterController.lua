@@ -4,10 +4,17 @@
 
 local CharacterController = {}
 
+-- Schema: editor shows these as typed fields. Types: number, string, boolean, entity, vec3
+CharacterController.schema = {
+    { name = "moveSpeed", type = "number", default = 5.0, min = 0, max = 50 },
+    { name = "jumpSpeed", type = "number", default = 7.0, min = 0, max = 30 },
+    { name = "sensitivity", type = "number", default = 0.002, min = 0.0001, max = 0.1 },
+}
+
 function CharacterController:OnStart()
-    self.moveSpeed = 5.0
-    self.jumpSpeed = 7.0
-    self.sensitivity = 0.002
+    self.moveSpeed = self.properties.moveSpeed and self.properties.moveSpeed or 5.0
+    self.jumpSpeed = self.properties.jumpSpeed and self.properties.jumpSpeed or 7.0
+    self.sensitivity = self.properties.sensitivity and self.properties.sensitivity or 0.002
     self.yaw = 0.0
 end
 

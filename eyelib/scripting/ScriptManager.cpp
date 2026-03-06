@@ -176,9 +176,9 @@ bool ScriptManager::CallUpdate(ScriptHandle handle, float deltaTime) {
         return false;
     }
     std::string err;
-    const bool ok = CallFunction(*info->vm, info->scriptName, "Update", true, deltaTime, err);
+    const bool ok = CallFunction(*info->vm, info->scriptName, "OnUpdate", true, deltaTime, err);
     if (!ok && !err.empty()) {
-        core::Log::WarnF("Script Update failed: %s - %s", info->scriptName.c_str(), err.c_str());
+        core::Log::WarnF("Script OnUpdate failed: %s - %s", info->scriptName.c_str(), err.c_str());
     }
     return ok;
 }
@@ -189,9 +189,9 @@ bool ScriptManager::CallStart(ScriptHandle handle) {
         return false;
     }
     std::string err;
-    const bool ok = CallFunction(*info->vm, info->scriptName, "Start", false, 0.0f, err);
+    const bool ok = CallFunction(*info->vm, info->scriptName, "OnStart", false, 0.0f, err);
     if (!ok && !err.empty()) {
-        core::Log::WarnF("Script Start failed: %s - %s", info->scriptName.c_str(), err.c_str());
+        core::Log::WarnF("Script OnStart failed: %s - %s", info->scriptName.c_str(), err.c_str());
     }
     return ok;
 }
@@ -202,9 +202,9 @@ bool ScriptManager::CallStop(ScriptHandle handle) {
         return false;
     }
     std::string err;
-    const bool ok = CallFunction(*info->vm, info->scriptName, "Stop", false, 0.0f, err);
+    const bool ok = CallFunction(*info->vm, info->scriptName, "OnDestroy", false, 0.0f, err);
     if (!ok && !err.empty()) {
-        core::Log::WarnF("Script Stop failed: %s - %s", info->scriptName.c_str(), err.c_str());
+        core::Log::WarnF("Script OnDestroy failed: %s - %s", info->scriptName.c_str(), err.c_str());
     }
     return ok;
 }

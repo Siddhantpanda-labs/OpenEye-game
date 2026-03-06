@@ -5,10 +5,12 @@
 
 #include "api/world/All.h"
 #include "api/world/Commands.h"
+#include "scripting/ScriptSchema.h"
 
 #include <imgui.h>
 #include <json.hpp>
 #include <string>
+#include <unordered_map>
 #include <cstdio>
 #include <cstring>
 
@@ -85,21 +87,36 @@ void ShowColliderComponent(eyelib::api::world::World& world, EntityId entity) {
     ImGui::PopID();
 }
 
-void ShowScriptComponent(eyelib::api::world::World& world, EntityId entity) {
+void ShowScriptComponent(openeye::editor::EditorContext* ctx) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+    EntityId entity = ctx->selectedEntity;
     ::eyelib::world::components::Script script;
     if (!world.GetScript(entity, script)) return;
+
     ImGui::PushID("InspectorScript");
     ImGui::PushID(static_cast<int>(entity.index));
     ImGui::PushID(static_cast<int>(entity.generation));
 
+    using ScriptValue = ::eyelib::world::components::ScriptValue;
+    using ScriptValueType = ScriptValue::Type;
+
     char scriptNameBuf[512];
     std::snprintf(scriptNameBuf, sizeof(scriptNameBuf), "%.511s", script.scriptName.c_str());
+    bool scriptNameChanged = false;
     if (ImGui::InputText("Script (path/id)", scriptNameBuf, sizeof(scriptNameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
         script.scriptName = scriptNameBuf;
-        world.SetScript(entity, script);
+        scriptNameChanged = true;
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         script.scriptName = scriptNameBuf;
+        scriptNameChanged = true;
+    }
+    if (scriptNameChanged) {
+        if (!script.scriptName.empty()) {
+            auto schema = openeye::player::scripting::GetScriptSchema(script.scriptName, ctx->assetRoots);
+            openeye::player::scripting::ApplySchemaDefaults(schema, script.properties);
+        }
         world.SetScript(entity, script);
     }
 
@@ -108,42 +125,116 @@ void ShowScriptComponent(eyelib::api::world::World& world, EntityId entity) {
     if (ImGui::Checkbox("Needs Reload", &script.needsReload))
         world.SetScript(entity, script);
 
-    if (ImGui::TreeNodeEx("Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
-        std::vector<std::string> keys;
-        keys.reserve(script.properties.size());
-        for (const auto& kv : script.properties) keys.push_back(kv.first);
-        for (size_t i = 0; i < keys.size(); ++i) {
-            const std::string& key = keys[i];
-            auto it = script.properties.find(key);
-            if (it == script.properties.end()) continue;
-            const auto& val = it->second;
-            ImGui::PushID(static_cast<int>(i));
-            ImGui::SetNextItemWidth(-80.f);
-            std::string displayVal;
-            if (val.type == ::eyelib::world::components::ScriptValue::Type::String && std::holds_alternative<std::string>(val.value))
-                displayVal = std::get<std::string>(val.value);
-            else if (val.type == ::eyelib::world::components::ScriptValue::Type::Number && std::holds_alternative<double>(val.value))
-                displayVal = std::to_string(std::get<double>(val.value));
-            else if (val.type == ::eyelib::world::components::ScriptValue::Type::Bool && std::holds_alternative<bool>(val.value))
-                displayVal = std::get<bool>(val.value) ? "true" : "false";
-            else
-                displayVal = "(other)";
-            char valBuf[256];
-            std::snprintf(valBuf, sizeof(valBuf), "%.255s", displayVal.c_str());
-            if (ImGui::InputText(key.c_str(), valBuf, sizeof(valBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-                script.properties[key] = ::eyelib::world::components::ScriptValue(std::string(valBuf));
-                world.SetScript(entity, script);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("X")) {
-                script.properties.erase(key);
-                world.SetScript(entity, script);
-            }
-            ImGui::PopID();
+    static std::unordered_map<std::string, std::vector<openeye::player::scripting::ScriptPropertySchemaEntry>> s_schemaCache;
+    std::vector<openeye::player::scripting::ScriptPropertySchemaEntry>* schema = nullptr;
+    if (!script.scriptName.empty()) {
+        auto it = s_schemaCache.find(script.scriptName);
+        if (it == s_schemaCache.end()) {
+            auto loaded = openeye::player::scripting::GetScriptSchema(script.scriptName, ctx->assetRoots);
+            it = s_schemaCache.emplace(script.scriptName, std::move(loaded)).first;
         }
-        if (ImGui::Button("Add Property")) {
-            script.properties["newKey"] = ::eyelib::world::components::ScriptValue(std::string(""));
-            world.SetScript(entity, script);
+        schema = &it->second;
+    }
+
+    if (ImGui::TreeNodeEx("Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (!schema || schema->empty()) {
+            ImGui::TextUnformatted("Define .schema in script (see docs).");
+        } else {
+            std::vector<EntityId> entityList;
+            bool entityListFetched = false;
+            for (const auto& entry : *schema) {
+                ScriptValue& val = script.properties[entry.name];
+                if (val.type == ScriptValueType::Nil)
+                    val = entry.defaultValue;
+                ImGui::PushID(entry.name.c_str());
+                bool changed = false;
+                if (entry.type == "number") {
+                    double v = 0.0;
+                    if (std::holds_alternative<double>(val.value)) v = std::get<double>(val.value);
+                    float f = static_cast<float>(v);
+                    if (entry.hasMinMax) {
+                        if (ImGui::DragFloat(entry.name.c_str(), &f, 0.01f, static_cast<float>(entry.minVal), static_cast<float>(entry.maxVal)))
+                            changed = true;
+                    } else {
+                        if (ImGui::DragFloat(entry.name.c_str(), &f, 0.01f))
+                            changed = true;
+                    }
+                    if (changed) { val.type = ScriptValueType::Number; val.value = static_cast<double>(f); }
+                } else if (entry.type == "string") {
+                    std::string s;
+                    if (std::holds_alternative<std::string>(val.value)) s = std::get<std::string>(val.value);
+                    char buf[512];
+                    std::snprintf(buf, sizeof(buf), "%.511s", s.c_str());
+                    if (ImGui::InputText(entry.name.c_str(), buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                        val.type = ScriptValueType::String;
+                        val.value = std::string(buf);
+                        changed = true;
+                    }
+                } else if (entry.type == "boolean") {
+                    bool b = false;
+                    if (std::holds_alternative<bool>(val.value)) b = std::get<bool>(val.value);
+                    if (ImGui::Checkbox(entry.name.c_str(), &b)) {
+                        val.type = ScriptValueType::Bool;
+                        val.value = b;
+                        changed = true;
+                    }
+                } else if (entry.type == "vec3") {
+                    eyelib::math::Vec3 v{};
+                    if (std::holds_alternative<eyelib::math::Vec3>(val.value)) v = std::get<eyelib::math::Vec3>(val.value);
+                    float f3[3] = { v.x, v.y, v.z };
+                    if (ImGui::DragFloat3(entry.name.c_str(), f3, 0.01f)) {
+                        val.type = ScriptValueType::Vec3;
+                        val.value = eyelib::math::Vec3{ f3[0], f3[1], f3[2] };
+                        changed = true;
+                    }
+                } else if (entry.type == "entity") {
+                    if (!entityListFetched) {
+                        entityList = world.GetEntities();
+                        entityListFetched = true;
+                    }
+                    EntityId current = ::eyelib::world::InvalidEntity;
+                    if (std::holds_alternative<::eyelib::world::EntityId>(val.value))
+                        current = std::get<::eyelib::world::EntityId>(val.value);
+                    int currentIdx = -1;
+                    for (size_t i = 0; i < entityList.size(); ++i) {
+                        if (entityList[i].index == current.index && entityList[i].generation == current.generation) {
+                            currentIdx = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                    std::string preview = "(None)";
+                    if (currentIdx >= 0 && world.IsAlive(current)) {
+                        std::string name;
+                        if (world.GetEntityName(current, name)) preview = name;
+                        else preview = "Entity " + std::to_string(current.index);
+                    }
+                    if (ImGui::BeginCombo(entry.name.c_str(), preview.c_str())) {
+                        if (ImGui::Selectable("(None)", currentIdx == -1)) {
+                            val.type = ScriptValueType::Entity;
+                            val.value = ::eyelib::world::InvalidEntity;
+                            changed = true;
+                        }
+                        for (size_t i = 0; i < entityList.size(); ++i) {
+                            EntityId e = entityList[i];
+                            if (!world.IsAlive(e)) continue;
+                            std::string name;
+                            world.GetEntityName(e, name);
+                            if (name.empty()) name = "Entity " + std::to_string(e.index);
+                            bool selected = (currentIdx >= 0 && entityList[static_cast<size_t>(currentIdx)].index == e.index);
+                            if (ImGui::Selectable(name.c_str(), selected)) {
+                                val.type = ScriptValueType::Entity;
+                                val.value = e;
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+                if (changed) {
+                    world.SetScript(entity, script);
+                }
+                ImGui::PopID();
+            }
         }
         ImGui::TreePop();
     }
@@ -278,7 +369,7 @@ void ShowComponent(EditorContext* ctx, const std::string& componentName) {
     }
     if (componentName == "Script") {
         if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen))
-            ShowScriptComponent(world, entity);
+            ShowScriptComponent(ctx);
         return;
     }
 
@@ -413,6 +504,34 @@ void ShowInspectorPanel(EditorContext* ctx) {
                 }
                 if (ImGui::IsItemDeactivatedAfterEdit()) {
                     ctx->world.SetEntityName(e, nameBuffer);
+                }
+            }
+            // Tags: list + add/remove
+            {
+                EntityId e = ctx->selectedEntity;
+                std::vector<std::string> tags = ctx->world.GetTags(e);
+                if (ImGui::TreeNodeEx("Tags", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    for (size_t i = 0; i < tags.size(); ++i) {
+                        ImGui::PushID(static_cast<int>(i));
+                        ImGui::TextUnformatted(tags[i].c_str());
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("X")) {
+                            ctx->world.RemoveTag(e, tags[i]);
+                        }
+                        ImGui::PopID();
+                    }
+                    static char tagBuf[128] = "";
+                    ImGui::SetNextItemWidth(120.0f);
+                    if (ImGui::InputText("##NewTag", tagBuf, sizeof(tagBuf), ImGuiInputTextFlags_EnterReturnsTrue) && tagBuf[0] != '\0') {
+                        ctx->world.AddTag(e, tagBuf);
+                        tagBuf[0] = '\0';
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Add") && tagBuf[0] != '\0') {
+                        ctx->world.AddTag(e, tagBuf);
+                        tagBuf[0] = '\0';
+                    }
+                    ImGui::TreePop();
                 }
             }
             ImGui::Separator();
