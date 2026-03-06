@@ -13,6 +13,7 @@
 #include "eyelib/world/Serialization/ComponentSerializer.h"
 #include <json.hpp>
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Animator.h"
 #include "eyelib/world/components/Collider.h"
 #include "eyelib/world/components/Light.h"
@@ -782,6 +783,21 @@ bool World::GetCamera(::eyelib::world::EntityId entity,
     return true;
 }
 
+bool World::GetXRCamera(::eyelib::world::EntityId entity,
+                        ::eyelib::world::components::XRCamera& out) const {
+    if (!m_impl) {
+        return false;
+    }
+    const auto* xrCamera = m_impl->world.GetState()
+        .Components<::eyelib::world::components::XRCamera>()
+        .TryGet(entity);
+    if (!xrCamera) {
+        return false;
+    }
+    out = *xrCamera;
+    return true;
+}
+
 bool World::GetLight(::eyelib::world::EntityId entity,
                      ::eyelib::world::components::Light& out) const {
     if (!m_impl) {
@@ -999,6 +1015,14 @@ bool World::SetCamera(::eyelib::world::EntityId entity,
     return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, camera)).success;
 }
 
+bool World::SetXRCamera(::eyelib::world::EntityId entity,
+                        const ::eyelib::world::components::XRCamera& xrCamera) {
+    if (!m_impl) {
+        return false;
+    }
+    return ApplyCommandSync(eyelib::api::world::SetComponentData(entity, xrCamera)).success;
+}
+
 bool World::SetLight(::eyelib::world::EntityId entity,
                      const ::eyelib::world::components::Light& light) {
     if (!m_impl) {
@@ -1141,6 +1165,7 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.renderables.clear();
     out.meshRenderers.clear();
     out.cameras.clear();
+    out.xrCameras.clear();
     out.lights.clear();
     out.rigidBodies.clear();
     out.colliders.clear();
@@ -1167,6 +1192,8 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
         out.meshRenderers.push_back({ entity, comp });
     for (const auto& [entity, comp] : obs.GetCamerasView())
         out.cameras.push_back({ entity, comp });
+    for (const auto& [entity, comp] : obs.GetXRCamerasView())
+        out.xrCameras.push_back({ entity, comp });
     for (const auto& [entity, comp] : obs.GetLightsView())
         out.lights.push_back({ entity, comp });
     for (const auto& [entity, comp] : obs.GetRigidBodiesView())

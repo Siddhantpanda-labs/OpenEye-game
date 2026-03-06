@@ -61,6 +61,8 @@ public:
     void Render(const RenderScene& scene);
     /** Render from a read-only view (zero-copy when view wraps API scene). When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass (same depth as main; for editor picking). */
     void Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Single-pass stereo: one render, two viewports (left | right). Uses instanced draw (2 instances) and stereo shader. Call when pipeline is already resized to full width (width = 2 * eyeWidth). */
+    void RenderStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
     /** Draw outline from entity ID buffer (post-process). Call after Render(view, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
     void RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r = 1.0f, float g = 0.5f, float b = 0.0f);
     /** Draw world-space debug lines with depth test (occluded by geometry). Draws into HDR. */
@@ -125,11 +127,15 @@ private:
     void RenderForward(const IRenderSceneView& view);
     /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
     void RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view);
+    /** Single-pass stereo opaque: two viewports, stereo shader, DrawInstanced(..., 2). */
+    void RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
+    void BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
     void RenderForwardPlus(const IRenderSceneView& view);
     /** Skybox as a frame-graph pass: writes to HDR so post reads it. Used by Deferred and Forward. */
     void AddSkyboxPassToFrameGraph(const IRenderSceneView& view, FGTextureHandle hdrColor, bool useGbufferDepth);
     void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
+    void EnsureStereoForwardShader();
     void EnsureSkyboxShader();
     void EnsureOutlinePostShader();
     void EnsureEntityIdShader();
@@ -155,6 +161,7 @@ private:
     std::unique_ptr<GpuProfilerRHI> m_gpuProfilerRHI;
     std::shared_ptr<Shader> m_forwardPlusShader;
     std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
+    std::shared_ptr<Shader> m_stereoForwardShader;
     std::shared_ptr<Shader> m_skyboxShader;
     std::shared_ptr<Shader> m_outlinePostShader;
     std::shared_ptr<Shader> m_entityIdShader;

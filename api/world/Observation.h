@@ -35,6 +35,7 @@ public:
     std::span<const World::RenderableEntry> GetRenderablesView() const;
     std::span<const World::MeshRendererEntry> GetMeshRenderersView() const;
     std::span<const World::CameraEntry> GetCamerasView() const;
+    std::span<const World::XRCameraEntry> GetXRCamerasView() const;
     std::span<const World::LightEntry> GetLightsView() const;
     std::span<const World::RigidBodyEntry> GetRigidBodiesView() const;
     std::span<const World::ColliderEntry> GetCollidersView() const;
@@ -46,6 +47,7 @@ private:
     mutable std::vector<World::RenderableEntry> m_renderableBuffer;
     mutable std::vector<World::MeshRendererEntry> m_meshRendererBuffer;
     mutable std::vector<World::CameraEntry> m_cameraBuffer;
+    mutable std::vector<World::XRCameraEntry> m_xrCameraBuffer;
     mutable std::vector<World::LightEntry> m_lightBuffer;
     mutable std::vector<World::RigidBodyEntry> m_rigidBodyBuffer;
     mutable std::vector<World::ColliderEntry> m_colliderBuffer;

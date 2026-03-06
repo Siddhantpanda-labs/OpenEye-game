@@ -855,6 +855,21 @@ void DeviceGL::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
+void DeviceGL::BlitToDefaultFramebufferSubregion(IRenderTarget* src, int dstX, int dstY, int dstW, int dstH) {
+    if (!src || dstW <= 0 || dstH <= 0) return;
+    const int srcW = static_cast<int>(src->GetWidth());
+    const int srcH = static_cast<int>(src->GetHeight());
+    if (srcW <= 0 || srcH <= 0) return;
+    auto* r = static_cast<RenderTargetGL*>(src);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, srcW, srcH,
+                      dstX, dstY, dstX + dstW, dstY + dstH,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
 void DeviceGL::BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) {
     if (!src || windowWidth == 0 || windowHeight == 0) return;
     const uint32_t srcW = src->GetWidth();

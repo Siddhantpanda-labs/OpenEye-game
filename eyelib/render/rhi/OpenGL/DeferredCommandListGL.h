@@ -26,6 +26,7 @@ struct DeferredCommandListGL : ICommandList {
     void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) override;
     void ClearDefaultFramebuffer(const ClearValue& clear) override;
     void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
+    void SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
     void SetDepthTest(bool enable) override;
     void SetDepthWrite(bool enable) override;
     void SetDepthFuncLess(bool less) override;
@@ -65,6 +66,7 @@ struct DeferredCommandListGL : ICommandList {
     void Draw(uint32_t vertexCount, uint32_t firstVertex) override;
     void DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
     void DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) override;
+    void DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) override;
     void DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) override;
     void DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) override;
     void MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;

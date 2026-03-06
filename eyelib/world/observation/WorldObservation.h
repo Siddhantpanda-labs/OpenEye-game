@@ -4,6 +4,7 @@
 #include "eyelib/math/Transform.h"
 #include "eyelib/world/WorldView.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Collider.h"
 #include "eyelib/world/components/Light.h"
@@ -50,6 +51,7 @@ public:
     std::span<const std::pair<EntityId, components::Renderable>> GetRenderablesView() const;
     std::span<const std::pair<EntityId, components::MeshRenderer>> GetMeshRenderersView() const;
     std::span<const std::pair<EntityId, components::Camera>> GetCamerasView() const;
+    std::span<const std::pair<EntityId, components::XRCamera>> GetXRCamerasView() const;
     std::span<const std::pair<EntityId, components::Light>> GetLightsView() const;
     std::span<const std::pair<EntityId, components::RigidBody>> GetRigidBodiesView() const;
     std::span<const std::pair<EntityId, components::Collider>> GetCollidersView() const;
@@ -67,6 +69,7 @@ private:
     mutable std::vector<std::pair<EntityId, components::Renderable>> m_renderableBuffer;
     mutable std::vector<std::pair<EntityId, components::MeshRenderer>> m_meshRendererBuffer;
     mutable std::vector<std::pair<EntityId, components::Camera>> m_cameraBuffer;
+    mutable std::vector<std::pair<EntityId, components::XRCamera>> m_xrCameraBuffer;
     mutable std::vector<std::pair<EntityId, components::Light>> m_lightBuffer;
     mutable std::vector<std::pair<EntityId, components::RigidBody>> m_rigidBodyBuffer;
     mutable std::vector<std::pair<EntityId, components::Collider>> m_colliderBuffer;

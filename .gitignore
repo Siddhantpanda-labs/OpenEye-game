@@ -9,6 +9,7 @@ thirdparty/bullet3/
 thirdparty/joltPhysics/
 thirdparty/bgfx.cmake/
 thirdparty/diligent/
+thirdparty/OpenXR-SDK/
 *.user
 *.suo
 *.sdf

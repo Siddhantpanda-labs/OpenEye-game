@@ -112,6 +112,17 @@ std::span<const World::CameraEntry> Observation::GetCamerasView() const {
     return std::span<const World::CameraEntry>(m_cameraBuffer);
 }
 
+std::span<const World::XRCameraEntry> Observation::GetXRCamerasView() const {
+    if (m_snapshot) return std::span<const World::XRCameraEntry>(m_snapshot->xrCameras);
+    const auto raw = m_observation->GetXRCamerasView();
+    m_xrCameraBuffer.clear();
+    m_xrCameraBuffer.reserve(raw.size());
+    for (const auto& p : raw) {
+        m_xrCameraBuffer.push_back({ p.first, p.second });
+    }
+    return std::span<const World::XRCameraEntry>(m_xrCameraBuffer);
+}
+
 std::span<const World::LightEntry> Observation::GetLightsView() const {
     if (m_snapshot) return std::span<const World::LightEntry>(m_snapshot->lights);
     const auto raw = m_observation->GetLightsView();

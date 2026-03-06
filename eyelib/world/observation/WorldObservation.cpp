@@ -7,6 +7,7 @@
 #include "eyelib/world/EntityRegistry.h"
 #include "eyelib/world/WorldGraph/Metadata.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Collider.h"
 #include "eyelib/world/components/Light.h"
 #include "eyelib/world/components/MeshRenderer.h"
@@ -147,6 +148,16 @@ std::span<const std::pair<EntityId, components::Camera>> WorldObservation::GetCa
         m_cameraBuffer.push_back({ entity, component });
     }
     return std::span<const std::pair<EntityId, components::Camera>>(m_cameraBuffer);
+}
+
+std::span<const std::pair<EntityId, components::XRCamera>> WorldObservation::GetXRCamerasView() const {
+    m_xrCameraBuffer.clear();
+    const auto& store = m_view.Components<components::XRCamera>().All();
+    m_xrCameraBuffer.reserve(store.size());
+    for (const auto& [entity, component] : store) {
+        m_xrCameraBuffer.push_back({ entity, component });
+    }
+    return std::span<const std::pair<EntityId, components::XRCamera>>(m_xrCameraBuffer);
 }
 
 std::span<const std::pair<EntityId, components::Light>> WorldObservation::GetLightsView() const {

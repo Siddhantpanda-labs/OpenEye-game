@@ -53,6 +53,7 @@ target_link_libraries(OpenEyeGameRuntime
         EyelibAnimationAPI
         EyelibAudio
         EyelibScriptingAPI
+        EyelibVR
         OpenEyeImGui
 )
 

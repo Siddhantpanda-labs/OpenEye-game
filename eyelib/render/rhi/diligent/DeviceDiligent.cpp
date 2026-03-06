@@ -960,6 +960,14 @@ void DeviceDiligent::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, u
     (void)height;
 }
 
+void DeviceDiligent::BlitToDefaultFramebufferSubregion(IRenderTarget* src, int dstX, int dstY, int dstW, int dstH) {
+    (void)dstX;
+    (void)dstY;
+    (void)dstW;
+    (void)dstH;
+    BlitToDefaultFramebuffer(src);
+}
+
 void DeviceDiligent::BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) {
     (void)windowWidth;
     (void)windowHeight;

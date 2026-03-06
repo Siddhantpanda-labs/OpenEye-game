@@ -61,6 +61,7 @@ void RenderPipeline::Shutdown() {
     m_postProcessor.reset();
     m_forwardPlusShader.reset();
     m_forwardPlusSkinnedShader.reset();
+    m_stereoForwardShader.reset();
     m_outlinePostShader.reset();
     m_entityIdShader.reset();
     if (m_device) {
@@ -672,6 +673,214 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
     if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
 }
 
+void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
+    EnsureStereoForwardShader();
+    if (!m_stereoForwardShader || !m_stereoForwardShader->IsValid()) return;
+
+    const LightParams light = view.GetLight();
+    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
+    const bool useShadows = (m_shadowMap != nullptr && light.castShadows);
+    if (useShadows && cmd) {
+        rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
+        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
+    }
+
+    const uint32_t halfW = m_width / 2;
+    if (cmd) {
+        cmd->SetViewportIndexed(0, 0, 0, halfW, m_height);
+        cmd->SetViewportIndexed(1, halfW, 0, halfW, m_height);
+    }
+
+    const int kMaxPointLights = 8;
+    const int kMaxSpotLights = 4;
+    const int numPoint = static_cast<int>(std::min(m_scratchPointLights.size(), size_t(kMaxPointLights)));
+    const int numSpot = static_cast<int>(std::min(m_scratchSpotLights.size(), size_t(kMaxSpotLights)));
+
+    math::Mat4 viewArr[2] = { leftCam.view, rightCam.view };
+    math::Mat4 projArr[2] = { leftCam.projection, rightCam.projection };
+
+    view.ForEachOpaqueDrawable([&](const Drawable& d) {
+        if (!d.mesh || !d.material) return;
+        Material* mat = (d.materialInstance ? d.materialInstance->GetMaterial().get() : d.material.get());
+        if (!mat) return;
+
+        m_stereoForwardShader->Bind(m_device);
+        Shader* sh = m_stereoForwardShader.get();
+        sh->SetMat4("u_Model", d.transform);
+        sh->SetMat4Array("u_View", viewArr, 2);
+        sh->SetMat4Array("u_Projection", projArr, 2);
+        sh->SetVec3("u_ViewPos[0]", leftCam.viewPos);
+        sh->SetVec3("u_ViewPos[1]", rightCam.viewPos);
+        sh->SetVec3("u_LightDir", light.direction);
+        sh->SetVec3("u_LightColor", light.color);
+        sh->SetFloat("u_LightIntensity", light.intensity);
+        sh->SetVec3("u_Ambient", light.ambient);
+        sh->SetFloat("u_Exposure", light.exposure);
+        if (useShadows) {
+            sh->SetInt("u_ShadowMap", kShadowMapUnit);
+            sh->SetMat4("u_LightSpaceMatrix", m_shadowMap->GetShadowMatrix());
+            sh->SetFloat("u_ShadowBias", 0.005f);
+            sh->SetInt("u_UseShadows", 1);
+        } else {
+            sh->SetInt("u_UseShadows", 0);
+        }
+        sh->SetVec3("u_Albedo", mat->GetAlbedo());
+        sh->SetFloat("u_Metallic", mat->GetMetallic());
+        sh->SetFloat("u_Roughness", mat->GetRoughness());
+        sh->SetVec3("u_Emission", mat->GetEmission());
+        sh->SetFloat("u_Alpha", mat->GetAlpha());
+        sh->SetInt("u_PointLightCount", numPoint);
+        for (int i = 0; i < numPoint; ++i) {
+            const auto& p = m_scratchPointLights[static_cast<size_t>(i)];
+            sh->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
+            sh->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
+            sh->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
+            sh->SetFloat("u_PointLightRadius[" + std::to_string(i) + "]", p.radius);
+        }
+        sh->SetInt("u_SpotLightCount", numSpot);
+        for (int i = 0; i < numSpot; ++i) {
+            const auto& s = m_scratchSpotLights[static_cast<size_t>(i)];
+            sh->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
+            sh->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
+            sh->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
+            sh->SetFloat("u_SpotLightIntensity[" + std::to_string(i) + "]", s.intensity);
+            sh->SetFloat("u_SpotLightRange[" + std::to_string(i) + "]", s.range);
+            sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
+            sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
+        }
+        d.mesh->Bind(m_device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.DrawInstanced(m_device, -1, 2); }
+        d.mesh->Unbind();
+        m_stereoForwardShader->Unbind();
+    });
+
+    if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
+}
+
+void RenderPipeline::BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
+    if (!m_frameGraph || !m_shadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
+    m_frameGraph->Clear();
+    m_frameGraph->SetFrameSize(m_width, m_height);
+
+    const LightParams light = view.GetLight();
+    m_scratchPointLights.clear();
+    m_scratchSpotLights.clear();
+    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
+    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
+
+    FGNameToHandle nameToHandle;
+    rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
+    nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_shadowMap->GetDepthTextureRHI(), m_shadowMap->GetResolution(), m_shadowMap->GetResolution());
+
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, leftCam);
+    const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+
+    FrameGraphRecipe recipe;
+    if (light.castShadows)
+        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Forward Opaque", {}, { "HDR" }, true });
+    recipe.push_back({ "Transparency", {}, { "HDR" }, true });
+
+    auto getExecutor = [this, &view, &leftCam, &rightCam, &light, ctx, clearFwd](const std::string& name) -> FrameGraph::ExecuteFunc {
+        if (name == "Shadow")
+            return [this, &view, &light, &leftCam, ctx](const FGPassResources&) {
+                m_shadowPass->Render(*m_shadowMap, ctx,
+                    [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
+                    light.direction, leftCam.view, leftCam.projection, leftCam.viewPos, leftCam.nearPlane, leftCam.farPlane);
+            };
+        if (name == "Forward Opaque")
+            return [this, &view, &leftCam, &rightCam, ctx, clearFwd](const FGPassResources&) {
+                if (ctx.cmd && m_hdrRenderTarget)
+                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+                if (ctx.cmd) { ctx.cmd->SetDepthTest(true); ctx.cmd->SetCullFace(false); }
+                RenderForwardOpaqueStereo(ctx.cmd, view, leftCam, rightCam);
+            };
+        if (name == "Transparency")
+            return [this, &view, &leftCam, &rightCam, ctx](const FGPassResources&) {
+                if (ctx.cmd && m_hdrRenderTarget) {
+                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
+                    const uint32_t halfW = m_width / 2;
+                    ctx.cmd->SetViewport(0, 0, halfW, m_height);
+                }
+                m_scratchTransparent.clear();
+                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
+                TransparencyPass::Render(ctx, m_scratchTransparent, leftCam.view, leftCam.projection, leftCam.viewPos);
+                if (ctx.cmd && m_hdrRenderTarget) {
+                    const uint32_t halfW = m_width / 2;
+                    ctx.cmd->SetViewport(halfW, 0, halfW, m_height);
+                }
+                TransparencyPass::Render(ctx, m_scratchTransparent, rightCam.view, rightCam.projection, rightCam.viewPos);
+            };
+        return [](const FGPassResources&) {};
+    };
+
+    AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
+    if (view.GetSkybox()) {
+        m_frameGraph->AddPass("SkyboxLeft", [this, &view, &leftCam](const FGPassResources&) {
+            rhi::ICommandList* cmd = GetRHICommandList();
+            if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(0, 0, m_width / 2, m_height); }
+            RenderSkyboxImpl(leftCam, view.GetSkybox(), false);
+        }, {}, { nameToHandle["HDR"] }, true);
+        m_frameGraph->AddPass("SkyboxRight", [this, &view, &rightCam](const FGPassResources&) {
+            rhi::ICommandList* cmd = GetRHICommandList();
+            if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(m_width / 2, 0, m_width / 2, m_height); }
+            RenderSkyboxImpl(rightCam, view.GetSkybox(), false);
+        }, {}, { nameToHandle["HDR"] }, true);
+    }
+
+    m_frameGraph->Compile(m_device);
+    m_frameGraph->Execute(ctx);
+}
+
+void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
+    if (m_width == 0 || m_height == 0) return;
+    EnsureResources(m_width, m_height);
+    if (!m_hdrRenderTarget) return;
+
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;
+#ifndef NDEBUG
+    m_rendering = true;
+#endif
+    cmd->Begin();
+    if (m_device) m_device->Finish();
+
+    BuildAndExecuteForwardFrameGraphStereo(view, leftCam, rightCam);
+
+    const CameraView cam = leftCam;
+    if (m_prePostCallback) {
+        const RenderScene* sceneForCb = view.GetSceneForCallback();
+        if (sceneForCb)
+            m_prePostCallback(m_hdrRenderTarget, m_width, m_height, *sceneForCb);
+    }
+
+    if (eyelib::debug::GetPresets().debugDrawEnabled.load() && m_device) {
+        RenderContext ctx = RenderContext::FromDevice(m_device);
+        cmd->SetViewport(0, 0, m_width, m_height);
+        DebugDrawRenderer::Render(ctx, leftCam, m_hdrRenderTarget, m_width, m_height);
+    }
+
+    if (m_postProcessor) {
+        PostProcessor::Settings settings;
+        math::Mat4 invView = glm::inverse(cam.view);
+        math::Mat4 invProj = glm::inverse(cam.projection);
+        auto skybox = view.GetSkybox();
+        rhi::ITexture* skyboxTex = skybox && skybox->IsValid() ? skybox->GetTextureRHI() : nullptr;
+        float time = core::Time::TotalTime();
+        rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
+        m_postProcessor->ApplyPostProcessing(hdrTex, *m_gbuffer, settings, cam.view, cam.projection, invView, invProj, cam.viewPos, skyboxTex, time);
+    }
+
+    m_prevView = cam.view;
+    m_prevProjection = cam.projection;
+    cmd->End();
+#ifndef NDEBUG
+    m_rendering = false;
+#endif
+}
+
 void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
@@ -1102,6 +1311,16 @@ bool RenderPipeline::HasValidOutput() const {
     return m_hdrRenderTarget != nullptr && m_gbuffer != nullptr;
 }
 
+void RenderPipeline::EnsureStereoForwardShader() {
+    if (m_stereoForwardShader && m_stereoForwardShader->IsValid()) return;
+    if (!m_device) return;
+    m_stereoForwardShader = std::make_shared<Shader>();
+    if (!m_stereoForwardShader->Load(m_device, "passes/forward/forward_stereo", Mesh::GetVertexLayoutRHI())) {
+        core::Log::WarnF("Stereo forward shader failed to load (passes/forward/forward_stereo). Stereo preview will fall back to dual pass.");
+        m_stereoForwardShader.reset();
+    }
+}
+
 void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
     if (!m_device) return;
@@ -1316,6 +1535,7 @@ void RenderPipeline::ReloadShaders() {
     if (m_entityIdShader) m_entityIdShader->Reload();
     if (m_forwardPlusShader) m_forwardPlusShader->Reload();
     if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Reload();
+    if (m_stereoForwardShader) m_stereoForwardShader->Reload();
     if (m_gbufferPass) m_gbufferPass->ReloadShaders();
     if (m_shadowPass) m_shadowPass->ReloadShaders();
     if (m_lightingPass) m_lightingPass->ReloadShaders();

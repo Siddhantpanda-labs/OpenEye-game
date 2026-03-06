@@ -268,6 +268,24 @@ static void AddCameraEntity(EditorContext* ctx) {
     world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::Camera>(newEntity, camera));
 }
 
+/** Create entity with XRCamera component, select it. Optionally parent to s_pendingAddParent. */
+static void AddXRCameraEntity(EditorContext* ctx) {
+    if (!ctx) return;
+    eyelib::api::world::World& world = ctx->world;
+    const std::string name = GetUniqueEntityName(world, "XR Camera");
+    auto result = world.ApplyCommandSync(eyelib::api::world::CreateEntity(name));
+    if (!result.success || !result.createdEntity) return;
+    EntityId newEntity = *result.createdEntity;
+    if (s_pendingAddParent != ::eyelib::world::InvalidEntity && world.IsAlive(s_pendingAddParent)) {
+        world.SetParent(newEntity, s_pendingAddParent);
+        s_pendingAddParent = ::eyelib::world::InvalidEntity;
+    }
+    ctx->sceneSelected = false;
+    ctx->selectedEntity = newEntity;
+    eyelib::world::components::XRCamera xrCamera{};
+    world.ApplyCommandSync(eyelib::api::world::AddComponent<eyelib::world::components::XRCamera>(newEntity, xrCamera));
+}
+
 /** Create empty entity (Transform only, from default), select it. Optionally parent to s_pendingAddParent. */
 static void AddEmptyEntity(EditorContext* ctx) {
     if (!ctx) return;
@@ -338,6 +356,10 @@ void RunAddEntityPopup(EditorContext* ctx) {
     // Camera
     if (ImGui::Selectable("Camera")) {
         AddCameraEntity(ctx);
+        ImGui::CloseCurrentPopup();
+    }
+    if (ImGui::Selectable("XR Camera")) {
+        AddXRCameraEntity(ctx);
         ImGui::CloseCurrentPopup();
     }
 

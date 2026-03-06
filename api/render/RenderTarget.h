@@ -42,6 +42,8 @@ public:
 
     std::shared_ptr<Texture> GetColorTexture(size_t slot = 0) const;
     std::shared_ptr<Texture> GetDepthTexture() const;
+    /** Native texture handle of color attachment (e.g. OpenGL texture ID). For XR submit. */
+    void* GetColorTextureNativeHandle(size_t slot = 0) const;
 
     static void Blit(const RenderTarget& source, const RenderTarget& dest, bool colorOnly = true);
     static int GetMaxSamples(RenderPipeline* pipeline, int samples);

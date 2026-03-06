@@ -47,6 +47,8 @@ struct MeshHandle {
     bool IsValid() const { return vertexBuffer != nullptr && indexBuffer != nullptr; }
     void Bind(rhi::IDevice* device) const;
     void Draw(rhi::IDevice* device, int submeshIndex = -1) const;
+    /** Draw with instance count (e.g. 2 for single-pass stereo). */
+    void DrawInstanced(rhi::IDevice* device, int submeshIndex, uint32_t instanceCount) const;
 };
 
 /** GPU-only mesh instance (Phase 2.4). No CPU geometry; create via CreateFromDescriptor(device, desc).

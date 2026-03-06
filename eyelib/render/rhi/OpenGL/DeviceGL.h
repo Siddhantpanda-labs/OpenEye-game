@@ -81,6 +81,7 @@ struct DeviceGL : IDevice {
     void Finish() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
+    void BlitToDefaultFramebufferSubregion(IRenderTarget* src, int dstX, int dstY, int dstW, int dstH) override;
     void BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;

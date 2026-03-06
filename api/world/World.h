@@ -2,6 +2,7 @@
 
 #include "eyelib/world/World.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Collider.h"
 #include "eyelib/world/components/Light.h"
 #include "eyelib/world/components/MeshRenderer.h"
@@ -169,6 +170,11 @@ public:
         ::eyelib::world::components::Camera component;
     };
 
+    struct XRCameraEntry {
+        ::eyelib::world::EntityId entity;
+        ::eyelib::world::components::XRCamera component;
+    };
+
     struct LightEntry {
         ::eyelib::world::EntityId entity;
         ::eyelib::world::components::Light component;
@@ -189,6 +195,7 @@ public:
         std::vector<RenderableEntry> renderables;
         std::vector<MeshRendererEntry> meshRenderers;
         std::vector<CameraEntry> cameras;
+        std::vector<XRCameraEntry> xrCameras;
         std::vector<LightEntry> lights;
         std::vector<RigidBodyEntry> rigidBodies;
         std::vector<ColliderEntry> colliders;
@@ -233,6 +240,8 @@ public:
                           ::eyelib::world::components::Transform& out) const;
     bool GetCamera(::eyelib::world::EntityId entity,
                    ::eyelib::world::components::Camera& out) const;
+    bool GetXRCamera(::eyelib::world::EntityId entity,
+                     ::eyelib::world::components::XRCamera& out) const;
     bool GetLight(::eyelib::world::EntityId entity,
                   ::eyelib::world::components::Light& out) const;
     bool GetRenderable(::eyelib::world::EntityId entity,
@@ -267,6 +276,8 @@ public:
                           const ::eyelib::world::components::Transform& worldTransform);
     bool SetCamera(::eyelib::world::EntityId entity,
                    const ::eyelib::world::components::Camera& camera);
+    bool SetXRCamera(::eyelib::world::EntityId entity,
+                     const ::eyelib::world::components::XRCamera& xrCamera);
     bool SetLight(::eyelib::world::EntityId entity,
                   const ::eyelib::world::components::Light& light);
     bool SetRenderable(::eyelib::world::EntityId entity,

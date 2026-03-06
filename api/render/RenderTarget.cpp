@@ -9,7 +9,18 @@ namespace api {
 
 namespace {
 ::eyelib::render::TextureFormat ToInternal(TextureFormat format) {
-    return static_cast<::eyelib::render::TextureFormat>(format);
+    switch (format) {
+    case TextureFormat::R8: return ::eyelib::render::TextureFormat::R8;
+    case TextureFormat::RG8: return ::eyelib::render::TextureFormat::RG8;
+    case TextureFormat::RGB8: return ::eyelib::render::TextureFormat::RGB8;
+    case TextureFormat::RGBA8: return ::eyelib::render::TextureFormat::RGBA8;
+    case TextureFormat::RGB16F: return ::eyelib::render::TextureFormat::RGB16F;
+    case TextureFormat::RGBA16F: return ::eyelib::render::TextureFormat::RGBA16F;
+    case TextureFormat::Depth24: return ::eyelib::render::TextureFormat::Depth24;
+    case TextureFormat::Depth24Stencil8: return ::eyelib::render::TextureFormat::Depth24Stencil8;
+    case TextureFormat::None: return ::eyelib::render::TextureFormat::None;
+    default: return ::eyelib::render::TextureFormat::None;
+    }
 }
 } // namespace
 
@@ -80,6 +91,14 @@ size_t RenderTarget::GetColorAttachmentCount() const {
 std::shared_ptr<Texture> RenderTarget::GetColorTexture(size_t slot) const {
     auto tex = m_impl->target->GetColorTexture(slot);
     return tex ? Texture::WrapInternal(tex) : nullptr;
+}
+
+void* RenderTarget::GetColorTextureNativeHandle(size_t slot) const {
+    if (!m_impl->target) return nullptr;
+    auto* rhiRT = m_impl->target->GetRenderTargetRHI();
+    if (!rhiRT) return nullptr;
+    auto* tex = rhiRT->GetColorTexture(static_cast<uint32_t>(slot));
+    return tex ? tex->GetNativeTexture() : nullptr;
 }
 
 std::shared_ptr<Texture> RenderTarget::GetDepthTexture() const {

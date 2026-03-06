@@ -6,6 +6,7 @@
 #include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Renderable.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Light.h"
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Animator.h"
@@ -94,6 +95,7 @@ void ComponentSerializer::RegisterBuiltins() {
     RegisterTransform();
     Register<components::Renderable>("Renderable", 1);
     Register<components::Camera>("Camera", 1);
+    Register<components::XRCamera>("XRCamera", 1);
     Register<components::Light>("Light", 1);
     Register<components::RigidBody>("RigidBody", 1);
     Register<components::Animator>("Animator", 1);

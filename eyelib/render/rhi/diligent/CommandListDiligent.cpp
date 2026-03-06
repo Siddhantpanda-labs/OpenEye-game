@@ -287,6 +287,10 @@ void CommandListDiligent::SetViewport(uint32_t x, uint32_t y, uint32_t width, ui
     (void)width;
     (void)height;
 }
+void CommandListDiligent::SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    (void)index;
+    SetViewport(x, y, width, height);
+}
 void CommandListDiligent::SetDepthTest(bool enable) { (void)enable; }
 void CommandListDiligent::SetDepthWrite(bool enable) { (void)enable; }
 void CommandListDiligent::SetDepthFuncLess(bool less) { (void)less; }
@@ -552,6 +556,11 @@ void CommandListDiligent::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, 
 
 void CommandListDiligent::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     DrawIndexed(indexCount, firstIndex, vertexOffset);
+}
+void CommandListDiligent::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
+    if (instanceCount == 0) return;
+    if (instanceCount == 1) { DrawIndexed(indexCount, firstIndex, vertexOffset); return; }
+    (void)indexCount; (void)firstIndex; (void)vertexOffset; (void)instanceCount;
 }
 void CommandListDiligent::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
 void CommandListDiligent::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }

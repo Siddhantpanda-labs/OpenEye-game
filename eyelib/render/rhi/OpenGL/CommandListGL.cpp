@@ -92,6 +92,12 @@ void CommandListGL::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t
                static_cast<GLsizei>(width), static_cast<GLsizei>(height));
 }
 
+void CommandListGL::SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    GLfloat vp[4] = { static_cast<GLfloat>(x), static_cast<GLfloat>(y),
+                      static_cast<GLfloat>(width), static_cast<GLfloat>(height) };
+    glViewportIndexedfv(static_cast<GLuint>(index), vp);
+}
+
 void CommandListGL::SetDepthTest(bool enable) {
     if (enable) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
 }
@@ -515,6 +521,17 @@ void CommandListGL::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_
 
 void CommandListGL::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     DrawIndexed(indexCount, firstIndex, vertexOffset);
+}
+
+void CommandListGL::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
+    if (instanceCount == 0) return;
+    glBindVertexArray(m_vao);
+    GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
+    size_t indexSize = (m_currentIndexType == IndexType::UInt16) ? 2 : 4;
+    const void* offsetPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(firstIndex * indexSize));
+    glDrawElementsInstancedBaseVertex(
+        GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList),
+        static_cast<GLsizei>(indexCount), idxType, offsetPtr, static_cast<GLsizei>(instanceCount), vertexOffset);
 }
 
 void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {

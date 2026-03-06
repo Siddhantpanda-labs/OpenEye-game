@@ -5,6 +5,7 @@
 #include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Renderable.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Light.h"
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Animator.h"
@@ -80,6 +81,25 @@ struct SerializationTraits<eyelib::world::components::Camera> {
         out.nearPlane = j.value("near", 0.1f);
         out.farPlane = j.value("far", 1000.0f);
         out.orthoSize = j.value("orthoSize", 10.0f);
+        return out;
+    }
+};
+
+template<>
+struct SerializationTraits<eyelib::world::components::XRCamera> {
+    static nlohmann::json Serialize(const eyelib::world::components::XRCamera& v) {
+        nlohmann::json j;
+        j["isPrimary"] = v.isPrimary;
+        j["nearPlane"] = v.nearPlane;
+        j["farPlane"] = v.farPlane;
+        return j;
+    }
+    static eyelib::world::components::XRCamera Deserialize(const nlohmann::json& j, const eyelib::world::components::XRCamera& fallback = {}) {
+        auto out = fallback;
+        if (!j.is_object()) return out;
+        out.isPrimary = j.value("isPrimary", true);
+        out.nearPlane = j.value("nearPlane", 0.1f);
+        out.farPlane = j.value("farPlane", 1000.0f);
         return out;
     }
 };

@@ -5,6 +5,7 @@
 #include "eyelib/world/components/Transform.h"
 #include "eyelib/world/components/Renderable.h"
 #include "eyelib/world/components/Camera.h"
+#include "eyelib/world/components/XRCamera.h"
 #include "eyelib/world/components/Light.h"
 #include "eyelib/world/components/RigidBody.h"
 #include "eyelib/world/components/Animator.h"
@@ -34,6 +35,7 @@ void ComponentRegistry::RegisterBuiltins() {
     Register<components::Transform>("Transform");
     Register<components::Renderable>("Renderable");
     Register<components::Camera>("Camera");
+    Register<components::XRCamera>("XRCamera");
     Register<components::Light>("Light");
     Register<components::RigidBody>("RigidBody");
     Register<components::Animator>("Animator");

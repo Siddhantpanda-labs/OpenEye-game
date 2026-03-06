@@ -129,6 +129,8 @@ struct IDevice {
     virtual void BlitToDefaultFramebuffer(IRenderTarget* src) = 0;
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to default framebuffer. */
     virtual void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) = 0;
+    /** Blit full contents of src into a subregion of the default framebuffer (e.g. for stereo split: left/right halves). dstX,dstY,dstW,dstH in window coordinates. */
+    virtual void BlitToDefaultFramebufferSubregion(IRenderTarget* src, int dstX, int dstY, int dstW, int dstH) = 0;
     /** Clear default framebuffer then blit src into a centered rect that preserves aspect ratio (letterbox). windowWidth/Height = output size. */
     virtual void BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) = 0;
     /** Blit from src to dst (full size). colorOnly: true = color bit, false = color + depth. */
@@ -157,6 +159,8 @@ struct ICommandList {
     virtual void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) = 0;
     virtual void ClearDefaultFramebuffer(const ClearValue& clear) = 0;
     virtual void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
+    /** Set viewport for a given index (for stereo: index 0 = left, 1 = right). Used with gl_ViewportIndex in shaders. */
+    virtual void SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
     virtual void SetDepthTest(bool enable) = 0;
     virtual void SetDepthWrite(bool enable) = 0;
     virtual void SetDepthFuncLess(bool less) = 0;  // true = GL_LESS, false = GL_LEQUAL etc.
@@ -208,6 +212,8 @@ struct ICommandList {
     virtual void Draw(uint32_t vertexCount, uint32_t firstVertex = 0) = 0;
     virtual void DrawIndexed(uint32_t indexCount, uint32_t firstIndex = 0, int32_t vertexOffset = 0) = 0;
     virtual void DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) = 0;
+    /** Draw indexed with instance count (e.g. 2 for stereo: one draw, both eyes). */
+    virtual void DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) = 0;
     /** Single indirect draw (arrays). Buffer must contain DrawArraysIndirectCommand at offset. Gated by caps. */
     virtual void DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) = 0;
     /** Single indirect draw (indexed). Index buffer must be bound. Buffer contains DrawIndexedIndirectCommand at offset. */

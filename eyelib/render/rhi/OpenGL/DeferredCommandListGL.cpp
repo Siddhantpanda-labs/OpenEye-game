@@ -47,6 +47,9 @@ void DeferredCommandListGL::ClearDefaultFramebuffer(const ClearValue& clear) {
 void DeferredCommandListGL::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
     Record([x, y, width, height](ICommandList* c) { c->SetViewport(x, y, width, height); });
 }
+void DeferredCommandListGL::SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    Record([index, x, y, width, height](ICommandList* c) { c->SetViewportIndexed(index, x, y, width, height); });
+}
 void DeferredCommandListGL::SetDepthTest(bool enable) {
     Record([enable](ICommandList* c) { c->SetDepthTest(enable); });
 }
@@ -174,6 +177,9 @@ void DeferredCommandListGL::DrawIndexed(uint32_t indexCount, uint32_t firstIndex
 }
 void DeferredCommandListGL::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     Record([indexCount, firstIndex, vertexOffset](ICommandList* c) { c->DrawIndexedSubmesh(indexCount, firstIndex, vertexOffset); });
+}
+void DeferredCommandListGL::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
+    Record([indexCount, firstIndex, vertexOffset, instanceCount](ICommandList* c) { c->DrawIndexedInstanced(indexCount, firstIndex, vertexOffset, instanceCount); });
 }
 void DeferredCommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
     Record([indirectBuffer, offset](ICommandList* c) { c->DrawArraysIndirect(indirectBuffer, offset); });

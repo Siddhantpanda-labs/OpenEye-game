@@ -35,6 +35,7 @@ option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 option(OPENEYE_USE_DILIGENT "Use Diligent Engine as RHI backend (requires thirdparty/DiligentCore)" OFF)
+option(OPENEYE_USE_OPENXR "Build OpenXR VR provider (requires thirdparty/OpenXR-SDK)" OFF)
 
 # Player build uses OpenGL only (no Diligent)
 if(OPENEYE_BUILD_PLAYER)
@@ -157,6 +158,18 @@ set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "Disable LTO for Jolt" FORCE)
 set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "Use dynamic MSVC runtime" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/JoltPhysics/Build ${CMAKE_BINARY_DIR}/thirdparty/JoltPhysics)
 
+# --------------------------------------
+# OpenXR SDK (optional; for VR provider)
+# --------------------------------------
+if(OPENEYE_USE_OPENXR)
+    set(BUILD_TESTS OFF CACHE BOOL "Build OpenXR tests" FORCE)
+    set(BUILD_API_LAYERS OFF CACHE BOOL "Build OpenXR API layers" FORCE)
+    set(BUILD_CONFORMANCE_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_SDK_TESTS OFF CACHE BOOL "Build OpenXR SDK samples" FORCE)
+    set(BUILD_LOADER ON CACHE BOOL "Build OpenXR loader" FORCE)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/OpenXR-SDK)
+endif()
+
 # ImGui library (shared across editor and game)
 set(IMGUI_SOURCES
     ${CMAKE_SOURCE_DIR}/thirdparty/imgui/imgui.cpp
@@ -249,6 +262,8 @@ if(OPENEYE_BUILD_EYELIB)
     # Eyelib scripting module
     add_subdirectory(eyelib/scripting)
     add_subdirectory(api/scripting)
+    # Eyelib VR module (XR abstraction; OpenXR backend is optional)
+    add_subdirectory(eyelib/vr)
 endif()
 
 # Editor and game default OFF for now; set ON to build

@@ -45,6 +45,8 @@ public:
 
     /** Render scene. When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass for GPU picking. */
     void Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Single-pass stereo: one render, two viewports (left | right). Pipeline must be resized to full width (2*eyeWidth). */
+    void RenderStereo(const RenderScene& scene, const CameraView& leftCam, const CameraView& rightCam);
     /** Read entity ID at pixel (x,y) in render target coordinates, origin bottom-left. Call after Render(scene, ids) and Finish(). Returns true and writes ID to *outId; 0 = no entity. */
     bool ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) const;
     /** Draw outline from entity ID buffer. Call after Render(scene, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
@@ -61,6 +63,10 @@ public:
     /** Reload all pipeline shaders (for hot-reload when shader files change). */
     void ReloadShaders();
     void BlitToScreen();
+    /** Blit current pipeline output (HDR/post) to the given render target. Use for XR eye buffers. */
+    void BlitOutputTo(class RenderTarget& target);
+    /** Blit left and right eye render targets to window halves (left | right). For stereo preview without headset. */
+    void BlitStereoToScreen(class RenderTarget& left, class RenderTarget& right, uint32_t totalWidth, uint32_t totalHeight);
     /** Wait for GPU to finish (call before swap to reduce flicker). */
     void Finish();
     bool HasValidOutput() const;

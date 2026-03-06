@@ -742,6 +742,93 @@ void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world
     }
     eyelib::api::RenderScene scene;
     BuildScene(world, options, animationBridge, assetRegistry, scene, nullptr);
+
+    const bool useXR = m_xrProvider && m_xrProvider->IsSessionActive() && !m_frameSnapshot.xrCameras.empty();
+    if (useXR && m_xrProvider->GetViewCount() >= 2u) {
+        const uint32_t viewCount = m_xrProvider->GetViewCount();
+        float nearPlane = 0.1f;
+        float farPlane = 1000.0f;
+        if (!m_frameSnapshot.xrCameras.empty()) {
+            nearPlane = m_frameSnapshot.xrCameras[0].component.nearPlane;
+            farPlane = m_frameSnapshot.xrCameras[0].component.farPlane;
+        }
+        if (!m_xrProvider->BeginFrame()) {
+            RenderSceneOnly(scene, width, height);
+            return;
+        }
+        std::vector<eyelib::vr::XRTextureHandle> handles(static_cast<size_t>(viewCount), 0u);
+        for (uint32_t i = 0; i < viewCount; ++i) {
+            eyelib::vr::XRViewData viewData;
+            if (!m_xrProvider->GetViewPoseFov(i, viewData)) continue;
+            eyelib::vr::XRViewProjection xrCam = eyelib::vr::ViewProjectionFromXRView(viewData, nearPlane, farPlane);
+            scene.camera.view = xrCam.view;
+            scene.camera.projection = xrCam.projection;
+            scene.camera.viewPos = xrCam.viewPos;
+            scene.camera.nearPlane = xrCam.nearPlane;
+            scene.camera.farPlane = xrCam.farPlane;
+
+            uint32_t eyeW = 0, eyeH = 0;
+            m_xrProvider->GetRecommendedViewSize(i, eyeW, eyeH);
+            if (eyeW == 0) eyeW = 1;
+            if (eyeH == 0) eyeH = 1;
+            if (!m_xrEyeTargets[i] || m_xrEyeSize[i][0] != eyeW || m_xrEyeSize[i][1] != eyeH) {
+                m_xrEyeTargets[i] = std::make_unique<eyelib::api::RenderTarget>();
+                if (!m_xrEyeTargets[i]->Create(&m_pipeline, eyeW, eyeH,
+                        std::vector<eyelib::api::TextureFormat>{eyelib::api::TextureFormat::RGBA16F},
+                        eyelib::api::TextureFormat::Depth24, 0)) {
+                    m_xrEyeTargets[i].reset();
+                    continue;
+                }
+                m_xrEyeSize[i][0] = eyeW;
+                m_xrEyeSize[i][1] = eyeH;
+            }
+            ApplyResize(eyeW, eyeH);
+            if (!m_pipeline.HasValidOutput()) continue;
+            m_pipeline.Render(scene);
+            m_pipeline.BlitOutputTo(*m_xrEyeTargets[i]);
+            void* native = m_xrEyeTargets[i]->GetColorTextureNativeHandle(0);
+            handles[i] = native ? static_cast<eyelib::vr::XRTextureHandle>(reinterpret_cast<uintptr_t>(native)) : 0u;
+        }
+        m_xrProvider->EndFrame(viewCount, handles.data());
+        ApplyResize(width, height);
+        return;
+    }
+
+    // Stereo preview when XR camera present but no headset: single-pass stereo (one render, two viewports).
+    if (!m_frameSnapshot.xrCameras.empty() && width >= 2 && height >= 1) {
+        const auto& xrEntry = m_frameSnapshot.xrCameras[0];
+        float nearPlane = xrEntry.component.nearPlane;
+        float farPlane = xrEntry.component.farPlane;
+        ::eyelib::world::components::Transform xrTransform;
+        if (world.GetWorldTransform(xrEntry.entity, xrTransform)) {
+            eyelib::vr::XRViewData leftData, rightData;
+            eyelib::vr::StereoViewDataFromCenterPose(xrTransform.position, xrTransform.rotation,
+                eyelib::vr::kDefaultStereoIPD, eyelib::vr::kDefaultStereoFovHalfX, eyelib::vr::kDefaultStereoFovHalfY,
+                leftData, rightData);
+            eyelib::vr::XRViewProjection leftProj = eyelib::vr::ViewProjectionFromXRView(leftData, nearPlane, farPlane);
+            eyelib::vr::XRViewProjection rightProj = eyelib::vr::ViewProjectionFromXRView(rightData, nearPlane, farPlane);
+
+            eyelib::api::CameraView leftCam, rightCam;
+            leftCam.view = leftProj.view;
+            leftCam.projection = leftProj.projection;
+            leftCam.viewPos = leftProj.viewPos;
+            leftCam.nearPlane = leftProj.nearPlane;
+            leftCam.farPlane = leftProj.farPlane;
+            rightCam.view = rightProj.view;
+            rightCam.projection = rightProj.projection;
+            rightCam.viewPos = rightProj.viewPos;
+            rightCam.nearPlane = rightProj.nearPlane;
+            rightCam.farPlane = rightProj.farPlane;
+
+            ApplyResize(width, height);
+            if (m_pipeline.HasValidOutput()) {
+                m_pipeline.RenderStereo(scene, leftCam, rightCam);
+                m_pipeline.BlitToScreen();
+            }
+            return;
+        }
+    }
+
     RenderSceneOnly(scene, width, height);
 }
 

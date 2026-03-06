@@ -1,6 +1,7 @@
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderSceneAdapter.h"
 #include "api/render/RenderTarget.h"
+#include "eyelib/render/RenderTarget.h"
 #include "api/platform/Window.h"
 #include "api/core/All.h"
 #include "eyelib/render/2d/Primitives.h"
@@ -147,6 +148,22 @@ void RenderPipeline::Render(const RenderScene& scene, const std::vector<uint32_t
     m_impl->pipeline->Render(view, entityIdsForOpaque);
 }
 
+void RenderPipeline::RenderStereo(const RenderScene& scene, const CameraView& leftCam, const CameraView& rightCam) {
+    ApiRenderSceneView view(scene);
+    ::eyelib::render::CameraView left, right;
+    left.view = leftCam.view;
+    left.projection = leftCam.projection;
+    left.viewPos = leftCam.viewPos;
+    left.nearPlane = leftCam.nearPlane;
+    left.farPlane = leftCam.farPlane;
+    right.view = rightCam.view;
+    right.projection = rightCam.projection;
+    right.viewPos = rightCam.viewPos;
+    right.nearPlane = rightCam.nearPlane;
+    right.farPlane = rightCam.farPlane;
+    m_impl->pipeline->RenderStereo(view, left, right);
+}
+
 bool RenderPipeline::ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) const {
     if (!outId) return false;
     *outId = 0;
@@ -182,6 +199,26 @@ void RenderPipeline::ReloadShaders() {
 
 void RenderPipeline::BlitToScreen() {
     m_impl->pipeline->BlitToScreen();
+}
+
+void RenderPipeline::BlitOutputTo(RenderTarget& target) {
+    if (!m_impl->pipeline) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    auto* srcRT = m_impl->pipeline->GetCurrentFrameOutputRT();
+    auto* destRT = target.GetInternal() ? target.GetInternal()->GetRenderTargetRHI() : nullptr;
+    if (device && srcRT && destRT)
+        device->Blit(srcRT, destRT, true);
+}
+
+void RenderPipeline::BlitStereoToScreen(RenderTarget& left, RenderTarget& right, uint32_t totalWidth, uint32_t totalHeight) {
+    if (!m_impl->pipeline || totalWidth < 2 || totalHeight < 1) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    auto* rtLeft = left.GetInternal() ? left.GetInternal()->GetRenderTargetRHI() : nullptr;
+    auto* rtRight = right.GetInternal() ? right.GetInternal()->GetRenderTargetRHI() : nullptr;
+    if (!device || !rtLeft || !rtRight) return;
+    const int halfW = static_cast<int>(totalWidth / 2);
+    device->BlitToDefaultFramebufferSubregion(rtLeft, 0, 0, halfW, static_cast<int>(totalHeight));
+    device->BlitToDefaultFramebufferSubregion(rtRight, halfW, 0, halfW, static_cast<int>(totalHeight));
 }
 
 void RenderPipeline::Finish() {

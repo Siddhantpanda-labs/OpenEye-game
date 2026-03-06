@@ -188,5 +188,18 @@ void MeshHandle::Draw(rhi::IDevice* device, int submeshIndex) const {
     }
 }
 
+void MeshHandle::DrawInstanced(rhi::IDevice* device, int submeshIndex, uint32_t instanceCount) const {
+    if (!device || !vertexBuffer || !indexBuffer || instanceCount == 0) return;
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return;
+    Bind(device);
+    if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < submeshes.size()) {
+        const Submesh& s = submeshes[static_cast<size_t>(submeshIndex)];
+        cmd->DrawIndexedInstanced(s.indexCount, s.indexOffset, 0, instanceCount);
+    } else {
+        cmd->DrawIndexedInstanced(totalIndexCount, 0, 0, instanceCount);
+    }
+}
+
 } // namespace render
 } // namespace eyelib

@@ -8,6 +8,8 @@
 #include "api/core/FrameAllocator.h"
 #include "api/render/All.h"
 #include "api/world/All.h"
+#include "eyelib/vr/IXRProvider.h"
+#include "eyelib/vr/XRViewHelpers.h"
 
 #include <functional>
 #include <memory>
@@ -77,6 +79,9 @@ public:
     /** Native texture handle of pipeline output (after RenderSceneOnly). For ImGui use as ImTextureID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** Optional XR provider. When set and session active, Render() uses stereo XR path when scene has XR camera. */
+    void SetXRProvider(::eyelib::vr::IXRProvider* provider) { m_xrProvider = provider; }
+
     /** Device for asset loading / SetRenderDevice. Null if not initialized. */
     eyelib::api::RenderDevice GetDevice() const;
 
@@ -143,6 +148,10 @@ private:
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     bool m_captureCallbackSet = false;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;
+
+    ::eyelib::vr::IXRProvider* m_xrProvider = nullptr;
+    std::unique_ptr<eyelib::api::RenderTarget> m_xrEyeTargets[2];
+    uint32_t m_xrEyeSize[2][2] = {{0, 0}, {0, 0}};
 };
 
 } // namespace openeye::player

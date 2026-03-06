@@ -6,10 +6,12 @@
 #include "api/math/TransformUtils.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
+#include "eyelib/vr/XRViewHelpers.h"
 
 #include <imgui.h>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 namespace openeye::editor::panels {
@@ -77,13 +79,21 @@ void ShowGameViewPanel(EditorContext* ctx) {
             eyelib::api::world::World::RenderSnapshot snapshot;
             ctx->world.CaptureRenderSnapshot(snapshot);
 
-            if (snapshot.cameras.empty()) {
+            if (snapshot.cameras.empty() && snapshot.xrCameras.empty()) {
                 ImGui::TextUnformatted("No cameras in scene.");
             } else {
                 for (const auto& entry : snapshot.cameras) {
                     const EntityId e = entry.entity;
                     const bool isSelected = (ctx->gameViewDebugCamera.index == e.index && ctx->gameViewDebugCamera.generation == e.generation);
                     std::string label = GetEntityDisplayName(ctx->world, e);
+                    if (ImGui::Selectable(label.c_str(), isSelected)) {
+                        ctx->gameViewDebugCamera = isSelected ? ::eyelib::world::InvalidEntity : e;
+                    }
+                }
+                for (const auto& entry : snapshot.xrCameras) {
+                    const EntityId e = entry.entity;
+                    const bool isSelected = (ctx->gameViewDebugCamera.index == e.index && ctx->gameViewDebugCamera.generation == e.generation);
+                    std::string label = "XR: " + GetEntityDisplayName(ctx->world, e);
                     if (ImGui::Selectable(label.c_str(), isSelected)) {
                         ctx->gameViewDebugCamera = isSelected ? ::eyelib::world::InvalidEntity : e;
                     }
@@ -107,8 +117,14 @@ void ShowGameViewPanel(EditorContext* ctx) {
 
             ::eyelib::world::components::Transform camTransform;
             ::eyelib::world::components::Camera camComp;
-            if (ctx->world.GetWorldTransform(ctx->gameViewDebugCamera, camTransform) &&
-                ctx->world.GetCamera(ctx->gameViewDebugCamera, camComp)) {
+            ::eyelib::world::components::XRCamera xrCamComp;
+            const bool isRegularCamera = ctx->world.GetWorldTransform(ctx->gameViewDebugCamera, camTransform) &&
+                                         ctx->world.GetCamera(ctx->gameViewDebugCamera, camComp);
+            const bool isXRCamera = !isRegularCamera &&
+                                   ctx->world.GetWorldTransform(ctx->gameViewDebugCamera, camTransform) &&
+                                   ctx->world.GetXRCamera(ctx->gameViewDebugCamera, xrCamComp);
+
+            if (isRegularCamera) {
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;
                 s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
@@ -122,6 +138,43 @@ void ShowGameViewPanel(EditorContext* ctx) {
                     ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
                 } else {
                     ImGui::TextUnformatted("No preview output");
+                }
+            } else if (isXRCamera) {
+                // Single-pass stereo: one render, two viewports (left | right)
+                static EditorSceneBuilder s_builder;
+                eyelib::api::RenderScene scene;
+                s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
+
+                eyelib::vr::XRViewData leftData, rightData;
+                eyelib::vr::StereoViewDataFromCenterPose(camTransform.position, camTransform.rotation,
+                    eyelib::vr::kDefaultStereoIPD, eyelib::vr::kDefaultStereoFovHalfX, eyelib::vr::kDefaultStereoFovHalfY,
+                    leftData, rightData);
+
+                const float nearPlane = xrCamComp.nearPlane;
+                const float farPlane = xrCamComp.farPlane;
+                eyelib::vr::XRViewProjection leftProj = eyelib::vr::ViewProjectionFromXRView(leftData, nearPlane, farPlane);
+                eyelib::vr::XRViewProjection rightProj = eyelib::vr::ViewProjectionFromXRView(rightData, nearPlane, farPlane);
+
+                eyelib::api::CameraView leftCam, rightCam;
+                leftCam.view = leftProj.view;
+                leftCam.projection = leftProj.projection;
+                leftCam.viewPos = leftProj.viewPos;
+                leftCam.nearPlane = leftProj.nearPlane;
+                leftCam.farPlane = leftProj.farPlane;
+                rightCam.view = rightProj.view;
+                rightCam.projection = rightProj.projection;
+                rightCam.viewPos = rightProj.viewPos;
+                rightCam.nearPlane = rightProj.nearPlane;
+                rightCam.farPlane = rightProj.farPlane;
+
+                ctx->gameViewPipeline->Resize(w, h);
+                ctx->gameViewPipeline->RenderStereo(scene, leftCam, rightCam);
+
+                void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
+                if (texId && ctx->gameViewPipeline->HasValidOutput()) {
+                    ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
+                } else {
+                    ImGui::TextUnformatted("No stereo preview output");
                 }
             } else {
                 ImGui::TextUnformatted("Camera entity missing transform or component.");
