@@ -962,6 +962,45 @@ bool DeviceGL::ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32
     return true;
 }
 
+bool DeviceGL::ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) {
+    if (!rt || !outBuffer || w == 0 || h == 0) return false;
+    const uint32_t rtW = rt->GetWidth();
+    const uint32_t rtH = rt->GetHeight();
+    if (x + w > rtW || y + h > rtH) return false;
+    GLint oldReadFbo = 0, oldDrawFbo = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldReadFbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDrawFbo);
+    auto* r = static_cast<RenderTargetGL*>(rt);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    const size_t pixelCount = static_cast<size_t>(w) * static_cast<size_t>(h);
+    std::vector<float> tmp(static_cast<size_t>(4) * pixelCount);
+    glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(w), static_cast<GLsizei>(h),
+                 GL_RGBA, GL_FLOAT, tmp.data());
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(oldReadFbo));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(oldDrawFbo));
+    const size_t rowBytes = static_cast<size_t>(w) * 4u;
+    for (uint32_t row = 0; row < h; ++row) {
+        const uint32_t srcRow = h - 1u - row;
+        const float* src = tmp.data() + static_cast<size_t>(srcRow) * static_cast<size_t>(w) * 4u;
+        uint8_t* dst = outBuffer + static_cast<size_t>(row) * rowBytes;
+        for (uint32_t col = 0; col < w; ++col) {
+            float r0 = src[0], g = src[1], b = src[2], a = src[3];
+            float L = r0 * 0.2126f + g * 0.7152f + b * 0.0722f;
+            float scale = (L <= 0.0f) ? 1.0f : (1.0f / (1.0f + L));
+            r0 *= scale; g *= scale; b *= scale;
+            dst[0] = static_cast<uint8_t>(std::clamp(static_cast<int>(r0 * 255.0f), 0, 255));
+            dst[1] = static_cast<uint8_t>(std::clamp(static_cast<int>(g * 255.0f), 0, 255));
+            dst[2] = static_cast<uint8_t>(std::clamp(static_cast<int>(b * 255.0f), 0, 255));
+            dst[3] = static_cast<uint8_t>(std::clamp(static_cast<int>(a * 255.0f), 0, 255));
+            src += 4;
+            dst += 4;
+        }
+    }
+    return true;
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

@@ -1276,6 +1276,17 @@ rhi::IRenderTarget* RenderPipeline::GetCurrentFrameOutputRT() const {
     return m_hdrRenderTarget;
 }
 
+bool RenderPipeline::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const {
+    rhi::IRenderTarget* rt = GetCurrentFrameOutputRT();
+    if (!m_device || !rt || !outRGBA || width == 0 || height == 0) return false;
+    const uint32_t rtW = rt->GetWidth();
+    const uint32_t rtH = rt->GetHeight();
+    if (rtW == 0 || rtH == 0) return false;
+    const uint32_t w = (width <= rtW) ? width : rtW;
+    const uint32_t h = (height <= rtH) ? height : rtH;
+    return m_device->ReadPixelsRGBA8(rt, 0, 0, w, h, outRGBA);
+}
+
 rhi::ITexture* RenderPipeline::GetCurrentFrameOutputColorTextureRHI() const {
     rhi::IRenderTarget* rt = GetCurrentFrameOutputRT();
     return rt ? rt->GetColorTexture(0) : nullptr;

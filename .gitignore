@@ -69,3 +69,4 @@ assets/models/*
 # !assets/models/.gitkeep
 # !assets/textures/.gitkeep
 
+app/metaworld/

@@ -87,6 +87,7 @@ struct DeviceGL : IDevice {
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
     bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) override;
+    bool ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) override;
 
     /** Lazy-create and return the shared fullscreen quad VBO/IBO used by DrawFullscreenQuad. */
     void EnsureFullscreenQuad();

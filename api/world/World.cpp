@@ -783,6 +783,19 @@ bool World::GetCamera(::eyelib::world::EntityId entity,
     return true;
 }
 
+std::optional<::eyelib::world::EntityId> World::GetFirstXRCameraEntityId() const {
+    if (!m_impl) return std::nullopt;
+    ::eyelib::world::WorldObservation obs(m_impl->world.GetView());
+    const auto view = obs.GetXRCamerasView();
+    for (const auto& [eid, comp] : view) {
+        if (comp.isPrimary)
+            return eid;
+    }
+    if (!view.empty())
+        return view[0].first;
+    return std::nullopt;
+}
+
 bool World::GetXRCamera(::eyelib::world::EntityId entity,
                         ::eyelib::world::components::XRCamera& out) const {
     if (!m_impl) {

@@ -79,6 +79,9 @@ public:
     /** Native texture handle of pipeline output (after RenderSceneOnly). For ImGui use as ImTextureID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** Read current frame output as RGBA8. Call after Render(); performs Finish() then readback. outRGBA must be at least width*height*4. Returns false if not ready or readback unsupported. */
+    bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA);
+
     /** Optional XR provider. When set and session active, Render() uses stereo XR path when scene has XR camera. */
     void SetXRProvider(::eyelib::vr::IXRProvider* provider) { m_xrProvider = provider; }
 
@@ -124,6 +127,7 @@ private:
         std::span<const eyelib::api::world::World::RenderableEntry> renderables,
         std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
         std::span<const eyelib::api::world::World::CameraEntry> cameras,
+        std::span<const eyelib::api::world::World::XRCameraEntry> xrCameras,
         std::span<const eyelib::api::world::World::LightEntry> lights,
         std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
         const RuntimeOptions& options,

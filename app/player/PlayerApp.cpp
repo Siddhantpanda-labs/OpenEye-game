@@ -11,6 +11,13 @@
 #include "api/assets/ShaderWatcher.h"
 #include "api/render/RenderBackend.h"
 
+#ifdef OPENEYE_BUILD_STREAMING
+#include "app/streaming/VRStreamingServer.h"
+#endif
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
 #include <iostream>
 #include <cstdio>
 
@@ -334,6 +341,23 @@ int RunPlayer(int argc, char** argv) {
         return static_cast<int>(ExitCode::AssetStrictFailed);
     }
 
+#ifdef OPENEYE_BUILD_STREAMING
+    gameRuntime.SetStreamingGyroCallback([&world](float yaw, float pitch, float roll) {
+        auto eid = world.GetFirstXRCameraEntityId();
+        if (!eid) return;
+        eyelib::world::components::Transform t;
+        if (!world.GetWorldTransform(*eid, t)) return;
+        glm::mat4 R = glm::rotate(glm::mat4(1.f), yaw, glm::vec3(0.f, 1.f, 0.f))
+                    * glm::rotate(glm::mat4(1.f), pitch, glm::vec3(1.f, 0.f, 0.f))
+                    * glm::rotate(glm::mat4(1.f), roll, glm::vec3(0.f, 0.f, 1.f));
+        t.rotation = glm::quat_cast(R);
+        world.SetTransform(*eid, t);
+    });
+    if (!options.headless && gameRuntime.StartStreaming(27016)) {
+        eyelib::api::core::Log::Info("VR streaming server started (discovery 27015, stream 27016).");
+    }
+#endif
+
     std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher;
     if (!options.headless) {
         shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
@@ -428,6 +452,15 @@ int RunPlayer(int argc, char** argv) {
                     snap.frameTimeMs = eyelib::api::core::Time::SmoothedDeltaTime() * 1000.0f;
                     snap.entityCount = world.GetEntityCount();
                     snap.scenePath = options.scenePath;
+#ifdef OPENEYE_BUILD_STREAMING
+                    if (gameRuntime.IsStreaming()) {
+                        snap.streamingActive = true;
+                        snap.streamingClientCount = gameRuntime.GetStreamingClientCount();
+                        std::string ip = eyelib::app::VRStreamingServer::GetLocalIPv4Address();
+                        if (!ip.empty())
+                            snap.streamingServerAddress = ip + ":27016";
+                    }
+#endif
                     overlay.Render(snap);
                 }
                 window.SwapBuffers();

@@ -12,6 +12,7 @@
 #include "api/render/RenderScene.h"
 #include "WorldAnimation.h"
 #include "api/assets/AssetManager.h"
+#include "eyelib/vr/XRViewHelpers.h"
 
 #include <cassert>
 #include <cmath>
@@ -166,6 +167,12 @@ void WorldRenderBridge::Shutdown() {
 
 void* WorldRenderBridge::GetOutputColorTextureNativeHandle() const {
     return m_ready ? m_pipeline.GetOutputColorTextureNativeHandle() : nullptr;
+}
+
+bool WorldRenderBridge::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) {
+    if (!m_ready || !outRGBA || width == 0 || height == 0) return false;
+    m_pipeline.Finish();
+    return m_pipeline.ReadOutputPixels(width, height, outRGBA);
 }
 
 eyelib::api::RenderDevice WorldRenderBridge::GetDevice() const {
@@ -403,9 +410,10 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
     const auto renderables = obs.GetRenderablesView();
     const auto meshRenderers = obs.GetMeshRenderersView();
     const auto cameras = obs.GetCamerasView();
+    const auto xrCameras = obs.GetXRCamerasView();
     const auto lights = obs.GetLightsView();
     auto getTransform = [&](eyelib::world::EntityId id) { return obs.GetTransform(id); };
-    BuildSceneFromViews(renderables, meshRenderers, cameras, lights, getTransform, options, animationBridge, assetRegistry, scene, frameAlloc);
+    BuildSceneFromViews(renderables, meshRenderers, cameras, xrCameras, lights, getTransform, options, animationBridge, assetRegistry, scene, frameAlloc);
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapshot& snapshot,
@@ -414,7 +422,7 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapsh
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    BuildSceneFromViews(snapshot.renderables, snapshot.meshRenderers, snapshot.cameras, snapshot.lights,
+    BuildSceneFromViews(snapshot.renderables, snapshot.meshRenderers, snapshot.cameras, snapshot.xrCameras, snapshot.lights,
                         [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); },
                         options, animationBridge, assetRegistry, scene, frameAlloc);
 }
@@ -423,6 +431,7 @@ void WorldRenderBridge::BuildSceneFromViews(
     std::span<const eyelib::api::world::World::RenderableEntry> renderables,
     std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
     std::span<const eyelib::api::world::World::CameraEntry> cameras,
+    std::span<const eyelib::api::world::World::XRCameraEntry> xrCameras,
     std::span<const eyelib::api::world::World::LightEntry> lights,
     std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
     const RuntimeOptions& options,
@@ -626,51 +635,89 @@ void WorldRenderBridge::BuildSceneFromViews(
         scene.transparentCount = 0;
     }
 
+    // Active view priority: XR camera (if present) -> primary regular camera -> any regular camera -> fallback
     bool cameraFound = false;
     eyelib::world::components::Camera cameraComponent{};
     eyelib::world::components::Transform cameraTransform{};
-    for (const auto& entry : cameras) {
-        if (!cameraFound || entry.component.isPrimary) {
-            cameraFound = true;
-            cameraComponent = entry.component;
-            if (const auto transform = getTransform(entry.entity)) {
-                cameraTransform = *transform;
-            }
-            if (entry.component.isPrimary) {
+
+    if (!xrCameras.empty()) {
+        // Use XR camera as active view (prefer isPrimary when multiple)
+        size_t xrIdx = 0;
+        for (size_t i = 0; i < xrCameras.size(); ++i) {
+            if (xrCameras[i].component.isPrimary) {
+                xrIdx = i;
                 break;
             }
         }
+        const auto& xrEntry = xrCameras[xrIdx];
+        const auto xrTransform = getTransform(xrEntry.entity);
+        if (xrTransform) {
+            eyelib::vr::XRViewData leftData, rightData;
+            eyelib::vr::StereoViewDataFromCenterPose(
+                xrTransform->position, xrTransform->rotation,
+                eyelib::vr::kDefaultStereoIPD,
+                eyelib::vr::kDefaultStereoFovHalfX,
+                eyelib::vr::kDefaultStereoFovHalfY,
+                leftData, rightData);
+            eyelib::vr::XRViewProjection xrProj = eyelib::vr::ViewProjectionFromXRView(
+                leftData,
+                xrEntry.component.nearPlane,
+                xrEntry.component.farPlane);
+            scene.camera.view = xrProj.view;
+            scene.camera.projection = xrProj.projection;
+            scene.camera.viewPos = xrProj.viewPos;
+            scene.camera.nearPlane = xrProj.nearPlane;
+            scene.camera.farPlane = xrProj.farPlane;
+            cameraFound = true;
+        }
     }
 
-    if (cameraFound) {
-        const float aspect = (cameraComponent.aspect > 0.0f)
-            ? cameraComponent.aspect
-            : (m_height > 0 ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f);
-        if (cameraComponent.isPerspective) {
-            scene.camera.projection = eyelib::math::Perspective(
-                DegreesToRadians(cameraComponent.fov),
-                aspect,
-                cameraComponent.nearPlane,
-                cameraComponent.farPlane
-            );
-        } else {
-            const float half = cameraComponent.orthoSize * 0.5f;
-            scene.camera.projection = eyelib::math::Orthographic(
-                -half * aspect,
-                half * aspect,
-                -half,
-                half,
-                cameraComponent.nearPlane,
-                cameraComponent.farPlane
-            );
+    if (!cameraFound) {
+        for (const auto& entry : cameras) {
+            if (!cameraFound || entry.component.isPrimary) {
+                cameraFound = true;
+                cameraComponent = entry.component;
+                if (const auto transform = getTransform(entry.entity)) {
+                    cameraTransform = *transform;
+                }
+                if (entry.component.isPrimary) {
+                    break;
+                }
+            }
         }
 
-        const auto worldMatrix = TransformToMatrix(cameraTransform);
-        scene.camera.view = eyelib::math::Inverse(worldMatrix);
-        scene.camera.viewPos = cameraTransform.position;
-        scene.camera.nearPlane = cameraComponent.nearPlane;
-        scene.camera.farPlane = cameraComponent.farPlane;
-    } else {
+        if (cameraFound) {
+            const float aspect = (cameraComponent.aspect > 0.0f)
+                ? cameraComponent.aspect
+                : (m_height > 0 ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f);
+            if (cameraComponent.isPerspective) {
+                scene.camera.projection = eyelib::math::Perspective(
+                    DegreesToRadians(cameraComponent.fov),
+                    aspect,
+                    cameraComponent.nearPlane,
+                    cameraComponent.farPlane
+                );
+            } else {
+                const float half = cameraComponent.orthoSize * 0.5f;
+                scene.camera.projection = eyelib::math::Orthographic(
+                    -half * aspect,
+                    half * aspect,
+                    -half,
+                    half,
+                    cameraComponent.nearPlane,
+                    cameraComponent.farPlane
+                );
+            }
+
+            const auto worldMatrix = TransformToMatrix(cameraTransform);
+            scene.camera.view = eyelib::math::Inverse(worldMatrix);
+            scene.camera.viewPos = cameraTransform.position;
+            scene.camera.nearPlane = cameraComponent.nearPlane;
+            scene.camera.farPlane = cameraComponent.farPlane;
+        }
+    }
+
+    if (!cameraFound) {
         const float aspect = (m_height > 0) ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f;
         scene.camera.projection = eyelib::math::Perspective(DegreesToRadians(60.0f), aspect, 0.1f, 1000.0f);
         scene.camera.view = eyelib::math::LookAt({0.0f, 2.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});

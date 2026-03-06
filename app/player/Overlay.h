@@ -15,6 +15,12 @@ struct OverlaySnapshot {
     float frameTimeMs = 0.0f;
     size_t entityCount = 0;
     std::string scenePath;
+
+    /** VR streaming: when true, overlay may show VR server panel (QR, address, client count). */
+    bool streamingActive = false;
+    size_t streamingClientCount = 0;
+    /** e.g. "192.168.1.42:27016"; empty if unknown. */
+    std::string streamingServerAddress;
 };
 
 class RuntimeOverlay {
@@ -27,6 +33,11 @@ public:
 
 private:
     bool m_ready = false;
+    // QR code texture for VR server panel (only used when OPENEYE_BUILD_STREAMING)
+    void* m_qrTextureId = nullptr;
+    int m_qrTextureWidth = 0;
+    int m_qrTextureHeight = 0;
+    std::string m_lastQRAddress;
 };
 
 } // namespace openeye::player

@@ -242,6 +242,8 @@ public:
                    ::eyelib::world::components::Camera& out) const;
     bool GetXRCamera(::eyelib::world::EntityId entity,
                      ::eyelib::world::components::XRCamera& out) const;
+    /** First entity with XRCamera (prefers isPrimary). Empty if none. */
+    std::optional<::eyelib::world::EntityId> GetFirstXRCameraEntityId() const;
     bool GetLight(::eyelib::world::EntityId entity,
                   ::eyelib::world::components::Light& out) const;
     bool GetRenderable(::eyelib::world::EntityId entity,

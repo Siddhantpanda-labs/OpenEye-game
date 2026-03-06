@@ -9,6 +9,10 @@
 
 #include "api/render/RenderBackend.h"
 
+#ifdef OPENEYE_BUILD_STREAMING
+#include "app/streaming/VRStreamingServer.h"
+#endif
+
 namespace openeye::player {
 
 void GameRuntime::ResetScene() {
@@ -32,6 +36,9 @@ void GameRuntime::ResetScene() {
 }
 
 GameRuntime::~GameRuntime() {
+#ifdef OPENEYE_BUILD_STREAMING
+    StopStreaming();
+#endif
     Shutdown();
 }
 
@@ -167,6 +174,20 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
     ResetScene();
     m_render->BuildScene(*m_world, m_options, m_animation.get(), m_assetRegistry, m_scene, &m_frameAlloc);
     m_render->RenderSceneOnly(m_scene, m_width, m_height);
+
+#ifdef OPENEYE_BUILD_STREAMING
+    if (m_streaming && m_streaming->IsRunning()) {
+        m_streaming->Tick();
+        if (m_streaming->GetClientCount() > 0) {
+            const size_t need = static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * 4u;
+            if (m_streamingReadbackBuffer.size() < need)
+                m_streamingReadbackBuffer.resize(need);
+            if (m_render->ReadOutputPixels(m_width, m_height, m_streamingReadbackBuffer.data()))
+                m_streaming->SendFrame(m_streamingReadbackBuffer.data(), m_width, m_height, 75);
+        }
+    }
+#endif
+
     return m_render->GetOutputColorTextureNativeHandle();
 }
 
@@ -179,5 +200,35 @@ void GameRuntime::ReloadShaders() {
         m_render->ReloadShaders();
     }
 }
+
+#ifdef OPENEYE_BUILD_STREAMING
+bool GameRuntime::StartStreaming(uint16_t streamPort) {
+    if (IsHeadless()) return false;
+    if (m_streaming && m_streaming->IsRunning()) return true;
+    if (!m_streaming) m_streaming = std::make_unique<eyelib::app::VRStreamingServer>();
+    if (m_streamingGyroCallback)
+        m_streaming->SetGyroCallback(m_streamingGyroCallback);
+    return m_streaming->Start(streamPort);
+}
+
+void GameRuntime::StopStreaming() {
+    if (m_streaming)
+        m_streaming->Stop();
+}
+
+bool GameRuntime::IsStreaming() const {
+    return m_streaming && m_streaming->IsRunning();
+}
+
+size_t GameRuntime::GetStreamingClientCount() const {
+    return m_streaming && m_streaming->IsRunning() ? m_streaming->GetClientCount() : 0u;
+}
+
+void GameRuntime::SetStreamingGyroCallback(std::function<void(float yaw, float pitch, float roll)> cb) {
+    m_streamingGyroCallback = std::move(cb);
+    if (m_streaming)
+        m_streaming->SetGyroCallback(m_streamingGyroCallback);
+}
+#endif
 
 } // namespace openeye::player

@@ -173,6 +173,10 @@ bool RenderPipeline::ReadPixelEntityId(uint32_t x, uint32_t y, uint32_t* outId) 
     return device->ReadPixelUint32(rt, x, y, outId);
 }
 
+bool RenderPipeline::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const {
+    return m_impl->pipeline && m_impl->pipeline->ReadOutputPixels(width, height, outRGBA);
+}
+
 void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r, float g, float b) {
     if (selectedPackedId == 0) return;
     m_impl->pipeline->RenderOutlineFromIdBuffer(selectedPackedId, r, g, b);

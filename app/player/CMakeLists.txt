@@ -57,6 +57,11 @@ target_link_libraries(OpenEyeGameRuntime
         OpenEyeImGui
 )
 
+if(OPENEYE_BUILD_STREAMING)
+    target_link_libraries(OpenEyeGameRuntime PUBLIC OpenEyeStreaming)
+    target_compile_definitions(OpenEyeGameRuntime PUBLIC OPENEYE_BUILD_STREAMING)
+endif()
+
 # Player executable (uses game runtime); only when building the player app
 if(OPENEYE_BUILD_PLAYER)
     set(PLAYER_SOURCES
@@ -81,4 +86,8 @@ if(OPENEYE_BUILD_PLAYER)
         PRIVATE
             OpenEyeGameRuntime
     )
+    if(OPENEYE_BUILD_STREAMING)
+        target_link_libraries(OpenEyePlayer PRIVATE qrcodegen)
+        target_include_directories(OpenEyePlayer PRIVATE ${CMAKE_SOURCE_DIR}/thirdparty/qrcodegen)
+    endif()
 endif()

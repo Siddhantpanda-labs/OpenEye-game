@@ -999,6 +999,16 @@ bool DeviceDiligent::ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, 
     return false;  // TODO: implement for Diligent when needed
 }
 
+bool DeviceDiligent::ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) {
+    (void)rt;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)outBuffer;
+    return false;  // TODO: implement for Diligent when needed
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

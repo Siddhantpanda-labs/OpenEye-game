@@ -79,6 +79,9 @@ public:
     /** Native texture handle of pipeline output (after Render). For ImGui: use as ImTextureID. OpenGL: texture ID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** Read current frame output as RGBA8. Call after Render() and Finish(). outRGBA must be at least width*height*4 bytes. Returns false if readback not supported. */
+    bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const;
+
     /** Restore default framebuffer (0) and viewport. Call after Render() when not calling BlitToScreen() (e.g. editor scene view) so subsequent drawing (e.g. ImGui) targets the window. */
     void RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height);
 

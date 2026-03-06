@@ -32,6 +32,7 @@ option(OPENEYE_BUILD_EDITOR "Build development editor" ON)
 option(OPENEYE_BUILD_GAME "Build final game" ON)
 option(OPENEYE_BUILD_PLAYER "Build unified runtime player" ON)
 option(OPENEYE_BUILD_TESTS "Build API test app" ON)
+option(OPENEYE_BUILD_STREAMING "Build VR streaming server (UDP discovery + frame stream)" ON)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 option(OPENEYE_USE_DILIGENT "Use Diligent Engine as RHI backend (requires thirdparty/DiligentCore)" OFF)
@@ -68,6 +69,15 @@ endif()
 # --------------------------------------
 add_library(glad STATIC ${CMAKE_SOURCE_DIR}/thirdparty/glad/src/glad_gl_loader.c)
 target_include_directories(glad PUBLIC ${CMAKE_SOURCE_DIR}/thirdparty/glad/include)
+
+# --------------------------------------
+# QR code generator (Nayuki) - for VR server pairing overlay
+# --------------------------------------
+add_library(qrcodegen STATIC ${CMAKE_SOURCE_DIR}/thirdparty/qrcodegen/qrcodegen.cpp)
+target_include_directories(qrcodegen PUBLIC ${CMAKE_SOURCE_DIR}/thirdparty/qrcodegen)
+if(MSVC)
+    target_compile_options(qrcodegen PRIVATE /W3 /wd4244 /wd4267)
+endif()
 
 # --------------------------------------
 # GLFW (use GLFW's own CMake build system - proper way)
@@ -289,6 +299,10 @@ endif()
 # --------------------------------------
 # Unified Runtime Player (lib shared with Editor Game view)
 # --------------------------------------
+if(OPENEYE_BUILD_STREAMING)
+    add_subdirectory(app/streaming)
+endif()
+
 if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/player)
 endif()
@@ -319,7 +333,7 @@ add_subdirectory(app/demo_physics_jolt)
 # Diligent standalone test (clear + present)
 # --------------------------------------
 if(OPENEYE_USE_DILIGENT)
-    add_subdirectory(app/diligent_test)
+ 
 endif()
 
 

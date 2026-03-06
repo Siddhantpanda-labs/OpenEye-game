@@ -14,9 +14,14 @@
 #include "api/world/All.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace eyelib { namespace api { class Window; } }
+
+#ifdef OPENEYE_BUILD_STREAMING
+#include "app/streaming/VRStreamingServer.h"
+#endif
 
 namespace openeye::player {
 
@@ -67,6 +72,17 @@ public:
     /** Reload shaders (e.g. after ShaderWatcher copy). No-op when headless. */
     void ReloadShaders();
 
+#ifdef OPENEYE_BUILD_STREAMING
+    /** Start VR streaming server (discovery + stream port). No-op when headless. */
+    bool StartStreaming(uint16_t streamPort = 27016);
+    void StopStreaming();
+    bool IsStreaming() const;
+    /** Number of connected VR clients (0 when not streaming). */
+    size_t GetStreamingClientCount() const;
+    /** Callback (yaw, pitch, roll in radians) when client sends head tracking. Set before StartStreaming to drive XR camera. */
+    void SetStreamingGyroCallback(std::function<void(float yaw, float pitch, float roll)> cb);
+#endif
+
 private:
     void ResetScene();
 
@@ -87,6 +103,12 @@ private:
     uint32_t m_height = 0;
     bool m_ready = false;
     AssetBindStats m_assetBindStats{};
+
+#ifdef OPENEYE_BUILD_STREAMING
+    std::unique_ptr<eyelib::app::VRStreamingServer> m_streaming;
+    std::function<void(float yaw, float pitch, float roll)> m_streamingGyroCallback;
+    std::vector<uint8_t> m_streamingReadbackBuffer;
+#endif
 };
 
 } // namespace openeye::player

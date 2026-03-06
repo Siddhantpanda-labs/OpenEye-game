@@ -141,6 +141,8 @@ struct IDevice {
     virtual void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) = 0;
     /** Read one pixel from RT's color attachment 0 (must be R32UI). (x,y) in RT coordinates, origin bottom-left. Call after frame is done (e.g. Finish). */
     virtual bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) = 0;
+    /** Read color pixels from RT's color attachment 0 into RGBA8. (x,y,w,h) in RT coords, origin bottom-left. outBuffer must be at least w*h*4 bytes. Call after frame is done (e.g. Finish). */
+    virtual bool ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) = 0;
     /** Wait for fence (CPU blocks until GPU has passed the fence). timeoutMs: 0 = no wait, UINT64_MAX = wait forever. Returns true if signalled. */
     virtual bool WaitFence(IFence* fence, uint64_t timeoutMs) = 0;
     virtual void DestroyFence(IFence* fence) = 0;

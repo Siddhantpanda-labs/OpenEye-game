@@ -112,6 +112,8 @@ public:
 
     /** Render target that will be blitted to screen this frame (post output when valid, else HDR). */
     rhi::IRenderTarget* GetCurrentFrameOutputRT() const;
+    /** Read current frame output as RGBA8. Call after Render() and Finish(). outRGBA must be at least width*height*4 bytes. Returns false if readback not supported or RT invalid. */
+    bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const;
     /** Color texture of the current frame output (for display; same as BlitToScreen source). */
     rhi::ITexture* GetCurrentFrameOutputColorTextureRHI() const;
 
