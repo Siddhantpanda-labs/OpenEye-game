@@ -1,6 +1,7 @@
 #include "EditorApp.h"
 
 #include "EditorContext.h"
+#include "EditorProject.h"
 #include "EditorSceneBuilder.h"
 #include "MenuBar.h"
 #include "panels/StatusPanel.h"
@@ -8,6 +9,7 @@
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
 #include "panels/GameViewPanel.h"
+#include "panels/AssetPanel.h"
 #include "GameRuntime.h"
 
 #include "api/assets/All.h"
@@ -16,7 +18,6 @@
 #include "api/platform/All.h"
 #include "api/render/All.h"
 #include "api/render/RenderDevice.h"
-#include "api/assets/ShaderWatcher.h"
 #include "api/platform/GraphicsDevice.h"
 #include "api/render/RenderBackend.h"
 #include "api/render/StaticResources.h"
@@ -28,6 +29,7 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
+#include <cstring>
 
 namespace openeye::editor {
 
@@ -101,8 +103,13 @@ private:
 } // namespace
 
 int RunEditor(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+    const char* projectPathArg = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--project") == 0 && i + 1 < argc) {
+            projectPathArg = argv[i + 1];
+            break;
+        }
+    }
 
     eyelib::api::Engine::Config engineConfig;
     engineConfig.enableLogging = true;
@@ -166,40 +173,14 @@ int RunEditor(int argc, char** argv) {
         }
     }
 
-    std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
-    {
-        std::string exePath = eyelib::api::platform::filesystem::GetExecutablePath();
-        std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(exePath);
-        std::string runtimeAssets = exeDir.empty()
-            ? eyelib::api::platform::filesystem::GetAbsolutePath("assets")
-            : eyelib::api::platform::filesystem::NormalizePath(
-                exeDir + (exeDir.back() == '/' || exeDir.back() == '\\' ? "" : "/") + "assets");
-        std::string sourceAssets;
-        const std::vector<std::string> candidates = {
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("assets"),
-            runtimeAssets
-        };
-        for (const auto& candidate : candidates) {
-            std::string shadersDir = candidate;
-            if (!shadersDir.empty() && shadersDir.back() != '/' && shadersDir.back() != '\\')
-                shadersDir += "/shaders";
-            else
-                shadersDir += "shaders";
-            if (eyelib::api::platform::filesystem::FileExists(shadersDir)) {
-                sourceAssets = candidate;
-                break;
-            }
-        }
-        if (sourceAssets.empty()) sourceAssets = runtimeAssets;
-        shaderWatcher->SetSourceAssetsDir(sourceAssets);
-        shaderWatcher->SetRuntimeAssetsDir(runtimeAssets);
-        eyelib::api::core::Log::InfoF("Editor ShaderWatcher source: %s", sourceAssets.c_str());
-        eyelib::api::core::Log::InfoF("Editor ShaderWatcher runtime: %s", runtimeAssets.c_str());
+    // Engine assets (shaders, etc.) load directly from Engine/assets — no copy to exe dir
+    std::string engineRoot = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
+    std::string engineAssets = "assets";
+    if (!engineRoot.empty()) {
+        engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets");
+        eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
     }
+    eyelib::api::core::Log::InfoF("Editor engine assets: %s", engineAssets.c_str());
 
     eyelib::api::AssetRegistry assetRegistry;
     if (editorDevice)
@@ -209,8 +190,13 @@ int RunEditor(int argc, char** argv) {
     ctx.sceneViewPipeline = &sceneViewPipeline;
     ctx.gameViewPipeline = &gameViewPipeline;
     ctx.assetRegistry = &assetRegistry;
-    ctx.assetRoots = { "assets" };
+    ctx.assetRoots = { engineAssets };
+    ctx.engineAssetsPath = engineAssets;
     ctx.window = &window;
+
+    if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
+        eyelib::api::core::Log::InfoF("Editor: opened project '%s' at %s", ctx.projectName.c_str(), ctx.projectPath.c_str());
+    }
 
     if (editorRenderDevice) {
         auto defaultShader = std::make_shared<eyelib::api::Shader>();
@@ -262,14 +248,9 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowStatusPanel(&ctx);
         openeye::editor::panels::ShowHierarchyPanel(&ctx);
         openeye::editor::panels::ShowInspectorPanel(&ctx);
+        openeye::editor::panels::ShowAssetPanel(&ctx);
         openeye::editor::panels::ShowSceneViewPanel(&ctx);
         openeye::editor::panels::ShowGameViewPanel(&ctx);
-
-        if (shaderWatcher && ctx.sceneViewPipeline) {
-            int copied = shaderWatcher->Tick();
-            if (copied > 0)
-                ctx.sceneViewPipeline->ReloadShaders();
-        }
 
         ImGui::Render();
         // Restore default framebuffer and full-window viewport so ImGui draws to the window.

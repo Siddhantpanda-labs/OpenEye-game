@@ -8,7 +8,6 @@
 #include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
 #include "api/world/All.h"
-#include "api/assets/ShaderWatcher.h"
 #include "api/render/RenderBackend.h"
 
 #ifdef OPENEYE_BUILD_STREAMING
@@ -133,7 +132,10 @@ static void ResolveLogPathToExeDir(RuntimeOptions& options) {
 
 void ApplyDefaults(RuntimeOptions& options) {
     if (options.assetRoots.empty()) {
-        options.assetRoots.emplace_back("assets");
+        std::string engineAssets = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
+        if (!engineAssets.empty())
+            engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineAssets + "/assets");
+        options.assetRoots.emplace_back(engineAssets.empty() ? "assets" : engineAssets);
     }
 
     if (options.fixedTimestep > 0.0f && !options.timeModeSet) {
@@ -358,40 +360,13 @@ int RunPlayer(int argc, char** argv) {
     }
 #endif
 
-    std::unique_ptr<eyelib::assets::ShaderWatcher> shaderWatcher;
+    // Shaders and engine assets load directly from Engine/assets — no ShaderWatcher copy to exe dir
     if (!options.headless) {
-        shaderWatcher = std::make_unique<eyelib::assets::ShaderWatcher>();
-        std::string exePath = eyelib::api::platform::filesystem::GetExecutablePath();
-        std::string exeDir = eyelib::api::platform::filesystem::GetDirectory(exePath);
-        std::string runtimeAssets = exeDir.empty()
-            ? eyelib::api::platform::filesystem::GetAbsolutePath("assets")
-            : eyelib::api::platform::filesystem::NormalizePath(
-                exeDir + (exeDir.back() == '/' || exeDir.back() == '\\' ? "" : "/") + "assets");
-        std::string sourceAssets;
-        const std::vector<std::string> candidates = {
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../../../../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("../assets"),
-            eyelib::api::platform::filesystem::GetAbsolutePath("assets"),
-            runtimeAssets
-        };
-        for (const auto& candidate : candidates) {
-            std::string shadersDir = candidate;
-            if (!shadersDir.empty() && shadersDir.back() != '/' && shadersDir.back() != '\\')
-                shadersDir += "/shaders";
-            else
-                shadersDir += "shaders";
-            if (eyelib::api::platform::filesystem::FileExists(shadersDir)) {
-                sourceAssets = candidate;
-                break;
-            }
+        std::string engineRoot = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
+        if (!engineRoot.empty()) {
+            eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
+            eyelib::api::core::Log::InfoF("Player engine assets: %s", eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets").c_str());
         }
-        if (sourceAssets.empty()) sourceAssets = runtimeAssets;
-        shaderWatcher->SetSourceAssetsDir(sourceAssets);
-        shaderWatcher->SetRuntimeAssetsDir(runtimeAssets);
-        eyelib::api::core::Log::InfoF("ShaderWatcher source: %s", sourceAssets.c_str());
-        eyelib::api::core::Log::InfoF("ShaderWatcher runtime: %s", runtimeAssets.c_str());
     }
 
     struct RuntimeStats { float accum = 0.0f; int frames = 0; } stats;
@@ -413,10 +388,6 @@ int RunPlayer(int argc, char** argv) {
             }
         }
         if (!options.headless) {
-            if (shaderWatcher) {
-                const int copied = shaderWatcher->Tick();
-                if (copied > 0) gameRuntime.ReloadShaders();
-            }
             window.PollEvents();
             if (window.ShouldClose()) {
                 eyelib::api::core::Engine::RequestShutdown();

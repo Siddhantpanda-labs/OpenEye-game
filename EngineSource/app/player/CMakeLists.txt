@@ -71,6 +71,9 @@ if(OPENEYE_BUILD_PLAYER)
         ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Overlay.h
     )
+    if(WIN32)
+        list(APPEND PLAYER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/OpenEyePlayer.rc)
+    endif()
 
     add_executable(OpenEyePlayer ${PLAYER_SOURCES})
 

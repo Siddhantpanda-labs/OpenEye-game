@@ -205,15 +205,24 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(eyelib/vr)
 endif()
 
-# Editor and game default OFF for now; set ON to build
-set(OPENEYE_BUILD_EDITOR OFF CACHE BOOL "Build development editor")
+# Editor: use root option (default ON). Game: still OFF by default.
 set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game")
+
+# --------------------------------------
+# Copy engine assets (shaders, default materials, etc.) to Engine/assets for runtime
+# --------------------------------------
+add_custom_target(CopyEngineAssets
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_SOURCE_DIR}/Engine/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/assets ${CMAKE_SOURCE_DIR}/Engine/assets
+    COMMENT "Copying engine assets to Engine/assets"
+)
 
 # --------------------------------------
 # Editor Application (api client only)
 # --------------------------------------
 if(OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/editor)
+    add_dependencies(OpenEyeEditor CopyEngineAssets)
 endif()
 
 # --------------------------------------
@@ -244,6 +253,7 @@ endif()
 
 if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/player)
+    add_dependencies(OpenEyePlayer CopyEngineAssets)
 endif()
 
 # --------------------------------------
@@ -256,7 +266,6 @@ endif()
 # --------------------------------------
 # Transform hierarchy benchmark (100k entities; requires EyelibWorld)
 # --------------------------------------
-add_subdirectory(app/benchmark_transform)
 
 # --------------------------------------
 # Windows VR streaming test client (same protocol as Flutter; GLFW + MF decode)
@@ -268,7 +277,6 @@ endif()
 # --------------------------------------
 # Jolt physics demo (floor + sphere, raycast, AABB query)
 # --------------------------------------
-add_subdirectory(app/demo_physics_jolt)
 
 # --------------------------------------
 # Diligent standalone test (clear + present)

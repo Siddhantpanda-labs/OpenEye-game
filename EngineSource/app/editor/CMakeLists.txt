@@ -7,14 +7,20 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/LightGizmoIcons.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/PhysicsColliderIcons.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorFolderPicker.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorProject.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/StatusPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/HierarchyPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/SceneViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/GameViewPanel.cpp
 )
+if(WIN32)
+    list(APPEND EDITOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/OpenEyeEditor.rc)
+endif()
 
 add_executable(OpenEyeEditor ${EDITOR_SOURCES})
 
@@ -42,3 +48,6 @@ target_link_libraries(OpenEyeEditor
         OpenEyeImGui
         OpenEyeGameRuntime
 )
+if(WIN32)
+    target_link_libraries(OpenEyeEditor PRIVATE ole32)
+endif()

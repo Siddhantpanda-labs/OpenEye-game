@@ -70,6 +70,11 @@ bool FileExists(const std::string& path) {
     return fs::exists(path, ec) && !ec;
 }
 
+bool IsDirectory(const std::string& path) {
+    std::error_code ec;
+    return fs::exists(path, ec) && fs::is_directory(path, ec) && !ec;
+}
+
 size_t GetFileSize(const std::string& path) {
     std::error_code ec;
     auto sz = fs::file_size(path, ec);
@@ -90,6 +95,18 @@ bool DeleteFile(const std::string& path) {
     std::error_code ec;
     if (!fs::is_regular_file(path, ec) || ec) return false;
     return fs::remove(path, ec) && !ec;
+}
+
+bool RenamePath(const std::string& oldPath, const std::string& newPath) {
+    std::error_code ec;
+    fs::rename(oldPath, newPath, ec);
+    return !ec;
+}
+
+bool DeleteDirectory(const std::string& path) {
+    std::error_code ec;
+    if (!fs::is_directory(path, ec) || ec) return false;
+    return fs::remove_all(path, ec) >= 0 && !ec;
 }
 
 std::vector<std::string> ListDirectory(const std::string& path) {
@@ -152,6 +169,27 @@ std::string GetExecutablePath() {
 #else
     return {};
 #endif
+}
+
+std::string GetEngineAssetsRoot() {
+    std::string exePath = GetExecutablePath();
+    std::string dir = GetDirectory(exePath);
+    if (dir.empty()) return {};
+    for (int up = 0; up < 5; ++up) {
+        std::string candidate = dir;
+        for (int i = 0; i < up; ++i)
+            candidate = NormalizePath(candidate + "/..");
+        if (!candidate.empty() && FileExists(NormalizePath(candidate + "/assets/shaders")))
+            return candidate;
+    }
+    return dir;
+}
+
+bool SetWorkingDirectory(const std::string& path) {
+    if (path.empty()) return false;
+    std::error_code ec;
+    fs::current_path(path, ec);
+    return !ec;
 }
 
 } // namespace filesystem

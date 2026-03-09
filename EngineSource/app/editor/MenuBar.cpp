@@ -1,5 +1,7 @@
 #include "MenuBar.h"
 #include "EditorContext.h"
+#include "EditorFolderPicker.h"
+#include "EditorProject.h"
 #include "EditorSceneBuilder.h"
 #include "GameRuntime.h"
 #include "api/platform/All.h"
@@ -74,10 +76,23 @@ void ShowMenuBar(EditorContext& ctx) {
     if (!ImGui::BeginMainMenuBar()) return;
 
     if (ImGui::BeginMenu("File")) {
+        if (ImGui::MenuItem("Open Project...")) {
+            std::string picked = openeye::editor::ShowFolderPickerDialog();
+            if (!picked.empty() && openeye::editor::OpenProject(ctx, picked)) {
+                std::snprintf(ctx.projectPathBuffer, sizeof(ctx.projectPathBuffer), "%s", ctx.projectPath.c_str());
+            }
+        }
+        if (ImGui::MenuItem("Close Project", nullptr, false, !ctx.projectPath.empty())) {
+            openeye::editor::CloseProject(ctx, ctx.engineAssetsPath);
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Open...")) {
             ctx.activeModal = EditorContext::Modal::Open;
             if (ctx.scenePath.empty()) {
-                std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/main.json");
+                if (!ctx.projectAssetsRoot.empty())
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s/scenes/main.json", ctx.projectAssetsRoot.c_str());
+                else
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/main.json");
             } else {
                 std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s", ctx.scenePath.c_str());
             }
@@ -85,7 +100,10 @@ void ShowMenuBar(EditorContext& ctx) {
         if (ImGui::MenuItem("Save")) {
             if (ctx.scenePath.empty()) {
                 ctx.activeModal = EditorContext::Modal::SaveAs;
-                std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/untitled.json");
+                if (!ctx.projectAssetsRoot.empty())
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s/scenes/untitled.json", ctx.projectAssetsRoot.c_str());
+                else
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/untitled.json");
             } else {
                 ctx.world.SaveScene(ctx.scenePath);
             }
@@ -93,7 +111,10 @@ void ShowMenuBar(EditorContext& ctx) {
         if (ImGui::MenuItem("Save As...")) {
             ctx.activeModal = EditorContext::Modal::SaveAs;
             if (ctx.scenePath.empty()) {
-                std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/untitled.json");
+                if (!ctx.projectAssetsRoot.empty())
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s/scenes/untitled.json", ctx.projectAssetsRoot.c_str());
+                else
+                    std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "scenes/untitled.json");
             } else {
                 std::snprintf(ctx.pathBuffer, sizeof(ctx.pathBuffer), "%s", ctx.scenePath.c_str());
             }

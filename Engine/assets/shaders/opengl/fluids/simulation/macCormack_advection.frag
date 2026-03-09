@@ -1,0 +1,60 @@
+/*
+    OpenGL 4.1 Core - Fluid Simulation: Mac Cormack Advection - Fragment Shader
+*/
+
+#version 410 core
+
+out vec4 FragColor; // Output data
+
+uniform sampler3D VelocityTexture;
+uniform sampler3D SourceTexture; // Source field to advect
+uniform sampler3D Phi1HatTexture;
+uniform sampler3D Phi2HatTexture;
+uniform sampler3D ObstacleTexture;
+uniform float timeStep;
+uniform vec3 InverseSize;
+uniform float dissipation;
+
+flat in float layer; // Layer of the 3D texture
+
+void main()
+{
+    vec3 fragCoord = vec3(gl_FragCoord.xy, layer);
+    float obstacle = texture(ObstacleTexture, InverseSize * fragCoord).r;
+    vec3 newVal = vec3(0.0);
+    if (obstacle < 1.0)
+    {
+        vec3 u = texture(VelocityTexture, InverseSize * fragCoord).xyz;
+        vec3 coord = (fragCoord - timeStep * u);
+        coord = floor(coord + vec3(0.5));
+        vec3 neighborhood[8];
+        vec3 offsets[8] = vec3[8](
+            vec3(-0.5, -0.5, -0.5), vec3(-0.5, -0.5,  0.5),
+            vec3(-0.5,  0.5, -0.5), vec3(-0.5,  0.5,  0.5),
+            vec3( 0.5, -0.5, -0.5), vec3( 0.5, -0.5,  0.5),
+            vec3( 0.5,  0.5, -0.5), vec3( 0.5,  0.5,  0.5)
+        );
+        for (int i = 0; i < 8; i++) {
+            vec3 sampleCoord = InverseSize * (coord + offsets[i]);
+            sampleCoord = clamp(sampleCoord, vec3(0.0), vec3(1.0)); // Clamp to bounds
+            neighborhood[i] = texture(SourceTexture, sampleCoord).xyz;
+        }
+        vec3 minVal = neighborhood[0];
+        vec3 maxVal = neighborhood[0];
+        for (int i = 1; i < 8; i++)
+        {
+            minVal = min(minVal, neighborhood[i]);
+            maxVal = max(maxVal, neighborhood[i]);
+        }
+        vec3 phi1_hat = texture(Phi1HatTexture, InverseSize * fragCoord).xyz;
+        vec3 phi2_hat = texture(Phi2HatTexture, InverseSize * fragCoord).xyz;
+        vec3 val = texture(SourceTexture, InverseSize * fragCoord).xyz;
+        newVal = phi1_hat + 0.5 * (val - phi2_hat);
+        newVal = clamp(newVal, minVal, maxVal);
+    }
+    FragColor = vec4(newVal, 1.0);
+    if (length(FragColor) < 0.0001)
+        FragColor = vec4(0.0);
+}
+
+

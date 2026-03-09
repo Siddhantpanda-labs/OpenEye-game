@@ -107,12 +107,9 @@ const char* DeviceGL::GetShaderFragmentExtension() const {
 bool DeviceGL::ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) {
     if (!logicalName || logicalName[0] == '\0') return false;
     if (stage != ShaderStage::Compute) return false;
-    std::string baseDir = "assets/shaders/opengl/";
+    std::string root = eyelib::platform::filesystem::GetEngineAssetsRoot();
+    std::string baseDir = root.empty() ? "assets/shaders/opengl/" : eyelib::platform::filesystem::NormalizePath(root + "/assets/shaders/opengl/");
     outPath = baseDir + logicalName + ".comp";
-    std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
-    if (!exeDir.empty() && eyelib::platform::filesystem::FileExists(exeDir + outPath)) {
-        outPath = exeDir + outPath;
-    }
     return true;
 }
 
@@ -453,17 +450,11 @@ IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, cons
     if (!shaderName || !shaderName[0]) return nullptr;
     const std::string logicalName = ShaderPathToLogicalName(shaderName);
     if (logicalName.empty()) return nullptr;
-    // Resolve logical name to OpenGL GLSL: assets/shaders/opengl/{name}.vert/.frag
-    std::string baseDir = "assets/shaders/opengl/";
+    // Load from Engine/assets/shaders/opengl (no copy to exe dir)
+    std::string root = eyelib::platform::filesystem::GetEngineAssetsRoot();
+    std::string baseDir = root.empty() ? "assets/shaders/opengl/" : eyelib::platform::filesystem::NormalizePath(root + "/assets/shaders/opengl/");
     std::string vertPath = baseDir + logicalName + ".vert";
     std::string fragPath = baseDir + logicalName + ".frag";
-    std::string exeDir = eyelib::platform::filesystem::GetDirectory(eyelib::platform::filesystem::GetExecutablePath());
-    if (!exeDir.empty() && exeDir.back() != '/' && exeDir.back() != '\\')
-        exeDir += "/";
-    if (!exeDir.empty() && eyelib::platform::filesystem::FileExists(exeDir + vertPath)) {
-        vertPath = exeDir + vertPath;
-        fragPath = exeDir + fragPath;
-    }
 
     std::string vertexSrc;
     if (!eyelib::render::LoadShaderSource(vertPath, vertexSrc)) return nullptr;

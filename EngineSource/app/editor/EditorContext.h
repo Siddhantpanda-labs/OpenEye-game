@@ -56,7 +56,17 @@ struct EditorContext {
     eyelib::api::AssetRegistry* assetRegistry = nullptr;
     /** Default material for primitives/untextured meshes. Set once at init (EditorApp) so scene builder does not lazy-create. */
     std::shared_ptr<eyelib::api::Material> defaultMaterial;
+    /** Asset search roots; when a project is open this is { projectAssetsRoot }. */
     std::vector<std::string> assetRoots;
+
+    /** Project-centric: path to project folder (e.g. Projects/MyWorld). Empty when no project open. */
+    std::string projectPath;
+    /** Project name from .openeye descriptor. */
+    std::string projectName;
+    /** Resolved path to project Assets folder (projectPath + "/" + assets from descriptor). */
+    std::string projectAssetsRoot;
+    /** Resolved path to project Cache folder. */
+    std::string projectCacheRoot;
 
     /** Set by EditorApp; used for Game view (Play mode). */
     eyelib::api::Window* window = nullptr;
@@ -70,9 +80,13 @@ struct EditorContext {
     /** Path to snapshot saved when Play was pressed; used to revert world on Stop. Empty when no snapshot. */
     std::string playSnapshotPath;
 
+    /** Engine assets path (e.g. Engine/assets). Set by EditorApp; used when closing project to restore assetRoots. */
+    std::string engineAssetsPath;
+
     enum class Modal { None, Open, SaveAs };
     Modal activeModal = Modal::None;
     char pathBuffer[512] = "scenes/main.json";
+    char projectPathBuffer[512] = "Projects/MyWorld";
 };
 
 } // namespace openeye::editor

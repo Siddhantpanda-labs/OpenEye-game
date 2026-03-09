@@ -191,7 +191,10 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
         core::Log::Error("Shader::Load with keywords: device did not provide shader path info");
         return false;
     }
-    std::string basePath = std::string("assets/shaders/") + backend + "/" + shaderName;
+    std::string root = platform::filesystem::GetEngineAssetsRoot();
+    std::string basePath = root.empty()
+        ? (std::string("assets/shaders/") + backend + "/" + shaderName)
+        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + shaderName);
     std::string vertexPath = basePath + vertExt;
     std::string fragmentPath = basePath + fragExt;
     std::string vertexSrc, fragmentSrc;
