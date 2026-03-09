@@ -3,11 +3,15 @@ package com.example.meta_client
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val channelName = "openeye/vr_h264_decoder"
+    private val rotationVectorChannelName = "openeye/rotation_vector"
+    private val rotationVectorEventChannelName = "openeye/rotation_vector_events"
     private var h264Decoder: H264Decoder? = null
+    private var rotationVectorTracker: RotationVectorTracker? = null
 
     /** View type for native SurfaceView (flicker test: same vsync pipeline as MediaCodec). */
     val h264SurfaceViewType = "openeye/h264_surface_view"
@@ -62,9 +66,54 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, rotationVectorChannelName).setMethodCallHandler { call, result ->
+            if (rotationVectorTracker == null) rotationVectorTracker = RotationVectorTracker(this)
+            val tracker = rotationVectorTracker
+            when (call.method) {
+                "isAvailable" -> result.success(tracker?.isAvailable == true)
+                "startTracking" -> {
+                    tracker?.startTracking()
+                    result.success(null)
+                }
+                "stopTracking" -> {
+                    tracker?.stopTracking()
+                    result.success(null)
+                }
+                "getQuaternion" -> {
+                    if (tracker == null || !tracker.isAvailable) {
+                        result.error("UNAVAILABLE", "Rotation vector not available", null)
+                    } else {
+                        val q = tracker.getQuaternion()
+                        result.success(listOf(q[0].toDouble(), q[1].toDouble(), q[2].toDouble(), q[3].toDouble()))
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, rotationVectorEventChannelName).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    if (rotationVectorTracker == null) rotationVectorTracker = RotationVectorTracker(this@MainActivity)
+                    val tracker = rotationVectorTracker ?: return
+                    if (events == null) return
+                    tracker.onPose = { q, timestampUs ->
+                        events.success(listOf(q[0].toDouble(), q[1].toDouble(), q[2].toDouble(), q[3].toDouble(), timestampUs.toDouble()))
+                    }
+                    tracker.startTracking()
+                }
+                override fun onCancel(arguments: Any?) {
+                    rotationVectorTracker?.onPose = null
+                    rotationVectorTracker?.stopTracking()
+                }
+            }
+        )
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        rotationVectorTracker?.stopTracking()
+        rotationVectorTracker = null
         h264Decoder?.disposeDecoder()
         h264Decoder = null
         super.cleanUpFlutterEngine(flutterEngine)

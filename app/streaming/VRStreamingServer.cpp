@@ -47,7 +47,7 @@ VRStreamingServer::~VRStreamingServer() {
 bool VRStreamingServer::Start(uint16_t streamPort) {
     if (m_running) return true;
     if (!m_impl->streamServer->start(streamPort)) return false;
-    m_impl->streamServer->setGyroCallback([this](float yaw, float pitch, float roll) {
+    m_impl->streamServer->setGyroCallback([this](float yaw, float pitch, float roll, uint64_t /*timestamp_us*/) {
         if (m_gyroCallback) m_gyroCallback(yaw, pitch, roll);
     });
     m_impl->streamServer->setDiscoveryServiceName("OpenEye");

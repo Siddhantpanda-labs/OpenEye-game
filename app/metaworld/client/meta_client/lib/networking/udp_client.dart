@@ -337,12 +337,23 @@ class UDPClient {
     }
   }
 
-  /// Send gyro as GYRO:yaw,pitch,roll (radians) for OpenEye server
-  void sendGyro(double yaw, double pitch, double roll) {
+  /// Target pose send rate (Hz) to match typical VR render rate and avoid flooding UDP.
+  static const int kPoseSendRateHz = 120;
+  int _lastGyroSendTimeMs = 0;
+
+  /// Send gyro as GYRO:yaw,pitch,roll[,timestamp_us] (radians). Throttled to ~kPoseSendRateHz.
+  void sendGyro(double yaw, double pitch, double roll, [double? timestampUs]) {
     if (!_isConnected || _socket == null) return;
 
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final minIntervalMs = 1000 ~/ kPoseSendRateHz;
+    if (_lastGyroSendTimeMs != 0 && (nowMs - _lastGyroSendTimeMs) < minIntervalMs) return;
+    _lastGyroSendTimeMs = nowMs;
+
     try {
-      final message = 'GYRO:$yaw,$pitch,$roll';
+      final message = timestampUs != null
+          ? 'GYRO:$yaw,$pitch,$roll,$timestampUs'
+          : 'GYRO:$yaw,$pitch,$roll';
       final serverAddress = InternetAddress(_serverHost!);
       _socket!.send(Uint8List.fromList(message.codeUnits), serverAddress, _serverPort!);
     } catch (e) {

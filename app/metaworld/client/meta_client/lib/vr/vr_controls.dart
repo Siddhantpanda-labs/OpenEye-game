@@ -1,15 +1,21 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:vector_math/vector_math_64.dart' as math;
 
-/// Stable head tracking with quaternion-only fusion:
-/// - gyro integrated in quaternion space (no Euler feedback drift)
-/// - gravity correction from accelerometer (tilt stabilization)
-/// - stillness bias calibration + online bias adaptation
-/// - stillness lock to prevent stop-tail drift
+/// Fused head tracking: prefers platform rotation vector (Android Game RV) when available,
+/// with calibration (set forward) + stillness lock. Falls back to gyro+accel fusion otherwise.
+/// - Android: TYPE_GAME_ROTATION_VECTOR + display remap (HeadTracker-style), then app-level
+///   calibration and stillness lock.
+/// - Fallback: gyro integrated in quaternion space, gravity correction from accelerometer,
+///   bias calibration + online bias adaptation, stillness lock.
 class VRControls {
+  static const _rotationVectorChannel = MethodChannel('openeye/rotation_vector');
+  static const _rotationVectorEventChannel = EventChannel('openeye/rotation_vector_events');
+
   final StreamController<Map<String, double>> _headTrackingController =
       StreamController<Map<String, double>>.broadcast();
 
@@ -17,6 +23,12 @@ class VRControls {
   StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
 
   bool _isInitialized = false;
+  bool _useRotationVector = false;
+  StreamSubscription<dynamic>? _rotationVectorSubscription;
+  math.Quaternion _qPrev = math.Quaternion.identity();
+  math.Quaternion _qLocked = math.Quaternion.identity();
+  static const double _stillQuatDotThreshold = 0.99995;
+
   final math.Vector3 _headPosition = math.Vector3.zero();
 
   // Orientation in quaternion space.
@@ -67,15 +79,60 @@ class VRControls {
   bool get isInitialized => _isInitialized;
   Stream<Map<String, double>> get headTrackingStream => _headTrackingController.stream;
   bool get isCalibrating => _isCalibrating;
+  bool get useRotationVector => _useRotationVector;
 
   Future<void> initialize() async {
     try {
+      if (Platform.isAndroid) {
+        final available = await _rotationVectorChannel.invokeMethod<bool>('isAvailable');
+        if (available == true) {
+          _useRotationVector = true;
+          _qPrev = math.Quaternion.identity();
+          _qLocked = math.Quaternion.identity();
+          _rotationVectorSubscription = _rotationVectorEventChannel
+              .receiveBroadcastStream()
+              .listen(_onRotationVectorEvent, onError: (_) {});
+          _isInitialized = true;
+          return;
+        }
+      }
+      // Fallback: gyro + accelerometer fusion
       _gyroscopeSubscription = gyroscopeEventStream().listen(_handleGyroscope);
       _accelerometerSubscription = accelerometerEventStream().listen(_handleAccelerometer);
       _isInitialized = true;
     } catch (e) {
       throw Exception('Failed to initialize VR controls: $e');
     }
+  }
+
+  void _onRotationVectorEvent(dynamic event) {
+    if (!_isInitialized || !_useRotationVector) return;
+    final list = event as List<dynamic>?;
+    if (list == null || list.length < 5) return;
+    final x = (list[0] as num).toDouble();
+    final y = (list[1] as num).toDouble();
+    final z = (list[2] as num).toDouble();
+    final w = (list[3] as num).toDouble();
+    final timestampUs = (list[4] as num).toDouble();
+    _q = math.Quaternion(x, y, z, w);
+    _q.normalize();
+
+    if (_isCalibrating) return;
+
+    // Stillness lock from quaternion change (no gyro needed)
+    double dot = _q.x * _qPrev.x + _q.y * _qPrev.y + _q.z * _qPrev.z + _q.w * _qPrev.w;
+    if (dot < 0) dot = -dot;
+    if (dot > _stillQuatDotThreshold) {
+      _stillFrameCount++;
+      if (_stillFrameCount >= _lockEnterFrames) _motionLocked = true;
+    } else {
+      _stillFrameCount = 0;
+      _motionLocked = false;
+      _qLocked = math.Quaternion.copy(_q);
+    }
+    _qPrev = math.Quaternion.copy(_q);
+
+    _sendHeadTrackingData(timestampUs);
   }
 
   void _handleGyroscope(GyroscopeEvent event) {
@@ -219,8 +276,10 @@ class VRControls {
     out(yaw, pitch, roll);
   }
 
-  void _sendHeadTrackingData() {
-    final outQ = _qCalib.conjugated() * _q;
+  void _sendHeadTrackingData([double? timestampUs]) {
+    final ts = timestampUs ?? DateTime.now().microsecondsSinceEpoch.toDouble();
+    final qOut = _motionLocked && _useRotationVector ? _qLocked : _q;
+    final outQ = _qCalib.conjugated() * qOut;
     double yawRaw = 0.0;
     double pitchRaw = 0.0;
     double rollRaw = 0.0;
@@ -237,6 +296,7 @@ class VRControls {
       'yaw': yaw,
       'pitch': pitch,
       'roll': roll,
+      'timestamp_us': ts,
       'x': _headPosition.x,
       'y': _headPosition.y,
       'z': _headPosition.z,
@@ -252,7 +312,7 @@ class VRControls {
     _calibrationTimer?.cancel();
     _calibrationTimer = Timer(const Duration(milliseconds: _biasCalibrationMs), () {
       _calibrationTimer = null;
-      if (_biasSamples.length >= 10) {
+      if (!_useRotationVector && _biasSamples.length >= 10) {
         var sum = math.Vector3.zero();
         for (final s in _biasSamples) {
           sum += s;
@@ -260,6 +320,7 @@ class VRControls {
         _gyroBias = sum / _biasSamples.length.toDouble();
       }
       _qCalib = math.Quaternion.copy(_q);
+      _qCalib.normalize();
       _isCalibrating = false;
       _biasSamples.clear();
       _lastGyroTimeUs = 0;
@@ -269,7 +330,8 @@ class VRControls {
   }
 
   Map<String, double> getHeadTrackingData() {
-    final outQ = _qCalib.conjugated() * _q;
+    final qOut = _motionLocked && _useRotationVector ? _qLocked : _q;
+    final outQ = _qCalib.conjugated() * qOut;
     double yawRaw = 0.0;
     double pitchRaw = 0.0;
     double rollRaw = 0.0;
@@ -285,6 +347,7 @@ class VRControls {
       'yaw': yaw,
       'pitch': pitch,
       'roll': roll,
+      'timestamp_us': DateTime.now().microsecondsSinceEpoch.toDouble(),
       'x': _headPosition.x,
       'y': _headPosition.y,
       'z': _headPosition.z,
@@ -357,6 +420,7 @@ class VRControls {
                     }
                     final data = snapshot.data!;
                     return Text(
+                      '${_useRotationVector ? "RV" : "Gyro"} · '
                       'Yaw: ${(data['yaw'] ?? 0).toStringAsFixed(2)}\n'
                       'Pitch: ${(data['pitch'] ?? 0).toStringAsFixed(2)}\n'
                       'Roll: ${(data['roll'] ?? 0).toStringAsFixed(2)}',
@@ -375,6 +439,13 @@ class VRControls {
   void dispose() {
     _calibrationTimer?.cancel();
     _calibrationTimer = null;
+    if (_useRotationVector) {
+      _rotationVectorSubscription?.cancel();
+      _rotationVectorSubscription = null;
+      try {
+        _rotationVectorChannel.invokeMethod('stopTracking');
+      } catch (_) {}
+    }
     _accelerometerSubscription?.cancel();
     _gyroscopeSubscription?.cancel();
     _headTrackingController.close();

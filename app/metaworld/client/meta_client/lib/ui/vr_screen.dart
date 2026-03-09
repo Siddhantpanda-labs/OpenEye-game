@@ -114,11 +114,11 @@ class _VRScreenState extends State<VRScreen> {
   }
 
   void _handleHeadTracking(Map<String, double> trackingData) {
-    // Send gyro as GYRO:yaw,pitch,roll (radians) for OpenEye server
     final yaw = trackingData['yaw'] ?? 0.0;
     final pitch = trackingData['pitch'] ?? 0.0;
     final roll = trackingData['roll'] ?? 0.0;
-    _udpClient.sendGyro(yaw, pitch, roll);
+    final timestampUs = trackingData['timestamp_us'];
+    _udpClient.sendGyro(yaw, pitch, roll, timestampUs);
   }
 
   void _exitVR() {

@@ -1,7 +1,7 @@
 /**
  * @file stream_server.hpp
  * @brief UDP-based VR stream server: discovery (27015), stream port, frame payload send, gyro callback.
- * Protocol: VR_SERVER_DISCOVERY_REQUEST/RESPONSE, VR_CLIENT_CONNECT, VR_SERVER_ACK, GYRO:yaw,pitch,roll.
+ * Protocol: VR_SERVER_DISCOVERY_REQUEST/RESPONSE, VR_CLIENT_CONNECT, VR_SERVER_ACK, GYRO:yaw,pitch,roll[,timestamp_us].
  * Frame payload: [1 format][4 frame_id][8 timestamp_us][4 size][2 chunk_idx][2 chunk_count][payload]; chunk payload <= 1200.
  */
 
@@ -22,7 +22,7 @@ namespace streaming {
  */
 class StreamServer {
 public:
-    using GyroCallback = std::function<void(float yaw, float pitch, float roll)>;
+    using GyroCallback = std::function<void(float yaw, float pitch, float roll, uint64_t timestamp_us)>;
 
     StreamServer();
     ~StreamServer();

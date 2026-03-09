@@ -252,10 +252,12 @@ void StreamServer::tick() {
                 }
             } else {
                 float yaw = 0.f, pitch = 0.f, roll = 0.f;
+                double timestampUs = 0.0;
                 bool gotGyro = false;
                 if (msg.size() >= 5 && msg.compare(0, 5, "GYRO:") == 0) {
                     float y = 0, p = 0, r = 0;
-                    if (sscanf(msg.c_str() + 5, "%f,%f,%f", &y, &p, &r) >= 3) {
+                    int n = sscanf(msg.c_str() + 5, "%f,%f,%f,%lf", &y, &p, &r, &timestampUs);
+                    if (n >= 3) {
                         yaw = y; pitch = p; roll = r;
                         gotGyro = true;
                     }
@@ -273,7 +275,7 @@ void StreamServer::tick() {
                     }
                 }
                 if (gotGyro && m_gyroCallback)
-                    m_gyroCallback(yaw, pitch, roll);
+                    m_gyroCallback(yaw, pitch, roll, static_cast<uint64_t>(timestampUs));
             }
         }
     }
