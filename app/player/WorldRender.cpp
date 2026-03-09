@@ -10,6 +10,7 @@
 #include "api/platform/All.h"
 #include "api/render/Material.h"
 #include "api/render/RenderScene.h"
+#include "api/render/RenderTarget.h"
 #include "WorldAnimation.h"
 #include "api/assets/AssetManager.h"
 #include "eyelib/vr/XRViewHelpers.h"
@@ -149,6 +150,18 @@ void WorldRenderBridge::Shutdown() {
     if (!m_ready) {
         return;
     }
+    for (int i = 0; i < kStreamingPBOCount; ++i) {
+        if (m_streamingPBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingPBO[i]); m_streamingPBO[i] = nullptr; }
+        if (m_streamingNV12PBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingNV12PBO[i]); m_streamingNV12PBO[i] = nullptr; }
+    }
+    for (int i = 0; i < kStreamingRTCount; ++i)
+        m_streamingTargets[i].reset();
+    m_streamingRTWriteIndex = 0;
+    m_streamingRTFrameCount = 0;
+    m_streamingPBOIndex = 0;
+    m_streamingReadbackCount = 0;
+    m_streamingNV12PBOIndex = 0;
+    m_streamingNV12ReadbackCount = 0;
     // Destroy caches and shaders/materials first; their destructors call into the RHI device.
     // Only then shut down the pipeline (which destroys the device).
     eyelib::assets::AssetManager::Get().SetGPUResolver(nullptr);
@@ -173,6 +186,102 @@ bool WorldRenderBridge::ReadOutputPixels(uint32_t width, uint32_t height, uint8_
     if (!m_ready || !outRGBA || width == 0 || height == 0) return false;
     m_pipeline.Finish();
     return m_pipeline.ReadOutputPixels(width, height, outRGBA);
+}
+
+void WorldRenderBridge::PrepareStreamingFrame() {
+    if (!m_ready) return;
+    if (!m_streamingTargets[0]) {
+        bool ok = true;
+        for (int i = 0; i < kStreamingRTCount; ++i) {
+            m_streamingTargets[i] = std::make_unique<eyelib::api::RenderTarget>();
+            if (!m_streamingTargets[i]->Create(&m_pipeline, kStreamingWidth, kStreamingHeight,
+                                               {eyelib::api::TextureFormat::RGBA8},
+                                               eyelib::api::TextureFormat::Depth24, 0)) {
+                ok = false;
+                break;
+            }
+        }
+        if (!ok) {
+            for (int i = 0; i < kStreamingRTCount; ++i)
+                m_streamingTargets[i].reset();
+            return;
+        }
+    }
+    auto& writeTarget = m_streamingTargets[m_streamingRTWriteIndex];
+    if (writeTarget) {
+        m_pipeline.BlitOutputTo(*writeTarget);
+        if (m_streamingRTFrameCount < kStreamingRTCount)
+            ++m_streamingRTFrameCount;
+        const size_t pboSize = static_cast<size_t>(kStreamingWidth) * kStreamingHeight * 4u;
+        if (!m_streamingPBO[0]) {
+            for (int i = 0; i < kStreamingPBOCount; ++i)
+                m_streamingPBO[i] = m_pipeline.CreatePixelPackBuffer(pboSize);
+            bool ok = true;
+            for (int i = 0; i < kStreamingPBOCount; ++i)
+                if (!m_streamingPBO[i]) ok = false;
+            if (!ok) {
+                for (int i = 0; i < kStreamingPBOCount; ++i) {
+                    if (m_streamingPBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingPBO[i]); m_streamingPBO[i] = nullptr; }
+                }
+            }
+        }
+        if (!m_streamingNV12PBO[0]) {
+            for (int i = 0; i < kStreamingPBOCount; ++i)
+                m_streamingNV12PBO[i] = m_pipeline.CreatePixelPackBuffer(kStreamingNV12Size);
+            bool ok = true;
+            for (int i = 0; i < kStreamingPBOCount; ++i)
+                if (!m_streamingNV12PBO[i]) ok = false;
+            if (!ok) {
+                for (int i = 0; i < kStreamingPBOCount; ++i) {
+                    if (m_streamingNV12PBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingNV12PBO[i]); m_streamingNV12PBO[i] = nullptr; }
+                }
+            }
+        }
+        if (m_streamingNV12PBO[0]) {
+            m_pipeline.RunStreamingNV12Pass(*writeTarget, m_streamingNV12PBO[m_streamingNV12PBOIndex], kStreamingNV12Size, kStreamingWidth, kStreamingHeight, kStreamingPitch);
+            m_streamingNV12PBOIndex = (m_streamingNV12PBOIndex + 1) % kStreamingPBOCount;
+            if (m_streamingNV12ReadbackCount < kStreamingPBOCount) ++m_streamingNV12ReadbackCount;
+        }
+    }
+}
+
+bool WorldRenderBridge::ReadStreamingPixels(uint8_t* outRGBA) {
+    if (!m_ready || !outRGBA || !m_streamingTargets[0]) return false;
+    const int latestIdx = (m_streamingRTWriteIndex + kStreamingRTCount - 1) % kStreamingRTCount;
+    if (!m_streamingTargets[latestIdx]) return false;
+    m_pipeline.Finish();
+    return m_pipeline.ReadPixelsFromRenderTarget(*m_streamingTargets[latestIdx], outRGBA);
+}
+
+bool WorldRenderBridge::GetStreamingPixelsFromPreviousFrame(uint8_t* outRGBA) {
+    if (!m_ready || !outRGBA || !m_streamingPBO[0]) return false;
+    if (m_streamingReadbackCount < 2) return false;
+    const int prevIdx = (m_streamingPBOIndex + 2) % kStreamingPBOCount;
+    const size_t size = static_cast<size_t>(kStreamingWidth) * kStreamingHeight * 4u;
+    m_pipeline.MapPixelPackBuffer(m_streamingPBO[prevIdx], outRGBA, size, kStreamingWidth, kStreamingHeight);
+    return true;
+}
+
+bool WorldRenderBridge::GetStreamingNV12FromPreviousFrame(uint8_t* outBuffer, size_t outSizeBytes) {
+    if (!m_ready || !outBuffer || !m_streamingNV12PBO[0]) return false;
+    if (outSizeBytes < kStreamingNV12Size) return false;
+    if (m_streamingNV12ReadbackCount < 2) return false;
+    const int prevIdx = (m_streamingNV12PBOIndex + 2) % kStreamingPBOCount;
+    m_pipeline.MapPixelPackBufferRaw(m_streamingNV12PBO[prevIdx], outBuffer, kStreamingNV12Size);
+    return true;
+}
+
+void WorldRenderBridge::IssueStreamingReadback() {
+    if (!m_streamingTargets[0]) return;
+    if (m_streamingPBO[0] && m_streamingRTFrameCount >= 2) {
+        const int readRTIdx = (m_streamingRTWriteIndex + kStreamingRTCount - 1) % kStreamingRTCount;
+        if (m_streamingTargets[readRTIdx]) {
+            m_pipeline.ReadPixelsToPBO(*m_streamingTargets[readRTIdx], m_streamingPBO[m_streamingPBOIndex]);
+            m_streamingPBOIndex = (m_streamingPBOIndex + 1) % kStreamingPBOCount;
+            if (m_streamingReadbackCount < kStreamingPBOCount) ++m_streamingReadbackCount;
+        }
+    }
+    m_streamingRTWriteIndex = (m_streamingRTWriteIndex + 1) % kStreamingRTCount;
 }
 
 eyelib::api::RenderDevice WorldRenderBridge::GetDevice() const {

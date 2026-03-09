@@ -117,6 +117,9 @@ public:
     /** Color texture of the current frame output (for display; same as BlitToScreen source). */
     rhi::ITexture* GetCurrentFrameOutputColorTextureRHI() const;
 
+    /** Streaming: run compute pass to convert source RT (RGBA) to NV12 in the given buffer. Uses GL_SHADER_STORAGE_BARRIER_BIT only after dispatch. */
+    void RunStreamingNV12Pass(rhi::IRenderTarget* sourceRT, void* nv12BufferHandle, size_t nv12Size, uint32_t width, uint32_t height, uint32_t pitch);
+
 private:
     /** Shared init after m_device is set (owned or shared). */
     bool InitializeDeviceResources(uint32_t width, uint32_t height);
@@ -141,6 +144,7 @@ private:
     void EnsureSkyboxShader();
     void EnsureOutlinePostShader();
     void EnsureEntityIdShader();
+    void EnsureStreamingNV12Pass();
     void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque);
     /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);
@@ -167,6 +171,8 @@ private:
     std::shared_ptr<Shader> m_skyboxShader;
     std::shared_ptr<Shader> m_outlinePostShader;
     std::shared_ptr<Shader> m_entityIdShader;
+    rhi::IPipeline* m_streamingNV12Pipeline = nullptr;
+    rhi::IShader* m_streamingNV12Shader = nullptr;
     rhi::IRenderTarget* m_entityIdRenderTarget = nullptr;
     rhi::IRenderTarget* m_outlineCompositeTemp = nullptr;
 

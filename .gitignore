@@ -4,12 +4,13 @@ build_eyelib/
 build1/
 out/
 bin/
-lib/
+
 thirdparty/bullet3/
 thirdparty/joltPhysics/
 thirdparty/bgfx.cmake/
 thirdparty/diligent/
 thirdparty/OpenXR-SDK/
+thirdparty/libjpeg-turbo/
 *.user
 *.suo
 *.sdf
@@ -69,4 +70,11 @@ assets/models/*
 # !assets/models/.gitkeep
 # !assets/textures/.gitkeep
 
-app/metaworld/
+app/metaworld/client/meta_client/.dart_tool/
+app/metaworld/client/meta_client/build/
+app/metaworld/client/meta_client/ios/
+app/metaworld/client/meta_client/macos/
+app/metaworld/client/meta_client/web/
+app/metaworld/client/meta_client/windows/
+app/metaworld/client/meta_client/linux/
+app/metaworld/client/meta_client/.idea/

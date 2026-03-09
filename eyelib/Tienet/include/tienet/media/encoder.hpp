@@ -29,6 +29,12 @@ public:
 	virtual void shutdown() = 0;
     virtual bool reconfigure(const EncoderConfig& cfg) = 0;
     virtual void forceKeyframe() = 0;
+	/** Encode from raw NV12 (Y then interleaved UV). Skips CPU RGBA→NV12 when used. pitch: row stride in bytes (0 = width). Returns H.264 bytes or empty. */
+	virtual std::vector<uint8_t> encodeFromNV12(const std::vector<uint8_t>& nv12Frame, uint32_t pitch = 0) { (void)nv12Frame; (void)pitch; return {}; }
+#if defined(_WIN32)
+	/** Encode from a D3D11 NV12 texture (no readback). Pass ID3D11Texture2D* as void*. Returns H.264 bytes or empty. */
+	virtual std::vector<uint8_t> encodeFromD3D11NV12(void* d3d11TextureNV12) { (void)d3d11TextureNV12; return {}; }
+#endif
 #if defined(TIENET_HAS_CUDA)
     // Optional CUDA path for zero-copy (NV12 planar device pointer input)
     virtual std::vector<uint8_t> encodeCudaNV12(void* cudaDevicePtrY, void* cudaDevicePtrUV, uint32_t pitch) { (void)cudaDevicePtrY; (void)cudaDevicePtrUV; (void)pitch; return {}; }

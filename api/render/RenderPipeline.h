@@ -4,6 +4,7 @@
 #include "api/render/RenderScene.h"
 #include "eyelib/math/Types.h"
 #include "api/render/RenderBackend.h"
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -81,6 +82,17 @@ public:
 
     /** Read current frame output as RGBA8. Call after Render() and Finish(). outRGBA must be at least width*height*4 bytes. Returns false if readback not supported. */
     bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const;
+    /** Read pixels from an arbitrary render target (e.g. streaming 960x540 RT). outRGBA must be at least target width*height*4. Call after Finish() if target was just blitted to. */
+    bool ReadPixelsFromRenderTarget(class RenderTarget& target, uint8_t* outRGBA) const;
+    /** Async readback (PBO): create/destroy buffers and issue readback. Returns nullptr if unsupported (use sync ReadPixelsFromRenderTarget). */
+    void* CreatePixelPackBuffer(size_t sizeInBytes) const;
+    void DestroyPixelPackBuffer(void* handle) const;
+    void ReadPixelsToPBO(class RenderTarget& target, void* pboHandle) const;
+    void MapPixelPackBuffer(void* pboHandle, void* outBuffer, size_t sizeInBytes, uint32_t width, uint32_t height) const;
+    /** Map PBO and copy to outBuffer without row flip (for NV12 readback). */
+    void MapPixelPackBufferRaw(void* pboHandle, void* outBuffer, size_t sizeInBytes) const;
+    /** Run compute pass: source RT (RGBA) -> NV12 into the given PBO. Uses minimal barrier (GL_SHADER_STORAGE_BARRIER_BIT). */
+    void RunStreamingNV12Pass(class RenderTarget& sourceRT, void* nv12PBOHandle, size_t nv12Size, uint32_t width, uint32_t height, uint32_t pitch) const;
 
     /** Restore default framebuffer (0) and viewport. Call after Render() when not calling BlitToScreen() (e.g. editor scene view) so subsequent drawing (e.g. ImGui) targets the window. */
     void RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height);

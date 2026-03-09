@@ -2,7 +2,6 @@
 
 set(STREAMING_SOURCES
     VRStreamingServer.cpp
-    FrameEncoder.cpp
 )
 
 add_library(OpenEyeStreaming STATIC ${STREAMING_SOURCES})
@@ -13,7 +12,12 @@ target_include_directories(OpenEyeStreaming
         ${CMAKE_SOURCE_DIR}
 )
 
+# Tienet provides StreamServer (network/protocol); H264 uses Tienet encoder when enabled
 target_link_libraries(OpenEyeStreaming
     PUBLIC
-        # stb_image_write is header-only; no link
+        Tienet
 )
+
+if(OPENEYE_STREAMING_H264)
+    target_compile_definitions(OpenEyeStreaming PRIVATE OPENEYE_STREAMING_H264=1)
+endif()

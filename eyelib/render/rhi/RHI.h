@@ -143,6 +143,15 @@ struct IDevice {
     virtual bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) = 0;
     /** Read color pixels from RT's color attachment 0 into RGBA8. (x,y,w,h) in RT coords, origin bottom-left. outBuffer must be at least w*h*4 bytes. Call after frame is done (e.g. Finish). */
     virtual bool ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) = 0;
+    /** Async readback: create a pixel pack buffer for glReadPixels into PBO. Returns opaque handle or nullptr if unsupported. */
+    virtual void* CreatePixelPackBuffer(size_t sizeInBytes) { (void)sizeInBytes; return nullptr; }
+    virtual void DestroyPixelPackBuffer(void* handle) { (void)handle; }
+    /** Issue async readback from RT (RGBA8) into PBO. Does not block; map the PBO later to get data. */
+    virtual void ReadPixelsToPBO(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, void* pboHandle) { (void)rt; (void)x; (void)y; (void)w; (void)h; (void)pboHandle; }
+    /** Map PBO and copy to outBuffer (top-left row order). Blocks until transfer into PBO is complete. sizeInBytes = w*h*4. */
+    virtual void MapPixelPackBuffer(void* pboHandle, void* outBuffer, size_t sizeInBytes, uint32_t width, uint32_t height) { (void)pboHandle; (void)outBuffer; (void)sizeInBytes; (void)width; (void)height; }
+    /** Map PBO and copy to outBuffer without row flip (raw bytes; for NV12). Blocks until transfer complete. */
+    virtual void MapPixelPackBufferRaw(void* pboHandle, void* outBuffer, size_t sizeInBytes) { (void)pboHandle; (void)outBuffer; (void)sizeInBytes; }
     /** Wait for fence (CPU blocks until GPU has passed the fence). timeoutMs: 0 = no wait, UINT64_MAX = wait forever. Returns true if signalled. */
     virtual bool WaitFence(IFence* fence, uint64_t timeoutMs) = 0;
     virtual void DestroyFence(IFence* fence) = 0;
@@ -176,6 +185,10 @@ struct ICommandList {
 
     virtual void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) = 0;
     virtual void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) = 0;
+    /** After compute writing to SSBO: use only GL_SHADER_STORAGE_BARRIER_BIT (minimal barrier). No-op on non-OpenGL. */
+    virtual void MemoryBarrierStorage() {}
+    /** Bind a pixel-pack buffer (same GL buffer) as SSBO at slot for compute write. pboHandle from CreatePixelPackBuffer. No-op on non-OpenGL. */
+    virtual void BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) { (void)pboHandle; (void)slot; (void)size; }
 
     virtual void BindPipeline(IPipeline* pipeline) = 0;
     virtual void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset = 0) = 0;

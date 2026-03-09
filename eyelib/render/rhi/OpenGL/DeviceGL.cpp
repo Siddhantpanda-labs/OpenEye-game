@@ -967,12 +967,31 @@ bool DeviceGL::ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32
     const uint32_t rtW = rt->GetWidth();
     const uint32_t rtH = rt->GetHeight();
     if (x + w > rtW || y + h > rtH) return false;
+    ITexture* color0 = rt->GetColorTexture(0);
+    const bool useByteReadback = color0 && (color0->GetFormat() == RHITextureFormat::RGBA8 || color0->GetFormat() == RHITextureFormat::RGBA8_SRGB);
+
     GLint oldReadFbo = 0, oldDrawFbo = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldReadFbo);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDrawFbo);
     auto* r = static_cast<RenderTargetGL*>(rt);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
+
+    if (useByteReadback) {
+        const size_t rowBytes = static_cast<size_t>(w) * 4u;
+        glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(w), static_cast<GLsizei>(h),
+                     GL_RGBA, GL_UNSIGNED_BYTE, outBuffer);
+        glReadBuffer(GL_NONE);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(oldReadFbo));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(oldDrawFbo));
+        for (uint32_t row = 0; row < h / 2u; ++row) {
+            const uint32_t swapRow = h - 1u - row;
+            std::swap_ranges(outBuffer + row * rowBytes, outBuffer + (row + 1u) * rowBytes,
+                             outBuffer + swapRow * rowBytes);
+        }
+        return true;
+    }
+
     const size_t pixelCount = static_cast<size_t>(w) * static_cast<size_t>(h);
     std::vector<float> tmp(static_cast<size_t>(4) * pixelCount);
     glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(w), static_cast<GLsizei>(h),
@@ -999,6 +1018,84 @@ bool DeviceGL::ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32
         }
     }
     return true;
+}
+
+void* DeviceGL::CreatePixelPackBuffer(size_t sizeInBytes) {
+    if (sizeInBytes == 0) return nullptr;
+    GLuint id = 0;
+    glGenBuffers(1, &id);
+    if (id == 0) return nullptr;
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, id);
+    glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(sizeInBytes), nullptr, GL_STREAM_COPY);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(id));
+}
+
+void DeviceGL::DestroyPixelPackBuffer(void* handle) {
+    if (!handle) return;
+    GLuint id = static_cast<GLuint>(reinterpret_cast<uintptr_t>(handle));
+    GLint bound = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &bound);
+    if (static_cast<GLuint>(bound) == id)
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    glDeleteBuffers(1, &id);
+}
+
+void DeviceGL::ReadPixelsToPBO(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, void* pboHandle) {
+    if (!rt || !pboHandle || w == 0 || h == 0) return;
+    const uint32_t rtW = rt->GetWidth();
+    const uint32_t rtH = rt->GetHeight();
+    if (x + w > rtW || y + h > rtH) return;
+    GLuint pbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(pboHandle));
+    GLint oldPBO = 0, oldReadFbo = 0, oldDrawFbo = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &oldPBO);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &oldReadFbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &oldDrawFbo);
+    auto* r = static_cast<RenderTargetGL*>(rt);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, r->m_fbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+    glReadPixels(static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(w), static_cast<GLsizei>(h),
+                 GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(oldPBO));
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(oldReadFbo));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(oldDrawFbo));
+}
+
+void DeviceGL::MapPixelPackBuffer(void* pboHandle, void* outBuffer, size_t sizeInBytes, uint32_t width, uint32_t height) {
+    if (!pboHandle || !outBuffer || sizeInBytes == 0 || width == 0 || height == 0) return;
+    if (sizeInBytes < static_cast<size_t>(width) * height * 4u) return;
+    GLuint pbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(pboHandle));
+    GLint oldPBO = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &oldPBO);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+    void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(sizeInBytes), GL_MAP_READ_BIT);
+    if (ptr) {
+        const size_t rowBytes = static_cast<size_t>(width) * 4u;
+        for (uint32_t row = 0; row < height; ++row) {
+            const uint32_t srcRow = height - 1u - row;
+            const uint8_t* src = static_cast<const uint8_t*>(ptr) + srcRow * rowBytes;
+            uint8_t* dst = static_cast<uint8_t*>(outBuffer) + row * rowBytes;
+            std::memcpy(dst, src, rowBytes);
+        }
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(oldPBO));
+}
+
+void DeviceGL::MapPixelPackBufferRaw(void* pboHandle, void* outBuffer, size_t sizeInBytes) {
+    if (!pboHandle || !outBuffer || sizeInBytes == 0) return;
+    GLuint pbo = static_cast<GLuint>(reinterpret_cast<uintptr_t>(pboHandle));
+    GLint oldPBO = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &oldPBO);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+    void* ptr = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, static_cast<GLsizeiptr>(sizeInBytes), GL_MAP_READ_BIT);
+    if (ptr) {
+        std::memcpy(outBuffer, ptr, sizeInBytes);
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, static_cast<GLuint>(oldPBO));
 }
 
 } // namespace rhi

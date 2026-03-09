@@ -10,6 +10,7 @@
 #include "eyelib/render/passes/TransparencyPass.h"
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/passes/LightCullPass.h"
+#include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/RenderContext.h"
 #include "eyelib/render/2d/Primitives.h"
@@ -30,6 +31,7 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/render/ShaderSourceLoader.h"
 
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
@@ -65,6 +67,8 @@ void RenderPipeline::Shutdown() {
     m_outlinePostShader.reset();
     m_entityIdShader.reset();
     if (m_device) {
+        if (m_streamingNV12Pipeline) { m_device->DestroyPipeline(m_streamingNV12Pipeline); m_streamingNV12Pipeline = nullptr; }
+        if (m_streamingNV12Shader) { m_device->DestroyShader(m_streamingNV12Shader); m_streamingNV12Shader = nullptr; }
         if (m_outlineCompositeTemp) { m_device->DestroyRenderTarget(m_outlineCompositeTemp); m_outlineCompositeTemp = nullptr; }
         if (m_entityIdRenderTarget) { m_device->DestroyRenderTarget(m_entityIdRenderTarget); m_entityIdRenderTarget = nullptr; }
     }
@@ -1431,6 +1435,54 @@ void RenderPipeline::EnsureEntityIdShader() {
         core::Log::WarnF("EntityID shader failed to load (passes/entityid/entityid). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
+}
+
+void RenderPipeline::EnsureStreamingNV12Pass() {
+    if (m_streamingNV12Pipeline || !m_device) return;
+    if (!m_device->GetCapabilities().supportsCompute) return;
+    std::string path;
+    if (!m_device->ResolveShaderPath("passes/streaming/rgba_to_nv12", rhi::ShaderStage::Compute, path)) {
+        core::Log::WarnF("Streaming NV12: ResolveShaderPath failed for passes/streaming/rgba_to_nv12");
+        return;
+    }
+    std::string src;
+    if (!LoadShaderSource(path, src)) {
+        core::Log::WarnF("Streaming NV12: LoadShaderSource failed for %s", path.c_str());
+        return;
+    }
+    m_streamingNV12Shader = m_device->CreateShader(rhi::ShaderStage::Compute, src.c_str(), src.size());
+    if (!m_streamingNV12Shader || !m_streamingNV12Shader->IsValid()) {
+        core::Log::Warn("Streaming NV12: CreateShader failed");
+        if (m_streamingNV12Shader) { m_device->DestroyShader(m_streamingNV12Shader); m_streamingNV12Shader = nullptr; }
+        return;
+    }
+    m_streamingNV12Pipeline = m_device->CreateComputePipeline(m_streamingNV12Shader);
+    if (!m_streamingNV12Pipeline) {
+        core::Log::Warn("Streaming NV12: CreateComputePipeline failed");
+        m_device->DestroyShader(m_streamingNV12Shader);
+        m_streamingNV12Shader = nullptr;
+        return;
+    }
+}
+
+void RenderPipeline::RunStreamingNV12Pass(rhi::IRenderTarget* sourceRT, void* nv12BufferHandle, size_t nv12Size, uint32_t width, uint32_t height, uint32_t pitch) {
+    EnsureStreamingNV12Pass();
+    if (!m_streamingNV12Pipeline || !sourceRT || !nv12BufferHandle || nv12Size == 0 || pitch == 0) return;
+    rhi::ICommandList* cmd = GetRHICommandList();
+    if (!cmd) return;
+    rhi::ITexture* tex = sourceRT->GetColorTexture(0);
+    if (!tex) return;
+    cmd->BindPipeline(m_streamingNV12Pipeline);
+    m_device->EnsureComputePipelineStorageBlockBindings(m_streamingNV12Pipeline);
+    cmd->BindTexture(tex, 0);
+    cmd->BindPixelPackBufferAsSSBO(nv12BufferHandle, 0, nv12Size);
+    cmd->SetUniformUint("u_Width", width);
+    cmd->SetUniformUint("u_Height", height);
+    cmd->SetUniformUint("u_Pitch", pitch);
+    const uint32_t gx = (width + 15u) / 16u;
+    const uint32_t gy = (height + 15u) / 16u;
+    cmd->Dispatch(gx > 0 ? gx : 1u, gy > 0 ? gy : 1u, 1u);
+    cmd->MemoryBarrierStorage();
 }
 
 void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque) {

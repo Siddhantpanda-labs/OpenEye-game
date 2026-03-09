@@ -456,6 +456,7 @@ int RunPlayer(int argc, char** argv) {
                     if (gameRuntime.IsStreaming()) {
                         snap.streamingActive = true;
                         snap.streamingClientCount = gameRuntime.GetStreamingClientCount();
+                        snap.streamingFps = gameRuntime.GetStreamingFPS();
                         std::string ip = eyelib::app::VRStreamingServer::GetLocalIPv4Address();
                         if (!ip.empty())
                             snap.streamingServerAddress = ip + ":27016";

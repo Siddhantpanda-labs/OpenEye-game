@@ -36,6 +36,8 @@ struct CommandListDiligent : ICommandList {
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
     void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) override;
+    void MemoryBarrierStorage() override;
+    void BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) override;
 
     void BindPipeline(IPipeline* pipeline) override;
     void BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) override;

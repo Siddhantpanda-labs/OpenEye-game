@@ -88,6 +88,11 @@ struct DeviceGL : IDevice {
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
     bool ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) override;
     bool ReadPixelsRGBA8(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* outBuffer) override;
+    void* CreatePixelPackBuffer(size_t sizeInBytes) override;
+    void DestroyPixelPackBuffer(void* handle) override;
+    void ReadPixelsToPBO(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t w, uint32_t h, void* pboHandle) override;
+    void MapPixelPackBuffer(void* pboHandle, void* outBuffer, size_t sizeInBytes, uint32_t width, uint32_t height) override;
+    void MapPixelPackBufferRaw(void* pboHandle, void* outBuffer, size_t sizeInBytes) override;
 
     /** Lazy-create and return the shared fullscreen quad VBO/IBO used by DrawFullscreenQuad. */
     void EnsureFullscreenQuad();

@@ -98,6 +98,10 @@ void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {
             ImGui::SetNextWindowBgAlpha(0.9f);
             if (ImGui::Begin("OpenEye VR Server", nullptr, flags)) {
                 ImGui::Text("Device connected: %zu", snapshot.streamingClientCount);
+                if (snapshot.streamingFps > 0.0f)
+                    ImGui::Text("Stream FPS: %.1f", snapshot.streamingFps);
+                else
+                    ImGui::TextUnformatted("Stream FPS: --");
                 ImGui::Separator();
                 ImGui::Image(m_qrTextureId, ImVec2(static_cast<float>(m_qrTextureWidth), static_cast<float>(m_qrTextureHeight)));
                 ImGui::Spacing();
@@ -115,6 +119,10 @@ void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {
             ImGui::SetNextWindowBgAlpha(0.9f);
             if (ImGui::Begin("OpenEye VR Server", nullptr, flags)) {
                 ImGui::Text("Device connected: %zu", snapshot.streamingClientCount);
+                if (snapshot.streamingFps > 0.0f)
+                    ImGui::Text("Stream FPS: %.1f", snapshot.streamingFps);
+                else
+                    ImGui::TextUnformatted("Stream FPS: --");
                 ImGui::Separator();
                 ImGui::TextUnformatted("openeye://");
                 ImGui::SameLine(0, 0);

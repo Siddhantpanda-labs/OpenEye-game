@@ -78,6 +78,12 @@ void DeferredCommandListGL::BarrierBuffer(IBuffer* buffer, ResourceState fromSta
 void DeferredCommandListGL::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
     Record([texture, fromState, toState](ICommandList* c) { c->BarrierTexture(texture, fromState, toState); });
 }
+void DeferredCommandListGL::MemoryBarrierStorage() {
+    Record([](ICommandList* c) { c->MemoryBarrierStorage(); });
+}
+void DeferredCommandListGL::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) {
+    Record([pboHandle, slot, size](ICommandList* c) { c->BindPixelPackBufferAsSSBO(pboHandle, slot, size); });
+}
 
 void DeferredCommandListGL::BindPipeline(IPipeline* pipeline) {
     Record([pipeline](ICommandList* c) { c->BindPipeline(pipeline); });

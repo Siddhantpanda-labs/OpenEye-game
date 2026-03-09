@@ -13,8 +13,15 @@
 #include "api/render/All.h"
 #include "api/world/All.h"
 
+#include <array>
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
+#include <mutex>
+#include <queue>
+#include <thread>
 #include <vector>
 
 namespace eyelib { namespace api { class Window; } }
@@ -79,6 +86,8 @@ public:
     bool IsStreaming() const;
     /** Number of connected VR clients (0 when not streaming). */
     size_t GetStreamingClientCount() const;
+    /** Streaming FPS (frames sent/sec). 0 when not streaming. */
+    float GetStreamingFPS() const;
     /** Callback (yaw, pitch, roll in radians) when client sends head tracking. Set before StartStreaming to drive XR camera. */
     void SetStreamingGyroCallback(std::function<void(float yaw, float pitch, float roll)> cb);
 #endif
@@ -108,6 +117,21 @@ private:
     std::unique_ptr<eyelib::app::VRStreamingServer> m_streaming;
     std::function<void(float yaw, float pitch, float roll)> m_streamingGyroCallback;
     std::vector<uint8_t> m_streamingReadbackBuffer;
+
+    // Pipelined frame queue: 5 slots; when full, drop oldest so encoder always gets newest.
+    // Render thread never waits on encoder; avoids back-pressure on encode spikes.
+    static constexpr int kStreamingFrameQueueSize = 5;
+    std::mutex m_streamingEncodeMutex;
+    std::condition_variable m_streamingEncodeCV;
+    std::queue<int> m_streamingToEncode;
+    std::queue<int> m_streamingNV12ToEncode;
+    std::deque<int> m_streamingFreeList;
+    std::array<std::vector<uint8_t>, kStreamingFrameQueueSize> m_streamingPool;
+    std::thread m_streamingEncoderThread;
+    std::atomic<bool> m_streamingEncoderStop{false};
+    void StartStreamingEncoderThread();
+    void StopStreamingEncoderThread();
+    void StreamingEncoderThreadLoop();
 #endif
 };
 

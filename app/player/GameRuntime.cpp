@@ -179,11 +179,43 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
     if (m_streaming && m_streaming->IsRunning()) {
         m_streaming->Tick();
         if (m_streaming->GetClientCount() > 0) {
-            const size_t need = static_cast<size_t>(m_width) * static_cast<size_t>(m_height) * 4u;
-            if (m_streamingReadbackBuffer.size() < need)
-                m_streamingReadbackBuffer.resize(need);
-            if (m_render->ReadOutputPixels(m_width, m_height, m_streamingReadbackBuffer.data()))
-                m_streaming->SendFrame(m_streamingReadbackBuffer.data(), m_width, m_height, 75);
+            constexpr size_t kStreamingPixels = static_cast<size_t>(960) * 540u * 4u;
+            int poolIdx = -1;
+            {
+                std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+                if (!m_streamingFreeList.empty()) {
+                    poolIdx = m_streamingFreeList.front();
+                    m_streamingFreeList.pop_front();
+                } else if (!m_streamingToEncode.empty()) {
+                    poolIdx = m_streamingToEncode.front();
+                    m_streamingToEncode.pop();
+                } else if (!m_streamingNV12ToEncode.empty()) {
+                    poolIdx = m_streamingNV12ToEncode.front();
+                    m_streamingNV12ToEncode.pop();
+                }
+            }
+            if (poolIdx >= 0) {
+                bool pushed = false;
+                if (m_render->HasStreamingNV12PBOs() &&
+                    m_render->GetStreamingNV12FromPreviousFrame(m_streamingPool[poolIdx].data(), WorldRenderBridge::kStreamingNV12Size)) {
+                    std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+                    m_streamingNV12ToEncode.push(poolIdx);
+                    m_streamingEncodeCV.notify_one();
+                    pushed = true;
+                }
+                if (!pushed && m_render->GetStreamingPixelsFromPreviousFrame(m_streamingPool[poolIdx].data())) {
+                    std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+                    m_streamingToEncode.push(poolIdx);
+                    m_streamingEncodeCV.notify_one();
+                    pushed = true;
+                }
+                if (!pushed) {
+                    std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+                    m_streamingFreeList.push_back(poolIdx);
+                }
+            }
+            m_render->PrepareStreamingFrame();
+            m_render->IssueStreamingReadback();
         }
     }
 #endif
@@ -202,16 +234,81 @@ void GameRuntime::ReloadShaders() {
 }
 
 #ifdef OPENEYE_BUILD_STREAMING
+void GameRuntime::StreamingEncoderThreadLoop() {
+    constexpr size_t kStreamingPixels = static_cast<size_t>(960) * 540u * 4u;
+    while (true) {
+        int idx = -1;
+        bool useNV12 = false;
+        {
+            std::unique_lock<std::mutex> lock(m_streamingEncodeMutex);
+            m_streamingEncodeCV.wait(lock, [this] {
+                return !m_streamingNV12ToEncode.empty() || !m_streamingToEncode.empty() || m_streamingEncoderStop.load();
+            });
+            if (m_streamingEncoderStop.load()) break;
+            if (!m_streamingNV12ToEncode.empty()) {
+                idx = m_streamingNV12ToEncode.front();
+                m_streamingNV12ToEncode.pop();
+                useNV12 = true;
+            } else {
+                idx = m_streamingToEncode.front();
+                m_streamingToEncode.pop();
+            }
+        }
+        if (idx >= 0 && idx < kStreamingFrameQueueSize && m_streaming && m_streaming->IsRunning()) {
+            if (useNV12 && m_streamingPool[idx].size() >= WorldRenderBridge::kStreamingNV12Size)
+                m_streaming->SendFrameNV12(m_streamingPool[idx].data(), 960, 540, WorldRenderBridge::kStreamingPitch);
+            else if (m_streamingPool[idx].size() >= kStreamingPixels)
+                m_streaming->SendFrame(m_streamingPool[idx].data(), 960, 540, 50);
+        }
+        if (idx >= 0 && idx < kStreamingFrameQueueSize) {
+            std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+            m_streamingFreeList.push_back(idx);
+        }
+    }
+}
+
+void GameRuntime::StartStreamingEncoderThread() {
+    StopStreamingEncoderThread();
+    constexpr size_t kStreamingPixels = static_cast<size_t>(960) * 540u * 4u;
+    for (int i = 0; i < kStreamingFrameQueueSize; ++i) {
+        m_streamingPool[i].resize(kStreamingPixels);
+        m_streamingFreeList.push_back(i);
+    }
+    m_streamingEncoderStop.store(false);
+    m_streamingEncoderThread = std::thread(&GameRuntime::StreamingEncoderThreadLoop, this);
+}
+
+void GameRuntime::StopStreamingEncoderThread() {
+    m_streamingEncoderStop.store(true);
+    m_streamingEncodeCV.notify_all();
+    if (m_streamingEncoderThread.joinable()) {
+        m_streamingEncoderThread.join();
+        m_streamingEncoderThread = std::thread();
+    }
+    std::lock_guard<std::mutex> lock(m_streamingEncodeMutex);
+    while (!m_streamingToEncode.empty()) {
+        m_streamingFreeList.push_back(m_streamingToEncode.front());
+        m_streamingToEncode.pop();
+    }
+    while (!m_streamingNV12ToEncode.empty()) {
+        m_streamingFreeList.push_back(m_streamingNV12ToEncode.front());
+        m_streamingNV12ToEncode.pop();
+    }
+}
+
 bool GameRuntime::StartStreaming(uint16_t streamPort) {
     if (IsHeadless()) return false;
     if (m_streaming && m_streaming->IsRunning()) return true;
     if (!m_streaming) m_streaming = std::make_unique<eyelib::app::VRStreamingServer>();
     if (m_streamingGyroCallback)
         m_streaming->SetGyroCallback(m_streamingGyroCallback);
-    return m_streaming->Start(streamPort);
+    if (!m_streaming->Start(streamPort)) return false;
+    StartStreamingEncoderThread();
+    return true;
 }
 
 void GameRuntime::StopStreaming() {
+    StopStreamingEncoderThread();
     if (m_streaming)
         m_streaming->Stop();
 }
@@ -222,6 +319,10 @@ bool GameRuntime::IsStreaming() const {
 
 size_t GameRuntime::GetStreamingClientCount() const {
     return m_streaming && m_streaming->IsRunning() ? m_streaming->GetClientCount() : 0u;
+}
+
+float GameRuntime::GetStreamingFPS() const {
+    return m_streaming && m_streaming->IsRunning() ? m_streaming->GetStreamingFPS() : 0.0f;
 }
 
 void GameRuntime::SetStreamingGyroCallback(std::function<void(float yaw, float pitch, float roll)> cb) {

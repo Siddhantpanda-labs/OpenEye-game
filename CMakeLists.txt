@@ -33,6 +33,8 @@ option(OPENEYE_BUILD_GAME "Build final game" ON)
 option(OPENEYE_BUILD_PLAYER "Build unified runtime player" ON)
 option(OPENEYE_BUILD_TESTS "Build API test app" ON)
 option(OPENEYE_BUILD_STREAMING "Build VR streaming server (UDP discovery + frame stream)" ON)
+option(OPENEYE_STREAMING_H264 "Use H.264 encoding for VR streaming (Tienet MF/NVENC)" ON)
+option(OPENEYE_STREAMING_NVENC "Use NVENC for H.264 when available (requires NVIDIA Video Codec SDK)" OFF)
 option(OPENEYE_USE_LZ4 "Use LZ4 for asset/binary compression" ON)
 option(OPENEYE_USE_ZSTD "Use Zstd for asset/binary compression" ON)
 option(OPENEYE_USE_DILIGENT "Use Diligent Engine as RHI backend (requires thirdparty/DiligentCore)" OFF)
@@ -297,6 +299,19 @@ if(OPENEYE_BUILD_GAME)
 endif()
 
 # --------------------------------------
+# Tienet (H.264 encoder: MF on Windows, optional NVENC)
+# --------------------------------------
+if(OPENEYE_BUILD_STREAMING AND OPENEYE_STREAMING_H264)
+    set(TIENET_ENABLE_NVENC ${OPENEYE_STREAMING_NVENC} CACHE BOOL "Use NVENC in Tienet" FORCE)
+    # Default NVIDIA Video Codec SDK path for NVENC; override with -DOPENEYE_VIDEO_CODEC_SDK_PATH=...
+    set(OPENEYE_VIDEO_CODEC_SDK_PATH "c:/Video_Codec_SDK_13.0.19" CACHE PATH "Path to NVIDIA Video Codec SDK (e.g. c:/Video_Codec_SDK_13.0.19)")
+    if(OPENEYE_VIDEO_CODEC_SDK_PATH)
+        set(ENV{VIDEO_CODEC_SDK_DIR} "${OPENEYE_VIDEO_CODEC_SDK_PATH}")
+    endif()
+    add_subdirectory(eyelib/Tienet)
+endif()
+
+# --------------------------------------
 # Unified Runtime Player (lib shared with Editor Game view)
 # --------------------------------------
 if(OPENEYE_BUILD_STREAMING)
@@ -318,6 +333,13 @@ endif()
 # Transform hierarchy benchmark (100k entities; requires EyelibWorld)
 # --------------------------------------
 add_subdirectory(app/benchmark_transform)
+
+# --------------------------------------
+# Windows VR streaming test client (same protocol as Flutter; GLFW + MF decode)
+# --------------------------------------
+if(WIN32)
+    add_subdirectory(app/metaworld/client/win_client)
+endif()
 
 # --------------------------------------
 # Physics determinism test (60 FPS vs 144 FPS → same result)

@@ -22,6 +22,9 @@
 // Compression
 #include "tienet/compression/compressor.hpp"
 
+// Streaming (UDP discovery + stream port, frame payload send, gyro callback)
+#include "tienet/streaming/stream_server.hpp"
+
 // Optional extensions
 #ifdef TIENET_ENABLE_VR
 #include "tienet/vr/vr_extensions.hpp"

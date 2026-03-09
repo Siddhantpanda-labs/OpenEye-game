@@ -36,21 +36,31 @@ public:
     void Tick();
 
     /**
-     * Encode RGBA8 (row-major, top-left origin) to JPEG and send to all connected clients.
-     * Safe to call from render thread. No-op if no clients.
+     * Encode RGBA8 (row-major, top-left origin) to H.264 and send to all connected clients.
+     * Safe to call from encoder thread. No-op if no clients or H.264 encoder unavailable.
      */
     void SendFrame(const uint8_t* rgba, uint32_t width, uint32_t height, int jpegQuality = 75);
+
+    /**
+     * Encode raw NV12 (Y plane then interleaved UV) to H.264 and send. Use when GPU or other path produced NV12.
+     * pitch: row stride in bytes (0 = width). Use aligned pitch (e.g. 256) when buffer is pitch-aligned for NVENC.
+     * No-op if no clients or H.264 encoder not available. Safe to call from encoder thread.
+     */
+    void SendFrameNV12(const uint8_t* nv12, uint32_t width, uint32_t height, uint32_t pitch = 0);
 
     void SetGyroCallback(GyroCallback cb) { m_gyroCallback = std::move(cb); }
     /** Number of clients that have sent VR_CLIENT_CONNECT and are receiving frames. */
     size_t GetClientCount() const;
+
+    /** Frames sent per second (rolling 1s window). 0 when not running or no frames sent yet. */
+    float GetStreamingFPS() const;
 
     /** Get local IPv4 address for display (e.g. for QR). Returns empty string on failure. */
     static std::string GetLocalIPv4Address();
 
 private:
     struct Impl;
-    std::unique_ptr<Impl> m_impl;
+    mutable std::unique_ptr<Impl> m_impl;
     bool m_running = false;
     uint16_t m_streamPort = 0;
     GyroCallback m_gyroCallback;

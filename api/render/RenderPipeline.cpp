@@ -177,6 +177,63 @@ bool RenderPipeline::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* 
     return m_impl->pipeline && m_impl->pipeline->ReadOutputPixels(width, height, outRGBA);
 }
 
+bool RenderPipeline::ReadPixelsFromRenderTarget(RenderTarget& target, uint8_t* outRGBA) const {
+    if (!m_impl->pipeline) return false;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    auto internal = target.GetInternal();
+    if (!device || !internal || !outRGBA) return false;
+    ::eyelib::render::rhi::IRenderTarget* rt = internal->GetRenderTargetRHI();
+    if (!rt) return false;
+    const uint32_t w = target.GetWidth();
+    const uint32_t h = target.GetHeight();
+    return device->ReadPixelsRGBA8(rt, 0, 0, w, h, outRGBA);
+}
+
+void* RenderPipeline::CreatePixelPackBuffer(size_t sizeInBytes) const {
+    if (!m_impl->pipeline) return nullptr;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    return device ? device->CreatePixelPackBuffer(sizeInBytes) : nullptr;
+}
+
+void RenderPipeline::DestroyPixelPackBuffer(void* handle) const {
+    if (!m_impl->pipeline || !handle) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    if (device) device->DestroyPixelPackBuffer(handle);
+}
+
+void RenderPipeline::ReadPixelsToPBO(RenderTarget& target, void* pboHandle) const {
+    if (!m_impl->pipeline || !pboHandle) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    auto internal = target.GetInternal();
+    if (!device || !internal) return;
+    ::eyelib::render::rhi::IRenderTarget* rt = internal->GetRenderTargetRHI();
+    if (!rt) return;
+    const uint32_t w = target.GetWidth();
+    const uint32_t h = target.GetHeight();
+    device->ReadPixelsToPBO(rt, 0, 0, w, h, pboHandle);
+}
+
+void RenderPipeline::MapPixelPackBuffer(void* pboHandle, void* outBuffer, size_t sizeInBytes, uint32_t width, uint32_t height) const {
+    if (!m_impl->pipeline) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    if (device) device->MapPixelPackBuffer(pboHandle, outBuffer, sizeInBytes, width, height);
+}
+
+void RenderPipeline::MapPixelPackBufferRaw(void* pboHandle, void* outBuffer, size_t sizeInBytes) const {
+    if (!m_impl->pipeline) return;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    if (device) device->MapPixelPackBufferRaw(pboHandle, outBuffer, sizeInBytes);
+}
+
+void RenderPipeline::RunStreamingNV12Pass(RenderTarget& sourceRT, void* nv12PBOHandle, size_t nv12Size, uint32_t width, uint32_t height, uint32_t pitch) const {
+    if (!m_impl->pipeline || !nv12PBOHandle || nv12Size == 0 || pitch == 0) return;
+    auto internal = sourceRT.GetInternal();
+    if (!internal) return;
+    ::eyelib::render::rhi::IRenderTarget* rt = internal->GetRenderTargetRHI();
+    if (!rt) return;
+    m_impl->pipeline->RunStreamingNV12Pass(rt, nv12PBOHandle, nv12Size, width, height, pitch);
+}
+
 void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float r, float g, float b) {
     if (selectedPackedId == 0) return;
     m_impl->pipeline->RenderOutlineFromIdBuffer(selectedPackedId, r, g, b);

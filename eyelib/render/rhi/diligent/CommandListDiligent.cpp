@@ -301,6 +301,8 @@ void CommandListDiligent::SetPolygonOffsetLine(bool enable, float factor, float 
 
 void CommandListDiligent::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) { (void)buffer; (void)fromState; (void)toState; }
 
+void CommandListDiligent::MemoryBarrierStorage() {}
+void CommandListDiligent::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) { (void)pboHandle; (void)slot; (void)size; }
 void CommandListDiligent::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
 #if OPENEYE_USE_DILIGENT
     if (!texture || !m_device) return;

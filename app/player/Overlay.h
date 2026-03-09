@@ -21,6 +21,8 @@ struct OverlaySnapshot {
     size_t streamingClientCount = 0;
     /** e.g. "192.168.1.42:27016"; empty if unknown. */
     std::string streamingServerAddress;
+    /** When streaming and client connected: actual frames-sent/sec. 0 otherwise. */
+    float streamingFps = 0.0f;
 };
 
 class RuntimeOverlay {

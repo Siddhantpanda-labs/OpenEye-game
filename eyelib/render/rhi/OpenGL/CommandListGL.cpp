@@ -207,6 +207,16 @@ void CommandListGL::BarrierTexture(ITexture* texture, ResourceState fromState, R
     }
 }
 
+void CommandListGL::MemoryBarrierStorage() {
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+}
+
+void CommandListGL::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) {
+    if (!pboHandle || size == 0) return;
+    GLuint id = static_cast<GLuint>(reinterpret_cast<uintptr_t>(pboHandle));
+    glBindBufferRange(GL_SHADER_STORAGE_BUFFER, static_cast<GLuint>(slot), id, 0, static_cast<GLsizeiptr>(size));
+}
+
 static void ApplyBlend(const BlendState& b) {
     if (!b.blendEnable) {
         glDisable(GL_BLEND);

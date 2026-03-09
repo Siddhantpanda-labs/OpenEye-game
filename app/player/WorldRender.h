@@ -82,6 +82,25 @@ public:
     /** Read current frame output as RGBA8. Call after Render(); performs Finish() then readback. outRGBA must be at least width*height*4. Returns false if not ready or readback unsupported. */
     bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA);
 
+    /** Streaming: prepare a 960x540 RGBA8 copy of the current frame (blit from pipeline output). Call before readback when clients are connected. */
+    void PrepareStreamingFrame();
+    /** Streaming (sync): read back the 960x540 frame into outRGBA. Returns false if streaming target not ready. Use when PBO async path is unavailable. */
+    bool ReadStreamingPixels(uint8_t* outRGBA);
+    /** Streaming (async PBO): copy previous frame from PBO into outRGBA. Returns true if data is valid (encode/send). Call before PrepareStreamingFrame. First two frames return false (triple-buffer warmup). */
+    bool GetStreamingPixelsFromPreviousFrame(uint8_t* outRGBA);
+    /** Streaming (async PBO): issue readback into current PBO, then advance. Call after PrepareStreamingFrame. No-op if PBOs not available. */
+    void IssueStreamingReadback();
+    /** True when triple PBO path is active; use to avoid sync ReadStreamingPixels (which would trigger the sync warning). */
+    bool HasStreamingPBOs() const { return m_streamingPBO[0] != nullptr; }
+    /** True when GPU NV12 path is active (triple NV12 PBOs + compute pass). Prefer over RGBA when encoding. */
+    bool HasStreamingNV12PBOs() const { return m_streamingNV12PBO[0] != nullptr; }
+    /** Streaming (NV12): copy previous frame from NV12 PBO into outBuffer (raw, no flip). Returns true if valid. Call before PrepareStreamingFrame. outSizeBytes = pitch*height + pitch*(height/2). */
+    bool GetStreamingNV12FromPreviousFrame(uint8_t* outBuffer, size_t outSizeBytes);
+    /** Streaming NV12 pitch (256-byte aligned). Use with GetStreamingNV12FromPreviousFrame / SendFrameNV12. Public for GameRuntime encoder. */
+    static constexpr uint32_t kStreamingPitch = 1024u;
+    /** Streaming NV12 buffer size in bytes (pitch*height + pitch*(height/2)). Public for GameRuntime encoder. */
+    static constexpr size_t kStreamingNV12Size = static_cast<size_t>(kStreamingPitch) * 540u + static_cast<size_t>(kStreamingPitch) * 270u;
+
     /** Optional XR provider. When set and session active, Render() uses stereo XR path when scene has XR camera. */
     void SetXRProvider(::eyelib::vr::IXRProvider* provider) { m_xrProvider = provider; }
 
@@ -156,6 +175,20 @@ private:
     ::eyelib::vr::IXRProvider* m_xrProvider = nullptr;
     std::unique_ptr<eyelib::api::RenderTarget> m_xrEyeTargets[2];
     uint32_t m_xrEyeSize[2][2] = {{0, 0}, {0, 0}};
+
+    static constexpr uint32_t kStreamingWidth = 960u;
+    static constexpr uint32_t kStreamingHeight = 540u;
+    static constexpr int kStreamingPBOCount = 3;
+    static constexpr int kStreamingRTCount = 3;
+    std::unique_ptr<eyelib::api::RenderTarget> m_streamingTargets[kStreamingRTCount];
+    int m_streamingRTWriteIndex = 0;
+    int m_streamingRTFrameCount = 0;
+    void* m_streamingPBO[kStreamingPBOCount] = {nullptr, nullptr, nullptr};
+    int m_streamingPBOIndex = 0;
+    int m_streamingReadbackCount = 0;
+    void* m_streamingNV12PBO[kStreamingPBOCount] = {nullptr, nullptr, nullptr};
+    int m_streamingNV12PBOIndex = 0;
+    int m_streamingNV12ReadbackCount = 0;
 };
 
 } // namespace openeye::player

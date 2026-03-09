@@ -69,6 +69,11 @@ set(TIENET_FLUTTER_SOURCES
     src/flutter/flutter_bindings.cpp
 )
 
+# Streaming (UDP discovery + stream port, frame payload send, gyro)
+set(TIENET_STREAMING_SOURCES
+    src/streaming/stream_server.cpp
+)
+
 # All sources
 set(TIENET_ALL_SOURCES
     ${TIENET_CORE_SOURCES}
@@ -78,6 +83,7 @@ set(TIENET_ALL_SOURCES
     ${TIENET_MEDIA_SOURCES}
     ${TIENET_VR_SOURCES}
     ${TIENET_FLUTTER_SOURCES}
+    ${TIENET_STREAMING_SOURCES}
     src/discovery/discovery.cpp
 )
 
@@ -151,7 +157,7 @@ if(WIN32)
         set(_NVENC_HINTS
             $ENV{VIDEO_CODEC_SDK_DIR}
             $ENV{NVENC_SDK_DIR}
-            "C:/Program Files/NVIDIA GPU Computing Toolkit/Video Codec SDK"
+            "c:/Video_Codec_SDK_13.0.19"
         )
         find_path(NVENC_INCLUDE_DIR nvEncodeAPI.h HINTS ${_NVENC_HINTS} PATH_SUFFIXES Interface interface include Include)
         find_library(NVENC_LIBRARY NAMES nvencodeapi nvEncodeAPI64 nvencodeapi64 HINTS ${_NVENC_HINTS} PATH_SUFFIXES lib Lib lib/x64 Lib/Win64)
