@@ -1,0 +1,78 @@
+# Eyelib Render API (minimal bring-up)
+
+set(API_RENDER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Renderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Texture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Texture.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Texture3D.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Texture3D.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/TextureCube.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TextureCube.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/TextureArray.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TextureArray.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/TextureTypes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Mesh.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Material.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Material.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MaterialInstance.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MaterialInstance.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Shader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Shader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderScene.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderSceneAdapter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderSceneAdapter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/DrawableSnapshot.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/FrameGraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/FrameGraph.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Sprite.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Sprite.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Text.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Camera.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Light.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/All.h
+)
+
+add_library(EyelibRenderAPI STATIC ${API_RENDER_SOURCES})
+
+target_include_directories(EyelibRenderAPI
+    PUBLIC
+        $<BUILD_INTERFACE:${OPENEYE_ENGINE_SOURCE}>
+        $<BUILD_INTERFACE:${OPENEYE_ENGINE_SOURCE}/api>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${OPENEYE_ENGINE_SOURCE}/eyelib
+        ${OPENEYE_ENGINE_SOURCE}/thirdparty/glad/include
+)
+
+target_link_libraries(EyelibRenderAPI
+    PUBLIC
+        EyelibRender
+        EyelibMath
+)
+
