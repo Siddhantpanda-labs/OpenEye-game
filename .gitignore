@@ -8,6 +8,8 @@ bin/
 # Engine runtime output (binaries, libs)
 Engine/bin/
 Engine/lib/
+Engine/assets/models/
+
 
 # Project cache (generated runtime data)
 Projects/*/Cache/
