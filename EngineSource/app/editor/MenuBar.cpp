@@ -27,6 +27,32 @@ static void ShowSaveAsModal(EditorContext& ctx) {
     ctx.activeModal = EditorContext::Modal::None;
 }
 
+static void ShowCreateProjectModal(EditorContext& ctx) {
+    if (ctx.activeModal != EditorContext::Modal::CreateProject) return;
+    ImGui::OpenPopup("Create Project");
+    ctx.activeModal = EditorContext::Modal::None;
+}
+
+static void RunCreateProjectModal(EditorContext& ctx) {
+    if (!ImGui::BeginPopupModal("Create Project", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::Text("Project name (will be created in Projects folder):");
+    ImGui::SetNextItemWidth(280.0f);
+    ImGui::InputText("##projectname", ctx.projectNameBuffer, sizeof(ctx.projectNameBuffer));
+    if (ImGui::Button("Create", ImVec2(120, 0))) {
+        std::string path = openeye::editor::CreateProject(ctx.projectNameBuffer);
+        if (!path.empty()) {
+            if (openeye::editor::OpenProject(ctx, path))
+                std::snprintf(ctx.projectPathBuffer, sizeof(ctx.projectPathBuffer), "%s", ctx.projectPath.c_str());
+            ImGui::CloseCurrentPopup();
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 static void RunOpenModal(EditorContext& ctx) {
     if (!ImGui::BeginPopupModal("Open Scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
     ImGui::Text("Scene path (relative or absolute):");
@@ -69,9 +95,11 @@ static void RunSaveAsModal(EditorContext& ctx) {
 void ShowMenuBar(EditorContext& ctx) {
     if (ctx.activeModal == EditorContext::Modal::Open) ShowOpenModal(ctx);
     if (ctx.activeModal == EditorContext::Modal::SaveAs) ShowSaveAsModal(ctx);
+    if (ctx.activeModal == EditorContext::Modal::CreateProject) ShowCreateProjectModal(ctx);
 
     RunOpenModal(ctx);
     RunSaveAsModal(ctx);
+    RunCreateProjectModal(ctx);
 
     if (!ImGui::BeginMainMenuBar()) return;
 
@@ -81,6 +109,10 @@ void ShowMenuBar(EditorContext& ctx) {
             if (!picked.empty() && openeye::editor::OpenProject(ctx, picked)) {
                 std::snprintf(ctx.projectPathBuffer, sizeof(ctx.projectPathBuffer), "%s", ctx.projectPath.c_str());
             }
+        }
+        if (ImGui::MenuItem("Create Project...")) {
+            ctx.activeModal = EditorContext::Modal::CreateProject;
+            std::snprintf(ctx.projectNameBuffer, sizeof(ctx.projectNameBuffer), "NewProject");
         }
         if (ImGui::MenuItem("Close Project", nullptr, false, !ctx.projectPath.empty())) {
             openeye::editor::CloseProject(ctx, ctx.engineAssetsPath);

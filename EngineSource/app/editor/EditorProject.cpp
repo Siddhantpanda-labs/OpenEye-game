@@ -71,4 +71,33 @@ void CloseProject(EditorContext& ctx, const std::string& engineAssetsPath) {
     ctx.assetRoots = { engineAssetsPath };
 }
 
+std::string CreateProject(const std::string& projectName) {
+    if (projectName.empty())
+        return {};
+    std::string engineRoot = fs::GetEngineAssetsRoot();
+    if (engineRoot.empty())
+        return {};
+    std::string projectsDir = fs::NormalizePath(engineRoot + "/../Projects");
+    if (!fs::FileExists(projectsDir))
+        fs::CreateDirectory(projectsDir);
+    std::string projectPath = fs::NormalizePath(projectsDir + "/" + projectName);
+    if (fs::FileExists(projectPath))
+        return {};
+    if (!fs::CreateDirectory(projectPath))
+        return {};
+    if (!fs::CreateDirectory(projectPath + "/Assets") || !fs::CreateDirectory(projectPath + "/Cache"))
+        return {};
+    nlohmann::json j;
+    j["name"] = projectName;
+    j["engine_version"] = "0.1";
+    j["assets"] = "Assets";
+    j["cache"] = "Cache";
+    std::string openeyePath = fs::NormalizePath(projectPath + "/" + projectName + ".openeye");
+    std::ofstream out(openeyePath);
+    if (!out.is_open())
+        return {};
+    out << j.dump(2);
+    return projectPath;
+}
+
 } // namespace openeye::editor

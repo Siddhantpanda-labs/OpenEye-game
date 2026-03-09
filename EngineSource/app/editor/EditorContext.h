@@ -83,10 +83,11 @@ struct EditorContext {
     /** Engine assets path (e.g. Engine/assets). Set by EditorApp; used when closing project to restore assetRoots. */
     std::string engineAssetsPath;
 
-    enum class Modal { None, Open, SaveAs };
+    enum class Modal { None, Open, SaveAs, CreateProject };
     Modal activeModal = Modal::None;
     char pathBuffer[512] = "scenes/main.json";
     char projectPathBuffer[512] = "Projects/MyWorld";
+    char projectNameBuffer[128] = "NewProject";
 };
 
 } // namespace openeye::editor
