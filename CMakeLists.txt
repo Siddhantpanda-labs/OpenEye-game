@@ -49,3 +49,6 @@ endif()
 
 # Engine source (all thirdparty, eyelib, api, app live here)
 add_subdirectory(EngineSource)
+
+# Asset pipeline (canonical formats + importer tool; separate from eyelib assets)
+add_subdirectory(asset_pipe)

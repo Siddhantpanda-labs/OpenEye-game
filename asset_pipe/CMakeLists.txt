@@ -1,0 +1,6 @@
+# Asset pipeline: canonical formats + importer tool (separate from eyelib assets)
+cmake_minimum_required(VERSION 3.20)
+add_subdirectory(core)
+add_subdirectory(writers)
+add_subdirectory(readers)
+add_subdirectory(tools/importer)

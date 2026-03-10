@@ -264,6 +264,11 @@ if(OPENEYE_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app/test")
 endif()
 
 # --------------------------------------
+# Canonical viewer (loads asset_pipe .mesh, displays with default material)
+# --------------------------------------
+add_subdirectory(app/canonical_viewer)
+
+# --------------------------------------
 # Transform hierarchy benchmark (100k entities; requires EyelibWorld)
 # --------------------------------------
 
