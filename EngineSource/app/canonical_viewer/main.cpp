@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -36,6 +37,43 @@ namespace fs = std::filesystem;
 std::string Dirname(const std::string& path) {
     fs::path p(path);
     return p.parent_path().string();
+}
+
+std::string Trim(const std::string& s) {
+    const size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return {};
+    const size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
+bool ReadMaterialMap(const std::string& mapPath, std::vector<std::string>& outIndexedFiles) {
+    std::ifstream file(mapPath, std::ios::binary);
+    if (!file) return false;
+
+    outIndexedFiles.clear();
+    bool any = false;
+    std::string line;
+    while (std::getline(file, line)) {
+        line = Trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        const size_t sep = line.find('|');
+        if (sep == std::string::npos) continue;
+
+        const std::string idxStr = Trim(line.substr(0, sep));
+        const std::string materialFile = Trim(line.substr(sep + 1));
+        if (idxStr.empty() || materialFile.empty()) continue;
+
+        size_t index = 0;
+        try {
+            index = static_cast<size_t>(std::stoul(idxStr));
+        } catch (...) {
+            continue;
+        }
+        if (index >= outIndexedFiles.size()) outIndexedFiles.resize(index + 1u);
+        outIndexedFiles[index] = materialFile;
+        any = true;
+    }
+    return any;
 }
 
 std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, eyelib::api::RenderDevice device) {
@@ -98,7 +136,7 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
     if (!litShader) return nullptr;
     auto mat = std::make_shared<eyelib::api::Material>();
     mat->SetShader(litShader);
-    mat->SetAlbedo(eyelib::math::Vec3(0.85f, 0.85f, 0.88f));
+    mat->SetAlbedo(eyelib::math::Vec3(loaded.albedoColorR, loaded.albedoColorG, loaded.albedoColorB));
     mat->SetMetallic(loaded.metallicValue);
     mat->SetRoughness(loaded.roughnessValue);
     auto resolvePath = [&baseDir](const std::string& p) -> std::string {
@@ -287,41 +325,60 @@ int main(int argc, char** argv) {
         std::string baseDir = Dirname(path);
         if (baseDir.empty()) baseDir = ".";
 
-        std::vector<asset_pipe::LoadedMaterial> loadedMats;
-        std::vector<std::string> matFiles;
-        try {
-            for (const auto& e : fs::directory_iterator(baseDir)) {
-                if (e.path().extension() == ".material")
-                    matFiles.push_back(e.path().string());
-            }
-        } catch (...) {}
-        // Sort by numeric suffix (e.g. house_material_0, house_mat1) so order matches importer material indices
-        std::sort(matFiles.begin(), matFiles.end(), [](const std::string& a, const std::string& b) {
-            auto num = [](const std::string& s) {
-                int n = -1;
-                size_t i = s.find_last_of("0123456789");
-                if (i != std::string::npos) {
-                    size_t start = s.find_last_not_of("0123456789", i);
-                    start = (start == std::string::npos) ? 0 : start + 1;
-                    try { n = std::stoi(s.substr(start)); } catch (...) {}
-                }
-                return n;
-            };
-            int na = num(a), nb = num(b);
-            if (na != nb) return na < nb;
-            return a < b;
-        });
-        for (const auto& p : matFiles) {
-            asset_pipe::LoadedMaterial lm;
-            if (asset_pipe::MaterialReader::Read(p, lm))
-                loadedMats.push_back(std::move(lm));
-        }
+        auto defaultMaterial = CreateDefaultMaterial(device);
+        std::vector<std::shared_ptr<eyelib::api::Material>> materialsByIndex;
 
-        std::vector<std::shared_ptr<eyelib::api::Material>> materials;
-        materials.push_back(CreateDefaultMaterial(device));
-        for (size_t i = 0; i < loadedMats.size(); ++i) {
-            auto m = CreateMaterialFromLoaded(device, loadedMats[i], baseDir, litShader);
-            materials.push_back(m ? m : materials[0]);
+        const std::string mapPath = (fs::path(baseDir) / (fs::path(path).stem().string() + ".materialmap")).string();
+        std::vector<std::string> indexedMaterialFiles;
+        const bool hasMaterialMap = ReadMaterialMap(mapPath, indexedMaterialFiles);
+        if (hasMaterialMap) {
+            materialsByIndex.assign(indexedMaterialFiles.size(), defaultMaterial);
+            for (size_t i = 0; i < indexedMaterialFiles.size(); ++i) {
+                if (indexedMaterialFiles[i].empty()) continue;
+                const std::string matPath = (fs::path(baseDir) / indexedMaterialFiles[i]).string();
+                asset_pipe::LoadedMaterial lm;
+                if (!asset_pipe::MaterialReader::Read(matPath, lm)) continue;
+                auto m = CreateMaterialFromLoaded(device, lm, baseDir, litShader);
+                if (m) materialsByIndex[i] = m;
+            }
+            std::cout << "CanonicalViewer: using material map " << mapPath << " (" << materialsByIndex.size() << " indexed materials)\n";
+        } else {
+            // Legacy fallback for older assets that do not include a material map.
+            std::vector<asset_pipe::LoadedMaterial> loadedMats;
+            std::vector<std::string> matFiles;
+            try {
+                for (const auto& e : fs::directory_iterator(baseDir)) {
+                    if (e.path().extension() == ".material")
+                        matFiles.push_back(e.path().string());
+                }
+            } catch (...) {}
+            // Best-effort legacy order by numeric suffix.
+            std::sort(matFiles.begin(), matFiles.end(), [](const std::string& a, const std::string& b) {
+                auto num = [](const std::string& s) {
+                    int n = -1;
+                    size_t i = s.find_last_of("0123456789");
+                    if (i != std::string::npos) {
+                        size_t start = s.find_last_not_of("0123456789", i);
+                        start = (start == std::string::npos) ? 0 : start + 1;
+                        try { n = std::stoi(s.substr(start)); } catch (...) {}
+                    }
+                    return n;
+                };
+                int na = num(a), nb = num(b);
+                if (na != nb) return na < nb;
+                return a < b;
+            });
+            for (const auto& p : matFiles) {
+                asset_pipe::LoadedMaterial lm;
+                if (asset_pipe::MaterialReader::Read(p, lm))
+                    loadedMats.push_back(std::move(lm));
+            }
+            materialsByIndex.assign(loadedMats.size(), defaultMaterial);
+            for (size_t i = 0; i < loadedMats.size(); ++i) {
+                auto m = CreateMaterialFromLoaded(device, loadedMats[i], baseDir, litShader);
+                if (m) materialsByIndex[i] = m;
+            }
+            std::cout << "CanonicalViewer: material map not found, using legacy material ordering fallback\n";
         }
 
         for (const auto& d : drawables) {
@@ -335,11 +392,12 @@ int main(int argc, char** argv) {
             int matIndex = 0;
             if (mesh->GetSubmeshCount() > 0)
                 matIndex = mesh->GetSubmesh(0).materialIndex;
-            size_t matSlot = (matIndex >= 0 && static_cast<size_t>(matIndex) < loadedMats.size())
-                ? static_cast<size_t>(matIndex) + 1u  // +1: slot 0 is default
-                : 0u;
-            if (matSlot >= materials.size()) matSlot = 0;
-            draw.material = materials[matSlot];
+            draw.material = defaultMaterial;
+            if (matIndex >= 0) {
+                const size_t idx = static_cast<size_t>(matIndex);
+                if (idx < materialsByIndex.size() && materialsByIndex[idx])
+                    draw.material = materialsByIndex[idx];
+            }
             if (draw.material)
                 eyelib::api::FillDrawableRenderParams(draw.params, draw.material, draw.materialInstance);
             draw.transform = ToGlmMat4(&d.worldTransform.m[0]);
@@ -356,7 +414,7 @@ int main(int argc, char** argv) {
         scene.opaque = scene.opaqueStorage.data();
         float radius = 5.f;
         SetupCameraAndLight(scene, sceneAABB, radius, freeFlyCam);
-        std::cout << "CanonicalViewer: prefab " << path << " (" << scene.opaqueCount << " meshes, " << materials.size() << " materials). Right-drag look, WASD+Q/E move.\n";
+        std::cout << "CanonicalViewer: prefab " << path << " (" << scene.opaqueCount << " meshes, " << materialsByIndex.size() << " indexed materials). Right-drag look, WASD+Q/E move.\n";
     } else {
         auto defaultMaterial = CreateDefaultMaterial(device);
         auto mesh = LoadCanonicalMesh(path, device);
@@ -409,7 +467,7 @@ int main(int argc, char** argv) {
         float rx = cy * ct, rz = cy * st;
         float rlen = std::sqrt(rx * rx + rz * rz);
         if (rlen > 1e-5f) { rx /= rlen; rz /= rlen; }
-        float move = freeFlyCam.moveSpeed * dt;
+        float move = freeFlyCam.moveSpeed * dt * 2.f;
         if (eyelib::api::Input::IsKeyPressed(kKeyW)) { freeFlyCam.position.x += forwardX * move; freeFlyCam.position.y += forwardY * move; freeFlyCam.position.z += forwardZ * move; }
         if (eyelib::api::Input::IsKeyPressed(kKeyS)) { freeFlyCam.position.x -= forwardX * move; freeFlyCam.position.y -= forwardY * move; freeFlyCam.position.z -= forwardZ * move; }
         if (eyelib::api::Input::IsKeyPressed(kKeyA)) { freeFlyCam.position.x -= rx * move; freeFlyCam.position.z -= rz * move; }

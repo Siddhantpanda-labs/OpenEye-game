@@ -12,6 +12,9 @@ struct LoadedMaterial {
     std::string roughnessPath;
     float metallicValue = 0.f;
     float roughnessValue = 0.5f;
+    float albedoColorR = 1.f;
+    float albedoColorG = 1.f;
+    float albedoColorB = 1.f;
 };
 
 /** Reads canonical .material binary into LoadedMaterial. Returns true on success. */

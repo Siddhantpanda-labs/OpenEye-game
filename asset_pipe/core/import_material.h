@@ -20,6 +20,10 @@ struct ImportMaterial {
 
     float metallicValue = 0.f;
     float roughnessValue = 0.5f;
+
+    float albedoColorR = 1.f;
+    float albedoColorG = 1.f;
+    float albedoColorB = 1.f;
 };
 
 } // namespace asset_pipe

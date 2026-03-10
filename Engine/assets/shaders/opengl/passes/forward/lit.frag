@@ -143,7 +143,8 @@ void main() {
     float shadow = shadowFactor(v_Position);
     float lightVis = 1.0 - shadow;
     vec3 diffuse = albedo * u_LightColor * u_LightIntensity * NdotL * lightVis;
-    vec3 ambient = albedo * (1.0 - metallic) * u_Ambient * ao;
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 ambient = (albedo * (1.0 - metallic) + F0 * metallic) * u_Ambient * ao;
     vec3 color = ambient + diffuse + emission;
 
     for (int i = 0; i < u_PointLightCount && i < MAX_POINT_LIGHTS; i++) {

@@ -108,6 +108,7 @@ void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
     float NdotL = max(dot(N, L), 0.0);
     float shadow = (u_UseShadows > 0) ? 0.0 : 0.0;
     float3 diffuse = albedo * u_LightColor * u_LightIntensity * NdotL * (1.0 - shadow);
-    float3 ambient = albedo * (1.0 - metallic) * u_Ambient * ao;
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float3 ambient = (albedo * (1.0 - metallic) + F0 * metallic) * u_Ambient * ao;
     FragColor = float4((ambient + diffuse + emission) * u_Exposure, alpha);
 }

@@ -129,6 +129,20 @@ void ExtractMaterials(const aiScene* scene, const std::string& sourceName, Impor
         float f;
         if (mat->Get(AI_MATKEY_METALLIC_FACTOR, f) == AI_SUCCESS) imp.metallicValue = f;
         if (mat->Get(AI_MATKEY_ROUGHNESS_FACTOR, f) == AI_SUCCESS) imp.roughnessValue = f;
+
+        aiColor4D baseColor;
+        if (mat->Get(AI_MATKEY_BASE_COLOR, baseColor) == AI_SUCCESS) {
+            imp.albedoColorR = baseColor.r;
+            imp.albedoColorG = baseColor.g;
+            imp.albedoColorB = baseColor.b;
+        } else {
+            aiColor3D diffuse;
+            if (mat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == AI_SUCCESS) {
+                imp.albedoColorR = diffuse.r;
+                imp.albedoColorG = diffuse.g;
+                imp.albedoColorB = diffuse.b;
+            }
+        }
         out.materials.push_back(std::move(imp));
     }
 }

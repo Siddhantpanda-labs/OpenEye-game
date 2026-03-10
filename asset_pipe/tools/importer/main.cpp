@@ -14,12 +14,27 @@
 
 #include <iostream>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace fs = std::filesystem;
 
 static void Log(const char* msg) {
     std::cout << "[Importer] " << msg << std::endl;
+}
+
+static bool WriteMaterialMap(const asset_pipe::ImportScene& importScene, const fs::path& outDir) {
+    if (importScene.sourceName.empty()) return false;
+    const fs::path mapPath = outDir / (importScene.sourceName + ".materialmap");
+    std::ofstream file(mapPath, std::ios::binary);
+    if (!file) return false;
+
+    // Deterministic material index -> material file mapping for robust runtime lookup.
+    file << "# material_index|material_file\n";
+    for (size_t i = 0; i < importScene.materials.size(); ++i) {
+        file << i << "|" << importScene.materials[i].name << ".material\n";
+    }
+    return file.good();
 }
 
 int main(int argc, char** argv) {
@@ -79,6 +94,11 @@ int main(int argc, char** argv) {
         else
             std::cerr << "[Importer] Failed to write " << matPath << "\n";
     }
+
+    if (WriteMaterialMap(importScene, out))
+        Log(("Writing " + (out / (importScene.sourceName + ".materialmap")).string()).c_str());
+    else
+        std::cerr << "[Importer] Failed to write material map for " << importScene.sourceName << "\n";
 
     std::string prefabPath = (out / (importScene.sourceName + ".prefab")).string();
     if (asset_pipe::PrefabWriter::Write(importScene, prefabPath))

@@ -20,6 +20,9 @@ bool MaterialWriter::Write(const ImportMaterial& material, const std::string& pa
     header.roughnessPathLen = static_cast<uint32_t>(material.roughness.path.size());
     header.metallicValue = material.metallicValue;
     header.roughnessValue = material.roughnessValue;
+    header.albedoColorR = material.albedoColorR;
+    header.albedoColorG = material.albedoColorG;
+    header.albedoColorB = material.albedoColorB;
 
     if (!file.write(reinterpret_cast<const char*>(&header), sizeof(header))) return false;
     if (!material.name.empty() && !file.write(material.name.data(), material.name.size())) return false;
