@@ -200,7 +200,7 @@ void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AA
     scene.light.direction = glm::normalize(eyelib::math::Vec3(0.5f, 1.f, 0.3f));
     scene.light.color = eyelib::math::Vec3(1.f, 0.98f, 0.95f);
     scene.light.intensity = 2.f;
-    scene.light.ambient = eyelib::math::Vec3(0.08f);
+    scene.light.ambient = eyelib::math::Vec3(0.35f);  // higher ambient so model is visible clearly in viewer
     scene.light.exposure = 1.f;
     scene.light.castShadows = false;
     scene.skybox.reset();

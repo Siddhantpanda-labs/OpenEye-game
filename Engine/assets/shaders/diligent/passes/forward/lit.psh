@@ -44,18 +44,70 @@ cbuffer Material : register(b1)
     int    u_UseShadows;
     float  _pad17;
     float2 _pad18;
+
+    int    u_UseAlbedoTexture;
+    int    u_UseNormalTexture;
+    int    u_UseMetallicRoughnessTexture;
+    int    u_UseMetallicTexture;
+
+    int    u_UseRoughnessTexture;
+    int    u_UseAOTexture;
+    int    u_UseEmissiveTexture;
+    float  _pad19;
 };
 
-Texture2D u_ShadowMap : register(t0);
-SamplerState u_ShadowMap_sampler : register(s0);
+Texture2D u_AlbedoTexture : register(t0);
+Texture2D u_NormalTexture : register(t1);
+Texture2D u_MetallicRoughnessTexture : register(t2);
+Texture2D u_MetallicTexture : register(t3);
+Texture2D u_RoughnessTexture : register(t4);
+Texture2D u_AOTexture : register(t6);
+Texture2D u_EmissiveTexture : register(t7);
+Texture2D u_ShadowMap : register(t5);
+SamplerState u_LinearSampler : register(s0);
+SamplerState u_ShadowMap_sampler : register(s5);
 
 void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
 {
     float3 N = normalize(PSIn.Normal);
+    if (u_UseNormalTexture > 0) {
+        float3 n = u_NormalTexture.Sample(u_LinearSampler, PSIn.TexCoord).rgb * 2.0 - 1.0;
+        N = normalize(lerp(N, n, 0.5));
+    }
+
+    float3 albedo = u_Albedo;
+    float alpha = u_Alpha;
+    if (u_UseAlbedoTexture > 0) {
+        float4 texel = u_AlbedoTexture.Sample(u_LinearSampler, PSIn.TexCoord);
+        albedo *= texel.rgb;
+        alpha *= texel.a;
+    }
+
+    float metallic = u_Metallic;
+    float roughness = u_Roughness;
+    if (u_UseMetallicRoughnessTexture > 0) {
+        float2 mr = u_MetallicRoughnessTexture.Sample(u_LinearSampler, PSIn.TexCoord).bg;
+        metallic *= mr.x;
+        roughness *= mr.y;
+    } else {
+        if (u_UseMetallicTexture > 0)
+            metallic *= u_MetallicTexture.Sample(u_LinearSampler, PSIn.TexCoord).r;
+        if (u_UseRoughnessTexture > 0)
+            roughness *= u_RoughnessTexture.Sample(u_LinearSampler, PSIn.TexCoord).r;
+    }
+    roughness = clamp(roughness, 0.04, 1.0);
+
+    float ao = 1.0;
+    if (u_UseAOTexture > 0)
+        ao = u_AOTexture.Sample(u_LinearSampler, PSIn.TexCoord).r;
+    float3 emission = u_Emission;
+    if (u_UseEmissiveTexture > 0)
+        emission += u_EmissiveTexture.Sample(u_LinearSampler, PSIn.TexCoord).rgb;
+
     float3 L = normalize(-u_LightDir);
     float NdotL = max(dot(N, L), 0.0);
     float shadow = (u_UseShadows > 0) ? 0.0 : 0.0;
-    float3 diffuse = u_Albedo * u_LightColor * u_LightIntensity * NdotL * (1.0 - shadow);
-    float3 ambient = u_Albedo * u_Ambient;
-    FragColor = float4((ambient + diffuse + u_Emission) * u_Exposure, u_Alpha);
+    float3 diffuse = albedo * u_LightColor * u_LightIntensity * NdotL * (1.0 - shadow);
+    float3 ambient = albedo * (1.0 - metallic) * u_Ambient * ao;
+    FragColor = float4((ambient + diffuse + emission) * u_Exposure, alpha);
 }

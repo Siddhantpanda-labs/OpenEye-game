@@ -596,6 +596,13 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
     const CameraView cam = view.GetCamera();
     const LightParams light = view.GetLight();
     const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
+    const int kAlbedoTextureUnit = 0;
+    const int kNormalTextureUnit = 1;
+    const int kMetallicRoughnessTextureUnit = 2;
+    const int kMetallicTextureUnit = 3;
+    const int kRoughnessTextureUnit = 4;
+    const int kAOTextureUnit = 6;
+    const int kEmissiveTextureUnit = 7;
     const bool useShadows = (m_shadowMap != nullptr && light.castShadows);
     if (useShadows && cmd) {
         rhi::ITexture* shadowTex = m_shadowMap->GetDepthTextureRHI();
@@ -668,6 +675,30 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
             sh->SetFloat("u_SpotLightInnerCos[" + std::to_string(i) + "]", s.innerConeCos);
             sh->SetFloat("u_SpotLightOuterCos[" + std::to_string(i) + "]", s.outerConeCos);
         }
+
+        // Bind forward material textures with explicit slots and robust fallback flags.
+        auto getTex = [&](const std::string& name) -> std::shared_ptr<Texture2D> {
+            return d.materialInstance ? d.materialInstance->GetTexture(name) : d.material->GetTexture(name);
+        };
+        auto bindTexFlag = [&](const std::string& samplerName, const std::string& flagName,
+                               const std::shared_ptr<Texture2D>& tex, int unit) {
+            if (tex && tex->IsValid()) {
+                tex->Bind(unit);
+                sh->SetInt(samplerName, unit);
+                sh->SetInt(flagName, 1);
+            } else {
+                sh->SetInt(flagName, 0);
+            }
+        };
+
+        bindTexFlag("u_AlbedoTexture", "u_UseAlbedoTexture", getTex("u_AlbedoTexture"), kAlbedoTextureUnit);
+        bindTexFlag("u_NormalTexture", "u_UseNormalTexture", getTex("u_NormalTexture"), kNormalTextureUnit);
+        bindTexFlag("u_MetallicRoughnessTexture", "u_UseMetallicRoughnessTexture", getTex("u_MetallicRoughnessTexture"), kMetallicRoughnessTextureUnit);
+        bindTexFlag("u_MetallicTexture", "u_UseMetallicTexture", getTex("u_MetallicTexture"), kMetallicTextureUnit);
+        bindTexFlag("u_RoughnessTexture", "u_UseRoughnessTexture", getTex("u_RoughnessTexture"), kRoughnessTextureUnit);
+        bindTexFlag("u_AOTexture", "u_UseAOTexture", getTex("u_AOTexture"), kAOTextureUnit);
+        bindTexFlag("u_EmissiveTexture", "u_UseEmissiveTexture", getTex("u_EmissiveTexture"), kEmissiveTextureUnit);
+
         d.mesh->Bind(m_device);
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         d.mesh->Unbind();
