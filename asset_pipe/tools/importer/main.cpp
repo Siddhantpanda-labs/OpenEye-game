@@ -11,6 +11,7 @@
 #include "asset_pipe/writers/material_writer.h"
 #include "asset_pipe/writers/prefab_writer.h"
 #include "asset_pipe/writers/texture_writer.h"
+#include "asset_pipe/writers/animation_writer.h"
 
 #include <iostream>
 #include <filesystem>
@@ -67,6 +68,7 @@ int main(int argc, char** argv) {
     Log(("Meshes: " + std::to_string(importScene.meshes.size())).c_str());
     Log(("Materials: " + std::to_string(importScene.materials.size())).c_str());
     Log(("Textures: " + std::to_string(importScene.textures.size())).c_str());
+    Log(("Animations: " + std::to_string(importScene.animations.size())).c_str());
 
     fs::create_directories(outputDir);
     fs::path out(outputDir);
@@ -99,6 +101,14 @@ int main(int argc, char** argv) {
         Log(("Writing " + (out / (importScene.sourceName + ".materialmap")).string()).c_str());
     else
         std::cerr << "[Importer] Failed to write material map for " << importScene.sourceName << "\n";
+
+    for (size_t i = 0; i < importScene.animations.size(); ++i) {
+        std::string animPath = (out / (importScene.animations[i].name + ".anim")).string();
+        if (asset_pipe::AnimationWriter::Write(importScene.animations[i], animPath))
+            Log(("Writing " + animPath).c_str());
+        else
+            std::cerr << "[Importer] Failed to write " << animPath << "\n";
+    }
 
     std::string prefabPath = (out / (importScene.sourceName + ".prefab")).string();
     if (asset_pipe::PrefabWriter::Write(importScene, prefabPath))

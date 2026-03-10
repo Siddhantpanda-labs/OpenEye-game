@@ -120,6 +120,12 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
             ok = LoadFileToRGBA(tryPath.string(), imp);
         if (!ok && std::filesystem::exists(rawPath))
             ok = LoadFileToRGBA(rawPath, imp);
+        // FBX (and others) may reference embedded textures by path (e.g. "..\file.fbm\image.jpg") instead of *N
+        if (!ok && scene) {
+            const aiTexture* emb = scene->GetEmbeddedTexture(rawPath.c_str());
+            if (emb)
+                ok = DecodeEmbeddedToRGBA(emb, imp);
+        }
     }
 
     if (!ok) return -1;

@@ -4,8 +4,10 @@
 #include "asset_pipe/core/import_mesh.h"
 #include "asset_pipe/core/import_material.h"
 #include "asset_pipe/core/import_node.h"
+#include "asset_pipe/core/import_animation.h"
 #include "asset_pipe/core/math_types.h"
 
+#include <assimp/anim.h>
 #include <assimp/material.h>
 #include <assimp/mesh.h>
 #include <assimp/scene.h>
@@ -147,6 +149,62 @@ void ExtractMaterials(const aiScene* scene, const std::string& sourceName, Impor
     }
 }
 
+void ExtractAnimations(const aiScene* scene, const std::string& sourceName, ImportScene& out) {
+    if (!scene->mAnimations || scene->mNumAnimations == 0) return;
+    out.animations.reserve(out.animations.size() + scene->mNumAnimations);
+    for (unsigned a = 0; a < scene->mNumAnimations; ++a) {
+        const aiAnimation* anim = scene->mAnimations[a];
+        const double ticksPerSecond = (anim->mTicksPerSecond > 0.0) ? anim->mTicksPerSecond : 25.0;
+        const double durationTicks = (anim->mDuration >= 0.0) ? anim->mDuration : 0.0;
+        const float durationSec = static_cast<float>(durationTicks / ticksPerSecond);
+
+        ImportAnimation impAnim;
+        impAnim.name = anim->mName.length > 0
+            ? (sourceName + "_" + SanitizeName(anim->mName.C_Str()))
+            : (sourceName + "_anim_" + std::to_string(a));
+        impAnim.duration = durationSec;
+        impAnim.channels.reserve(anim->mNumChannels);
+
+        for (unsigned c = 0; c < anim->mNumChannels; ++c) {
+            const aiNodeAnim* ch = anim->mChannels[c];
+            AnimationChannel impCh;
+            impCh.boneName = ch->mNodeName.C_Str();
+            impCh.boneIndex = -1;
+
+            for (unsigned i = 0; i < ch->mNumPositionKeys; ++i) {
+                const aiVectorKey& key = ch->mPositionKeys[i];
+                VectorKey k;
+                k.time = static_cast<float>(key.mTime / ticksPerSecond);
+                k.value.x = key.mValue.x;
+                k.value.y = key.mValue.y;
+                k.value.z = key.mValue.z;
+                impCh.positionKeys.push_back(k);
+            }
+            for (unsigned i = 0; i < ch->mNumRotationKeys; ++i) {
+                const aiQuatKey& key = ch->mRotationKeys[i];
+                QuatKey k;
+                k.time = static_cast<float>(key.mTime / ticksPerSecond);
+                k.value.x = key.mValue.x;
+                k.value.y = key.mValue.y;
+                k.value.z = key.mValue.z;
+                k.value.w = key.mValue.w;
+                impCh.rotationKeys.push_back(k);
+            }
+            for (unsigned i = 0; i < ch->mNumScalingKeys; ++i) {
+                const aiVectorKey& key = ch->mScalingKeys[i];
+                VectorKey k;
+                k.time = static_cast<float>(key.mTime / ticksPerSecond);
+                k.value.x = key.mValue.x;
+                k.value.y = key.mValue.y;
+                k.value.z = key.mValue.z;
+                impCh.scaleKeys.push_back(k);
+            }
+            impAnim.channels.push_back(std::move(impCh));
+        }
+        out.animations.push_back(std::move(impAnim));
+    }
+}
+
 int AddNode(const aiNode* node, const aiScene* scene, ImportScene& out) {
     ImportNode n;
     n.name = node->mName.C_Str();
@@ -178,6 +236,7 @@ bool SceneConverter::Convert(const aiScene* scene, const char* sourcePath, Impor
     ExtractMeshes(scene, out.sourceName, out);
     ExtractMaterials(scene, out.sourceName, out);
     ExtractTextures(scene, sourcePath, out.sourceName, out);
+    ExtractAnimations(scene, out.sourceName, out);
 
     if (scene->mRootNode) {
         out.rootNodeIndex = AddNode(scene->mRootNode, scene, out);
