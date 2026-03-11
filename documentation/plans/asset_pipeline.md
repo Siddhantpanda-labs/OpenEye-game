@@ -1,721 +1,623 @@
-Yes — this is exactly the next **major system** you should build: the **Asset Import Pipeline + Canonical Asset Formats**. Every professional engine does this. The runtime **never loads FBX/GLTF/PNG directly**; it loads **engine-native canonical formats** produced by the importer.
+Good. Let’s **wrap everything cleanly and architect it properly**.
+I’ll give you a **complete AAA-grade asset module design** tailored to **your engine, your canonical formats, and your Option-A model**.
 
-Below is the **industry-standard approach**, simplified but correct.
-
----
-
-# 1️⃣ Core Principle (Used by All Engines)
-
-Runtime should only load **engine-native formats**.
-
-```
-External Formats (FBX / GLTF / PNG / WAV)
-                ↓
-           Importer
-                ↓
-        Canonical Engine Assets
-       (.mesh .material .anim etc.)
-                ↓
-          Runtime Loader
-```
-
-External formats are **editor-time only**.
-
-This is how engines like Unreal Engine and Unity work.
+This will be **structured like a real engine design document** so you can implement it directly.
 
 ---
 
-# 2️⃣ The Four-Layer Asset Pipeline
+# 1. Design Goals
 
-Professional pipelines have **four stages**.
+Your asset system must achieve:
 
-### 1️⃣ Source Asset
+### Deterministic identity
 
-Raw files artists provide.
+Assets must have **stable GUIDs across machines and git clones**.
 
+### Canonical runtime formats
+
+Runtime never loads FBX/GLB.
+
+Only:
+
+```text
+.omesh
+.mat
+.png/.jpg
+.anim
+.oea (package)
 ```
-Assets/models/car.fbx
-Assets/models/tree.gltf
-Assets/textures/brick.png
+
+### Dependency awareness
+
+```text
+Scene
+ └ Mesh (.omesh)
+      └ Material (.mat)
+            └ Texture (.png)
 ```
 
-These stay untouched.
+### Runtime performance
+
+Requirements:
+
+* O(1) asset lookup
+* fast startup
+* hot reload
+* dependency graph
+* streaming capability
 
 ---
 
-### 2️⃣ Import Step (Editor)
+# 2. Final Architecture Overview
 
-Importer parses the source file and converts it.
+Complete system:
+
+```text
+Importer Layer
+     ↓
+Canonical Assets
+     ↓
+Meta System (.meta)
+     ↓
+Asset Database
+     ↓
+Runtime Asset Manager
+     ↓
+GPU resources
+```
+
+Inside the engine:
+
+```text
+eyelib/
+ ├ render
+ ├ ecs
+ ├ physics
+ ├ world
+ └ assets   ← new module
+```
+
+During development you build it in:
+
+```text
+asset_pipe/
+```
+
+Then move it to:
+
+```text
+eyelib/assets
+```
+
+---
+
+# 3. Canonical Asset Rules
+
+One file = one asset.
+
+```text
+car.omesh        → Mesh asset
+car.mat          → Material asset
+albedo.png       → Texture asset
+walk.anim        → Animation asset
+city.oea         → Package asset
+```
+
+Submeshes inside `.omesh` are **not assets**.
+
+This was your chosen **Option A**.
+
+---
+
+# 4. GUID System
+
+### Type
+
+128-bit GUID.
+
+```cpp
+struct Guid
+{
+    uint64_t high;
+    uint64_t low;
+};
+```
+
+String representation:
+
+```
+9f4c2b3e8c1249e1a3d9c45c2c6a7e11
+```
+
+### Required operations
+
+```cpp
+Guid Generate();
+Guid FromString(string);
+string ToString();
+
+bool operator==(Guid);
+```
+
+Hash:
+
+```cpp
+struct GuidHash
+{
+    size_t operator()(const Guid& g) const;
+};
+```
+
+---
+
+# 5. Meta File System
+
+Every asset file has a `.meta`.
+
+Example:
+
+```text
+car.omesh
+car.omesh.meta
+```
+
+Meta example:
+
+```yaml
+guid: 9f4c2b3e8c1249e1a3d9c45c2c6a7e11
+type: Mesh
+
+dependencies:
+  - 12fa91bcff22
+  - 887ac1dd9233
+
+importer: model
+version: 1
+```
+
+Material meta:
+
+```yaml
+guid: 12fa91bcff22
+type: Material
+
+dependencies:
+  - a91c23ee9901
+```
+
+Texture meta:
+
+```yaml
+guid: a91c23ee9901
+type: Texture
+```
+
+---
+
+# 6. Asset Database
+
+The **central brain**.
+
+Memory structure:
+
+```cpp
+struct AssetInfo
+{
+    Guid guid;
+
+    AssetType type;
+
+    std::filesystem::path path;
+
+    std::vector<Guid> dependencies;
+};
+```
+
+Container:
+
+```cpp
+unordered_map<Guid, AssetInfo> assets;
+```
+
+Reverse lookup:
+
+```cpp
+unordered_map<string, Guid> pathToGuid;
+```
+
+---
+
+# 7. Asset Database Cache
+
+Disk scanning is slow.
+
+So cache registry:
+
+```text
+Library/
+   asset_database.bin
+```
+
+Startup algorithm:
+
+```
+1 load cache
+2 scan Assets/
+3 detect changes
+4 update registry
+```
+
+Cache contents:
+
+```
+GUID
+path
+type
+dependencies
+timestamp
+```
+
+---
+
+# 8. Asset Manager (Runtime Loader)
+
+Responsible for loading assets.
+
+Interface:
+
+```cpp
+class AssetManager
+{
+public:
+
+    Mesh* LoadMesh(Guid);
+
+    Material* LoadMaterial(Guid);
+
+    Texture* LoadTexture(Guid);
+
+    Animation* LoadAnimation(Guid);
+};
+```
+
+Runtime flow:
+
+```
+scene
+  ↓
+GUID
+  ↓
+AssetDatabase
+  ↓
+path
+  ↓
+reader
+  ↓
+runtime asset
+```
+
+---
+
+# 9. Runtime Asset Cache
+
+Avoid duplicate loads.
+
+Cache:
+
+```cpp
+unordered_map<Guid, shared_ptr<Mesh>> meshes;
+unordered_map<Guid, shared_ptr<Material>> materials;
+unordered_map<Guid, shared_ptr<Texture>> textures;
+```
+
+Load algorithm:
+
+```
+if asset cached → return
+else → read file → cache → return
+```
+
+---
+
+# 10. Dependency Graph
+
+Stored in database.
 
 Example:
 
 ```
-car.fbx
-   ↓
-MeshImporter
-   ↓
-car.mesh
-car.material
-car.anim
+mesh_guid
+  → material_guid_1
+  → material_guid_2
+
+material_guid
+  → texture_guid
 ```
 
-These go into:
+Use cases:
+
+* asset hot reload
+* safe deletion
+* build pipeline
+* streaming
+
+---
+
+# 11. Import Pipeline
+
+Importer steps:
+
+```
+FBX / GLB
+  ↓
+Assimp
+  ↓
+ImportScene
+  ↓
+Canonical writers
+  ↓
+.omesh
+.mat
+textures
+  ↓
+.meta generation
+  ↓
+AssetDatabase update
+```
+
+Important:
+
+Importer generates `.meta` if missing.
+
+---
+
+# 12. Asset Loading Flow
+
+Example runtime load.
+
+Scene file:
+
+```yaml
+mesh: guid:9f4c2b3e8c1249e1a3d9c45c2c6a7e11
+```
+
+Runtime:
+
+```
+LoadMesh(guid)
+
+AssetDatabase lookup
+    ↓
+Assets/Models/car.omesh
+    ↓
+MeshReader
+    ↓
+create GPU mesh
+    ↓
+load materials
+    ↓
+load textures
+```
+
+---
+
+# 13. Asset Folder Layout
+
+Professional project structure:
+
+```text
+Project/
+ ├ Assets/
+ │   ├ Models/
+ │   ├ Materials/
+ │   ├ Textures/
+ │   ├ Animations/
+ │
+ ├ Library/
+ │   └ asset_database.bin
+ │
+ ├ Cache/
+ └ Logs/
+```
+
+Rule:
+
+```
+Assets  = user content
+Library = engine generated
+```
+
+---
+
+# 14. Hot Reload System
+
+File watcher monitors:
 
 ```
 Assets/
 ```
 
-These are your **canonical formats**.
+On change:
+
+```
+file modified
+   ↓
+reload asset
+   ↓
+update database
+   ↓
+notify editor
+```
 
 ---
 
-### 3️⃣ Processing Step (Optional)
+# 15. Runtime Reader Integration
 
-Heavy processing generates optimized data.
+Your existing readers become runtime loaders:
+
+```
+MeshReader
+MaterialReader
+TextureReader
+AnimationReader
+OeaReader
+```
+
+AssetManager simply calls them.
 
 Example:
 
-```
-Cache/
-   meshes/
-   textures/
-   shaders/
-```
-
-Examples of processing:
-
-* mesh optimization
-* meshlet generation
-* texture compression
-* animation curve optimization
-
----
-
-### 4️⃣ Runtime Loading
-
-Game loads canonical assets:
-
-```
-LoadMesh("car.mesh")
-LoadMaterial("car.material")
-```
-
-Never:
-
-```
-LoadFBX("car.fbx")
-```
-
----
-
-# 3️⃣ Canonical Format Design
-
-You should define **stable internal formats**.
-
-Minimum set:
-
-```
-.mesh
-.material
-.texture
-.anim
-.scene
-```
-
----
-
-### Example `.mesh` structure
-
-```
-Header
-MeshInfo
-SubMeshes
-VertexBuffer
-IndexBuffer
-Skeleton (optional)
-BoundingVolumes
-```
-
-Typical stored data:
-
-```
-positions
-normals
-tangents
-uvs
-indices
-submesh ranges
-```
-
----
-
-### Example `.material`
-
-```
-shader_guid
-parameters
-texture_slots
-render_flags
-```
-
-Example:
-
-```
-shader: PBR
-albedo_texture
-normal_texture
-metallic
-roughness
-```
-
----
-
-### Example `.anim`
-
-```
-skeleton reference
-keyframes
-channels
-curve data
-duration
-```
-
----
-
-# 4️⃣ Asset Importer System
-
-Importer should be a **separate module**.
-
-Example structure:
-
-```
-EngineSource/
- └─ tools/
-     └─ asset_import/
-         ├─ MeshImporter
-         ├─ TextureImporter
-         ├─ AnimationImporter
-```
-
-Internally you can use:
-
-* Assimp
-* tinygltf
-* FBX SDK (optional)
-
-Importer outputs canonical files.
-
----
-
-# 5️⃣ Import Workflow in Editor
-
-When user drops a file:
-
-```
-Assets/models/car.fbx
-```
-
-Editor does:
-
-```
-Detect file type
-     ↓
-Call importer
-     ↓
-Generate canonical assets
-     ↓
-Register assets in AssetRegistry
-```
-
-Output:
-
-```
-car.mesh
-car.material
-car.anim
-```
-
----
-
-# 6️⃣ Metadata File
-
-Each asset should have metadata.
-
-Example:
-
-```
-car.mesh.meta
-```
-
-Example content:
-
-```
-guid: 4e92a39a-...
-source: car.fbx
-type: mesh
-```
-
-This allows:
-
-* GUID asset referencing
-* re-importing
-* dependency tracking
-
-Unity uses `.meta` files exactly like this.
-
----
-
-# 7️⃣ Asset Registry Integration
-
-Importer must register assets.
-
-Example entry:
-
-```
-GUID: 4e92a39a
-Type: Mesh
-Path: Assets/models/car.mesh
-Dependencies:
-   material_guid
-   texture_guid
-```
-
-Scenes reference **GUID**, not path.
-
----
-
-# 8️⃣ Reimport System
-
-If the source changes:
-
-```
-car.fbx modified
-```
-
-Editor should:
-
-```
-Detect change
-Re-run importer
-Update canonical assets
-```
-
----
-
-# 9️⃣ Important Design Rule
-
-Canonical formats must be **engine-stable**.
-
-Meaning:
-
-```
-.mesh
-.material
-.anim
-```
-
-should not change frequently.
-
-External formats can change.
-
-Canonical formats must remain consistent.
-
----
-
-# 🔟 What NOT to Do
-
-Common mistakes:
-
-### ❌ Loading FBX at runtime
-
-```
-Runtime → Assimp → FBX
-```
-
-Very slow.
-
----
-
-### ❌ Embedding GPU buffers in canonical format
-
-Canonical format should be **platform neutral**.
-
-GPU buffers generated at runtime.
-
----
-
-### ❌ Converting assets every time
-
-Import once.
-
-Reuse canonical assets.
-
----
-
-# 11️⃣ Minimal Import System You Need
-
-Start with just three importers.
-
-```
-MeshImporter
-TextureImporter
-AnimationImporter
-```
-
-Material importer can be simple at first.
-
----
-
-# Final Advice
-
-Don't overcomplicate the canonical format.
-
-First version can be **very simple**.
-
-Example `.mesh`:
-
-```
-struct MeshFile
+```cpp
+Mesh LoadMesh(Guid id)
 {
-    uint32 vertexCount;
-    uint32 indexCount;
-    Vertex vertices[];
-    uint32 indices[];
+    auto path = database.GetPath(id);
+    return MeshReader::Read(path);
 }
 ```
 
-You can evolve it later.
+---
+
+# 16. Optional Future Systems (AAA features)
+
+Do not implement yet but design for them.
+
+### Asset bundles
+
+```
+group assets
+stream at runtime
+```
+
+### Virtualized asset paths
+
+```
+guid → virtual path → physical path
+```
+
+### Derived data cache
+
+```
+compiled shaders
+compressed meshes
+texture mips
+```
+
+### Streaming
+
+```
+load LODs progressively
+```
 
 ---
 
----
-
-# 1️⃣ Are canonical binary assets loaded at runtime — including in the editor?
-
-Yes.
-
-In a professional engine there is **no difference in asset loading between editor and runtime**.
-
-Both use the **same asset loader**.
-
-The difference is only **who calls it**.
-
-### Runtime (game)
-
-```
-GameRuntime
-    ↓
-AssetManager
-    ↓
-LoadMesh(GUID)
-    ↓
-read car.mesh
-```
-
-### Editor (scene view)
-
-```
-EditorSceneBuilder
-    ↓
-AssetRegistry
-    ↓
-LoadMesh(GUID)
-    ↓
-read car.mesh
-```
-
-So the editor **also loads canonical binary assets**.
-
-The editor **never loads FBX/GLTF either**.
-
-External formats are only used by the **importer**.
-
----
-
-### Full pipeline
-
-```
-FBX / GLTF
-      ↓
-Importer (editor only)
-      ↓
-Canonical assets (.mesh .material .anim)
-      ↓
-Asset loader
-      ↓
-Renderer / runtime systems
-```
-
-Your editor and runtime both use the **same canonical loader**.
-
-That is important for consistency.
-
----
-
-# 2️⃣ Why runtime should NOT load FBX/GLTF
-
-Because those formats are:
-
-* slow to parse
-* complex
-* inconsistent
-* unpredictable
-
-Example:
-
-```
-FBX loader
-    ↓
-parse hierarchy
-    ↓
-convert coordinate systems
-    ↓
-convert materials
-```
-
-This is **editor work**, not runtime work.
-
-Runtime should do:
-
-```
-read binary
-memcpy into memory
-upload to GPU
-```
-
-Very fast.
-
----
-
-# 3️⃣ What I meant by Unreal using “complex containers”
-
-Your design is:
-
-```
-car.mesh
-car.mesh.meta
-```
-
-Two separate files.
-
-Unreal uses **one container file**.
-
-Example:
-
-```
-car.uasset
-```
-
-Inside that file is **everything**:
-
-```
-asset metadata
-asset GUID
-dependency list
-serialized object graph
-binary mesh data
-```
-
-So `.uasset` is not just a mesh file.
-
-It is a **full serialized asset package**.
-
-Inside it can be:
-
-```
-UStaticMesh
-Materials
-Textures
-Dependencies
-Editor metadata
-```
-
-Everything packed into one container.
-
----
-
-# 4️⃣ Why Unreal can do that
-
-Because Unreal’s entire engine is built on the **UObject reflection system**.
-
-Assets are actually serialized objects.
-
-Example:
-
-```
-UStaticMesh
-   ↓
-serialize properties
-   ↓
-write into .uasset
-```
-
-That’s why the file contains:
-
-```
-metadata
-properties
-object references
-binary data
-```
-
-It’s basically a **mini database inside a file**.
-
----
-
-# 5️⃣ Why your engine should NOT do this yet
-
-That system requires:
-
-* reflection system
-* object serialization
-* asset dependency graph
-* asset versioning
-* package loader
-
-It’s a **massive infrastructure**.
-
-For a custom engine, the better approach is:
-
-```
-simple canonical binary files
-+
-.meta metadata files
-```
-
-Like Unity.
-
----
-
-# 6️⃣ Unity vs Unreal asset philosophy
-
-### Unity
-
-```
-car.fbx
-car.fbx.meta
-```
-
-Assets are **files + metadata**.
-
-Simple.
-
----
-
-### Unreal
-
-```
-car.uasset
-```
-
-Everything inside one **container package**.
-
-More powerful but far more complex.
-
----
-
-# 7️⃣ Your recommended design
-
-For your engine:
-
-```
-Assets/
- ├─ models/
- │   ├─ car.mesh
- │   ├─ car.mesh.meta
+# 17. Final Module Layout
+
+When finished the module should look like:
+
+```text
+assets/
+ ├ guid/
+ │   Guid.h
+ │   Guid.cpp
  │
- ├─ textures/
- │   ├─ brick.texture
- │   ├─ brick.texture.meta
+ ├ meta/
+ │   MetaFile.h
+ │   MetaFile.cpp
  │
- └─ scenes/
-     ├─ city.scene
-     ├─ city.scene.meta
-```
-
-Binary canonical files + metadata files.
-
-Much easier to maintain.
-
----
-
-# 8️⃣ How loading works in your engine
-
-Example: editor opens scene.
-
-```
-city.scene
-   ↓
-mesh GUID
-   ↓
-AssetRegistry
-   ↓
-car.mesh
-   ↓
-MeshLoader
-   ↓
-GPU buffers
-```
-
-This works the same for:
-
-* editor scene view
-* game runtime
-* AI simulation runtime
-
----
-
-# 9️⃣ Important design rule
-
-Editor should **never special-case asset loading**.
-
-Everything should go through:
-
-```
-AssetManager / AssetRegistry
-```
-
-Otherwise bugs appear where:
-
-```
-editor works
-game crashes
+ ├ database/
+ │   AssetDatabase.h
+ │   AssetDatabase.cpp
+ │
+ ├ runtime/
+ │   AssetManager.h
+ │   AssetManager.cpp
+ │
+ ├ cache/
+ │   AssetCache.h
+ │   AssetCache.cpp
+ │
+ ├ import/
+ │   importer/
+ │
+ ├ readers/
+ │
+ ├ writers/
+ │
+ ├ formats/
 ```
 
 ---
 
-# 🔟 Your pipeline after everything is implemented
+# 18. Implementation Order (VERY IMPORTANT)
 
-Final asset pipeline:
+Do **not implement randomly**.
+
+Correct order:
+
+### Phase 1
 
 ```
-External files
-(FBX / PNG / GLTF)
+GUID system
+```
+
+### Phase 2
+
+```
+.meta file system
+```
+
+### Phase 3
+
+```
+AssetDatabase
+filesystem scan
+registry cache
+```
+
+### Phase 4
+
+```
+runtime AssetManager
+asset cache
+```
+
+### Phase 5
+
+```
+importer meta integration
+```
+
+### Phase 6
+
+```
+hot reload
+dependency graph
+```
+
+---
+
+# 19. Final Result
+
+Your engine becomes:
+
+```
+Interchange formats
         ↓
 Importer
         ↓
 Canonical assets
-(.mesh .material .anim)
         ↓
-.meta metadata (GUID)
+GUID asset system
         ↓
-AssetRegistry
+AssetDatabase
         ↓
-Runtime loader
+Runtime asset manager
         ↓
-Renderer / Physics / Animation
+Renderer / ECS / Physics
 ```
 
-Editor and runtime share the same loader.
+This is **exactly the architecture used in modern engines**.
 
 ---
 
-# Final takeaway
-
-Yes — canonical binary assets are loaded **both in editor and runtime**.
-
-The editor is just another **client of the runtime systems**.
-
-Unreal uses **container packages (.uasset)** that store metadata and data together, but that requires a huge object system. Your approach with **binary canonical assets + `.meta` files** is the correct design for a custom engine.
-
----
+If you want, I can also show you the **single biggest mistake almost every custom engine makes in asset systems** (and how to avoid it). It will save you **months of refactoring later.**

@@ -1,6 +1,7 @@
 #include "asset_pipe/readers/texture_reader.h"
 #include "asset_pipe/core/texture_format.h"
 
+#include <algorithm>
 #include <fstream>
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
@@ -8,7 +9,34 @@
 
 namespace asset_pipe {
 
+static bool IsImagePath(const std::string& path) {
+    if (path.size() < 4) return false;
+    std::string ext = path.substr(path.size() - 4);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (ext == ".png" || ext == ".jpg") return true;
+    if (path.size() >= 5) {
+        std::string ext5 = path.substr(path.size() - 5);
+        std::transform(ext5.begin(), ext5.end(), ext5.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (ext5 == ".jpeg") return true;
+    }
+    return false;
+}
+
 bool TextureReader::Read(const std::string& path, LoadedTexture& out) {
+    if (IsImagePath(path)) {
+        out = LoadedTexture{};
+        int w = 0, h = 0, ch = 0;
+        stbi_set_flip_vertically_on_load(0);
+        unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, 4);
+        if (!data || w <= 0 || h <= 0) return false;
+        out.width = static_cast<uint32_t>(w);
+        out.height = static_cast<uint32_t>(h);
+        out.channels = 4;
+        out.pixels.assign(data, data + static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
+        stbi_image_free(data);
+        return true;
+    }
+
     std::ifstream file(path, std::ios::binary);
     if (!file) return false;
 

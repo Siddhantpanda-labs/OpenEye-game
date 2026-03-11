@@ -21,7 +21,7 @@ target_include_directories(AssetPipeImporter PRIVATE
     ${ASSIMP_ROOT}/include
     ${STB_ROOT}
 )
-target_link_libraries(AssetPipeImporter PRIVATE AssetPipeWriters)
+target_link_libraries(AssetPipeImporter PRIVATE AssetPipeWriters AssetPipeMeta)
 
 if(MSVC)
     target_link_libraries(AssetPipeImporter PRIVATE

@@ -17,6 +17,7 @@
 #include "asset_pipe/writers/animation_writer.h"
 #include "asset_pipe/writers/oea_writer.h"
 #include "asset_pipe/core/oea_format.h"
+#include "asset_pipe/meta/meta_file.h"
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -229,6 +231,20 @@ bool WriteFileBytes(const fs::path& p, const std::vector<uint8_t>& bytes) {
     return f.good();
 }
 
+/** Write .meta next to asset; returns the assigned GUID. */
+std::string WriteMetaForAsset(const fs::path& assetPath, const std::string& type,
+                              const std::vector<std::string>& dependencies = {}) {
+    MetaFile meta;
+    meta.guid = GenerateGuidString();
+    meta.type = type;
+    meta.dependencies = dependencies;
+    meta.importer = "model";
+    meta.version = 1;
+    const std::string metaPath = assetPath.string() + ".meta";
+    WriteMetaFile(metaPath, meta);
+    return meta.guid;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -312,6 +328,7 @@ int main(int argc, char** argv) {
             std::cerr << "[Importer] Failed to write " << oeaPath << "\n";
             return 5;
         }
+        WriteMetaForAsset(fs::path(oeaPath), "Package", {});
         Log(("Writing " + oeaPath).c_str());
         Log("Done.");
         return 0;
@@ -326,6 +343,10 @@ int main(int argc, char** argv) {
         return 6;
     }
 
+    // Path (relative to model dir) -> GUID for dependency resolution.
+    std::unordered_map<std::string, std::string> textureGuidByPath;
+    std::vector<std::string> materialGuids;
+
     // Loose textures (original extension/encoded bytes).
     for (const auto& tex : importScene.textures) {
         const std::string n = tex.outputFileName.empty() ? (tex.name + ".png") : tex.outputFileName;
@@ -335,6 +356,8 @@ int main(int argc, char** argv) {
                 std::cerr << "[Importer] Failed to write " << p.string() << "\n";
                 return 7;
             }
+            const std::string relPath = ("textures/" + n);
+            textureGuidByPath[relPath] = WriteMetaForAsset(p, "Texture", {});
             Log(("Writing " + p.string()).c_str());
         }
     }
@@ -347,6 +370,7 @@ int main(int argc, char** argv) {
             std::cerr << "[Importer] Failed to write " << p.string() << "\n";
             return 8;
         }
+        WriteMetaForAsset(p, "Animation", {});
         Log(("Writing " + p.string()).c_str());
     }
 
@@ -355,11 +379,24 @@ int main(int argc, char** argv) {
         fs::create_directories(matDir, ec);
         if (ec) return 9;
         for (const auto& mat : importScene.materials) {
+            std::vector<std::string> deps;
+            auto addDep = [&](const std::string& path) {
+                if (path.empty()) return;
+                std::string key = path;
+                if (key.find("textures/") != 0) key = "textures/" + key;
+                auto it = textureGuidByPath.find(key);
+                if (it != textureGuidByPath.end()) deps.push_back(it->second);
+            };
+            addDep(mat.albedo.path);
+            addDep(mat.normal.path);
+            addDep(mat.metallic.path);
+            addDep(mat.roughness.path);
             const fs::path p = matDir / (mat.name + ".mat");
             if (!MaterialWriter::Write(mat, p.string())) {
                 std::cerr << "[Importer] Failed to write " << p.string() << "\n";
                 return 10;
             }
+            materialGuids.push_back(WriteMetaForAsset(p, "Material", deps));
             Log(("Writing " + p.string()).c_str());
         }
     } else {
@@ -375,6 +412,7 @@ int main(int argc, char** argv) {
         std::cerr << "[Importer] Failed to write " << omeshPath << "\n";
         return 12;
     }
+    WriteMetaForAsset(fs::path(omeshPath), "Mesh", materialGuids);
     Log(("Writing " + omeshPath).c_str());
 
     Log("Done.");
