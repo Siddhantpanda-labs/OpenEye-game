@@ -11,6 +11,7 @@
 #include "asset_pipe/readers/prefab_reader.h"
 #include "asset_pipe/readers/material_reader.h"
 #include "asset_pipe/readers/texture_reader.h"
+#include "asset_pipe/readers/oea_reader.h"
 #include "asset_pipe/core/import_mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -74,6 +75,55 @@ bool ReadMaterialMap(const std::string& mapPath, std::vector<std::string>& outIn
         any = true;
     }
     return any;
+}
+
+bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath, bool& outIsPrefab) {
+    std::vector<asset_pipe::OeaEntry> entries;
+    if (!asset_pipe::OeaReader::ReadIndex(oeaPath, entries) || entries.empty()) return false;
+
+    const std::string stem = fs::path(oeaPath).stem().string();
+    std::string preferredName = stem + ".prefab";
+    std::string selectedName;
+    for (const auto& e : entries) {
+        if (e.name == preferredName) {
+            selectedName = e.name;
+            break;
+        }
+    }
+    if (selectedName.empty()) {
+        for (const auto& e : entries) {
+            if (fs::path(e.name).extension() == ".prefab") {
+                selectedName = e.name;
+                break;
+            }
+        }
+    }
+    if (selectedName.empty()) {
+        for (const auto& e : entries) {
+            if (fs::path(e.name).extension() == ".mesh") {
+                selectedName = e.name;
+                break;
+            }
+        }
+    }
+    if (selectedName.empty()) return false;
+
+    std::error_code ec;
+    const uintmax_t fileSize = fs::file_size(oeaPath, ec);
+    const auto lastWrite = fs::last_write_time(oeaPath, ec);
+    const long long stamp = ec ? 0LL : static_cast<long long>(lastWrite.time_since_epoch().count());
+    const fs::path cacheDir = fs::temp_directory_path() / "OpenEyeOeaCache" /
+                              (stem + "_" + std::to_string(static_cast<unsigned long long>(fileSize)) + "_" + std::to_string(stamp));
+
+    const fs::path selectedPath = cacheDir / selectedName;
+    if (!fs::exists(selectedPath)) {
+        fs::remove_all(cacheDir, ec);
+        if (!asset_pipe::OeaReader::ExtractAll(oeaPath, cacheDir.string(), nullptr)) return false;
+    }
+
+    outAssetPath = selectedPath.string();
+    outIsPrefab = (selectedPath.extension() == ".prefab");
+    return true;
 }
 
 std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, eyelib::api::RenderDevice device) {
@@ -248,13 +298,24 @@ void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AA
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: CanonicalViewer <path_to.mesh | path_to.prefab>\n";
-        std::cerr << "  .mesh = single mesh with default material. .prefab = full model with materials.\n";
+        std::cerr << "Usage: CanonicalViewer <path_to.mesh | path_to.prefab | path_to.oea>\n";
+        std::cerr << "  .mesh = single mesh, .prefab = full model, .oea = packaged asset bundle.\n";
         return 1;
     }
 
-    const std::string path = argv[1];
-    const bool isPrefab = (path.size() >= 7 && path.compare(path.size() - 7, 7, ".prefab") == 0);
+    std::string path = argv[1];
+    bool isPrefab = (path.size() >= 7 && path.compare(path.size() - 7, 7, ".prefab") == 0);
+    const bool isOea = (path.size() >= 4 && path.compare(path.size() - 4, 4, ".oea") == 0);
+    if (isOea) {
+        std::string extractedPath;
+        bool extractedIsPrefab = false;
+        if (!ResolveOeaPrimaryPath(path, extractedPath, extractedIsPrefab)) {
+            std::cerr << "CanonicalViewer: failed to read/extract .oea package " << path << "\n";
+            return 1;
+        }
+        path = extractedPath;
+        isPrefab = extractedIsPrefab;
+    }
 
     eyelib::api::core::Engine::Config engineConfig{};
     engineConfig.logFile = "CanonicalViewer.log";

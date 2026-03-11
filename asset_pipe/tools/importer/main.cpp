@@ -12,11 +12,14 @@
 #include "asset_pipe/writers/prefab_writer.h"
 #include "asset_pipe/writers/texture_writer.h"
 #include "asset_pipe/writers/animation_writer.h"
+#include "asset_pipe/writers/oea_writer.h"
+#include "asset_pipe/core/oea_format.h"
 
 #include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -115,6 +118,28 @@ int main(int argc, char** argv) {
         Log(("Writing " + prefabPath).c_str());
     else
         std::cerr << "[Importer] Failed to write " << prefabPath << "\n";
+
+    std::vector<asset_pipe::OeaInputEntry> packageEntries;
+    packageEntries.reserve(importScene.meshes.size() + importScene.textures.size() + importScene.materials.size() +
+                           importScene.animations.size() + 2u);
+    for (const auto& m : importScene.meshes)
+        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Mesh, m.name + ".mesh", (out / (m.name + ".mesh")).string()});
+    for (const auto& t : importScene.textures)
+        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Texture, t.name + ".tex", (out / (t.name + ".tex")).string()});
+    for (const auto& m : importScene.materials)
+        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Material, m.name + ".material", (out / (m.name + ".material")).string()});
+    for (const auto& a : importScene.animations)
+        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Animation, a.name + ".anim", (out / (a.name + ".anim")).string()});
+    const std::string materialMapPath = (out / (importScene.sourceName + ".materialmap")).string();
+    if (fs::exists(materialMapPath))
+        packageEntries.push_back({asset_pipe::OeaFormat::Entry_MaterialMap, importScene.sourceName + ".materialmap", materialMapPath});
+    packageEntries.push_back({asset_pipe::OeaFormat::Entry_Prefab, importScene.sourceName + ".prefab", prefabPath});
+
+    const std::string oeaPath = (out / (importScene.sourceName + ".oea")).string();
+    if (asset_pipe::OeaWriter::Write(oeaPath, packageEntries))
+        Log(("Writing " + oeaPath).c_str());
+    else
+        std::cerr << "[Importer] Failed to write " << oeaPath << "\n";
 
     Log("Done.");
     return 0;

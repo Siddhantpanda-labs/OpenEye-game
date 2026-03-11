@@ -5,6 +5,7 @@ set(WRITERS_SOURCES
     texture_writer.cpp
     animation_writer.cpp
     prefab_writer.cpp
+    oea_writer.cpp
 )
 add_library(AssetPipeWriters STATIC ${WRITERS_SOURCES})
 target_link_libraries(AssetPipeWriters PUBLIC AssetPipeCore)
