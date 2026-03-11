@@ -4,13 +4,14 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorContext.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ui/LightGizmoIcons.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ui/PhysicsColliderIcons.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorFolderPicker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorProject.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/InstantiateOmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/RunImporter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/LightGizmoIcons.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui/PhysicsColliderIcons.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/AssetPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/StatusPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/HierarchyPanel.cpp
@@ -47,7 +48,16 @@ target_link_libraries(OpenEyeEditor
         EyelibMathAPI
         OpenEyeImGui
         OpenEyeGameRuntime
+        AssetReaders
 )
 if(WIN32)
     target_link_libraries(OpenEyeEditor PRIVATE ole32)
 endif()
+
+# Copy AssetImporter next to editor so "Convert to canonical" can run it
+add_dependencies(OpenEyeEditor AssetImporter)
+add_custom_command(TARGET OpenEyeEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:AssetImporter>
+        $<TARGET_FILE_DIR:OpenEyeEditor>/$<TARGET_FILE_NAME:AssetImporter>
+    COMMENT "Copy AssetImporter next to OpenEyeEditor")

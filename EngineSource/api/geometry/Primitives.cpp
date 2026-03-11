@@ -1,6 +1,5 @@
 #include "api/geometry/Primitives.h"
 #include "eyelib/geometry/primitives/MeshPrimitives.h"
-#include "eyelib/asset/AssetManager.h"
 #include "api/render/Mesh.h"
 #include "api/render/RenderDevice.h"
 
@@ -8,9 +7,9 @@ namespace eyelib {
 namespace api {
 namespace geometry {
 
-static void UploadMeshToGPU(Mesh& mesh) {
-    void* dev = ::eyelib::assets::AssetManager::Get().GetRenderDevice();
-    if (dev) mesh.UploadToGPU(RenderDevice(dev));
+/** Upload mesh to GPU if device is set. Primitives are created CPU-only otherwise; caller can pass device or upload later. */
+static void UploadMeshToGPU(Mesh& mesh, RenderDevice device = RenderDevice(nullptr)) {
+    if (device) mesh.UploadToGPU(device);
 }
 
 std::shared_ptr<Mesh> Primitives::CreateCube(float size) {

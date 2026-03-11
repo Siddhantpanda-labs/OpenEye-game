@@ -2,7 +2,7 @@
 
 #include "eyelib/render/resources/TextureTypes.h"
 #include "eyelib/render/rhi/RHI.h"
-#include "eyelib/asset/AssetId.h"
+#include "api/asset/AssetId.h"
 #include <cstddef>
 
 #include "eyelib/render/TextureDescriptor.h"
@@ -75,8 +75,8 @@ public:
     /** Set device to use for Create() without device, LoadFromMemory, SetData, Bind. */
     void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
 
-    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
-    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    void SetAssetId(const ::eyelib::api::AssetId& id) { m_assetId = id; }
+    const ::eyelib::api::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
 private:
@@ -94,7 +94,7 @@ private:
     /** CPU reload state (Phase 2.6). GetDescriptor() returns it; LoadFromFile sets it; Reload uses LoadFromDescriptor(device, m_descriptor). */
     TextureDescriptor m_descriptor;
 
-    assets::AssetId m_assetId = assets::AssetId::Invalid();
+    ::eyelib::api::AssetId m_assetId = ::eyelib::api::AssetId::Invalid();
 };
 
 } // namespace render

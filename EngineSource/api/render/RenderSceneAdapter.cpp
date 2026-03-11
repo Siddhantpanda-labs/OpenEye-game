@@ -18,6 +18,7 @@ namespace {
     out.transform = d.transform;
     out.bones = d.bones;
     out.boneCount = d.boneCount;
+    out.submeshIndex = d.submeshIndex;
     return out;
 }
 

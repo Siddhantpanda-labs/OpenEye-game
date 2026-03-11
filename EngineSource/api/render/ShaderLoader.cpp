@@ -1,4 +1,4 @@
-#include "ShaderLoader.h"
+#include "api/render/ShaderLoader.h"
 #include "api/asset/AssetRegistry.h"
 
 namespace eyelib {

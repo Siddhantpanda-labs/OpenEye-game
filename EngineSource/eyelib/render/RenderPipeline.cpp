@@ -700,7 +700,7 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
         bindTexFlag("u_EmissiveTexture", "u_UseEmissiveTexture", getTex("u_EmissiveTexture"), kEmissiveTextureUnit);
 
         d.mesh->Bind(m_device);
-        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
         d.mesh->Unbind();
         sh->Unbind();
     });
@@ -1194,7 +1194,7 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         }
 
         d.mesh->Bind(m_device);
-        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
         d.mesh->Unbind();
     });
 
@@ -1546,7 +1546,7 @@ void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std:
         m_entityIdShader->SetUint("u_EntityID", id);
         m_entityIdShader->SetMat4("u_Model", d.transform);
         d.mesh->Bind(m_device);
-        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
         d.mesh->Unbind();
     });
 

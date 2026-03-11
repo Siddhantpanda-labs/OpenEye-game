@@ -40,6 +40,7 @@ struct SerializationTraits<eyelib::world::components::Renderable> {
         j["meshAssetId"] = v.meshAssetId;
         j["materialAssetId"] = v.materialAssetId;
         j["visible"] = v.visible;
+        j["submeshIndex"] = v.submeshIndex;
         j["activeLOD"] = v.activeLOD;
         j["lodMeshAssetIds"] = SerializationTraits<std::vector<std::string>>::Serialize(v.lodMeshAssetIds);
         return j;
@@ -50,6 +51,7 @@ struct SerializationTraits<eyelib::world::components::Renderable> {
         out.meshAssetId = j.value("meshAssetId", std::string{});
         out.materialAssetId = j.value("materialAssetId", std::string{});
         out.visible = j.value("visible", true);
+        out.submeshIndex = j.value("submeshIndex", 0);
         out.activeLOD = j.value("activeLOD", 0);
         if (j.contains("lodMeshAssetIds")) {
             out.lodMeshAssetIds = SerializationTraits<std::vector<std::string>>::Deserialize(j["lodMeshAssetIds"]);
@@ -211,6 +213,7 @@ struct SerializationTraits<eyelib::world::components::MeshRenderer> {
         j["meshAssetId"] = v.meshAssetId;
         j["materialAssetId"] = v.materialAssetId;
         j["visible"] = v.visible;
+        j["submeshIndex"] = v.submeshIndex;
         return j;
     }
     static eyelib::world::components::MeshRenderer Deserialize(const nlohmann::json& j, const eyelib::world::components::MeshRenderer& fallback = {}) {
@@ -219,6 +222,7 @@ struct SerializationTraits<eyelib::world::components::MeshRenderer> {
         out.meshAssetId = j.value("meshAssetId", std::string{});
         out.materialAssetId = j.value("materialAssetId", std::string{});
         out.visible = j.value("visible", true);
+        out.submeshIndex = j.value("submeshIndex", 0);
         return out;
     }
 };

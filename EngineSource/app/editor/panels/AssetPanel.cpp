@@ -1,12 +1,15 @@
 #include "AssetPanel.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "InstantiateOmesh.h"
+#include "RunImporter.h"
 #include "api/platform/All.h"
 #include <imgui.h>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 namespace openeye::editor::panels {
 
@@ -16,6 +19,30 @@ static bool IsSceneFile(const std::string& path) {
     std::string ext = fs::GetExtension(path);
     return ext == ".json" || ext == ".scene";
 }
+
+/** True for source formats the AssetImporter can convert to canonical (.omesh, etc.). */
+static bool IsImportableModel(const std::string& path) {
+    std::string ext = fs::GetExtension(path);
+    return ext == ".fbx" || ext == ".glb" || ext == ".gltf" || ext == ".dae" || ext == ".obj";
+}
+
+static bool IsOmeshFile(const std::string& path) {
+    std::string ext = fs::GetExtension(path);
+    return ext == ".omesh";
+}
+
+/** Skip .meta files in the asset browser listing. */
+static bool IsMetaFile(const std::string& path) {
+    std::string ext = fs::GetExtension(path);
+    return ext == ".meta";
+}
+
+/** Payload for dragging an .omesh into the hierarchy. */
+struct OmeshDragPayload {
+    char path[512];
+    char guid[128];
+};
+static constexpr const char* kOmeshPayloadType = "OpenEyeOmesh";
 
 /** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty). */
 static const char* GetEmptySceneJson() {
@@ -38,6 +65,8 @@ static char s_renameBuffer[256] = "";
 static bool s_showRenameModal = false;
 static bool s_showDeleteConfirm = false;
 static bool s_deleteIsDirectory = false;
+static std::string s_convertMessage;
+static double s_convertMessageTime = 0.0;
 
 static void ResetCurrentPath(const std::string& projectRoot) {
     s_currentPath = projectRoot;
@@ -80,6 +109,30 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
 
     ImGui::PushID(fullPath.c_str());
     ImGui::BeginChild(name.c_str(), ImVec2(cardW, cardH), ImGuiChildFlags_Border | ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::InvisibleButton("##card", ImVec2(-1, -1));
+    bool doubleClick = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
+    if (doubleClick) {
+        if (isDir)
+            s_currentPath = fullPath;
+        else if (ctx && ctx->assetRegistry && IsSceneFile(fullPath)) {
+            if (ctx->world.LoadScene(fullPath)) {
+                ctx->scenePath = fullPath;
+                EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
+            }
+        }
+    }
+    if (!isDir && IsOmeshFile(fullPath)) {
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            OmeshDragPayload payload{};
+            std::snprintf(payload.path, sizeof(payload.path), "%.511s", fullPath.c_str());
+            std::string guid = GetGuidFromMetaPath(fullPath);
+            std::snprintf(payload.guid, sizeof(payload.guid), "%.127s", guid.c_str());
+            ImGui::SetDragDropPayload(kOmeshPayloadType, &payload, sizeof(payload));
+            ImGui::Text("Model: %s", name.c_str());
+            ImGui::EndDragDropSource();
+        }
+    }
+    ImGui::SetCursorPos(ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_Text, isDir ? ImVec4(0.9f, 0.85f, 0.4f, 1.0f) : ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
     ImGui::TextUnformatted(isDir ? "[Dir]" : "[File]");
     ImGui::PopStyleColor();
@@ -93,6 +146,32 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             if (ImGui::BeginMenu("Create")) {
                 if (ImGui::MenuItem("Scene file")) CreateEmptySceneFile(fullPath);
                 if (ImGui::MenuItem("Folder")) CreateNewFolder(fullPath);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+        }
+        if (!isDir && IsImportableModel(fullPath)) {
+            if (ImGui::BeginMenu("Convert to canonical")) {
+                if (ImGui::MenuItem("Embedded materials (default)")) {
+                    std::string outDir = fs::GetDirectory(fullPath);
+                    if (!outDir.empty() && RunImporter(fullPath, outDir, false)) {
+                        s_convertMessage = "Converted (embedded materials).";
+                        s_convertMessageTime = ImGui::GetTime();
+                    } else {
+                        s_convertMessage = "Conversion failed. Is AssetImporter next to the editor?";
+                        s_convertMessageTime = ImGui::GetTime();
+                    }
+                }
+                if (ImGui::MenuItem("Separate materials (--mat)")) {
+                    std::string outDir = fs::GetDirectory(fullPath);
+                    if (!outDir.empty() && RunImporter(fullPath, outDir, true)) {
+                        s_convertMessage = "Converted (separate materials).";
+                        s_convertMessageTime = ImGui::GetTime();
+                    } else {
+                        s_convertMessage = "Conversion failed. Is AssetImporter next to the editor?";
+                        s_convertMessageTime = ImGui::GetTime();
+                    }
+                }
                 ImGui::EndMenu();
             }
             ImGui::Separator();
@@ -111,17 +190,6 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
         ImGui::EndPopup();
     }
 
-    bool doubleClick = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
-    if (doubleClick) {
-        if (isDir) {
-            s_currentPath = fullPath;
-        } else if (ctx && ctx->assetRegistry && IsSceneFile(fullPath)) {
-            if (ctx->world.LoadScene(fullPath)) {
-                ctx->scenePath = fullPath;
-                EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
-            }
-        }
-    }
     ImGui::PopID();
 }
 
@@ -215,6 +283,13 @@ void ShowAssetPanel(EditorContext* ctx) {
             int columns = (int)(ImGui::GetContentRegionAvail().x / (cardW + pad));
             if (columns < 1) columns = 1;
 
+            if (!s_convertMessage.empty() && (ImGui::GetTime() - s_convertMessageTime) < 5.0) {
+                bool failed = (s_convertMessage.find("failed") != std::string::npos);
+                ImGui::PushStyleColor(ImGuiCol_Text, failed ? ImVec4(0.95f, 0.5f, 0.5f, 1.0f) : ImVec4(0.6f, 0.9f, 0.6f, 1.0f));
+                ImGui::TextUnformatted(s_convertMessage.c_str());
+                ImGui::PopStyleColor();
+                ImGui::Separator();
+            }
             if (s_currentPath != ctx->projectPath) {
                 if (ImGui::Button("< Back")) {
                     s_currentPath = GetParentPath(s_currentPath);
@@ -230,7 +305,7 @@ void ShowAssetPanel(EditorContext* ctx) {
                 std::string full = fs::NormalizePath(s_currentPath + "/" + e);
                 if (fs::IsDirectory(full))
                     dirs.push_back(e);
-                else
+                else if (!IsMetaFile(full))
                     files.push_back(e);
             }
             std::sort(dirs.begin(), dirs.end());

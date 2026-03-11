@@ -1,4 +1,5 @@
 #include "EditorProject.h"
+#include "api/asset/AssetRegistry.h"
 #include "api/platform/All.h"
 #include <json.hpp>
 #include <fstream>
@@ -59,7 +60,11 @@ bool OpenProject(EditorContext& ctx, const std::string& projectFolderPath) {
     ctx.projectName = name;
     ctx.projectAssetsRoot = fs::NormalizePath(absolute + "/" + assetsRel);
     ctx.projectCacheRoot = fs::NormalizePath(absolute + "/" + cacheRel);
-    ctx.assetRoots = { ctx.projectAssetsRoot };
+    ctx.assetRoots = { ctx.engineAssetsPath, ctx.projectAssetsRoot };
+    if (ctx.assetRegistry) {
+        ctx.assetRegistry->SetAssetRoot(ctx.projectAssetsRoot);
+        ctx.assetRegistry->Scan();
+    }
     return true;
 }
 
@@ -69,6 +74,10 @@ void CloseProject(EditorContext& ctx, const std::string& engineAssetsPath) {
     ctx.projectAssetsRoot.clear();
     ctx.projectCacheRoot.clear();
     ctx.assetRoots = { engineAssetsPath };
+    if (ctx.assetRegistry) {
+        ctx.assetRegistry->SetAssetRoot(engineAssetsPath);
+        ctx.assetRegistry->Scan();
+    }
 }
 
 std::string CreateProject(const std::string& projectName) {

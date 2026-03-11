@@ -74,6 +74,35 @@ int GetIndent(const std::string& line) {
     return n;
 }
 
+// Recursive parse for hierarchy: read one entity into a PrefabNode and advance idx past it and its descendants.
+void ParseEntityNode(const std::vector<std::string>& lines, size_t& idx, int baseIndent, PrefabNode& out) {
+    if (idx >= lines.size()) return;
+    out = PrefabNode{};
+    if (lines[idx].find("- name:") != std::string::npos)
+        ParseName(lines[idx], out.name);
+    idx++;
+    for (int i = 0; i < 16; ++i) out.localTransform[i] = (i % 5 == 0) ? 1.f : 0.f;
+    while (idx < lines.size()) {
+        int ind = GetIndent(lines[idx]);
+        if (ind <= baseIndent && lines[idx].find("- name:") != std::string::npos)
+            break;
+        if (lines[idx].find("transform:") != std::string::npos)
+            ParseTransform(lines[idx], out.localTransform);
+        else if (lines[idx].find("mesh:") != std::string::npos)
+            ParseMesh(lines[idx], out.meshPath);
+        else if (lines[idx].find("children:") != std::string::npos) {
+            idx++;
+            while (idx < lines.size() && GetIndent(lines[idx]) > baseIndent && lines[idx].find("- name:") != std::string::npos) {
+                PrefabNode child;
+                ParseEntityNode(lines, idx, GetIndent(lines[idx]), child);
+                out.children.push_back(std::move(child));
+            }
+            continue;
+        }
+        idx++;
+    }
+}
+
 // Recursive parse: from line index, read one entity (name, transform, mesh, children) and advance line index.
 void ParseEntity(const std::vector<std::string>& lines, size_t& idx, const float parentWorld[16], std::vector<PrefabDrawable>& out) {
     if (idx >= lines.size()) return;
@@ -151,6 +180,29 @@ bool PrefabReader::ReadFromText(const std::string& text, std::vector<PrefabDrawa
         idx++;
     }
     return true;
+}
+
+bool PrefabReader::ReadHierarchyFromText(const std::string& text, std::vector<PrefabNode>& outRoots) {
+    std::vector<std::string> lines;
+    std::stringstream stream(text);
+    std::string line;
+    while (std::getline(stream, line))
+        lines.push_back(line);
+    outRoots.clear();
+    size_t idx = 0;
+    while (idx < lines.size()) {
+        if (lines[idx].find("entities:") != std::string::npos) {
+            idx++;
+            while (idx < lines.size() && lines[idx].find("- name:") != std::string::npos) {
+                PrefabNode root;
+                ParseEntityNode(lines, idx, GetIndent(lines[idx]), root);
+                outRoots.push_back(std::move(root));
+            }
+            return true;
+        }
+        idx++;
+    }
+    return false;
 }
 
 } // namespace asset

@@ -5,5 +5,5 @@
  * @brief Internal asset manager and core AssetId. Re-exported for code that needs to resolve assets (e.g. EditorSceneBuilder).
  */
 
-#include "eyelib/asset/AssetManager.h"
-#include "eyelib/asset/AssetId.h"
+#include "api/asset/AssetId.h"
+#include "eyelib/asset/runtime/asset_manager.h"

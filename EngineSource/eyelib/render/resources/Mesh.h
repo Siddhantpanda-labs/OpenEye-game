@@ -2,7 +2,7 @@
 
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
-#include "eyelib/asset/AssetId.h"
+#include "api/asset/AssetId.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <memory>
@@ -92,8 +92,8 @@ public:
     /** Fullscreen quad (vec2 pos + vec2 uv). For skybox, post-process, lighting fullscreen. */
     static rhi::VertexLayout GetFullscreenQuadVertexLayoutRHI();
 
-    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
-    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    void SetAssetId(const ::eyelib::api::AssetId& id) { m_assetId = id; }
+    const ::eyelib::api::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
     /** Create GPU instance from CPU descriptor. Replaces any existing buffers. */
@@ -115,7 +115,7 @@ private:
     rhi::IBuffer* m_vertexBufferRHI = nullptr;
     rhi::IBuffer* m_indexBufferRHI = nullptr;
 
-    assets::AssetId m_assetId = assets::AssetId::Invalid();
+    ::eyelib::api::AssetId m_assetId = ::eyelib::api::AssetId::Invalid();
 };
 
 } // namespace render

@@ -13,6 +13,7 @@
 #include "GameRuntime.h"
 
 #include "api/asset/All.h"
+#include "api/asset/GPUResourceResolverBackend.h"
 #include "api/core/All.h"
 #include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
@@ -30,10 +31,99 @@
 
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
 
 namespace openeye::editor {
 
 namespace {
+
+struct ApiAssetIdHash {
+    size_t operator()(const eyelib::api::AssetId& id) const {
+        return id.high ^ (id.low << 1);
+    }
+};
+
+class EditorGPUResourceCache : public eyelib::api::IGPUResourceResolver {
+public:
+    EditorGPUResourceCache(void* device, eyelib::api::AssetRegistry* registry)
+        : m_device(device), m_registry(registry) {}
+
+    std::shared_ptr<eyelib::render::Shader> GetShader(const eyelib::api::AssetId& id) override {
+        if (!id.IsValid()) return nullptr;
+        auto it = m_shaders.find(id);
+        if (it != m_shaders.end()) return it->second;
+        const auto* desc = m_registry ? m_registry->GetShaderDescriptor(id) : nullptr;
+        if (!desc) return nullptr;
+        auto sh = std::make_shared<eyelib::render::Shader>();
+        if (!sh->LoadFromDescriptor(static_cast<eyelib::render::rhi::IDevice*>(m_device), *desc))
+            return nullptr;
+        m_shaders[id] = sh;
+        return sh;
+    }
+
+    std::shared_ptr<eyelib::render::Mesh> GetMesh(const eyelib::api::AssetId& id) override {
+        if (!id.IsValid()) return nullptr;
+        auto it = m_meshes.find(id);
+        if (it != m_meshes.end()) return it->second;
+        const auto* desc = m_registry ? m_registry->GetMeshDescriptor(id) : nullptr;
+        if (!desc) return nullptr;
+        auto mesh = std::make_shared<eyelib::render::Mesh>();
+        if (!mesh->CreateFromDescriptor(static_cast<eyelib::render::rhi::IDevice*>(m_device), *desc))
+            return nullptr;
+        m_meshes[id] = mesh;
+        return mesh;
+    }
+
+    std::shared_ptr<eyelib::render::Texture2D> GetTexture(const eyelib::api::AssetId& id) override {
+        if (!id.IsValid()) return nullptr;
+        auto it = m_textures.find(id);
+        if (it != m_textures.end()) return it->second;
+        const auto* desc = m_registry ? m_registry->GetTextureDescriptor(id) : nullptr;
+        if (!desc || desc->filePath.empty()) return nullptr;
+        auto tex = std::make_shared<eyelib::render::Texture2D>();
+        if (!tex->LoadFromDescriptor(static_cast<eyelib::render::rhi::IDevice*>(m_device), *desc))
+            return nullptr;
+        m_textures[id] = tex;
+        return tex;
+    }
+
+    std::shared_ptr<eyelib::render::Material> GetMaterial(const eyelib::api::AssetId& id) override {
+        if (!id.IsValid()) return nullptr;
+        auto it = m_materials.find(id);
+        if (it != m_materials.end()) return it->second;
+        const auto* desc = m_registry ? m_registry->GetMaterialDescriptor(id) : nullptr;
+        if (!desc || !m_registry) return nullptr;
+        auto resolveShader = [this](const std::string& name) {
+            eyelib::api::AssetId sid = m_registry->GetId("name:" + name);
+            if (!sid.IsValid()) sid = m_registry->LoadAssetDescriptorOnly("name:" + name, eyelib::api::AssetType::Shader);
+            return GetShader(sid);
+        };
+        auto resolveTexture = [this](const std::string& path) {
+            eyelib::api::AssetId tid = m_registry->GetId(path);
+            if (!tid.IsValid()) tid = m_registry->LoadAssetDescriptorOnly(path, eyelib::api::AssetType::Texture);
+            return GetTexture(tid);
+        };
+        auto mat = eyelib::render::CreateMaterialFromDescriptor(*desc, resolveShader, resolveTexture);
+        if (!mat) return nullptr;
+        m_materials[id] = mat;
+        return mat;
+    }
+
+    void OnDeviceLost() override {
+        m_shaders.clear();
+        m_meshes.clear();
+        m_textures.clear();
+        m_materials.clear();
+    }
+
+private:
+    void* m_device = nullptr;
+    eyelib::api::AssetRegistry* m_registry = nullptr;
+    std::unordered_map<eyelib::api::AssetId, std::shared_ptr<eyelib::render::Shader>, ApiAssetIdHash> m_shaders;
+    std::unordered_map<eyelib::api::AssetId, std::shared_ptr<eyelib::render::Mesh>, ApiAssetIdHash> m_meshes;
+    std::unordered_map<eyelib::api::AssetId, std::shared_ptr<eyelib::render::Texture2D>, ApiAssetIdHash> m_textures;
+    std::unordered_map<eyelib::api::AssetId, std::shared_ptr<eyelib::render::Material>, ApiAssetIdHash> m_materials;
+};
 
 class ScopedEngine {
 public:
@@ -187,6 +277,11 @@ int RunEditor(int argc, char** argv) {
     assetRegistry.Scan();
     if (editorDevice)
         assetRegistry.SetRenderDevice(editorRenderDevice);
+    std::unique_ptr<EditorGPUResourceCache> editorGpuResourceCache;
+    if (editorDevice) {
+        editorGpuResourceCache = std::make_unique<EditorGPUResourceCache>(editorRenderDevice.Get(), &assetRegistry);
+        assetRegistry.SetGPUResolver(editorGpuResourceCache.get());
+    }
 
     openeye::editor::EditorContext ctx;
     ctx.sceneViewPipeline = &sceneViewPipeline;
@@ -270,6 +365,7 @@ int RunEditor(int argc, char** argv) {
     // Teardown: pipelines release FBOs; then static GPU resources; device is destroyed when editorDevice goes out of scope.
     sceneViewPipeline.Shutdown();
     gameViewPipeline.Shutdown();
+    assetRegistry.SetGPUResolver(nullptr);
     if (editorDevice) {
         eyelib::render::DebugDrawRenderer::Shutdown();
         eyelib::render::Primitives::ShutdownStaticResources();

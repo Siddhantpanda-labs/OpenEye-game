@@ -69,11 +69,36 @@ std::shared_ptr<ImportMesh> AssetManager::LoadMesh(const Guid& guid) {
             std::vector<OeaEntry> entries;
             if (OeaReader::ReadIndex(path, entries)) {
                 for (const auto& e : entries) {
-                    if (e.type == OeaFormat::Entry_Mesh) {
-                        std::vector<uint8_t> data;
-                        if (OeaReader::ReadEntryData(path, e.name, data) && MeshReader::Read(data, *mesh)) {
-                            ok = true;
-                            break;
+                    if (e.type != OeaFormat::Entry_Mesh) continue;
+                    std::vector<uint8_t> data;
+                    if (!OeaReader::ReadEntryData(path, e.name, data)) continue;
+                    ImportMesh part;
+                    if (!MeshReader::Read(data, part)) continue;
+                    ok = true;
+                    const uint32_t baseVertex = static_cast<uint32_t>(mesh->vertices.size());
+                    const uint32_t baseIndex = static_cast<uint32_t>(mesh->indices.size());
+                    if (mesh->vertices.empty())
+                        mesh->name = part.name;
+                    for (auto& v : part.vertices)
+                        mesh->vertices.push_back(v);
+                    for (uint32_t idx : part.indices)
+                        mesh->indices.push_back(idx + baseVertex);
+                    for (const auto& s : part.submeshes) {
+                        ImportSubmesh sub;
+                        sub.indexStart = s.indexStart + baseIndex;
+                        sub.indexCount = s.indexCount;
+                        sub.materialIndex = s.materialIndex;
+                        mesh->submeshes.push_back(sub);
+                    }
+                    if (part.bounds.min.x <= part.bounds.max.x) {
+                        if (mesh->bounds.min.x > mesh->bounds.max.x) mesh->bounds = part.bounds;
+                        else {
+                            mesh->bounds.min.x = std::min(mesh->bounds.min.x, part.bounds.min.x);
+                            mesh->bounds.min.y = std::min(mesh->bounds.min.y, part.bounds.min.y);
+                            mesh->bounds.min.z = std::min(mesh->bounds.min.z, part.bounds.min.z);
+                            mesh->bounds.max.x = std::max(mesh->bounds.max.x, part.bounds.max.x);
+                            mesh->bounds.max.y = std::max(mesh->bounds.max.y, part.bounds.max.y);
+                            mesh->bounds.max.z = std::max(mesh->bounds.max.z, part.bounds.max.z);
                         }
                     }
                 }

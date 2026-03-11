@@ -1,5 +1,6 @@
 #include "HierarchyPanel.h"
 #include "EditorContext.h"
+#include "InstantiateOmesh.h"
 #include "PanelCommon.h"
 
 #include "api/geometry/BuiltinMeshIds.h"
@@ -8,6 +9,7 @@
 
 #include <imgui.h>
 #include <cstdio>
+#include <cstring>
 #include <unordered_set>
 
 namespace openeye::editor::panels {
@@ -17,6 +19,8 @@ namespace {
 using EntityId = ::eyelib::world::EntityId;
 
 constexpr const char* kEntityPayload = "OpenEyeEntity";
+constexpr const char* kOmeshPayloadType = "OpenEyeOmesh";
+struct OmeshDragPayload { char path[512]; char guid[128]; };
 
 /** Primitive mesh choice for Add Entity (mesh primitives only; no None). */
 enum class AddEntityMeshChoice : int {
@@ -106,6 +110,8 @@ std::string GetDisplayName(eyelib::api::world::World& world, EntityId id) {
 static EntityId s_pendingAddParent = ::eyelib::world::InvalidEntity;
 /** Set when "Add Child" is clicked; open "Add Entity" popup next frame from Hierarchy window (not from context menu). */
 static bool s_openAddEntityPopupNextFrame = false;
+/** Root entity of the last instantiated .omesh; show its branch expanded by default. */
+static EntityId s_lastInstantiatedOmeshRoot = ::eyelib::world::InvalidEntity;
 
 void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
     if (!ctx || !ctx->world.IsAlive(entity)) return;
@@ -118,6 +124,8 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
     if (isSelected) flags |= ImGuiTreeNodeFlags_Selected;
     const std::vector<EntityId> children = world.GetChildren(entity);
     if (children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
+    if (entity.index == s_lastInstantiatedOmeshRoot.index && entity.generation == s_lastInstantiatedOmeshRoot.generation)
+        flags |= ImGuiTreeNodeFlags_DefaultOpen;
 
     const bool open = ImGui::TreeNodeEx(
         (void*)(uintptr_t)(entity.index ^ (entity.generation << 16)),
@@ -151,7 +159,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
         ImGui::Text("Reparent %s", label.c_str());
         ImGui::EndDragDropSource();
     }
-    // Drop target: drop an entity here to make it a child of this entity
+    // Drop target: drop an entity here to make it a child of this entity, or drop .omesh to instantiate under this entity
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kEntityPayload)) {
             if (payload->DataSize == sizeof(EntityId)) {
@@ -162,6 +170,20 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
                     } else if (world.IsAlive(dragged)) {
                         ImGui::SetTooltip("Cannot make a parent a child of its descendant");
                     }
+                }
+            }
+        }
+        else if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kOmeshPayloadType)) {
+            if (p->DataSize >= sizeof(OmeshDragPayload)) {
+                const auto* omesh = static_cast<const OmeshDragPayload*>(p->Data);
+                std::string path(omesh->path);
+                std::string guid(omesh->guid);
+                if (guid.empty()) guid = path;
+                EntityId root = openeye::editor::InstantiateOmesh(world, path, guid, entity);
+                if (root != ::eyelib::world::InvalidEntity) {
+                    s_lastInstantiatedOmeshRoot = root;
+                    ctx->sceneSelected = false;
+                    ctx->selectedEntity = root;
                 }
             }
         }
@@ -407,13 +429,27 @@ void ShowHierarchyPanel(EditorContext* ctx) {
             ctx->sceneSelected = true;
             ctx->selectedEntity = ::eyelib::world::InvalidEntity;
         }
-        // Drop target: drop an entity on scene root to make it a root (unparent)
+        // Drop target: drop an entity on scene root to unparent, or drop .omesh to instantiate at root
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kEntityPayload)) {
                 if (payload->DataSize == sizeof(EntityId)) {
                     const EntityId dragged = *static_cast<const EntityId*>(payload->Data);
                     if (ctx->world.IsAlive(dragged))
                         ctx->world.ClearParent(dragged);
+                }
+            }
+            else if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kOmeshPayloadType)) {
+                if (p->DataSize >= sizeof(OmeshDragPayload)) {
+                    const auto* omesh = static_cast<const OmeshDragPayload*>(p->Data);
+                    std::string path(omesh->path);
+                    std::string guid(omesh->guid);
+                    if (guid.empty()) guid = path;
+                    EntityId root = openeye::editor::InstantiateOmesh(ctx->world, path, guid, ::eyelib::world::InvalidEntity);
+                    if (root != ::eyelib::world::InvalidEntity) {
+                        s_lastInstantiatedOmeshRoot = root;
+                        ctx->sceneSelected = false;
+                        ctx->selectedEntity = root;
+                    }
                 }
             }
             ImGui::EndDragDropTarget();

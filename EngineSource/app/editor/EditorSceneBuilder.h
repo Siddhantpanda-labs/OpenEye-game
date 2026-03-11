@@ -50,7 +50,8 @@ private:
         std::shared_ptr<eyelib::api::Mesh> mesh;
         std::shared_ptr<eyelib::api::Material> material;
     };
-    static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots);  // used by BindSceneAssets and Build
+    /** Resolve asset ref (path or GUID) to full path. If \a registry is non-null and path lookup fails, tries GUID via registry->GetFilePath. */
+    static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots, eyelib::api::AssetRegistry* registry = nullptr);
     ModelEntry LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path);
     /** Resolve builtin:// primitive mesh id to procedural mesh + default material. Returns empty entry if not builtin. */
     ModelEntry GetPrimitiveEntry(const std::string& meshId);

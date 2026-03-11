@@ -2,6 +2,7 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace eyelib {
@@ -69,13 +70,15 @@ void ShadowMap::UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& vie
     }
     dir /= len;
     glm::vec3 center(cameraPos.x, cameraPos.y, cameraPos.z);
-    const float lightDistance = 80.f;
+    const float dynamicExtent = std::clamp(farPlane * 0.15f, 55.0f, 250.0f);
+    const float lightDistance = dynamicExtent * 1.5f;
     glm::vec3 lightEye = center - dir * lightDistance;
     glm::vec3 up(0.f, 1.f, 0.f);
     if (std::abs(glm::dot(up, dir)) > 0.99f) up = glm::vec3(0.f, 0.f, 1.f);
     glm::mat4 lightView = glm::lookAt(lightEye, center, up);
-    float extent = 55.f;
-    const float orthoNear = 1.f, orthoFar = 200.f;
+    const float extent = dynamicExtent;
+    const float orthoNear = std::max(1.0f, nearPlane);
+    const float orthoFar = std::max(200.0f, dynamicExtent * 6.0f);
     glm::mat4 lightProj = glm::ortho(-extent, extent, -extent, extent, orthoNear, orthoFar);
     m_lightView = math::Mat4(lightView);
     m_lightProj = math::Mat4(lightProj);

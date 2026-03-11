@@ -1,22 +1,21 @@
 #include "StreamingManager.h"
-
-#include "eyelib/asset/StreamingManager.h"
+#include "asset/runtime/streaming_manager.h"
 
 namespace eyelib {
 namespace api {
 
 namespace {
-AssetId ToApi(const assets::AssetId& id) {
+AssetId ToApi(const asset::Guid& id) {
     AssetId out;
-    out.high = id.High();
-    out.low = id.Low();
+    out.high = id.high;
+    out.low = id.low;
     return out;
 }
 } // namespace
 
 class StreamingManager::Impl {
 public:
-    assets::StreamingManager manager;
+    asset::StreamingManager manager;
 };
 
 StreamingManager::StreamingManager() : m_impl(std::make_unique<Impl>()) {}

@@ -11,7 +11,6 @@
 #include "api/asset/loaders/MaterialLoader.h"
 #include "api/asset/loaders/ModelLoader.h"
 #include "api/asset/loaders/MeshLoader.h"
-#include "api/asset/loaders/ShaderLoader.h"
 #include "api/asset/loaders/TextureLoader.h"
 
 namespace eyelib {
@@ -28,7 +27,6 @@ using ::eyelib::api::AudioLoader;
 using ::eyelib::api::MaterialLoader;
 using ::eyelib::api::ModelLoader;
 using ::eyelib::api::MeshLoader;
-using ::eyelib::api::ShaderLoader;
 using ::eyelib::api::TextureLoader;
 } // namespace assets
 } // namespace api

@@ -10,6 +10,7 @@
 #include "api/render/Material.h"
 #include "api/render/MaterialInstance.h"
 #include "api/render/Shader.h"
+#include "api/render/ShaderLoader.h"
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
@@ -43,6 +44,7 @@ using ::eyelib::api::Mesh;
 using ::eyelib::api::Material;
 using ::eyelib::api::MaterialInstance;
 using ::eyelib::api::Shader;
+using ::eyelib::api::ShaderLoader;
 using ::eyelib::api::RenderPipeline;
 using ::eyelib::api::RenderScene;
 using ::eyelib::api::Drawable;

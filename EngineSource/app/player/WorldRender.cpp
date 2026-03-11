@@ -2,6 +2,8 @@
 
 #include "BuiltinResourceManager.h"
 #include "RendererGPUResourceCache.h"
+#include "api/asset/AssetId.h"
+#include "api/asset/AssetRegistry.h"
 #include "api/asset/loaders/ModelLoader.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
@@ -33,13 +35,21 @@ static std::string JoinPath(const std::string& base, const std::string& leaf) {
     return base + "/" + leaf;
 }
 
-static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots) {
+static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots,
+                                    eyelib::api::AssetRegistry* registry = nullptr) {
     using eyelib::api::platform::filesystem::FileExists;
     if (id.empty()) return {};
     if (FileExists(id)) return id;
     for (const auto& root : roots) {
         const std::string candidate = JoinPath(root, id);
         if (FileExists(candidate)) return candidate;
+    }
+    if (registry) {
+        eyelib::api::AssetId assetId = eyelib::api::AssetId::FromString(id);
+        if (assetId.IsValid()) {
+            std::string path = registry->GetFilePath(assetId);
+            if (!path.empty()) return path;
+        }
     }
     return {};
 }
@@ -572,7 +582,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
         } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
             if (meshResolved.empty()) continue;
             if (LoadModelEntry(assetRegistry, meshResolved).mesh) opaqueCount++;
         }
@@ -584,8 +594,9 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
         } else {
-            if (ResolveAssetPath(meshId, options.assetRoots).empty()) continue;
-            if (LoadModelEntry(assetRegistry, ResolveAssetPath(meshId, options.assetRoots)).mesh) opaqueCount++;
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
+            if (meshResolved.empty()) continue;
+            if (LoadModelEntry(assetRegistry, meshResolved).mesh) opaqueCount++;
         }
     }
     size_t pointLightCount = 0;
@@ -632,7 +643,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             modelEntry = GetPrimitiveEntry(meshId);
         } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
             if (meshResolved.empty()) continue;
             modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
@@ -641,8 +652,9 @@ void WorldRenderBridge::BuildSceneFromViews(
         eyelib::api::Drawable drawable;
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
+        drawable.submeshIndex = renderable.submeshIndex;
         if (!renderable.materialAssetId.empty()) {
-            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, options.assetRoots);
+            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, options.assetRoots, assetRegistry);
             if (!matResolved.empty() && assetRegistry) {
                 auto matId = assetRegistry->GetId(matResolved);
                 if (auto material = ResolveMaterial(matId)) drawable.material = material;
@@ -694,7 +706,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             modelEntry = GetPrimitiveEntry(meshId);
         } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
             if (meshResolved.empty()) continue;
             modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
@@ -703,8 +715,9 @@ void WorldRenderBridge::BuildSceneFromViews(
         eyelib::api::Drawable drawable;
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
+        drawable.submeshIndex = renderer.submeshIndex;
         if (!renderer.materialAssetId.empty()) {
-            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, options.assetRoots);
+            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, options.assetRoots, assetRegistry);
             if (!matResolved.empty() && assetRegistry) {
                 auto matId = assetRegistry->GetId(matResolved);
                 if (auto material = ResolveMaterial(matId)) drawable.material = material;

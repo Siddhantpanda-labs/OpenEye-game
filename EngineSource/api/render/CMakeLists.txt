@@ -20,6 +20,8 @@ set(API_RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/MaterialInstance.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Shader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderScene.h
@@ -72,6 +74,7 @@ target_include_directories(EyelibRenderAPI
 
 target_link_libraries(EyelibRenderAPI
     PUBLIC
+        EyelibAssetsAPI
         EyelibGeometry
         EyelibRender
         EyelibMath

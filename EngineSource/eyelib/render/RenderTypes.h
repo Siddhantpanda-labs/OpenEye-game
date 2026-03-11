@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -20,6 +21,8 @@ struct Drawable {
     math::Mat4 transform{1.0f};
     const math::Mat4* bones = nullptr;
     size_t boneCount = 0;
+    /** Submesh index (0 = first). -1 = draw all. */
+    int32_t submeshIndex = -1;
 };
 
 /** Camera view: view/projection matrices and view position */

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
-#include "eyelib/asset/AssetId.h"
+#include "api/asset/AssetId.h"
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -74,8 +74,8 @@ public:
     void Bind(rhi::IDevice* device) const;
     size_t GetHash() const;
 
-    void SetAssetId(const assets::AssetId& id) { m_assetId = id; }
-    const assets::AssetId& GetAssetId() const { return m_assetId; }
+    void SetAssetId(const ::eyelib::api::AssetId& id) { m_assetId = id; }
+    const ::eyelib::api::AssetId& GetAssetId() const { return m_assetId; }
     bool HasAssetId() const { return m_assetId.IsValid(); }
 
     void ForEachTexture(std::function<void(const std::string&, const std::shared_ptr<Texture2D>&)> fn) const;
@@ -105,7 +105,7 @@ private:
     mutable size_t m_cachedHash = 0;
     mutable bool m_hashDirty = true;
 
-    assets::AssetId m_assetId = assets::AssetId::Invalid();
+    ::eyelib::api::AssetId m_assetId = ::eyelib::api::AssetId::Invalid();
 };
 
 } // namespace render

@@ -98,7 +98,7 @@ void EditorSceneBuilder::BindSceneAssets(const eyelib::api::world::World& world,
                 continue;
         }
 
-        const std::string resolved = ResolveAssetPath(ref.id, assetRoots);
+        const std::string resolved = ResolveAssetPath(ref.id, assetRoots, &registry);
         if (resolved.empty()) continue;
 
         try {
@@ -111,12 +111,19 @@ void EditorSceneBuilder::BindSceneAssets(const eyelib::api::world::World& world,
     }
 }
 
-std::string EditorSceneBuilder::ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots) {
+std::string EditorSceneBuilder::ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots, eyelib::api::AssetRegistry* registry) {
     if (id.empty()) return {};
     if (api::platform::filesystem::FileExists(id)) return id;
     for (const auto& root : roots) {
         const std::string candidate = JoinPath(root, id);
         if (api::platform::filesystem::FileExists(candidate)) return candidate;
+    }
+    if (registry) {
+        eyelib::api::AssetId assetId = eyelib::api::AssetId::FromString(id);
+        if (assetId.IsValid()) {
+            std::string path = registry->GetFilePath(assetId);
+            if (!path.empty()) return path;
+        }
     }
     return {};
 }
@@ -198,6 +205,8 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::GetPrimitiveEntry(const std::
         mesh = eyelib::api::geometry::Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
     }
     if (mesh) {
+        if (m_renderDevice)
+            mesh->UploadToGPU(m_renderDevice);
         entry.mesh = std::move(mesh);
         EnsureDefaultMaterial();
         entry.material = m_defaultMaterial;
@@ -326,7 +335,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             modelEntry = GetPrimitiveEntry(meshId);
         } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
+            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots, assetRegistry);
             if (meshResolved.empty()) continue;
             modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
@@ -336,7 +345,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderable.materialAssetId.empty() && assetRegistry) {
-            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, assetRoots);
+            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, assetRoots, assetRegistry);
             if (!matResolved.empty()) {
                 if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
                     drawable.material = mat;
@@ -344,6 +353,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         }
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);
+        drawable.submeshIndex = renderable.submeshIndex;
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
         scene.opaqueStorage.push_back(drawable);
@@ -359,7 +369,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
             modelEntry = GetPrimitiveEntry(meshId);
         } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
+            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots, assetRegistry);
             if (meshResolved.empty()) continue;
             modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
@@ -369,7 +379,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderer.materialAssetId.empty() && assetRegistry) {
-            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, assetRoots);
+            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, assetRoots, assetRegistry);
             if (!matResolved.empty()) {
                 if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
                     drawable.material = mat;
@@ -377,6 +387,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         }
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);
+        drawable.submeshIndex = renderer.submeshIndex;
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
         scene.opaqueStorage.push_back(drawable);

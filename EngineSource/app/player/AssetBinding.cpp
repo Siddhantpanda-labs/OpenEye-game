@@ -1,5 +1,7 @@
 #include "AssetBinding.h"
 
+#include "api/asset/AssetId.h"
+#include "api/asset/AssetRegistry.h"
 #include "api/core/All.h"
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/platform/All.h"
@@ -17,15 +19,20 @@ static std::string JoinPath(const std::string& base, const std::string& leaf) {
     return base + "/" + leaf;
 }
 
-static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots) {
+static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots,
+                                    eyelib::api::AssetRegistry* registry = nullptr) {
     using eyelib::api::platform::filesystem::FileExists;
-    if (FileExists(id)) {
-        return id;
-    }
+    if (id.empty()) return {};
+    if (FileExists(id)) return id;
     for (const auto& root : roots) {
         const std::string candidate = JoinPath(root, id);
-        if (FileExists(candidate)) {
-            return candidate;
+        if (FileExists(candidate)) return candidate;
+    }
+    if (registry) {
+        eyelib::api::AssetId assetId = eyelib::api::AssetId::FromString(id);
+        if (assetId.IsValid()) {
+            std::string path = registry->GetFilePath(assetId);
+            if (!path.empty()) return path;
         }
     }
     return {};
@@ -69,7 +76,7 @@ AssetBindStats BindAssets(const eyelib::api::world::World& world,
                 break;
         }
 
-        const std::string resolved = ResolveAssetPath(ref.id, assetRoots);
+        const std::string resolved = ResolveAssetPath(ref.id, assetRoots, &registry);
         if (resolved.empty()) {
             eyelib::api::core::Log::WarnF("Missing asset: %s", ref.id.c_str());
             stats.missing += 1;

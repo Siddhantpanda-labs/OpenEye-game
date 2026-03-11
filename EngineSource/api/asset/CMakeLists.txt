@@ -22,8 +22,6 @@ set(API_ASSETS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ModelLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/MeshLoader.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ShaderLoader.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/loaders/ShaderLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/TextureLoader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/loaders/TextureLoader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/All.h
