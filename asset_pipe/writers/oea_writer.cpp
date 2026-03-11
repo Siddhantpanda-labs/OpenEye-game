@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <fstream>
 #include <vector>
+#ifdef ASSET_PIPE_HAVE_ZSTD
+#include <zstd.h>
+#endif
 
 namespace asset_pipe {
 
@@ -13,6 +16,8 @@ struct LoadedEntry {
     uint32_t type = 0;
     std::string name;
     std::vector<uint8_t> payload;
+    uint32_t flags = 0;
+    uint64_t uncompressedSize = 0;
 };
 
 bool ReadAllBytes(const std::string& path, std::vector<uint8_t>& out) {
@@ -39,6 +44,21 @@ bool OeaWriter::Write(const std::string& packagePath, const std::vector<OeaInput
         le.type = e.type;
         le.name = e.name;
         if (!ReadAllBytes(e.sourcePath, le.payload)) return false;
+#ifdef ASSET_PIPE_HAVE_ZSTD
+        le.uncompressedSize = static_cast<uint64_t>(le.payload.size());
+        if (le.payload.size() > 256) {
+            const size_t bound = ZSTD_compressBound(le.payload.size());
+            std::vector<uint8_t> compressed(bound);
+            const size_t csize = ZSTD_compress(compressed.data(), bound, le.payload.data(), le.payload.size(), 3);
+            if (!ZSTD_isError(csize) && csize > 0 && csize < le.payload.size() * 95 / 100) {
+                compressed.resize(csize);
+                le.payload.swap(compressed);
+                le.flags |= OeaFormat::kFlagCompressedZstd;
+            }
+        }
+#else
+        le.uncompressedSize = static_cast<uint64_t>(le.payload.size());
+#endif
         loaded.push_back(std::move(le));
     }
 
@@ -56,8 +76,10 @@ bool OeaWriter::Write(const std::string& packagePath, const std::vector<OeaInput
         OeaEntryRecord rec;
         rec.type = e.type;
         rec.nameLen = static_cast<uint32_t>(e.name.size());
+        rec.flags = e.flags;
         rec.offset = payloadOffset;
         rec.size = static_cast<uint64_t>(e.payload.size());
+        rec.uncompressedSize = e.uncompressedSize;
         payloadOffset += rec.size;
         records.push_back(rec);
     }

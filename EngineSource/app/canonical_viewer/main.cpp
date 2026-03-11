@@ -77,7 +77,7 @@ bool ReadMaterialMap(const std::string& mapPath, std::vector<std::string>& outIn
     return any;
 }
 
-bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath, bool& outIsPrefab) {
+bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath, bool& outIsPrefab, std::string& outExtractDir) {
     std::vector<asset_pipe::OeaEntry> entries;
     if (!asset_pipe::OeaReader::ReadIndex(oeaPath, entries) || entries.empty()) return false;
 
@@ -121,6 +121,7 @@ bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath
         if (!asset_pipe::OeaReader::ExtractAll(oeaPath, cacheDir.string(), nullptr)) return false;
     }
 
+    outExtractDir = cacheDir.string();
     outAssetPath = selectedPath.string();
     outIsPrefab = (selectedPath.extension() == ".prefab");
     return true;
@@ -303,13 +304,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string path = argv[1];
+    const std::string inputPath = argv[1];
+    std::string path = inputPath;
     bool isPrefab = (path.size() >= 7 && path.compare(path.size() - 7, 7, ".prefab") == 0);
     const bool isOea = (path.size() >= 4 && path.compare(path.size() - 4, 4, ".oea") == 0);
+    std::string oeaExtractDir;
     if (isOea) {
         std::string extractedPath;
         bool extractedIsPrefab = false;
-        if (!ResolveOeaPrimaryPath(path, extractedPath, extractedIsPrefab)) {
+        if (!ResolveOeaPrimaryPath(path, extractedPath, extractedIsPrefab, oeaExtractDir)) {
             std::cerr << "CanonicalViewer: failed to read/extract .oea package " << path << "\n";
             return 1;
         }
@@ -475,7 +478,7 @@ int main(int argc, char** argv) {
         scene.opaque = scene.opaqueStorage.data();
         float radius = 5.f;
         SetupCameraAndLight(scene, sceneAABB, radius, freeFlyCam);
-        std::cout << "CanonicalViewer: prefab " << path << " (" << scene.opaqueCount << " meshes, " << materialsByIndex.size() << " indexed materials). Right-drag look, WASD+Q/E move.\n";
+        std::cout << "CanonicalViewer: prefab " << inputPath << " (" << scene.opaqueCount << " meshes, " << materialsByIndex.size() << " indexed materials). Right-drag look, WASD+Q/E move.\n";
     } else {
         auto defaultMaterial = CreateDefaultMaterial(device);
         auto mesh = LoadCanonicalMesh(path, device);
@@ -500,7 +503,12 @@ int main(int argc, char** argv) {
         scene.opaqueCount = 1;
         sceneAABB = mesh->GetAABB();
         SetupCameraAndLight(scene, sceneAABB, 5.f, freeFlyCam);
-        std::cout << "CanonicalViewer: mesh " << path << ". Right-drag look, WASD+Q/E move.\n";
+        std::cout << "CanonicalViewer: mesh " << inputPath << ". Right-drag look, WASD+Q/E move.\n";
+    }
+
+    if (!oeaExtractDir.empty()) {
+        std::error_code ec;
+        fs::remove_all(oeaExtractDir, ec);
     }
 
     auto lastTime = std::chrono::steady_clock::now();

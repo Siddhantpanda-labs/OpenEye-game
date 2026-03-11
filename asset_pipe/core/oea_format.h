@@ -6,7 +6,10 @@ namespace asset_pipe {
 namespace OeaFormat {
 
 constexpr uint32_t kMagic = 0x3141454Fu;  // "OEA1"
-constexpr uint32_t kVersion = 1u;
+constexpr uint32_t kVersion = 2u;
+constexpr uint32_t kVersionV1 = 1u;
+
+constexpr uint32_t kFlagCompressedZstd = 1u << 0;
 
 enum EntryType : uint32_t {
     Entry_Unknown = 0u,
@@ -28,8 +31,11 @@ struct OeaHeader {
 struct OeaEntryRecord {
     uint32_t type = Entry_Unknown;
     uint32_t nameLen = 0;
+    uint32_t flags = 0;
+    uint32_t reserved = 0;
     uint64_t offset = 0;
     uint64_t size = 0;
+    uint64_t uncompressedSize = 0;
 };
 
 } // namespace OeaFormat

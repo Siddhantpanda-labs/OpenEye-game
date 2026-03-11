@@ -3,6 +3,10 @@
 
 #include <filesystem>
 #include <fstream>
+#include <vector>
+#ifdef ASSET_PIPE_HAVE_ZSTD
+#include <zstd.h>
+#endif
 
 namespace asset_pipe {
 
@@ -13,17 +17,36 @@ bool ReadHeaderAndIndex(std::ifstream& in, std::vector<OeaEntry>& outEntries) {
     using namespace OeaFormat;
     OeaHeader header{};
     if (!in.read(reinterpret_cast<char*>(&header), sizeof(header))) return false;
-    if (header.magic != kMagic || header.version != kVersion) return false;
+    if (header.magic != kMagic) return false;
+    if (header.version != kVersion && header.version != kVersionV1) return false;
 
     outEntries.clear();
     outEntries.reserve(header.entryCount);
     for (uint32_t i = 0; i < header.entryCount; ++i) {
         OeaEntryRecord rec{};
-        if (!in.read(reinterpret_cast<char*>(&rec), sizeof(rec))) return false;
+        if (header.version == kVersionV1) {
+            struct OeaEntryRecordV1 {
+                uint32_t type;
+                uint32_t nameLen;
+                uint64_t offset;
+                uint64_t size;
+            } recV1{};
+            if (!in.read(reinterpret_cast<char*>(&recV1), sizeof(recV1))) return false;
+            rec.type = recV1.type;
+            rec.nameLen = recV1.nameLen;
+            rec.flags = 0;
+            rec.offset = recV1.offset;
+            rec.size = recV1.size;
+            rec.uncompressedSize = recV1.size;
+        } else {
+            if (!in.read(reinterpret_cast<char*>(&rec), sizeof(rec))) return false;
+        }
         OeaEntry e;
         e.type = rec.type;
+        e.flags = rec.flags;
         e.offset = rec.offset;
         e.size = rec.size;
+        e.uncompressedSize = rec.uncompressedSize;
         if (rec.nameLen > 0) {
             e.name.resize(rec.nameLen);
             if (!in.read(&e.name[0], rec.nameLen)) return false;
@@ -58,14 +81,26 @@ bool OeaReader::ExtractAll(const std::string& packagePath, const std::string& ou
         in.seekg(static_cast<std::streamoff>(e.offset), std::ios::beg);
         if (!in) return false;
 
-        constexpr size_t kChunk = 64 * 1024;
-        std::vector<char> buffer(kChunk);
-        uint64_t remaining = e.size;
-        while (remaining > 0) {
-            const size_t n = static_cast<size_t>(remaining > kChunk ? kChunk : remaining);
-            if (!in.read(buffer.data(), static_cast<std::streamsize>(n))) return false;
-            if (!out.write(buffer.data(), static_cast<std::streamsize>(n))) return false;
-            remaining -= static_cast<uint64_t>(n);
+        std::vector<uint8_t> stored(static_cast<size_t>(e.size));
+        if (!stored.empty() &&
+            !in.read(reinterpret_cast<char*>(stored.data()), static_cast<std::streamsize>(stored.size())))
+            return false;
+
+        if ((e.flags & OeaFormat::kFlagCompressedZstd) != 0) {
+#ifdef ASSET_PIPE_HAVE_ZSTD
+            std::vector<uint8_t> decoded(static_cast<size_t>(e.uncompressedSize));
+            const size_t dsize = ZSTD_decompress(decoded.data(), decoded.size(), stored.data(), stored.size());
+            if (ZSTD_isError(dsize) || dsize != decoded.size()) return false;
+            if (!decoded.empty() &&
+                !out.write(reinterpret_cast<const char*>(decoded.data()), static_cast<std::streamsize>(decoded.size())))
+                return false;
+#else
+            return false;
+#endif
+        } else {
+            if (!stored.empty() &&
+                !out.write(reinterpret_cast<const char*>(stored.data()), static_cast<std::streamsize>(stored.size())))
+                return false;
         }
     }
     if (outEntries) *outEntries = std::move(entries);
