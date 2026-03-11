@@ -39,11 +39,16 @@ bool OeaWriter::Write(const std::string& packagePath, const std::vector<OeaInput
     std::vector<LoadedEntry> loaded;
     loaded.reserve(entries.size());
     for (const auto& e : entries) {
-        if (e.name.empty() || e.sourcePath.empty()) continue;
+        if (e.name.empty()) continue;
         LoadedEntry le;
         le.type = e.type;
         le.name = e.name;
-        if (!ReadAllBytes(e.sourcePath, le.payload)) return false;
+        if (!e.payload.empty()) {
+            le.payload = e.payload;
+        } else {
+            if (e.sourcePath.empty()) continue;
+            if (!ReadAllBytes(e.sourcePath, le.payload)) return false;
+        }
 #ifdef ASSET_PIPE_HAVE_ZSTD
         le.uncompressedSize = static_cast<uint64_t>(le.payload.size());
         if (le.payload.size() > 256) {

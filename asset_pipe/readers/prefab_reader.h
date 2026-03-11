@@ -18,6 +18,7 @@ class PrefabReader {
 public:
     /** Returns true on success. outDrawables is filled with mesh path + world transform for each entity that has a mesh. */
     static bool Read(const std::string& path, std::vector<PrefabDrawable>& outDrawables);
+    static bool ReadFromText(const std::string& text, std::vector<PrefabDrawable>& outDrawables);
 };
 
 } // namespace asset_pipe

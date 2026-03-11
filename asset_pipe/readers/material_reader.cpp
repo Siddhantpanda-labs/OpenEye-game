@@ -2,8 +2,73 @@
 #include "asset_pipe/core/material_format.h"
 
 #include <fstream>
+#include <cstring>
 
 namespace asset_pipe {
+
+namespace {
+
+bool ParseMaterialBytes(const uint8_t* data, size_t size, LoadedMaterial& out) {
+    if (!data || size < sizeof(uint32_t) * 2u) return false;
+
+    using namespace MaterialFormat;
+    const uint32_t magic = *reinterpret_cast<const uint32_t*>(data + 0);
+    const uint32_t version = *reinterpret_cast<const uint32_t*>(data + 4);
+    if (magic != kMagic) return false;
+
+    out = LoadedMaterial{};
+    if (version == kVersionV1) {
+        struct V1Header {
+            uint32_t magic, version, nameLen, albedoPathLen, normalPathLen, metallicPathLen, roughnessPathLen;
+            float metallicValue, roughnessValue;
+        };
+        if (size < sizeof(V1Header)) return false;
+        V1Header h{};
+        std::memcpy(&h, data, sizeof(V1Header));
+        size_t pos = sizeof(V1Header);
+        auto readStr = [&](uint32_t len, std::string& s) -> bool {
+            if (len == 0) { s.clear(); return true; }
+            if (pos > size || static_cast<size_t>(len) > (size - pos)) return false;
+            s.assign(reinterpret_cast<const char*>(data + pos), len);
+            pos += len;
+            return true;
+        };
+        if (!readStr(h.nameLen, out.name)) return false;
+        if (!readStr(h.albedoPathLen, out.albedoPath)) return false;
+        if (!readStr(h.normalPathLen, out.normalPath)) return false;
+        if (!readStr(h.metallicPathLen, out.metallicPath)) return false;
+        if (!readStr(h.roughnessPathLen, out.roughnessPath)) return false;
+        out.metallicValue = h.metallicValue;
+        out.roughnessValue = h.roughnessValue;
+        out.albedoColorR = 1.f; out.albedoColorG = 1.f; out.albedoColorB = 1.f;
+        return true;
+    }
+
+    if (version != kVersion || size < sizeof(MaterialHeader)) return false;
+    MaterialHeader h{};
+    std::memcpy(&h, data, sizeof(MaterialHeader));
+    size_t pos = sizeof(MaterialHeader);
+    auto readStr = [&](uint32_t len, std::string& s) -> bool {
+        if (len == 0) { s.clear(); return true; }
+        if (pos > size || static_cast<size_t>(len) > (size - pos)) return false;
+        s.assign(reinterpret_cast<const char*>(data + pos), len);
+        pos += len;
+        return true;
+    };
+    if (!readStr(h.nameLen, out.name)) return false;
+    if (!readStr(h.albedoPathLen, out.albedoPath)) return false;
+    if (!readStr(h.normalPathLen, out.normalPath)) return false;
+    if (!readStr(h.metallicPathLen, out.metallicPath)) return false;
+    if (!readStr(h.roughnessPathLen, out.roughnessPath)) return false;
+    out.metallicValue = h.metallicValue;
+    out.roughnessValue = h.roughnessValue;
+    out.albedoColorR = h.albedoColorR;
+    out.albedoColorG = h.albedoColorG;
+    out.albedoColorB = h.albedoColorB;
+    return true;
+}
+
+} // namespace
 
 bool MaterialReader::Read(const std::string& path, LoadedMaterial& out) {
     std::ifstream file(path, std::ios::binary);
@@ -75,6 +140,10 @@ bool MaterialReader::Read(const std::string& path, LoadedMaterial& out) {
     out.albedoColorG = header.albedoColorG;
     out.albedoColorB = header.albedoColorB;
     return true;
+}
+
+bool MaterialReader::Read(const std::vector<uint8_t>& bytes, LoadedMaterial& out) {
+    return ParseMaterialBytes(bytes.data(), bytes.size(), out);
 }
 
 } // namespace asset_pipe

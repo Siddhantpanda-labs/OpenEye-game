@@ -22,6 +22,55 @@ bool ReadBytes(std::istream& in, void* data, size_t size) {
     return in.read(static_cast<char*>(data), static_cast<std::streamsize>(size)).good();
 }
 
+bool ParseMeshBinary(const uint8_t* data, size_t size, ImportMesh& out) {
+    if (!data || size < sizeof(MeshHeader)) return false;
+    const auto* header = reinterpret_cast<const MeshHeader*>(data);
+    if (header->magic != kMagic || header->version != kVersion) return false;
+
+    auto fits = [size](uint32_t offset, size_t bytes) -> bool {
+        return static_cast<size_t>(offset) <= size && bytes <= (size - static_cast<size_t>(offset));
+    };
+    if (!fits(header->submeshOffset, static_cast<size_t>(header->submeshCount) * sizeof(SubmeshRecord))) return false;
+    if (!fits(header->vertexOffset, static_cast<size_t>(header->vertexCount) * sizeof(VertexRecord))) return false;
+    if (!fits(header->indexOffset, static_cast<size_t>(header->indexCount) * sizeof(uint32_t))) return false;
+    if (header->boundsOffset && !fits(header->boundsOffset, sizeof(BoundsRecord))) return false;
+
+    out = ImportMesh{};
+    out.vertices.resize(header->vertexCount);
+    out.indices.resize(header->indexCount);
+    out.submeshes.resize(header->submeshCount);
+
+    const auto* submeshes = reinterpret_cast<const SubmeshRecord*>(data + header->submeshOffset);
+    for (uint32_t i = 0; i < header->submeshCount; ++i) {
+        out.submeshes[i].indexStart = submeshes[i].indexStart;
+        out.submeshes[i].indexCount = submeshes[i].indexCount;
+        out.submeshes[i].materialIndex = submeshes[i].materialIndex;
+    }
+
+    const auto* verts = reinterpret_cast<const VertexRecord*>(data + header->vertexOffset);
+    for (uint32_t i = 0; i < header->vertexCount; ++i) {
+        out.vertices[i].position.x = verts[i].px; out.vertices[i].position.y = verts[i].py; out.vertices[i].position.z = verts[i].pz;
+        out.vertices[i].normal.x = verts[i].nx; out.vertices[i].normal.y = verts[i].ny; out.vertices[i].normal.z = verts[i].nz;
+        out.vertices[i].tangent.x = verts[i].tx; out.vertices[i].tangent.y = verts[i].ty; out.vertices[i].tangent.z = verts[i].tz; out.vertices[i].tangent.w = verts[i].tw;
+        out.vertices[i].uv0.x = verts[i].u0; out.vertices[i].uv0.y = verts[i].v0;
+        out.vertices[i].uv1.x = verts[i].u1; out.vertices[i].uv1.y = verts[i].v1;
+    }
+
+    const auto* idx = reinterpret_cast<const uint32_t*>(data + header->indexOffset);
+    for (uint32_t i = 0; i < header->indexCount; ++i) out.indices[i] = idx[i];
+
+    if (header->boundsOffset) {
+        const auto* bounds = reinterpret_cast<const BoundsRecord*>(data + header->boundsOffset);
+        out.bounds.min.x = bounds->centerX - bounds->extentsX;
+        out.bounds.min.y = bounds->centerY - bounds->extentsY;
+        out.bounds.min.z = bounds->centerZ - bounds->extentsZ;
+        out.bounds.max.x = bounds->centerX + bounds->extentsX;
+        out.bounds.max.y = bounds->centerY + bounds->extentsY;
+        out.bounds.max.z = bounds->centerZ + bounds->extentsZ;
+    }
+    return true;
+}
+
 } // namespace
 
 bool MeshReader::Read(const std::string& path, ImportMesh& out) {
@@ -73,6 +122,10 @@ bool MeshReader::Read(const std::string& path, ImportMesh& out) {
         }
     }
     return true;
+}
+
+bool MeshReader::Read(const std::vector<uint8_t>& bytes, ImportMesh& out) {
+    return ParseMeshBinary(bytes.data(), bytes.size(), out);
 }
 
 } // namespace asset_pipe

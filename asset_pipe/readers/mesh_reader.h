@@ -3,6 +3,7 @@
 #include "asset_pipe/core/import_mesh.h"
 
 #include <string>
+#include <vector>
 
 namespace asset_pipe {
 
@@ -10,6 +11,7 @@ namespace asset_pipe {
 class MeshReader {
 public:
     static bool Read(const std::string& path, ImportMesh& out);
+    static bool Read(const std::vector<uint8_t>& bytes, ImportMesh& out);
 };
 
 } // namespace asset_pipe

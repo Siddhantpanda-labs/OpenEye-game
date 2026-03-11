@@ -1,183 +1,381 @@
 /**
- * Asset pipeline importer: source file (FBX/GLTF/etc.) -> canonical .mesh, .material, .prefab.
- * Phase 1: no GUIDs; deterministic naming.
+ * Asset pipeline importer.
+ * Modes:
+ *   default : model/<name>.omesh + textures/ + anims (materials embedded in omesh)
+ *   --mat   : model/<name>.omesh + materials/*.mat + textures/ + anims
+ *   --oea   : single <name>.oea only (no loose writes)
  */
 
 #include "asset_pipe/tools/importer/SceneLoader.h"
 #include "asset_pipe/tools/importer/SceneConverter.h"
 #include <assimp/scene.h>
 #include "asset_pipe/core/import_scene.h"
-#include "asset_pipe/writers/mesh_writer.h"
+#include "asset_pipe/core/mesh_format.h"
+#include "asset_pipe/core/material_format.h"
+#include "asset_pipe/core/texture_format.h"
 #include "asset_pipe/writers/material_writer.h"
-#include "asset_pipe/writers/prefab_writer.h"
-#include "asset_pipe/writers/texture_writer.h"
 #include "asset_pipe/writers/animation_writer.h"
 #include "asset_pipe/writers/oea_writer.h"
 #include "asset_pipe/core/oea_format.h"
 
-#include <iostream>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
 
-static void Log(const char* msg) {
-    std::cout << "[Importer] " << msg << std::endl;
+static void Log(const char* msg) { std::cout << "[Importer] " << msg << std::endl; }
+
+namespace {
+using namespace asset_pipe;
+
+enum class OutputMode {
+    OmeshEmbeddedMaterials, // default
+    OmeshSplitMaterials,    // --mat
+    OeaOnly                 // --oea
+};
+
+template <typename T>
+void AppendBytes(std::vector<uint8_t>& out, const T& v) {
+    const auto* p = reinterpret_cast<const uint8_t*>(&v);
+    out.insert(out.end(), p, p + sizeof(T));
 }
 
-static bool WriteMaterialMap(const asset_pipe::ImportScene& importScene, const fs::path& outDir) {
-    if (importScene.sourceName.empty()) return false;
-    const fs::path mapPath = outDir / (importScene.sourceName + ".materialmap");
-    std::ofstream file(mapPath, std::ios::binary);
-    if (!file) return false;
+void AppendRaw(std::vector<uint8_t>& out, const void* ptr, size_t size) {
+    const auto* p = reinterpret_cast<const uint8_t*>(ptr);
+    out.insert(out.end(), p, p + size);
+}
 
-    // Deterministic material index -> material file mapping for robust runtime lookup.
-    file << "# material_index|material_file\n";
-    for (size_t i = 0; i < importScene.materials.size(); ++i) {
-        file << i << "|" << importScene.materials[i].name << ".material\n";
+size_t AlignUp(size_t value, size_t align) { return (value + align - 1) & ~(align - 1); }
+
+bool SerializeMesh(const ImportMesh& mesh, std::vector<uint8_t>& out) {
+    using namespace MeshFormat;
+    out.clear();
+    const uint32_t vertexCount = static_cast<uint32_t>(mesh.vertices.size());
+    const uint32_t indexCount = static_cast<uint32_t>(mesh.indices.size());
+    const uint32_t submeshCount = static_cast<uint32_t>(mesh.submeshes.size());
+
+    size_t offset = sizeof(MeshHeader);
+    const uint32_t lodCount = 1u;
+    size_t lodTableSize = AlignUp(lodCount * sizeof(MeshLOD), kAlignment);
+    uint32_t lodOffset = static_cast<uint32_t>(offset); offset += lodTableSize;
+    size_t submeshTableSize = AlignUp(submeshCount * sizeof(SubmeshRecord), kAlignment);
+    uint32_t submeshOffset = static_cast<uint32_t>(offset); offset += submeshTableSize;
+    size_t vertexDataSize = AlignUp(vertexCount * sizeof(VertexRecord), kAlignment);
+    uint32_t vertexOffset = static_cast<uint32_t>(offset); offset += vertexDataSize;
+    size_t indexDataSize = AlignUp(indexCount * sizeof(uint32_t), kAlignment);
+    uint32_t indexOffset = static_cast<uint32_t>(offset); offset += indexDataSize;
+    uint32_t boundsOffset = static_cast<uint32_t>(offset);
+
+    MeshHeader header;
+    header.vertexCount = vertexCount;
+    header.indexCount = indexCount;
+    header.submeshCount = submeshCount;
+    header.streamCount = 1u;
+    header.lodOffset = lodOffset;
+    header.submeshOffset = submeshOffset;
+    header.vertexOffset = vertexOffset;
+    header.indexOffset = indexOffset;
+    header.boundsOffset = boundsOffset;
+    AppendBytes(out, header);
+
+    MeshLOD lod;
+    lod.indexStart = 0;
+    lod.indexCount = indexCount;
+    lod.screenSize = 1.f;
+    AppendBytes(out, lod);
+    while (out.size() < lodOffset + lodTableSize) AppendBytes<uint32_t>(out, 0u);
+
+    for (const auto& s : mesh.submeshes) {
+        SubmeshRecord rec{};
+        rec.indexStart = s.indexStart;
+        rec.indexCount = s.indexCount;
+        rec.materialIndex = s.materialIndex;
+        AppendBytes(out, rec);
     }
-    return file.good();
+    while (out.size() < submeshOffset + submeshTableSize) AppendBytes<uint32_t>(out, 0u);
+
+    for (const auto& v : mesh.vertices) {
+        VertexRecord rec{};
+        rec.px = v.position.x; rec.py = v.position.y; rec.pz = v.position.z;
+        rec.nx = v.normal.x; rec.ny = v.normal.y; rec.nz = v.normal.z;
+        rec.tx = v.tangent.x; rec.ty = v.tangent.y; rec.tz = v.tangent.z; rec.tw = v.tangent.w;
+        rec.u0 = v.uv0.x; rec.v0 = v.uv0.y;
+        rec.u1 = v.uv1.x; rec.v1 = v.uv1.y;
+        AppendBytes(out, rec);
+    }
+    while (out.size() < vertexOffset + vertexDataSize) AppendBytes<uint32_t>(out, 0u);
+
+    if (!mesh.indices.empty())
+        AppendRaw(out, mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t));
+    while (out.size() < indexOffset + indexDataSize) AppendBytes<uint32_t>(out, 0u);
+
+    BoundsRecord b{};
+    b.centerX = (mesh.bounds.min.x + mesh.bounds.max.x) * 0.5f;
+    b.centerY = (mesh.bounds.min.y + mesh.bounds.max.y) * 0.5f;
+    b.centerZ = (mesh.bounds.min.z + mesh.bounds.max.z) * 0.5f;
+    b.extentsX = (mesh.bounds.max.x - mesh.bounds.min.x) * 0.5f;
+    b.extentsY = (mesh.bounds.max.y - mesh.bounds.min.y) * 0.5f;
+    b.extentsZ = (mesh.bounds.max.z - mesh.bounds.min.z) * 0.5f;
+    b.radius = std::sqrt(b.extentsX*b.extentsX + b.extentsY*b.extentsY + b.extentsZ*b.extentsZ);
+    AppendBytes(out, b);
+    return true;
 }
+
+bool SerializeMaterial(const ImportMaterial& material, std::vector<uint8_t>& out) {
+    using namespace MaterialFormat;
+    out.clear();
+    MaterialHeader header;
+    header.nameLen = static_cast<uint32_t>(material.name.size());
+    header.albedoPathLen = static_cast<uint32_t>(material.albedo.path.size());
+    header.normalPathLen = static_cast<uint32_t>(material.normal.path.size());
+    header.metallicPathLen = static_cast<uint32_t>(material.metallic.path.size());
+    header.roughnessPathLen = static_cast<uint32_t>(material.roughness.path.size());
+    header.metallicValue = material.metallicValue;
+    header.roughnessValue = material.roughnessValue;
+    header.albedoColorR = material.albedoColorR;
+    header.albedoColorG = material.albedoColorG;
+    header.albedoColorB = material.albedoColorB;
+    AppendBytes(out, header);
+    if (!material.name.empty()) AppendRaw(out, material.name.data(), material.name.size());
+    if (!material.albedo.path.empty()) AppendRaw(out, material.albedo.path.data(), material.albedo.path.size());
+    if (!material.normal.path.empty()) AppendRaw(out, material.normal.path.data(), material.normal.path.size());
+    if (!material.metallic.path.empty()) AppendRaw(out, material.metallic.path.data(), material.metallic.path.size());
+    if (!material.roughness.path.empty()) AppendRaw(out, material.roughness.path.data(), material.roughness.path.size());
+    return true;
+}
+
+bool SerializeAnimation(const ImportAnimation& animation, std::vector<uint8_t>& out) {
+    out.clear();
+    const uint32_t magic = 0x414E4931u; // ANI1
+    const uint32_t version = 1u;
+    const uint32_t nameLen = static_cast<uint32_t>(animation.name.size());
+    const uint32_t channelCount = static_cast<uint32_t>(animation.channels.size());
+    AppendBytes(out, magic);
+    AppendBytes(out, version);
+    AppendBytes(out, nameLen);
+    AppendBytes(out, channelCount);
+    AppendBytes(out, animation.duration);
+    if (!animation.name.empty()) AppendRaw(out, animation.name.data(), animation.name.size());
+    for (const auto& ch : animation.channels) {
+        const uint32_t boneNameLen = static_cast<uint32_t>(ch.boneName.size());
+        const int32_t boneIndex = ch.boneIndex;
+        const uint32_t posCount = static_cast<uint32_t>(ch.positionKeys.size());
+        const uint32_t rotCount = static_cast<uint32_t>(ch.rotationKeys.size());
+        const uint32_t sclCount = static_cast<uint32_t>(ch.scaleKeys.size());
+        AppendBytes(out, boneNameLen);
+        AppendBytes(out, boneIndex);
+        AppendBytes(out, posCount);
+        AppendBytes(out, rotCount);
+        AppendBytes(out, sclCount);
+        if (boneNameLen) AppendRaw(out, ch.boneName.data(), ch.boneName.size());
+        for (const auto& pk : ch.positionKeys) { AppendBytes(out, pk.time); AppendRaw(out, &pk.value, 12); }
+        for (const auto& rk : ch.rotationKeys) { AppendBytes(out, rk.time); AppendRaw(out, &rk.value, 16); }
+        for (const auto& sk : ch.scaleKeys) { AppendBytes(out, sk.time); AppendRaw(out, &sk.value, 12); }
+    }
+    return true;
+}
+
+void WriteNodeText(std::ostringstream& out, const ImportScene& scene, int nodeIndex, int depth) {
+    if (nodeIndex < 0 || nodeIndex >= static_cast<int>(scene.nodes.size())) return;
+    const ImportNode& node = scene.nodes[static_cast<size_t>(nodeIndex)];
+    std::string indent(depth * 2, ' ');
+    out << indent << "- name: \"" << node.name << "\"\n";
+    out << indent << "  transform: [";
+    for (int i = 0; i < 16; ++i) { if (i) out << ", "; out << node.localTransform.m[i]; }
+    out << "]\n";
+    if (node.meshIndex >= 0 && node.meshIndex < static_cast<int>(scene.meshes.size()))
+        out << indent << "  mesh: \"" << scene.meshes[static_cast<size_t>(node.meshIndex)].name << ".mesh\"\n";
+    out << indent << "  children:\n";
+    for (int c : node.children) WriteNodeText(out, scene, c, depth + 1);
+}
+
+bool SerializePrefab(const ImportScene& scene, std::vector<uint8_t>& out) {
+    std::ostringstream ss;
+    ss << "prefab:\n";
+    ss << "  source: \"" << scene.sourcePath << "\"\n";
+    ss << "  entities:\n";
+    if (scene.rootNodeIndex >= 0) WriteNodeText(ss, scene, scene.rootNodeIndex, 0);
+    const std::string s = ss.str();
+    out.assign(s.begin(), s.end());
+    return true;
+}
+
+std::vector<uint8_t> BuildMaterialMapBytes(const ImportScene& scene, bool useMatExt, bool inMaterialsFolder) {
+    std::ostringstream ss;
+    ss << "# material_index|material_file\n";
+    for (size_t i = 0; i < scene.materials.size(); ++i) {
+        if (inMaterialsFolder) ss << i << "|materials/";
+        else ss << i << "|";
+        ss << scene.materials[i].name << (useMatExt ? ".mat" : ".material") << "\n";
+    }
+    const std::string s = ss.str();
+    return std::vector<uint8_t>(s.begin(), s.end());
+}
+
+bool WriteFileBytes(const fs::path& p, const std::vector<uint8_t>& bytes) {
+    std::error_code ec;
+    if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
+    std::ofstream f(p.string(), std::ios::binary);
+    if (!f) return false;
+    if (!bytes.empty() && !f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
+        return false;
+    return f.good();
+}
+
+} // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: " << (argc ? argv[0] : "importer") << " <source_file> [output_dir] [--keep-loose | --oea-only]\n";
-        std::cerr << "  source_file: FBX, GLTF, GLB, DAE, etc.\n";
-        std::cerr << "  output_dir: default is directory of source_file\n";
-        std::cerr << "  default: writes .oea only\n";
-        std::cerr << "  --keep-loose: keep loose sub-assets alongside .oea\n";
-        std::cerr << "  --oea-only: alias for default behavior\n";
+        std::cerr << "Usage: " << (argc ? argv[0] : "importer") << " <source_file> [output_dir] [--mat | --oea]\n";
+        std::cerr << "  default: model/<name>.omesh + textures/ + anims (materials embedded in .omesh)\n";
+        std::cerr << "  --mat  : model/<name>.omesh + materials/*.mat + textures/ + anims\n";
+        std::cerr << "  --oea  : single <name>.oea only (no loose writes)\n";
         return 1;
     }
 
     const std::string sourcePath = argv[1];
     std::string outputDir = fs::path(sourcePath).parent_path().string();
-    bool keepLoose = false; // package-only by default
+    OutputMode mode = OutputMode::OmeshEmbeddedMaterials;
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i] ? argv[i] : "";
-        if (arg == "--keep-loose") keepLoose = true;
-        else if (arg == "--oea-only") keepLoose = false;
+        if (arg == "--oea") mode = OutputMode::OeaOnly;
+        else if (arg == "--mat") mode = OutputMode::OmeshSplitMaterials;
         else if (!arg.empty()) outputDir = arg;
     }
     if (outputDir.empty()) outputDir = ".";
 
     Log(("Loading " + sourcePath).c_str());
-
-    asset_pipe::SceneLoader loader;
+    SceneLoader loader;
     const aiScene* scene = loader.Load(sourcePath.c_str());
     if (!scene) {
         std::cerr << "[Importer] Error: " << loader.GetError() << std::endl;
         return 2;
     }
 
-    asset_pipe::ImportScene importScene;
-    if (!asset_pipe::SceneConverter::Convert(scene, sourcePath.c_str(), importScene)) {
+    ImportScene importScene;
+    if (!SceneConverter::Convert(scene, sourcePath.c_str(), importScene)) {
         std::cerr << "[Importer] Convert failed\n";
         return 3;
     }
+
+    fs::create_directories(outputDir);
+    fs::path out(outputDir);
 
     Log(("Meshes: " + std::to_string(importScene.meshes.size())).c_str());
     Log(("Materials: " + std::to_string(importScene.materials.size())).c_str());
     Log(("Textures: " + std::to_string(importScene.textures.size())).c_str());
     Log(("Animations: " + std::to_string(importScene.animations.size())).c_str());
 
-    fs::create_directories(outputDir);
-    fs::path out(outputDir);
-    fs::path writeDir = out;
-    if (!keepLoose) {
-        writeDir = fs::temp_directory_path() / "OpenEyeOeaStage" / importScene.sourceName;
-        std::error_code ec;
-        fs::remove_all(writeDir, ec);
-        fs::create_directories(writeDir, ec);
-        if (ec) {
-            std::cerr << "[Importer] Failed to create staging directory: " << writeDir.string() << "\n";
-            return 4;
+    // Build in-memory entries shared by .omesh/.oea container writing.
+    std::vector<OeaInputEntry> meshEntries;
+    meshEntries.reserve(importScene.meshes.size() + 2);
+    for (const auto& m : importScene.meshes) {
+        std::vector<uint8_t> payload;
+        if (!SerializeMesh(m, payload)) return 4;
+        meshEntries.push_back({OeaFormat::Entry_Mesh, m.name + ".mesh", "", std::move(payload)});
+    }
+    {
+        std::vector<uint8_t> prefabPayload;
+        if (!SerializePrefab(importScene, prefabPayload)) return 4;
+        meshEntries.push_back({OeaFormat::Entry_Prefab, importScene.sourceName + ".prefab", "", std::move(prefabPayload)});
+    }
+    meshEntries.push_back({OeaFormat::Entry_MaterialMap, importScene.sourceName + ".materialmap", "",
+                           BuildMaterialMapBytes(importScene, true, mode == OutputMode::OmeshSplitMaterials)});
+
+    if (mode == OutputMode::OeaOnly) {
+        std::vector<OeaInputEntry> packageEntries = meshEntries;
+        for (const auto& mat : importScene.materials) {
+            std::vector<uint8_t> payload;
+            if (!SerializeMaterial(mat, payload)) return 4;
+            packageEntries.push_back({OeaFormat::Entry_Material, mat.name + ".mat", "", std::move(payload)});
         }
-    }
-    std::vector<std::string> writtenSubFiles;
-
-    for (size_t i = 0; i < importScene.meshes.size(); ++i) {
-        std::string meshPath = (writeDir / (importScene.meshes[i].name + ".mesh")).string();
-        if (asset_pipe::MeshWriter::Write(importScene.meshes[i], meshPath)) {
-            if (keepLoose) Log(("Writing " + meshPath).c_str());
-            writtenSubFiles.push_back(meshPath);
-        } else
-            std::cerr << "[Importer] Failed to write " << meshPath << "\n";
-    }
-
-    for (size_t i = 0; i < importScene.textures.size(); ++i) {
-        std::string texPath = (writeDir / (importScene.textures[i].name + ".tex")).string();
-        if (asset_pipe::TextureWriter::Write(importScene.textures[i], texPath)) {
-            if (keepLoose) Log(("Writing " + texPath).c_str());
-            writtenSubFiles.push_back(texPath);
-        } else
-            std::cerr << "[Importer] Failed to write " << texPath << "\n";
-    }
-
-    for (size_t i = 0; i < importScene.materials.size(); ++i) {
-        std::string matPath = (writeDir / (importScene.materials[i].name + ".material")).string();
-        if (asset_pipe::MaterialWriter::Write(importScene.materials[i], matPath)) {
-            if (keepLoose) Log(("Writing " + matPath).c_str());
-            writtenSubFiles.push_back(matPath);
-        } else
-            std::cerr << "[Importer] Failed to write " << matPath << "\n";
-    }
-
-    if (WriteMaterialMap(importScene, writeDir)) {
-        if (keepLoose) Log(("Writing " + (writeDir / (importScene.sourceName + ".materialmap")).string()).c_str());
-        writtenSubFiles.push_back((writeDir / (importScene.sourceName + ".materialmap")).string());
-    } else
-        std::cerr << "[Importer] Failed to write material map for " << importScene.sourceName << "\n";
-
-    for (size_t i = 0; i < importScene.animations.size(); ++i) {
-        std::string animPath = (writeDir / (importScene.animations[i].name + ".anim")).string();
-        if (asset_pipe::AnimationWriter::Write(importScene.animations[i], animPath)) {
-            if (keepLoose) Log(("Writing " + animPath).c_str());
-            writtenSubFiles.push_back(animPath);
-        } else
-            std::cerr << "[Importer] Failed to write " << animPath << "\n";
-    }
-
-    std::string prefabPath = (writeDir / (importScene.sourceName + ".prefab")).string();
-    if (asset_pipe::PrefabWriter::Write(importScene, prefabPath)) {
-        if (keepLoose) Log(("Writing " + prefabPath).c_str());
-        writtenSubFiles.push_back(prefabPath);
-    } else
-        std::cerr << "[Importer] Failed to write " << prefabPath << "\n";
-
-    std::vector<asset_pipe::OeaInputEntry> packageEntries;
-    packageEntries.reserve(importScene.meshes.size() + importScene.textures.size() + importScene.materials.size() +
-                           importScene.animations.size() + 2u);
-    for (const auto& m : importScene.meshes)
-        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Mesh, m.name + ".mesh", (writeDir / (m.name + ".mesh")).string()});
-    for (const auto& t : importScene.textures)
-        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Texture, t.name + ".tex", (writeDir / (t.name + ".tex")).string()});
-    for (const auto& m : importScene.materials)
-        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Material, m.name + ".material", (writeDir / (m.name + ".material")).string()});
-    for (const auto& a : importScene.animations)
-        packageEntries.push_back({asset_pipe::OeaFormat::Entry_Animation, a.name + ".anim", (writeDir / (a.name + ".anim")).string()});
-    const std::string materialMapPath = (writeDir / (importScene.sourceName + ".materialmap")).string();
-    if (fs::exists(materialMapPath))
-        packageEntries.push_back({asset_pipe::OeaFormat::Entry_MaterialMap, importScene.sourceName + ".materialmap", materialMapPath});
-    packageEntries.push_back({asset_pipe::OeaFormat::Entry_Prefab, importScene.sourceName + ".prefab", prefabPath});
-
-    const std::string oeaPath = (out / (importScene.sourceName + ".oea")).string();
-    const bool oeaOk = asset_pipe::OeaWriter::Write(oeaPath, packageEntries);
-    if (oeaOk)
+        for (const auto& tex : importScene.textures) {
+            if (!tex.encodedData.empty()) {
+                const std::string n = tex.outputFileName.empty() ? (tex.name + ".png") : tex.outputFileName;
+                packageEntries.push_back({OeaFormat::Entry_Texture, "textures/" + n, "", tex.encodedData});
+            }
+        }
+        for (const auto& anim : importScene.animations) {
+            std::vector<uint8_t> payload;
+            if (!SerializeAnimation(anim, payload)) return 4;
+            packageEntries.push_back({OeaFormat::Entry_Animation, anim.name + ".anim", "", std::move(payload)});
+        }
+        const std::string oeaPath = (out / (importScene.sourceName + ".oea")).string();
+        if (!OeaWriter::Write(oeaPath, packageEntries)) {
+            std::cerr << "[Importer] Failed to write " << oeaPath << "\n";
+            return 5;
+        }
         Log(("Writing " + oeaPath).c_str());
-    else
-        std::cerr << "[Importer] Failed to write " << oeaPath << "\n";
-
-    if (!keepLoose && oeaOk) {
-        std::error_code ec;
-        fs::remove_all(writeDir, ec);
-        if (ec) {
-            std::cerr << "[Importer] Warning: failed to clean staging directory: " << writeDir.string() << "\n";
-        }
-        Log("Package-only mode: wrote .oea only.");
+        Log("Done.");
+        return 0;
     }
+
+    const fs::path modelDir = out / importScene.sourceName;
+    const fs::path texturesDir = modelDir / "textures";
+    std::error_code ec;
+    fs::create_directories(texturesDir, ec);
+    if (ec) {
+        std::cerr << "[Importer] Failed to create texture directory: " << texturesDir.string() << "\n";
+        return 6;
+    }
+
+    // Loose textures (original extension/encoded bytes).
+    for (const auto& tex : importScene.textures) {
+        const std::string n = tex.outputFileName.empty() ? (tex.name + ".png") : tex.outputFileName;
+        if (!tex.encodedData.empty()) {
+            const fs::path p = texturesDir / n;
+            if (!WriteFileBytes(p, tex.encodedData)) {
+                std::cerr << "[Importer] Failed to write " << p.string() << "\n";
+                return 7;
+            }
+            Log(("Writing " + p.string()).c_str());
+        }
+    }
+
+    // Loose animations in model folder.
+    for (const auto& anim : importScene.animations) {
+        const fs::path p = modelDir / (anim.name + ".anim");
+        fs::create_directories(modelDir, ec);
+        if (!AnimationWriter::Write(anim, p.string())) {
+            std::cerr << "[Importer] Failed to write " << p.string() << "\n";
+            return 8;
+        }
+        Log(("Writing " + p.string()).c_str());
+    }
+
+    if (mode == OutputMode::OmeshSplitMaterials) {
+        const fs::path matDir = modelDir / "materials";
+        fs::create_directories(matDir, ec);
+        if (ec) return 9;
+        for (const auto& mat : importScene.materials) {
+            const fs::path p = matDir / (mat.name + ".mat");
+            if (!MaterialWriter::Write(mat, p.string())) {
+                std::cerr << "[Importer] Failed to write " << p.string() << "\n";
+                return 10;
+            }
+            Log(("Writing " + p.string()).c_str());
+        }
+    } else {
+        for (const auto& mat : importScene.materials) {
+            std::vector<uint8_t> payload;
+            if (!SerializeMaterial(mat, payload)) return 11;
+            meshEntries.push_back({OeaFormat::Entry_Material, mat.name + ".mat", "", std::move(payload)});
+        }
+    }
+
+    const std::string omeshPath = (modelDir / (importScene.sourceName + ".omesh")).string();
+    if (!OeaWriter::Write(omeshPath, meshEntries)) {
+        std::cerr << "[Importer] Failed to write " << omeshPath << "\n";
+        return 12;
+    }
+    Log(("Writing " + omeshPath).c_str());
 
     Log("Done.");
     return 0;

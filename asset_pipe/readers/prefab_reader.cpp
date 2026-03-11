@@ -124,9 +124,16 @@ bool PrefabReader::Read(const std::string& path, std::vector<PrefabDrawable>& ou
     std::ifstream file(path);
     if (!file) return false;
 
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    return ReadFromText(ss.str(), outDrawables);
+}
+
+bool PrefabReader::ReadFromText(const std::string& text, std::vector<PrefabDrawable>& outDrawables) {
     std::vector<std::string> lines;
+    std::stringstream stream(text);
     std::string line;
-    while (std::getline(file, line))
+    while (std::getline(stream, line))
         lines.push_back(line);
 
     outDrawables.clear();

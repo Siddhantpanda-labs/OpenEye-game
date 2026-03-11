@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace asset_pipe {
 
@@ -21,6 +22,7 @@ struct LoadedMaterial {
 class MaterialReader {
 public:
     static bool Read(const std::string& path, LoadedMaterial& out);
+    static bool Read(const std::vector<uint8_t>& bytes, LoadedMaterial& out);
 };
 
 } // namespace asset_pipe

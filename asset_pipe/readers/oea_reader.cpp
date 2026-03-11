@@ -64,6 +64,44 @@ bool OeaReader::ReadIndex(const std::string& packagePath, std::vector<OeaEntry>&
     return ReadHeaderAndIndex(in, outEntries);
 }
 
+bool OeaReader::ReadEntryData(const std::string& packagePath, const std::string& entryName, std::vector<uint8_t>& outData) {
+    std::ifstream in(packagePath, std::ios::binary);
+    if (!in) return false;
+    std::vector<OeaEntry> entries;
+    if (!ReadHeaderAndIndex(in, entries)) return false;
+
+    const OeaEntry* selected = nullptr;
+    for (const auto& e : entries) {
+        if (e.name == entryName) {
+            selected = &e;
+            break;
+        }
+    }
+    if (!selected) return false;
+
+    in.seekg(static_cast<std::streamoff>(selected->offset), std::ios::beg);
+    if (!in) return false;
+
+    std::vector<uint8_t> stored(static_cast<size_t>(selected->size));
+    if (!stored.empty() &&
+        !in.read(reinterpret_cast<char*>(stored.data()), static_cast<std::streamsize>(stored.size())))
+        return false;
+
+    if ((selected->flags & OeaFormat::kFlagCompressedZstd) != 0) {
+#ifdef ASSET_PIPE_HAVE_ZSTD
+        std::vector<uint8_t> decoded(static_cast<size_t>(selected->uncompressedSize));
+        const size_t dsize = ZSTD_decompress(decoded.data(), decoded.size(), stored.data(), stored.size());
+        if (ZSTD_isError(dsize) || dsize != decoded.size()) return false;
+        outData = std::move(decoded);
+        return true;
+#else
+        return false;
+#endif
+    }
+    outData = std::move(stored);
+    return true;
+}
+
 bool OeaReader::ExtractAll(const std::string& packagePath, const std::string& outDir, std::vector<OeaEntry>* outEntries) {
     std::ifstream in(packagePath, std::ios::binary);
     if (!in) return false;

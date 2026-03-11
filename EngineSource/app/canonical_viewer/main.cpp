@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -40,6 +41,23 @@ std::string Dirname(const std::string& path) {
     return p.parent_path().string();
 }
 
+std::string ResolvePathWithFallback(const std::string& primaryBaseDir,
+                                    const std::string& fallbackBaseDir,
+                                    const std::string& relativeOrAbsolutePath) {
+    if (relativeOrAbsolutePath.empty()) return {};
+    fs::path p(relativeOrAbsolutePath);
+    if (p.is_absolute()) return relativeOrAbsolutePath;
+
+    const fs::path primary = fs::path(primaryBaseDir) / p;
+    if (fs::exists(primary)) return primary.string();
+    if (!fallbackBaseDir.empty()) {
+        const fs::path fallback = fs::path(fallbackBaseDir) / p;
+        if (fs::exists(fallback)) return fallback.string();
+    }
+    // Best effort: return primary candidate even if not found.
+    return primary.string();
+}
+
 std::string Trim(const std::string& s) {
     const size_t b = s.find_first_not_of(" \t\r\n");
     if (b == std::string::npos) return {};
@@ -55,6 +73,34 @@ bool ReadMaterialMap(const std::string& mapPath, std::vector<std::string>& outIn
     bool any = false;
     std::string line;
     while (std::getline(file, line)) {
+        line = Trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        const size_t sep = line.find('|');
+        if (sep == std::string::npos) continue;
+
+        const std::string idxStr = Trim(line.substr(0, sep));
+        const std::string materialFile = Trim(line.substr(sep + 1));
+        if (idxStr.empty() || materialFile.empty()) continue;
+
+        size_t index = 0;
+        try {
+            index = static_cast<size_t>(std::stoul(idxStr));
+        } catch (...) {
+            continue;
+        }
+        if (index >= outIndexedFiles.size()) outIndexedFiles.resize(index + 1u);
+        outIndexedFiles[index] = materialFile;
+        any = true;
+    }
+    return any;
+}
+
+bool ReadMaterialMapFromText(const std::string& text, std::vector<std::string>& outIndexedFiles) {
+    outIndexedFiles.clear();
+    bool any = false;
+    std::stringstream ss(text);
+    std::string line;
+    while (std::getline(ss, line)) {
         line = Trim(line);
         if (line.empty() || line[0] == '#') continue;
         const size_t sep = line.find('|');
@@ -127,13 +173,8 @@ bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath
     return true;
 }
 
-std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, eyelib::api::RenderDevice device) {
-    asset_pipe::ImportMesh importMesh;
-    if (!asset_pipe::MeshReader::Read(path, importMesh)) {
-        std::cerr << "CanonicalViewer: failed to read " << path << "\n";
-        return nullptr;
-    }
-
+std::shared_ptr<eyelib::api::Mesh> BuildApiMeshFromImportMesh(const asset_pipe::ImportMesh& importMesh,
+                                                               eyelib::api::RenderDevice device) {
     auto mesh = std::make_shared<eyelib::api::Mesh>();
     std::vector<eyelib::api::Mesh::Vertex> vertices;
     vertices.reserve(importMesh.vertices.size());
@@ -157,6 +198,22 @@ std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, ey
     }
     mesh->UploadToGPU(device);
     return mesh;
+}
+
+std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, eyelib::api::RenderDevice device) {
+    asset_pipe::ImportMesh importMesh;
+    if (!asset_pipe::MeshReader::Read(path, importMesh)) {
+        std::cerr << "CanonicalViewer: failed to read " << path << "\n";
+        return nullptr;
+    }
+    return BuildApiMeshFromImportMesh(importMesh, device);
+}
+
+std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMeshFromBytes(const std::vector<uint8_t>& bytes,
+                                                              eyelib::api::RenderDevice device) {
+    asset_pipe::ImportMesh importMesh;
+    if (!asset_pipe::MeshReader::Read(bytes, importMesh)) return nullptr;
+    return BuildApiMeshFromImportMesh(importMesh, device);
 }
 
 std::shared_ptr<eyelib::api::Texture> LoadTextureFromPath(eyelib::api::RenderDevice device, const std::string& path) {
@@ -183,6 +240,7 @@ std::shared_ptr<eyelib::api::Texture> LoadTextureFromPath(eyelib::api::RenderDev
 std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::RenderDevice device,
     const asset_pipe::LoadedMaterial& loaded,
     const std::string& baseDir,
+    const std::string& fallbackBaseDir,
     std::shared_ptr<eyelib::api::Shader> litShader) {
     if (!litShader) return nullptr;
     auto mat = std::make_shared<eyelib::api::Material>();
@@ -190,11 +248,8 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
     mat->SetAlbedo(eyelib::math::Vec3(loaded.albedoColorR, loaded.albedoColorG, loaded.albedoColorB));
     mat->SetMetallic(loaded.metallicValue);
     mat->SetRoughness(loaded.roughnessValue);
-    auto resolvePath = [&baseDir](const std::string& p) -> std::string {
-        if (p.empty()) return {};
-        fs::path path(p);
-        if (path.is_absolute()) return p;
-        return (fs::path(baseDir) / p).string();
+    auto resolvePath = [&baseDir, &fallbackBaseDir](const std::string& p) -> std::string {
+        return ResolvePathWithFallback(baseDir, fallbackBaseDir, p);
     };
     if (!loaded.albedoPath.empty()) {
         std::string p = resolvePath(loaded.albedoPath);
@@ -289,7 +344,7 @@ void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AA
     scene.light.direction = glm::normalize(eyelib::math::Vec3(0.5f, 1.f, 0.3f));
     scene.light.color = eyelib::math::Vec3(1.f, 0.98f, 0.95f);
     scene.light.intensity = 2.f;
-    scene.light.ambient = eyelib::math::Vec3(0.35f);  // higher ambient so model is visible clearly in viewer
+    scene.light.ambient = eyelib::math::Vec3(0.65f);  // higher ambient so model is visible clearly in viewer
     scene.light.exposure = 1.f;
     scene.light.castShadows = false;
     scene.skybox.reset();
@@ -299,17 +354,22 @@ void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AA
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "Usage: CanonicalViewer <path_to.mesh | path_to.prefab | path_to.oea>\n";
-        std::cerr << "  .mesh = single mesh, .prefab = full model, .oea = packaged asset bundle.\n";
+        std::cerr << "Usage: CanonicalViewer <path_to.oea | path_to.omesh>\n";
+        std::cerr << "  .oea = packaged full model, .omesh = model package + folder textures/materials.\n";
         return 1;
     }
 
     const std::string inputPath = argv[1];
     std::string path = inputPath;
-    bool isPrefab = (path.size() >= 7 && path.compare(path.size() - 7, 7, ".prefab") == 0);
-    const bool isOea = (path.size() >= 4 && path.compare(path.size() - 4, 4, ".oea") == 0);
+    bool isPrefab = false;
+    const bool isOeaPackage = (path.size() >= 4 && path.compare(path.size() - 4, 4, ".oea") == 0);
+    const bool isOmeshPackage = (path.size() >= 6 && path.compare(path.size() - 6, 6, ".omesh") == 0);
+    if (!isOeaPackage && !isOmeshPackage) {
+        std::cerr << "CanonicalViewer: only .oea or .omesh input is supported.\n";
+        return 1;
+    }
     std::string oeaExtractDir;
-    if (isOea) {
+    if (isOeaPackage) {
         std::string extractedPath;
         bool extractedIsPrefab = false;
         if (!ResolveOeaPrimaryPath(path, extractedPath, extractedIsPrefab, oeaExtractDir)) {
@@ -318,6 +378,9 @@ int main(int argc, char** argv) {
         }
         path = extractedPath;
         isPrefab = extractedIsPrefab;
+    } else {
+        // .omesh is read directly without extracting to temp.
+        isPrefab = true;
     }
 
     eyelib::api::core::Engine::Config engineConfig{};
@@ -378,41 +441,152 @@ int main(int argc, char** argv) {
 
     if (isPrefab) {
         std::vector<asset_pipe::PrefabDrawable> drawables;
-        if (!asset_pipe::PrefabReader::Read(path, drawables)) {
-            std::cerr << "CanonicalViewer: failed to read prefab " << path << "\n";
-            pipeline.Shutdown();
-            window.Shutdown();
-            eyelib::api::core::Engine::Shutdown();
-            return 7;
+        std::vector<asset_pipe::OeaEntry> omeshEntries;
+        auto readOmeshEntryBytes = [&](const std::string& name, std::vector<uint8_t>& outBytes) -> bool {
+            if (!isOmeshPackage || name.empty()) return false;
+            if (asset_pipe::OeaReader::ReadEntryData(path, name, outBytes)) return true;
+            const std::string base = fs::path(name).filename().string();
+            for (const auto& e : omeshEntries) {
+                if (fs::path(e.name).filename().string() == base) {
+                    return asset_pipe::OeaReader::ReadEntryData(path, e.name, outBytes);
+                }
+            }
+            return false;
+        };
+
+        if (isOmeshPackage) {
+            if (!asset_pipe::OeaReader::ReadIndex(path, omeshEntries) || omeshEntries.empty()) {
+                std::cerr << "CanonicalViewer: failed to read .omesh index " << path << "\n";
+                pipeline.Shutdown();
+                window.Shutdown();
+                eyelib::api::core::Engine::Shutdown();
+                return 7;
+            }
+            const std::string stem = fs::path(path).stem().string();
+            std::string prefabEntryName;
+            for (const auto& e : omeshEntries) {
+                if (e.name == stem + ".prefab") {
+                    prefabEntryName = e.name;
+                    break;
+                }
+            }
+            if (prefabEntryName.empty()) {
+                for (const auto& e : omeshEntries) {
+                    if (fs::path(e.name).extension() == ".prefab") {
+                        prefabEntryName = e.name;
+                        break;
+                    }
+                }
+            }
+            if (prefabEntryName.empty()) {
+                std::cerr << "CanonicalViewer: .omesh missing prefab entry " << path << "\n";
+                pipeline.Shutdown();
+                window.Shutdown();
+                eyelib::api::core::Engine::Shutdown();
+                return 7;
+            }
+            std::vector<uint8_t> prefabBytes;
+            if (!readOmeshEntryBytes(prefabEntryName, prefabBytes)) {
+                std::cerr << "CanonicalViewer: failed to read prefab entry in .omesh " << path << "\n";
+                pipeline.Shutdown();
+                window.Shutdown();
+                eyelib::api::core::Engine::Shutdown();
+                return 7;
+            }
+            const std::string prefabText(prefabBytes.begin(), prefabBytes.end());
+            if (!asset_pipe::PrefabReader::ReadFromText(prefabText, drawables)) {
+                std::cerr << "CanonicalViewer: failed to parse prefab in .omesh " << path << "\n";
+                pipeline.Shutdown();
+                window.Shutdown();
+                eyelib::api::core::Engine::Shutdown();
+                return 7;
+            }
+        } else {
+            if (!asset_pipe::PrefabReader::Read(path, drawables)) {
+                std::cerr << "CanonicalViewer: failed to read prefab " << path << "\n";
+                pipeline.Shutdown();
+                window.Shutdown();
+                eyelib::api::core::Engine::Shutdown();
+                return 7;
+            }
         }
 
         std::string baseDir = Dirname(path);
         if (baseDir.empty()) baseDir = ".";
+        const std::string fallbackBaseDir;
 
         auto defaultMaterial = CreateDefaultMaterial(device);
         std::vector<std::shared_ptr<eyelib::api::Material>> materialsByIndex;
 
-        const std::string mapPath = (fs::path(baseDir) / (fs::path(path).stem().string() + ".materialmap")).string();
         std::vector<std::string> indexedMaterialFiles;
-        const bool hasMaterialMap = ReadMaterialMap(mapPath, indexedMaterialFiles);
+        bool hasMaterialMap = false;
+        std::string mapSource;
+        if (isOmeshPackage) {
+            const std::string stem = fs::path(path).stem().string();
+            std::string mapEntryName;
+            for (const auto& e : omeshEntries) {
+                if (e.name == stem + ".materialmap") {
+                    mapEntryName = e.name;
+                    break;
+                }
+            }
+            if (mapEntryName.empty()) {
+                for (const auto& e : omeshEntries) {
+                    if (fs::path(e.name).extension() == ".materialmap") {
+                        mapEntryName = e.name;
+                        break;
+                    }
+                }
+            }
+            if (!mapEntryName.empty()) {
+                std::vector<uint8_t> mapBytes;
+                if (readOmeshEntryBytes(mapEntryName, mapBytes)) {
+                    const std::string mapText(mapBytes.begin(), mapBytes.end());
+                    hasMaterialMap = ReadMaterialMapFromText(mapText, indexedMaterialFiles);
+                    mapSource = path + "::" + mapEntryName;
+                }
+            }
+            if (!hasMaterialMap) {
+                const std::string mapPath = (fs::path(baseDir) / (fs::path(path).stem().string() + ".materialmap")).string();
+                hasMaterialMap = ReadMaterialMap(mapPath, indexedMaterialFiles);
+                mapSource = mapPath;
+            }
+        } else {
+            const std::string mapPath = ResolvePathWithFallback(
+                baseDir,
+                fallbackBaseDir,
+                fs::path(path).stem().string() + ".materialmap");
+            hasMaterialMap = ReadMaterialMap(mapPath, indexedMaterialFiles);
+            mapSource = mapPath;
+        }
+
         if (hasMaterialMap) {
             materialsByIndex.assign(indexedMaterialFiles.size(), defaultMaterial);
             for (size_t i = 0; i < indexedMaterialFiles.size(); ++i) {
                 if (indexedMaterialFiles[i].empty()) continue;
-                const std::string matPath = (fs::path(baseDir) / indexedMaterialFiles[i]).string();
+
                 asset_pipe::LoadedMaterial lm;
-                if (!asset_pipe::MaterialReader::Read(matPath, lm)) continue;
-                auto m = CreateMaterialFromLoaded(device, lm, baseDir, litShader);
+                bool loaded = false;
+                const std::string matPath = ResolvePathWithFallback(baseDir, fallbackBaseDir, indexedMaterialFiles[i]);
+                loaded = asset_pipe::MaterialReader::Read(matPath, lm);
+                if (!loaded && isOmeshPackage) {
+                    std::vector<uint8_t> matBytes;
+                    if (readOmeshEntryBytes(indexedMaterialFiles[i], matBytes))
+                        loaded = asset_pipe::MaterialReader::Read(matBytes, lm);
+                }
+                if (!loaded) continue;
+
+                auto m = CreateMaterialFromLoaded(device, lm, baseDir, fallbackBaseDir, litShader);
                 if (m) materialsByIndex[i] = m;
             }
-            std::cout << "CanonicalViewer: using material map " << mapPath << " (" << materialsByIndex.size() << " indexed materials)\n";
+            std::cout << "CanonicalViewer: using material map " << mapSource << " (" << materialsByIndex.size() << " indexed materials)\n";
         } else {
             // Legacy fallback for older assets that do not include a material map.
             std::vector<asset_pipe::LoadedMaterial> loadedMats;
             std::vector<std::string> matFiles;
             try {
                 for (const auto& e : fs::directory_iterator(baseDir)) {
-                    if (e.path().extension() == ".material")
+                    if (e.path().extension() == ".material" || e.path().extension() == ".mat")
                         matFiles.push_back(e.path().string());
                 }
             } catch (...) {}
@@ -437,17 +611,43 @@ int main(int argc, char** argv) {
                 if (asset_pipe::MaterialReader::Read(p, lm))
                     loadedMats.push_back(std::move(lm));
             }
+            if (loadedMats.empty() && isOmeshPackage) {
+                std::vector<std::string> matEntryNames;
+                for (const auto& e : omeshEntries) {
+                    const auto ext = fs::path(e.name).extension().string();
+                    if (ext == ".material" || ext == ".mat") matEntryNames.push_back(e.name);
+                }
+                std::sort(matEntryNames.begin(), matEntryNames.end());
+                for (const auto& n : matEntryNames) {
+                    std::vector<uint8_t> matBytes;
+                    if (!readOmeshEntryBytes(n, matBytes)) continue;
+                    asset_pipe::LoadedMaterial lm;
+                    if (asset_pipe::MaterialReader::Read(matBytes, lm))
+                        loadedMats.push_back(std::move(lm));
+                }
+            }
             materialsByIndex.assign(loadedMats.size(), defaultMaterial);
             for (size_t i = 0; i < loadedMats.size(); ++i) {
-                auto m = CreateMaterialFromLoaded(device, loadedMats[i], baseDir, litShader);
+                auto m = CreateMaterialFromLoaded(device, loadedMats[i], baseDir, fallbackBaseDir, litShader);
                 if (m) materialsByIndex[i] = m;
             }
             std::cout << "CanonicalViewer: material map not found, using legacy material ordering fallback\n";
         }
 
         for (const auto& d : drawables) {
-            std::string meshPath = (fs::path(baseDir) / d.meshPath).string();
-            auto mesh = LoadCanonicalMesh(meshPath, device);
+            std::shared_ptr<eyelib::api::Mesh> mesh;
+            if (isOmeshPackage) {
+                std::vector<uint8_t> meshBytes;
+                if (readOmeshEntryBytes(d.meshPath, meshBytes))
+                    mesh = LoadCanonicalMeshFromBytes(meshBytes, device);
+                if (!mesh || !mesh->IsValid()) {
+                    std::string meshPath = (fs::path(baseDir) / d.meshPath).string();
+                    mesh = LoadCanonicalMesh(meshPath, device);
+                }
+            } else {
+                std::string meshPath = (fs::path(baseDir) / d.meshPath).string();
+                mesh = LoadCanonicalMesh(meshPath, device);
+            }
             if (!mesh || !mesh->IsValid()) continue;
 
             eyelib::api::Drawable draw;

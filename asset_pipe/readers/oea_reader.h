@@ -19,6 +19,7 @@ class OeaReader {
 public:
     static bool ReadIndex(const std::string& packagePath, std::vector<OeaEntry>& outEntries);
     static bool ExtractAll(const std::string& packagePath, const std::string& outDir, std::vector<OeaEntry>* outEntries = nullptr);
+    static bool ReadEntryData(const std::string& packagePath, const std::string& entryName, std::vector<uint8_t>& outData);
 };
 
 } // namespace asset_pipe

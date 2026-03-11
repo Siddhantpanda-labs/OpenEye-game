@@ -9,6 +9,7 @@ namespace asset_pipe {
 struct ImportTexture {
     std::string name;
     std::string sourcePath;  // path to source image (e.g. .png)
+    std::string outputFileName; // e.g. "car_texture_0.png"
 
     uint32_t width = 0;
     uint32_t height = 0;

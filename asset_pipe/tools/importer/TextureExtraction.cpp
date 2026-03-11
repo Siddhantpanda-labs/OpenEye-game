@@ -9,6 +9,9 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 #include <algorithm>
 #include <cstring>
@@ -26,6 +29,37 @@ std::string NormalizePath(const std::string& path) {
     std::string p = path;
     while (!p.empty() && (p.back() == ' ' || p.back() == '\t')) p.pop_back();
     return p;
+}
+
+std::string NormalizeExt(const std::string& extOrHint) {
+    if (extOrHint.empty()) return ".png";
+    std::string e = extOrHint;
+    // strip leading dot(s)
+    while (!e.empty() && e.front() == '.') e.erase(e.begin());
+    for (char& c : e) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
+    }
+    if (e == "jpeg") e = "jpg";
+    if (e == "jpg" || e == "png" || e == "bmp" || e == "tga" || e == "gif" || e == "webp")
+        return "." + e;
+    return ".png";
+}
+
+std::string ExtFromPath(const std::string& p) {
+    std::filesystem::path fp(p);
+    return NormalizeExt(fp.extension().string());
+}
+
+bool EncodePngRGBA(uint32_t w, uint32_t h, const uint8_t* rgba, std::vector<uint8_t>& out) {
+    if (!rgba || w == 0 || h == 0) return false;
+    out.clear();
+    auto writeFn = [](void* context, void* data, int size) {
+        auto* v = reinterpret_cast<std::vector<uint8_t>*>(context);
+        const uint8_t* b = reinterpret_cast<const uint8_t*>(data);
+        v->insert(v->end(), b, b + size);
+    };
+    const int stride = static_cast<int>(w) * 4;
+    return stbi_write_png_to_func(writeFn, &out, static_cast<int>(w), static_cast<int>(h), 4, rgba, stride) != 0;
 }
 
 bool ReadFileBytes(const std::string& path, std::vector<uint8_t>& out) {
@@ -73,6 +107,9 @@ bool DecodeEmbeddedTexture(const aiTexture* tex, ImportTexture& out) {
             out.pixels[i * 4 + 2] = src[i].b;
             out.pixels[i * 4 + 3] = src[i].a;
         }
+        // Preserve best compact representation for packaging/loose export.
+        out.encodedData.clear();
+        EncodePngRGBA(out.width, out.height, out.pixels.data(), out.encodedData);
         return true;
     }
 
@@ -81,6 +118,7 @@ bool DecodeEmbeddedTexture(const aiTexture* tex, ImportTexture& out) {
     const size_t byteSize = static_cast<size_t>(tex->mWidth);
     if (byteSize == 0) return false;
     out.encodedData.assign(src, src + byteSize);
+    out.channels = 4;
     if (!ProbeInfoFromMemory(src, byteSize, out.width, out.height, out.channels)) {
         // Fallback decode when header probing fails.
         int w = 0, h = 0, ch = 0;
@@ -95,6 +133,7 @@ bool DecodeEmbeddedTexture(const aiTexture* tex, ImportTexture& out) {
         const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
         out.pixels.assign(decoded, decoded + total);
         out.encodedData.clear();
+        EncodePngRGBA(out.width, out.height, out.pixels.data(), out.encodedData);
         stbi_image_free(decoded);
     }
     return true;
@@ -126,6 +165,8 @@ bool LoadFileTexture(const std::string& path, ImportTexture& out) {
     out.channels = 4;
     const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
     out.pixels.assign(decoded, decoded + total);
+    out.encodedData.clear();
+    EncodePngRGBA(out.width, out.height, out.pixels.data(), out.encodedData);
     stbi_image_free(decoded);
     return true;
 }
@@ -140,6 +181,7 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
     if (it != pathToIndex.end()) return it->second;
 
     ImportTexture imp;
+    std::string ext = ExtFromPath(rawPath);
     bool ok = false;
 
     if (rawPath.size() >= 2 && rawPath[0] == '*') {
@@ -155,6 +197,8 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
             emb = scene->GetEmbeddedTexture(rawPath.c_str());
         if (emb)
             ok = DecodeEmbeddedTexture(emb, imp);
+        if (ok && emb && emb->achFormatHint[0] != '\0')
+            ext = NormalizeExt(emb->achFormatHint);
     }
 
     if (!ok) {
@@ -167,8 +211,11 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
         // FBX (and others) may reference embedded textures by path (e.g. "..\file.fbm\image.jpg") instead of *N
         if (!ok && scene) {
             const aiTexture* emb = scene->GetEmbeddedTexture(rawPath.c_str());
-            if (emb)
+            if (emb) {
                 ok = DecodeEmbeddedTexture(emb, imp);
+                if (ok && emb->achFormatHint[0] != '\0')
+                    ext = NormalizeExt(emb->achFormatHint);
+            }
         }
     }
 
@@ -176,6 +223,7 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
 
     const size_t idx = out.textures.size();
     imp.name = sourceName + "_texture_" + std::to_string(idx);
+    imp.outputFileName = imp.name + ext;
     out.textures.push_back(std::move(imp));
     pathToIndex[key] = static_cast<int>(idx);
     return static_cast<int>(idx);
@@ -189,7 +237,7 @@ void RemapMaterialPaths(ImportScene& out, std::unordered_map<std::string, int>& 
             auto it = pathToIndex.find(k);
             if (it != pathToIndex.end() && it->second >= 0 &&
                 static_cast<size_t>(it->second) < out.textures.size())
-                ref.path = out.textures[static_cast<size_t>(it->second)].name + ".tex";
+                ref.path = "textures/" + out.textures[static_cast<size_t>(it->second)].outputFileName;
         };
         setPath(mat.albedo, mat.albedo.path);
         setPath(mat.normal, mat.normal.path);
