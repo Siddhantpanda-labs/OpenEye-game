@@ -12,7 +12,7 @@ Engine/assets/models/
 
 
 # Project cache (generated runtime data)
-Projects/*/Cache/
+Projects/
 
 # Third-party (under EngineSource after refactor)
 EngineSource/thirdparty/bullet3/
