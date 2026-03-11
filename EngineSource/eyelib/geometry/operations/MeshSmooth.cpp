@@ -10,7 +10,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshSmooth::Smooth(assets::EditableMesh& editable, const Selection& selection, 
+void MeshSmooth::Smooth(geometry::EditableMesh& editable, const Selection& selection, 
                        float strength, int iterations, const Mask* mask) {
     if (iterations <= 0 || strength <= 0.0f) return;
     
@@ -30,7 +30,7 @@ void MeshSmooth::Smooth(assets::EditableMesh& editable, const Selection& selecti
     SmoothTaubin(editable, selection, lambda, mu, iterations, mask, topology);
 }
 
-void MeshSmooth::SmoothUniform(assets::EditableMesh& editable, const Selection& selection,
+void MeshSmooth::SmoothUniform(geometry::EditableMesh& editable, const Selection& selection,
                                float strength, int iterations, const Mask* mask) {
     if (iterations <= 0 || strength <= 0.0f) return;
     
@@ -88,7 +88,7 @@ void MeshSmooth::SmoothUniform(assets::EditableMesh& editable, const Selection& 
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshSmooth::SmoothTaubin(assets::EditableMesh& editable, const Selection& selection,
+void MeshSmooth::SmoothTaubin(geometry::EditableMesh& editable, const Selection& selection,
                               float lambda, float mu, int iterations,
                               const Mask* mask, const MeshTopology& topology) {
     auto& vertices = editable.GetVertices();
@@ -205,7 +205,7 @@ void MeshSmooth::SmoothTaubin(assets::EditableMesh& editable, const Selection& s
     editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshSmooth::ComputeUniformLaplacian(const assets::EditableMesh& editable, uint32_t vertexID,
+math::Vec3 MeshSmooth::ComputeUniformLaplacian(const geometry::EditableMesh& editable, uint32_t vertexID,
                                                 const MeshTopology& topology, size_t vertexCount) {
     const auto& vertices = editable.GetVertices();
     if (vertexID >= vertices.size()) return math::Vec3(0.0f);

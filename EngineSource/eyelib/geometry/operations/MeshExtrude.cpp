@@ -10,7 +10,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshExtrude::Extrude(assets::EditableMesh& editable, const Selection& selection,
+void MeshExtrude::Extrude(geometry::EditableMesh& editable, const Selection& selection,
                          float amount, const Mask* mask) {
     if (amount == 0.0f) return;
     
@@ -103,7 +103,7 @@ void MeshExtrude::Extrude(assets::EditableMesh& editable, const Selection& selec
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshExtrude::ExtrudeAlongDirection(assets::EditableMesh& editable, const Selection& selection,
+void MeshExtrude::ExtrudeAlongDirection(geometry::EditableMesh& editable, const Selection& selection,
                                        const math::Vec3& direction, float amount,
                                        const Mask* mask) {
     if (amount == 0.0f) return;
@@ -175,7 +175,7 @@ void MeshExtrude::ExtrudeAlongDirection(assets::EditableMesh& editable, const Se
     editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshExtrude::ComputeFaceNormal(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1, uint32_t v2) {
+math::Vec3 MeshExtrude::ComputeFaceNormal(const geometry::EditableMesh& editable, uint32_t v0, uint32_t v1, uint32_t v2) {
     const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size() || v2 >= vertices.size()) {
         return math::Vec3(0, 1, 0);
@@ -197,7 +197,7 @@ math::Vec3 MeshExtrude::ComputeFaceNormal(const assets::EditableMesh& editable, 
     return math::Vec3(0, 1, 0);
 }
 
-void MeshExtrude::ExtrudeFace(const assets::EditableMesh& editable, uint32_t faceIndex,
+void MeshExtrude::ExtrudeFace(const geometry::EditableMesh& editable, uint32_t faceIndex,
                               const std::unordered_set<uint32_t>& selectedFaces,
                               float amount, const math::Vec3& direction,
                               const Mask* mask,

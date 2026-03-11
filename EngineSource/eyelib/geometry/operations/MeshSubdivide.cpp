@@ -9,7 +9,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshSubdivide::Subdivide(assets::EditableMesh& editable, const Selection& selection, int levels) {
+void MeshSubdivide::Subdivide(geometry::EditableMesh& editable, const Selection& selection, int levels) {
     if (levels <= 0) return;
     
     if (editable.GetVertices().empty() || editable.GetIndices().empty()) return;
@@ -31,7 +31,7 @@ void MeshSubdivide::Subdivide(assets::EditableMesh& editable, const Selection& s
             for (size_t i = 0; i < faceCount; ++i) facesToSubdivide.insert(static_cast<uint32_t>(i));
         }
         
-        std::vector<assets::EditableMesh::Vertex> newVertices = inputVertices;
+        std::vector<geometry::EditableMesh::Vertex> newVertices = inputVertices;
         std::vector<uint32_t> newIndices;
         newIndices.reserve(inputIndices.size() * 4);
         std::unordered_map<uint64_t, uint32_t> edgeMidpoints;
@@ -60,8 +60,8 @@ void MeshSubdivide::Subdivide(assets::EditableMesh& editable, const Selection& s
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshSubdivide::SubdivideFace(const assets::EditableMesh& inputMesh, size_t faceIndex,
-                                 std::vector<assets::EditableMesh::Vertex>& newVertices,
+void MeshSubdivide::SubdivideFace(const geometry::EditableMesh& inputMesh, size_t faceIndex,
+                                 std::vector<geometry::EditableMesh::Vertex>& newVertices,
                                  std::vector<uint32_t>& newIndices,
                                  std::unordered_map<uint64_t, uint32_t>& edgeMidpoints) {
     const auto& inputVertices = inputMesh.GetVertices();
@@ -89,7 +89,7 @@ void MeshSubdivide::SubdivideFace(const assets::EditableMesh& inputMesh, size_t 
         const auto& va = inputVertices[a];
         const auto& vb = inputVertices[b];
         
-        assets::EditableMesh::Vertex midpoint;
+        geometry::EditableMesh::Vertex midpoint;
         midpoint.position = (va.position + vb.position) * 0.5f;
         midpoint.normal = glm::normalize((va.normal + vb.normal) * 0.5f);
         midpoint.uv = (va.uv + vb.uv) * 0.5f;
@@ -127,7 +127,7 @@ void MeshSubdivide::SubdivideFace(const assets::EditableMesh& inputMesh, size_t 
     newIndices.push_back(m20);
 }
 
-void MeshSubdivide::SubdivideLoop(assets::EditableMesh& editable, const Selection& selection, int levels) {
+void MeshSubdivide::SubdivideLoop(geometry::EditableMesh& editable, const Selection& selection, int levels) {
     Subdivide(editable, selection, levels);
 }
 

@@ -51,7 +51,7 @@ private:
         std::shared_ptr<eyelib::api::Material> material;
     };
     static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots);  // used by BindSceneAssets and Build
-    ModelEntry LoadModelEntry(const std::string& path);
+    ModelEntry LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path);
     /** Resolve builtin:// primitive mesh id to procedural mesh + default material. Returns empty entry if not builtin. */
     ModelEntry GetPrimitiveEntry(const std::string& meshId);
     void EnsureDefaultMaterial();

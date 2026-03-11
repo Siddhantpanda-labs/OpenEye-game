@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 
 namespace eyelib {
 namespace geometry {
@@ -12,20 +12,20 @@ namespace geometry {
  */
 class MeshPrimitives {
 public:
-    static void CreateCube(assets::EditableMesh& editable, float size = 0.5f);
-    static void CreateSphere(assets::EditableMesh& editable, float radius = 0.5f, int segments = 32, int rings = 16);
-    static void CreatePlane(assets::EditableMesh& editable, float width = 1.0f, float height = 1.0f, 
+    static void CreateCube(geometry::EditableMesh& editable, float size = 0.5f);
+    static void CreateSphere(geometry::EditableMesh& editable, float radius = 0.5f, int segments = 32, int rings = 16);
+    static void CreatePlane(geometry::EditableMesh& editable, float width = 1.0f, float height = 1.0f, 
                             int widthSegments = 1, int heightSegments = 1);
-    static void CreateQuad(assets::EditableMesh& editable);
-    static void CreateCylinder(assets::EditableMesh& editable, float radius = 0.5f, float height = 1.0f,
+    static void CreateQuad(geometry::EditableMesh& editable);
+    static void CreateCylinder(geometry::EditableMesh& editable, float radius = 0.5f, float height = 1.0f,
                                int segments = 32, int rings = 1, bool capTop = true, bool capBottom = true);
-    static void CreateCone(assets::EditableMesh& editable, float radius = 0.5f, float height = 1.0f,
+    static void CreateCone(geometry::EditableMesh& editable, float radius = 0.5f, float height = 1.0f,
                            int segments = 32, bool capBase = true);
-    static void CreateTorus(assets::EditableMesh& editable, float radius = 0.5f, float tubeRadius = 0.2f,
+    static void CreateTorus(geometry::EditableMesh& editable, float radius = 0.5f, float tubeRadius = 0.2f,
                             int segments = 32, int tubeSegments = 16);
 
 private:
-    static void FinalizeEditable(assets::EditableMesh& editable);
+    static void FinalizeEditable(geometry::EditableMesh& editable);
 };
 
 } // namespace geometry

@@ -26,7 +26,6 @@ target_include_directories(EyelibGeometryAPI
 
 target_link_libraries(EyelibGeometryAPI
     PUBLIC
-        EyelibAssets
         EyelibGeometry
         EyelibRenderAPI
         EyelibMath

@@ -1,8 +1,5 @@
 #include "eyelib/audio/AudioClip.h"
-
-#include "eyelib/assets/AssetManager.h"
-#include "eyelib/assets/AudioClip.h"
-#include "eyelib/assets/loaders/AudioLoader.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 
 #include <algorithm>
 #include <cstring>
@@ -31,14 +28,9 @@ static uint16_t ReadU16(const uint8_t* data, size_t size, size_t offset, bool& o
 } // namespace
 
 bool AudioClip::LoadFromFile(const std::string& path) {
-    const assets::AssetId id = assets::AudioLoader::LoadAudio(path);
-    auto clip = assets::AssetManager::Get().Cache().Get<assets::AudioClip>(id);
-    if (!clip) return false;
-    m_assetId = id;
-    m_sampleRate = clip->sampleRate;
-    m_channels = clip->channels;
-    m_samples = clip->samples;
-    return m_sampleRate > 0 && m_channels > 0 && !m_samples.empty();
+    std::vector<uint8_t> data = platform::filesystem::ReadFile(path);
+    if (data.empty()) return false;
+    return LoadFromMemory(data.data(), data.size());
 }
 
 bool AudioClip::LoadFromMemory(const uint8_t* data, size_t sizeBytes) {

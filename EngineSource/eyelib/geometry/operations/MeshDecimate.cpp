@@ -13,7 +13,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshDecimate::Decimate(assets::EditableMesh& editable, size_t targetTriangleCount,
+void MeshDecimate::Decimate(geometry::EditableMesh& editable, size_t targetTriangleCount,
                             const Selection& selection, const Mask* mask) {
     const auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -148,7 +148,7 @@ void MeshDecimate::Decimate(assets::EditableMesh& editable, size_t targetTriangl
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDecimate::DecimateByPercentage(assets::EditableMesh& editable, float reductionFactor,
+void MeshDecimate::DecimateByPercentage(geometry::EditableMesh& editable, float reductionFactor,
                                         const Selection& selection, const Mask* mask) {
     reductionFactor = std::clamp(reductionFactor, 0.0f, 1.0f);
     
@@ -163,7 +163,7 @@ void MeshDecimate::DecimateByPercentage(assets::EditableMesh& editable, float re
     Decimate(editable, targetTriangleCount, selection, mask);
 }
 
-float MeshDecimate::ComputeEdgeError(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
+float MeshDecimate::ComputeEdgeError(const geometry::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                     const MeshTopology& topology, math::Vec3& optimalPos) {
     const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size()) {
@@ -214,7 +214,7 @@ bool MeshDecimate::CanCollapseEdge(uint32_t v0, uint32_t v1, const MeshTopology&
     return true;
 }
 
-void MeshDecimate::CollapseEdge(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
+void MeshDecimate::CollapseEdge(const geometry::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                 const MeshTopology& topology,
                                 std::vector<render::Vertex>& newVertices,
                                 std::vector<uint32_t>& newIndices,

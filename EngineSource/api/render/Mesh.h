@@ -1,6 +1,7 @@
 #pragma once
 
 #include "api/render/RenderDevice.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <vector>
 
 namespace eyelib {
-namespace assets { class EditableMesh; }
 namespace render { class Mesh; }
 namespace api {
 
@@ -88,8 +88,8 @@ public:
     std::shared_ptr<::eyelib::render::Mesh> GetInternal() const;
 
     /** CPU mesh for geometry ops (Phase 2.4). Ops modify this; call UploadToGPU(device) to sync to GPU. */
-    ::eyelib::assets::EditableMesh* GetEditableMesh();
-    const ::eyelib::assets::EditableMesh* GetEditableMesh() const;
+    ::eyelib::geometry::EditableMesh* GetEditableMesh();
+    const ::eyelib::geometry::EditableMesh* GetEditableMesh() const;
 
 private:
     class Impl;

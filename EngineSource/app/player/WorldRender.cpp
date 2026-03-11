@@ -2,7 +2,7 @@
 
 #include "BuiltinResourceManager.h"
 #include "RendererGPUResourceCache.h"
-#include "api/assets/loaders/ModelLoader.h"
+#include "api/asset/loaders/ModelLoader.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
 #include "api/geometry/BuiltinMeshIds.h"
@@ -12,7 +12,7 @@
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
 #include "WorldAnimation.h"
-#include "api/assets/AssetManager.h"
+#include "api/asset/AssetManager.h"
 #include "eyelib/vr/XRViewHelpers.h"
 
 #include <cassert>
@@ -103,6 +103,7 @@ eyelib::math::Vec3 ForwardFromRotation(const eyelib::math::Quat& rotation) {
 } // namespace
 
 bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
+                                   eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::render::RenderBackend backend) {
     if (!m_renderer.Initialize()) {
         return false;
@@ -117,13 +118,16 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
     m_height = height;
     m_builtinManager = std::make_unique<BuiltinResourceManager>();
     m_builtinManager->SetDevice(m_pipeline.GetDevice());
-    m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), &eyelib::assets::AssetManager::Get());
-    eyelib::assets::AssetManager::Get().SetGPUResolver(m_gpuResourceCache.get());
+    if (assetRegistry) {
+        m_assetRegistryForResolver = assetRegistry;
+        m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), assetRegistry);
+        assetRegistry->SetGPUResolver(m_gpuResourceCache.get());
+    }
     m_ready = true;
     return true;
 }
 
-bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t height) {
+bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t height, eyelib::api::AssetRegistry* assetRegistry) {
     if (!sharedDevice) {
         return false;
     }
@@ -140,8 +144,11 @@ bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t 
     m_height = height;
     m_builtinManager = std::make_unique<BuiltinResourceManager>();
     m_builtinManager->SetDevice(m_pipeline.GetDevice());
-    m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), &eyelib::assets::AssetManager::Get());
-    eyelib::assets::AssetManager::Get().SetGPUResolver(m_gpuResourceCache.get());
+    if (assetRegistry) {
+        m_assetRegistryForResolver = assetRegistry;
+        m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), assetRegistry);
+        assetRegistry->SetGPUResolver(m_gpuResourceCache.get());
+    }
     m_ready = true;
     return true;
 }
@@ -164,7 +171,9 @@ void WorldRenderBridge::Shutdown() {
     m_streamingNV12ReadbackCount = 0;
     // Destroy caches and shaders/materials first; their destructors call into the RHI device.
     // Only then shut down the pipeline (which destroys the device).
-    eyelib::assets::AssetManager::Get().SetGPUResolver(nullptr);
+    if (m_assetRegistryForResolver)
+        m_assetRegistryForResolver->SetGPUResolver(nullptr);
+    m_assetRegistryForResolver = nullptr;
     m_gpuResourceCache.reset();
     m_modelCache.clear();
     m_builtinManager.reset();
@@ -375,7 +384,7 @@ std::shared_ptr<eyelib::api::MaterialInstance> WorldRenderBridge::GetSkinnedMate
     return instance;
 }
 
-WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::string& path) {
+WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path) {
     auto it = m_modelCache.find(path);
     if (it != m_modelCache.end()) {
         return it->second;
@@ -384,7 +393,7 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(const std::strin
     ModelEntry entry{};
     std::shared_ptr<eyelib::api::ModelAsset> model;
     try {
-        model = eyelib::api::ModelLoader::LoadModel(path);
+        model = eyelib::api::ModelLoader::LoadModel(registry, path);
     } catch (const std::exception& e) {
         eyelib::api::core::Log::ErrorF("Failed to load model: %s - %s", path.c_str(), e.what());
         m_modelCache.emplace(path, entry);
@@ -435,9 +444,11 @@ WorldRenderBridge::ModelEntry WorldRenderBridge::GetPrimitiveEntry(const std::st
 
 std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(eyelib::api::AssetId id) {
     if (!id.IsValid()) return nullptr;
-    eyelib::assets::AssetId coreId(id.high, id.low);
-    auto internal = eyelib::assets::AssetManager::Get().GetMaterial(coreId);
-    return internal ? eyelib::api::Material::WrapInternal(internal) : nullptr;
+    if (m_assetRegistryForResolver) {
+        auto mat = m_assetRegistryForResolver->GetMaterial(id);
+        return mat;
+    }
+    return nullptr;
 }
 
 std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
@@ -563,7 +574,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         } else {
             const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
             if (meshResolved.empty()) continue;
-            if (LoadModelEntry(meshResolved).mesh) opaqueCount++;
+            if (LoadModelEntry(assetRegistry, meshResolved).mesh) opaqueCount++;
         }
     }
     for (const auto& entry : meshRenderers) {
@@ -574,7 +585,7 @@ void WorldRenderBridge::BuildSceneFromViews(
             if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
         } else {
             if (ResolveAssetPath(meshId, options.assetRoots).empty()) continue;
-            if (LoadModelEntry(ResolveAssetPath(meshId, options.assetRoots)).mesh) opaqueCount++;
+            if (LoadModelEntry(assetRegistry, ResolveAssetPath(meshId, options.assetRoots)).mesh) opaqueCount++;
         }
     }
     size_t pointLightCount = 0;
@@ -623,7 +634,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         } else {
             const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
             if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(meshResolved);
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
         if (!modelEntry.mesh) continue;
 
@@ -685,7 +696,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         } else {
             const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots);
             if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(meshResolved);
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
         if (!modelEntry.mesh) continue;
 

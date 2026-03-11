@@ -12,7 +12,7 @@
 #include "panels/AssetPanel.h"
 #include "GameRuntime.h"
 
-#include "api/assets/All.h"
+#include "api/asset/All.h"
 #include "api/core/All.h"
 #include "api/physics/PhysicsModule.h"
 #include "api/platform/All.h"
@@ -183,6 +183,8 @@ int RunEditor(int argc, char** argv) {
     eyelib::api::core::Log::InfoF("Editor engine assets: %s", engineAssets.c_str());
 
     eyelib::api::AssetRegistry assetRegistry;
+    assetRegistry.SetAssetRoot(engineAssets);
+    assetRegistry.Scan();
     if (editorDevice)
         assetRegistry.SetRenderDevice(editorRenderDevice);
 

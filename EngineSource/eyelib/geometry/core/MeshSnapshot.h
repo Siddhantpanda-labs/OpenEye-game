@@ -6,9 +6,8 @@
 #include <cstdint>
 
 namespace eyelib {
-namespace assets { class EditableMesh; }
-
 namespace geometry {
+class EditableMesh;
 
 /**
  * @brief MeshSnapshot: Immutable snapshot of mesh state (CPU geometry).
@@ -21,12 +20,12 @@ public:
     /**
      * @brief Create snapshot from editable mesh.
      */
-    static std::shared_ptr<MeshSnapshot> Create(const assets::EditableMesh& editable);
+    static std::shared_ptr<MeshSnapshot> Create(const geometry::EditableMesh& editable);
     
     /**
      * @brief Restore editable mesh from snapshot.
      */
-    void Restore(assets::EditableMesh& editable) const;
+    void Restore(geometry::EditableMesh& editable) const;
     
     /**
      * @brief Get vertex count.
@@ -65,19 +64,19 @@ public:
     /**
      * @brief Save current mesh state.
      */
-    void Save(const assets::EditableMesh& editable);
+    void Save(const geometry::EditableMesh& editable);
     
     /**
      * @brief Undo last operation.
      * @return true if undo was successful
      */
-    bool Undo(assets::EditableMesh& editable);
+    bool Undo(geometry::EditableMesh& editable);
     
     /**
      * @brief Redo last undone operation.
      * @return true if redo was successful
      */
-    bool Redo(assets::EditableMesh& editable);
+    bool Redo(geometry::EditableMesh& editable);
     
     /**
      * @brief Check if undo is available.

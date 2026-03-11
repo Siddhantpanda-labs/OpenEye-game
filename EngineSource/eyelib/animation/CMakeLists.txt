@@ -43,8 +43,8 @@ target_include_directories(EyelibAnimation
 
 target_link_libraries(EyelibAnimation
     PUBLIC
-        EyelibAssets
         EyelibCore
+        EyelibGeometry
         EyelibMath
         EyelibRender
 )

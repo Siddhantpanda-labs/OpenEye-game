@@ -11,7 +11,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshBevel::BevelEdges(assets::EditableMesh& editable, const Selection& selection,
+void MeshBevel::BevelEdges(geometry::EditableMesh& editable, const Selection& selection,
                            float amount, int segments, const Mask* mask) {
     if (amount <= 0.0f || segments < 1) return;
     
@@ -179,7 +179,7 @@ void MeshBevel::BevelEdges(assets::EditableMesh& editable, const Selection& sele
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshBevel::BevelVertices(assets::EditableMesh& editable, const Selection& selection,
+void MeshBevel::BevelVertices(geometry::EditableMesh& editable, const Selection& selection,
                              float amount, int segments, const Mask* mask) {
     // Vertex beveling is more complex - for now, implement basic version
     // Full implementation would create chamfered geometry around selected vertices
@@ -220,7 +220,7 @@ void MeshBevel::BevelVertices(assets::EditableMesh& editable, const Selection& s
     BevelEdges(editable, edgeSelection, amount, segments, mask);
 }
 
-void MeshBevel::BevelEdge(assets::EditableMesh& editable, uint32_t edgeIndex,
+void MeshBevel::BevelEdge(geometry::EditableMesh& editable, uint32_t edgeIndex,
                          const std::unordered_set<uint32_t>& selectedEdges,
                          float amount, int segments,
                          const Mask* mask,
@@ -232,7 +232,7 @@ void MeshBevel::BevelEdge(assets::EditableMesh& editable, uint32_t edgeIndex,
     // Full implementation would use this for proper multi-segment beveling
 }
 
-math::Vec3 MeshBevel::ComputeEdgeOffset(const assets::EditableMesh& editable, uint32_t v0, uint32_t v1,
+math::Vec3 MeshBevel::ComputeEdgeOffset(const geometry::EditableMesh& editable, uint32_t v0, uint32_t v1,
                                         const MeshTopology& topology, float amount) {
     const auto& vertices = editable.GetVertices();
     if (v0 >= vertices.size() || v1 >= vertices.size()) {

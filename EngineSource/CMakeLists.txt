@@ -176,9 +176,8 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(api/math)
     add_subdirectory(eyelib/platform)
     add_subdirectory(api/platform)
-    add_subdirectory(eyelib/assets)
-    add_subdirectory(eyelib/asset_pipe)
-    add_subdirectory(api/assets)
+    add_subdirectory(eyelib/asset)
+    add_subdirectory(api/asset)
     add_subdirectory(eyelib/animation)
     add_subdirectory(api/animation)
     add_subdirectory(eyelib/scene)
@@ -265,7 +264,7 @@ if(OPENEYE_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app/test")
 endif()
 
 # --------------------------------------
-# Canonical viewer (loads asset_pipe .mesh, displays with default material)
+# Canonical viewer (loads asset .mesh, displays with default material)
 # --------------------------------------
 add_subdirectory(app/canonical_viewer)
 

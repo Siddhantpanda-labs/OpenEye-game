@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include "eyelib/math/Types.h"
@@ -30,7 +30,7 @@ public:
      * @param falloff Falloff radius (0 = hard edge, >0 = smooth falloff from selection center)
      * @param mask Optional mask to control paint strength per vertex
      */
-    static void PaintVertexColor(assets::EditableMesh& editable, const Selection& selection,
+    static void PaintVertexColor(geometry::EditableMesh& editable, const Selection& selection,
                                 const math::Vec4& color, float strength = 1.0f,
                                 float falloff = 0.0f, const Mask* mask = nullptr);
     
@@ -43,7 +43,7 @@ public:
      * @param selection Region to fill (if empty, fills all vertices)
      * @param color Fill color (RGBA)
      */
-    static void FillColor(assets::EditableMesh& editable, const Selection& selection,
+    static void FillColor(geometry::EditableMesh& editable, const Selection& selection,
                          const math::Vec4& color);
     
     /**
@@ -58,7 +58,7 @@ public:
      * @param direction Gradient direction (will be normalized)
      * @param mask Optional mask to control gradient strength
      */
-    static void GradientColor(assets::EditableMesh& editable, const Selection& selection,
+    static void GradientColor(geometry::EditableMesh& editable, const Selection& selection,
                              const math::Vec4& startColor, const math::Vec4& endColor,
                              const math::Vec3& direction, const Mask* mask = nullptr);
     
@@ -76,7 +76,7 @@ public:
      * @param seed Random seed (for determinism)
      * @param mask Optional mask to control paint strength
      */
-    static void NoisePaint(assets::EditableMesh& editable, const Selection& selection,
+    static void NoisePaint(geometry::EditableMesh& editable, const Selection& selection,
                           const math::Vec4& baseColor, const math::Vec4& noiseColor,
                           float scale = 1.0f, float strength = 0.5f, uint32_t seed = 0,
                           const Mask* mask = nullptr);
@@ -93,7 +93,7 @@ public:
      * @param strength Blend strength (0.0 to 1.0)
      * @param mask Optional mask to control blend strength
      */
-    static void BlendColors(assets::EditableMesh& editable, const Selection& selection,
+    static void BlendColors(geometry::EditableMesh& editable, const Selection& selection,
                           const math::Vec4& blendColor, BlendMode blendMode,
                           float strength = 1.0f, const Mask* mask = nullptr);
     
@@ -108,12 +108,12 @@ public:
      * @param sourceSelection Source region to sample from
      * @param targetSelection Target region to apply colors to
      */
-    static void SampleColor(const assets::EditableMesh& source, assets::EditableMesh& target,
+    static void SampleColor(const geometry::EditableMesh& source, geometry::EditableMesh& target,
                            const Selection& sourceSelection, const Selection& targetSelection);
 
 private:
     // Helper to compute selection center for falloff
-    static math::Vec3 ComputeSelectionCenter(const assets::EditableMesh& editable, const Selection& selection);
+    static math::Vec3 ComputeSelectionCenter(const geometry::EditableMesh& editable, const Selection& selection);
     
     // Helper to blend two colors
     static math::Vec4 BlendColor(const math::Vec4& a, const math::Vec4& b, BlendMode mode, float strength);

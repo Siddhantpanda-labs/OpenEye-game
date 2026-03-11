@@ -8,7 +8,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshDisplace::DisplaceAlongNormal(assets::EditableMesh& editable, const Selection& selection,
+void MeshDisplace::DisplaceAlongNormal(geometry::EditableMesh& editable, const Selection& selection,
                                        float amount, const Mask* mask) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -47,7 +47,7 @@ void MeshDisplace::DisplaceAlongNormal(assets::EditableMesh& editable, const Sel
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDisplace::DisplaceAlongDirection(assets::EditableMesh& editable, const Selection& selection,
+void MeshDisplace::DisplaceAlongDirection(geometry::EditableMesh& editable, const Selection& selection,
                                           const math::Vec3& direction, float amount,
                                           const Mask* mask) {
     auto& vertices = editable.GetVertices();
@@ -86,7 +86,7 @@ void MeshDisplace::DisplaceAlongDirection(assets::EditableMesh& editable, const 
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDisplace::DisplaceWithField(assets::EditableMesh& editable, const Selection& selection,
+void MeshDisplace::DisplaceWithField(geometry::EditableMesh& editable, const Selection& selection,
                                      std::function<float(const math::Vec3&)> field,
                                      const math::Vec3* direction, const Mask* mask) {
     auto& vertices = editable.GetVertices();

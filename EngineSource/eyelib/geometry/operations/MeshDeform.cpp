@@ -11,7 +11,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshDeform::Inflate(assets::EditableMesh& editable, const Selection& selection,
+void MeshDeform::Inflate(geometry::EditableMesh& editable, const Selection& selection,
                          float amount, const Mask* mask) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -72,20 +72,20 @@ void MeshDeform::Inflate(assets::EditableMesh& editable, const Selection& select
     editable.SetVertices(std::move(desc.vertices));
 }
 
-void MeshDeform::Deflate(assets::EditableMesh& editable, const Selection& selection,
+void MeshDeform::Deflate(geometry::EditableMesh& editable, const Selection& selection,
                         float amount, const Mask* mask) {
     // Deflate is just negative inflate
     Inflate(editable, selection, -amount, mask);
 }
 
-void MeshDeform::Relax(assets::EditableMesh& editable, const Selection& selection,
+void MeshDeform::Relax(geometry::EditableMesh& editable, const Selection& selection,
                       float strength, int iterations, const Mask* mask) {
     // Relax is gentle smoothing - use SmoothUniform with lower strength
     // Typically relax uses strength around 0.1-0.2 vs normal smooth at 0.5+
     MeshSmooth::SmoothUniform(editable, selection, strength, iterations, mask);
 }
 
-void MeshDeform::Lattice(assets::EditableMesh& editable, const Selection& selection,
+void MeshDeform::Lattice(geometry::EditableMesh& editable, const Selection& selection,
                         const math::Vec3& latticeOrigin, const math::Vec3& latticeSize,
                         const math::IVec3& latticeResolution,
                         const std::vector<math::Vec3>& controlPoints,
@@ -198,7 +198,7 @@ void MeshDeform::Lattice(assets::EditableMesh& editable, const Selection& select
     editable.SetVertices(std::move(desc.vertices));
 }
 
-math::Vec3 MeshDeform::ComputeVertexNormal(const assets::EditableMesh& editable, uint32_t vertexID,
+math::Vec3 MeshDeform::ComputeVertexNormal(const geometry::EditableMesh& editable, uint32_t vertexID,
                                           const MeshTopology& topology, size_t vertexCount) {
     const auto& vertices = editable.GetVertices();
     if (vertexID >= vertices.size()) return math::Vec3(0, 1, 0);

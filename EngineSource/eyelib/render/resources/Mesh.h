@@ -2,7 +2,7 @@
 
 #include "eyelib/math/Types.h"
 #include "eyelib/math/AABB.h"
-#include "eyelib/assets/AssetId.h"
+#include "eyelib/asset/AssetId.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cstdint>
 #include <memory>

@@ -77,6 +77,8 @@ eyelib/
  └ assets   ← new module
 ```
 
+**Current location:** The asset pipeline is implemented under **`EngineSource/eyelib/asset_pipe/`** (core, meta, database, runtime, readers, writers, tools/importer). The legacy **`eyelib/assets`** module is deprecated; see **`documentation/plans/asset_migration.md`** for steps to remove it and use asset_pipe everywhere.
+
 During development you build it in:
 
 ```text

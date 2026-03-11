@@ -57,6 +57,10 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
     m_world = &world;
     m_assetRegistry = &assetRegistry;
     m_assetRoots = assetRoots;
+    if (!assetRoots.empty()) {
+        assetRegistry.SetAssetRoot(assetRoots[0]);
+        assetRegistry.Scan();
+    }
     m_options = {};
     m_options.assetRoots = assetRoots;
     m_options.fixedTimestep = options ? options->fixedTimestep : 0.0f;
@@ -72,12 +76,12 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
         // Lifetime domain: use sharedDevice (editor) when valid; otherwise create device from window.
         m_render = std::make_unique<WorldRenderBridge>();
         if (sharedDevice) {
-            if (!m_render->Initialize(sharedDevice.Get(), width, height)) {
+            if (!m_render->Initialize(sharedDevice.Get(), width, height, &assetRegistry)) {
                 m_render.reset();
                 return false;
             }
         } else {
-            if (!m_render->Initialize(*window, width, height, backend)) {
+            if (!m_render->Initialize(*window, width, height, &assetRegistry, backend)) {
                 m_render.reset();
                 return false;
             }

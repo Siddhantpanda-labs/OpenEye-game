@@ -54,6 +54,15 @@ set(GEOMETRY_FIELDS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/fields/Field.h
 )
 
+set(GEOMETRY_MESH_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditableMesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditableMesh.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshBinaryFormat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/MeshBinaryFormat.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/OEAFormat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/OEAFormat.h
+)
+
 set(GEOMETRY_SOURCES
     ${GEOMETRY_CORE_SOURCES}
     ${GEOMETRY_SELECTION_SOURCES}
@@ -61,6 +70,7 @@ set(GEOMETRY_SOURCES
     ${GEOMETRY_PRIMITIVES_SOURCES}
     ${GEOMETRY_OPERATIONS_SOURCES}
     ${GEOMETRY_FIELDS_SOURCES}
+    ${GEOMETRY_MESH_SOURCES}
 )
 
 add_library(EyelibGeometry STATIC ${GEOMETRY_SOURCES})
@@ -76,8 +86,10 @@ target_include_directories(EyelibGeometry
 
 target_link_libraries(EyelibGeometry
     PUBLIC
-        EyelibAssets
+        AssetCore
         EyelibRender
         EyelibMath
+        EyelibCore
+        EyelibPlatform
     PRIVATE
 )

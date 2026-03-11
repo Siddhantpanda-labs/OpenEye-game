@@ -1,5 +1,5 @@
 #include "eyelib/animation/RiggingUtils.h"
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -9,7 +9,7 @@ namespace eyelib {
 namespace animation {
 
 void RiggingUtils::CalculateDistanceWeights(
-    assets::EditableMesh& editable,
+    geometry::EditableMesh& editable,
     std::shared_ptr<Skeleton> skeleton,
     float falloffDistance,
     float power) {
@@ -121,7 +121,7 @@ void RiggingUtils::AssignDistanceWeights(
 }
 
 void RiggingUtils::CalculateHeatDiffusionWeights(
-    assets::EditableMesh& editable,
+    geometry::EditableMesh& editable,
     std::shared_ptr<Skeleton> skeleton,
     int iterations) {
     

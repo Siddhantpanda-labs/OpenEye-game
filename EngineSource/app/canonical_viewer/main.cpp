@@ -7,12 +7,12 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
-#include "asset_pipe/readers/mesh_reader.h"
-#include "asset_pipe/readers/prefab_reader.h"
-#include "asset_pipe/readers/material_reader.h"
-#include "asset_pipe/readers/texture_reader.h"
-#include "asset_pipe/readers/oea_reader.h"
-#include "asset_pipe/core/import_mesh.h"
+#include "asset/readers/mesh_reader.h"
+#include "asset/readers/prefab_reader.h"
+#include "asset/readers/material_reader.h"
+#include "asset/readers/texture_reader.h"
+#include "asset/readers/oea_reader.h"
+#include "asset/core/import_mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHI.h"
 
@@ -124,8 +124,8 @@ bool ReadMaterialMapFromText(const std::string& text, std::vector<std::string>& 
 }
 
 bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath, bool& outIsPrefab, std::string& outExtractDir) {
-    std::vector<asset_pipe::OeaEntry> entries;
-    if (!asset_pipe::OeaReader::ReadIndex(oeaPath, entries) || entries.empty()) return false;
+    std::vector<asset::OeaEntry> entries;
+    if (!asset::OeaReader::ReadIndex(oeaPath, entries) || entries.empty()) return false;
 
     const std::string stem = fs::path(oeaPath).stem().string();
     std::string preferredName = stem + ".prefab";
@@ -164,7 +164,7 @@ bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath
     const fs::path selectedPath = cacheDir / selectedName;
     if (!fs::exists(selectedPath)) {
         fs::remove_all(cacheDir, ec);
-        if (!asset_pipe::OeaReader::ExtractAll(oeaPath, cacheDir.string(), nullptr)) return false;
+        if (!asset::OeaReader::ExtractAll(oeaPath, cacheDir.string(), nullptr)) return false;
     }
 
     outExtractDir = cacheDir.string();
@@ -173,7 +173,7 @@ bool ResolveOeaPrimaryPath(const std::string& oeaPath, std::string& outAssetPath
     return true;
 }
 
-std::shared_ptr<eyelib::api::Mesh> BuildApiMeshFromImportMesh(const asset_pipe::ImportMesh& importMesh,
+std::shared_ptr<eyelib::api::Mesh> BuildApiMeshFromImportMesh(const asset::ImportMesh& importMesh,
                                                                eyelib::api::RenderDevice device) {
     auto mesh = std::make_shared<eyelib::api::Mesh>();
     std::vector<eyelib::api::Mesh::Vertex> vertices;
@@ -201,8 +201,8 @@ std::shared_ptr<eyelib::api::Mesh> BuildApiMeshFromImportMesh(const asset_pipe::
 }
 
 std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, eyelib::api::RenderDevice device) {
-    asset_pipe::ImportMesh importMesh;
-    if (!asset_pipe::MeshReader::Read(path, importMesh)) {
+    asset::ImportMesh importMesh;
+    if (!asset::MeshReader::Read(path, importMesh)) {
         std::cerr << "CanonicalViewer: failed to read " << path << "\n";
         return nullptr;
     }
@@ -211,8 +211,8 @@ std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMesh(const std::string& path, ey
 
 std::shared_ptr<eyelib::api::Mesh> LoadCanonicalMeshFromBytes(const std::vector<uint8_t>& bytes,
                                                               eyelib::api::RenderDevice device) {
-    asset_pipe::ImportMesh importMesh;
-    if (!asset_pipe::MeshReader::Read(bytes, importMesh)) return nullptr;
+    asset::ImportMesh importMesh;
+    if (!asset::MeshReader::Read(bytes, importMesh)) return nullptr;
     return BuildApiMeshFromImportMesh(importMesh, device);
 }
 
@@ -226,8 +226,8 @@ std::shared_ptr<eyelib::api::Texture> LoadTextureFromPath(eyelib::api::RenderDev
 
     const bool isTex = (path.size() >= 4 && path.compare(path.size() - 4, 4, ".tex") == 0);
     if (isTex) {
-        asset_pipe::LoadedTexture loaded;
-        if (!asset_pipe::TextureReader::Read(path, loaded) || loaded.pixels.empty()) return nullptr;
+        asset::LoadedTexture loaded;
+        if (!asset::TextureReader::Read(path, loaded) || loaded.pixels.empty()) return nullptr;
         eyelib::api::TextureFormat fmt = (loaded.channels == 4) ? eyelib::api::TextureFormat::RGBA8 : eyelib::api::TextureFormat::RGB8;
         if (!apiTex->Create(static_cast<int>(loaded.width), static_cast<int>(loaded.height), fmt, loaded.pixels.data())) return nullptr;
         apiTex->GenerateMipmaps();
@@ -238,7 +238,7 @@ std::shared_ptr<eyelib::api::Texture> LoadTextureFromPath(eyelib::api::RenderDev
 }
 
 std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::RenderDevice device,
-    const asset_pipe::LoadedMaterial& loaded,
+    const asset::LoadedMaterial& loaded,
     const std::string& baseDir,
     const std::string& fallbackBaseDir,
     std::shared_ptr<eyelib::api::Shader> litShader) {
@@ -440,22 +440,22 @@ int main(int argc, char** argv) {
     FreeFlyCamera freeFlyCam;
 
     if (isPrefab) {
-        std::vector<asset_pipe::PrefabDrawable> drawables;
-        std::vector<asset_pipe::OeaEntry> omeshEntries;
+        std::vector<asset::PrefabDrawable> drawables;
+        std::vector<asset::OeaEntry> omeshEntries;
         auto readOmeshEntryBytes = [&](const std::string& name, std::vector<uint8_t>& outBytes) -> bool {
             if (!isOmeshPackage || name.empty()) return false;
-            if (asset_pipe::OeaReader::ReadEntryData(path, name, outBytes)) return true;
+            if (asset::OeaReader::ReadEntryData(path, name, outBytes)) return true;
             const std::string base = fs::path(name).filename().string();
             for (const auto& e : omeshEntries) {
                 if (fs::path(e.name).filename().string() == base) {
-                    return asset_pipe::OeaReader::ReadEntryData(path, e.name, outBytes);
+                    return asset::OeaReader::ReadEntryData(path, e.name, outBytes);
                 }
             }
             return false;
         };
 
         if (isOmeshPackage) {
-            if (!asset_pipe::OeaReader::ReadIndex(path, omeshEntries) || omeshEntries.empty()) {
+            if (!asset::OeaReader::ReadIndex(path, omeshEntries) || omeshEntries.empty()) {
                 std::cerr << "CanonicalViewer: failed to read .omesh index " << path << "\n";
                 pipeline.Shutdown();
                 window.Shutdown();
@@ -494,7 +494,7 @@ int main(int argc, char** argv) {
                 return 7;
             }
             const std::string prefabText(prefabBytes.begin(), prefabBytes.end());
-            if (!asset_pipe::PrefabReader::ReadFromText(prefabText, drawables)) {
+            if (!asset::PrefabReader::ReadFromText(prefabText, drawables)) {
                 std::cerr << "CanonicalViewer: failed to parse prefab in .omesh " << path << "\n";
                 pipeline.Shutdown();
                 window.Shutdown();
@@ -502,7 +502,7 @@ int main(int argc, char** argv) {
                 return 7;
             }
         } else {
-            if (!asset_pipe::PrefabReader::Read(path, drawables)) {
+            if (!asset::PrefabReader::Read(path, drawables)) {
                 std::cerr << "CanonicalViewer: failed to read prefab " << path << "\n";
                 pipeline.Shutdown();
                 window.Shutdown();
@@ -565,14 +565,14 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < indexedMaterialFiles.size(); ++i) {
                 if (indexedMaterialFiles[i].empty()) continue;
 
-                asset_pipe::LoadedMaterial lm;
+                asset::LoadedMaterial lm;
                 bool loaded = false;
                 const std::string matPath = ResolvePathWithFallback(baseDir, fallbackBaseDir, indexedMaterialFiles[i]);
-                loaded = asset_pipe::MaterialReader::Read(matPath, lm);
+                loaded = asset::MaterialReader::Read(matPath, lm);
                 if (!loaded && isOmeshPackage) {
                     std::vector<uint8_t> matBytes;
                     if (readOmeshEntryBytes(indexedMaterialFiles[i], matBytes))
-                        loaded = asset_pipe::MaterialReader::Read(matBytes, lm);
+                        loaded = asset::MaterialReader::Read(matBytes, lm);
                 }
                 if (!loaded) continue;
 
@@ -582,7 +582,7 @@ int main(int argc, char** argv) {
             std::cout << "CanonicalViewer: using material map " << mapSource << " (" << materialsByIndex.size() << " indexed materials)\n";
         } else {
             // Legacy fallback for older assets that do not include a material map.
-            std::vector<asset_pipe::LoadedMaterial> loadedMats;
+            std::vector<asset::LoadedMaterial> loadedMats;
             std::vector<std::string> matFiles;
             try {
                 for (const auto& e : fs::directory_iterator(baseDir)) {
@@ -607,8 +607,8 @@ int main(int argc, char** argv) {
                 return a < b;
             });
             for (const auto& p : matFiles) {
-                asset_pipe::LoadedMaterial lm;
-                if (asset_pipe::MaterialReader::Read(p, lm))
+                asset::LoadedMaterial lm;
+                if (asset::MaterialReader::Read(p, lm))
                     loadedMats.push_back(std::move(lm));
             }
             if (loadedMats.empty() && isOmeshPackage) {
@@ -621,8 +621,8 @@ int main(int argc, char** argv) {
                 for (const auto& n : matEntryNames) {
                     std::vector<uint8_t> matBytes;
                     if (!readOmeshEntryBytes(n, matBytes)) continue;
-                    asset_pipe::LoadedMaterial lm;
-                    if (asset_pipe::MaterialReader::Read(matBytes, lm))
+                    asset::LoadedMaterial lm;
+                    if (asset::MaterialReader::Read(matBytes, lm))
                         loadedMats.push_back(std::move(lm));
                 }
             }

@@ -8,7 +8,7 @@
 #include "WorldScripting.h"
 #include "WorldAudio.h"
 
-#include "api/assets/All.h"
+#include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
 #include "api/render/All.h"
 #include "api/world/All.h"

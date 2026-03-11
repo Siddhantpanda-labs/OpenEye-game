@@ -1,5 +1,5 @@
 #include "api/render/Mesh.h"
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/MeshDescriptorUtils.h"
 #include "eyelib/render/resources/Mesh.h"
@@ -9,7 +9,7 @@ namespace api {
 
 class Mesh::Impl {
 public:
-    assets::EditableMesh editable;
+    ::eyelib::geometry::EditableMesh editable;
     std::shared_ptr<::eyelib::render::Mesh> mesh = std::make_shared<::eyelib::render::Mesh>();
 };
 
@@ -178,11 +178,11 @@ std::shared_ptr<::eyelib::render::Mesh> Mesh::GetInternal() const {
     return m_impl->mesh;
 }
 
-::eyelib::assets::EditableMesh* Mesh::GetEditableMesh() {
+::eyelib::geometry::EditableMesh* Mesh::GetEditableMesh() {
     return &m_impl->editable;
 }
 
-const ::eyelib::assets::EditableMesh* Mesh::GetEditableMesh() const {
+const ::eyelib::geometry::EditableMesh* Mesh::GetEditableMesh() const {
     return &m_impl->editable;
 }
 

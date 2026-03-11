@@ -8,7 +8,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshPrimitives::CreateCube(assets::EditableMesh& editable, float size) {
+void MeshPrimitives::CreateCube(geometry::EditableMesh& editable, float size) {
     std::vector<render::Vertex> vertices;
     std::vector<uint32_t> indices;
     
@@ -69,7 +69,7 @@ void MeshPrimitives::CreateCube(assets::EditableMesh& editable, float size) {
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::CreateSphere(assets::EditableMesh& editable, float radius, int segments, int rings) {
+void MeshPrimitives::CreateSphere(geometry::EditableMesh& editable, float radius, int segments, int rings) {
     
     segments = std::max(3, segments);
     rings = std::max(2, rings);
@@ -137,7 +137,7 @@ void MeshPrimitives::CreateSphere(assets::EditableMesh& editable, float radius, 
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::CreatePlane(assets::EditableMesh& editable, float width, float height, int widthSegments, int heightSegments) {
+void MeshPrimitives::CreatePlane(geometry::EditableMesh& editable, float width, float height, int widthSegments, int heightSegments) {
     widthSegments = std::max(1, widthSegments);
     heightSegments = std::max(1, heightSegments);
     
@@ -191,11 +191,11 @@ void MeshPrimitives::CreatePlane(assets::EditableMesh& editable, float width, fl
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::CreateQuad(assets::EditableMesh& editable) {
+void MeshPrimitives::CreateQuad(geometry::EditableMesh& editable) {
     CreatePlane(editable, 1.0f, 1.0f, 1, 1);
 }
 
-void MeshPrimitives::CreateCylinder(assets::EditableMesh& editable, float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
+void MeshPrimitives::CreateCylinder(geometry::EditableMesh& editable, float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
     segments = std::max(3, segments);
     rings = std::max(1, rings);
     
@@ -331,7 +331,7 @@ void MeshPrimitives::CreateCylinder(assets::EditableMesh& editable, float radius
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::CreateCone(assets::EditableMesh& editable, float radius, float height, int segments, bool capBase) {
+void MeshPrimitives::CreateCone(geometry::EditableMesh& editable, float radius, float height, int segments, bool capBase) {
     segments = std::max(3, segments);
     
     std::vector<render::Vertex> vertices;
@@ -404,7 +404,7 @@ void MeshPrimitives::CreateCone(assets::EditableMesh& editable, float radius, fl
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::CreateTorus(assets::EditableMesh& editable, float radius, float tubeRadius, int segments, int tubeSegments) {
+void MeshPrimitives::CreateTorus(geometry::EditableMesh& editable, float radius, float tubeRadius, int segments, int tubeSegments) {
     segments = std::max(3, segments);
     tubeSegments = std::max(3, tubeSegments);
     
@@ -462,7 +462,7 @@ void MeshPrimitives::CreateTorus(assets::EditableMesh& editable, float radius, f
     FinalizeEditable(editable);
 }
 
-void MeshPrimitives::FinalizeEditable(assets::EditableMesh& editable) {
+void MeshPrimitives::FinalizeEditable(geometry::EditableMesh& editable) {
     auto desc = editable.GetDescriptor();
     render::MeshDescriptorUtils::GenerateNormals(desc);
     editable.SetVertices(std::move(desc.vertices));

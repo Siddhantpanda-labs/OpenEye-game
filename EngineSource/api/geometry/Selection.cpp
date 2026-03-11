@@ -86,7 +86,7 @@ class SelectionBuilder::Impl {
 public:
     ::eyelib::geometry::SelectionBuilder builder;
     
-    explicit Impl(const ::eyelib::assets::EditableMesh& editable) : builder(editable) {}
+    explicit Impl(const ::eyelib::geometry::EditableMesh& editable) : builder(editable) {}
 };
 
 SelectionBuilder::SelectionBuilder(const Mesh& mesh) 

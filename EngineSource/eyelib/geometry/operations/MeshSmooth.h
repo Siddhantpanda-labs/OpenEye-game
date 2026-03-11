@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include "eyelib/geometry/masking/Mask.h"
 #include <memory>
@@ -28,23 +28,23 @@ public:
      * @param iterations Number of smoothing iterations
      * @param mask Optional mask to control smoothing strength per vertex
      */
-    static void Smooth(assets::EditableMesh& editable, const Selection& selection, 
+    static void Smooth(geometry::EditableMesh& editable, const Selection& selection, 
                       float strength = 0.5f, int iterations = 1,
                       const Mask* mask = nullptr);
     
     /**
      * @brief Smooth mesh with uniform Laplacian (simple one-ring average).
      */
-    static void SmoothUniform(assets::EditableMesh& editable, const Selection& selection,
+    static void SmoothUniform(geometry::EditableMesh& editable, const Selection& selection,
                               float strength = 0.5f, int iterations = 1,
                               const Mask* mask = nullptr);
 
 private:
-    static void SmoothTaubin(assets::EditableMesh& editable, const Selection& selection,
+    static void SmoothTaubin(geometry::EditableMesh& editable, const Selection& selection,
                             float lambda, float mu, int iterations,
                             const Mask* mask, const MeshTopology& topology);
     
-    static math::Vec3 ComputeUniformLaplacian(const assets::EditableMesh& editable, uint32_t vertexID,
+    static math::Vec3 ComputeUniformLaplacian(const geometry::EditableMesh& editable, uint32_t vertexID,
                                                const MeshTopology& topology, size_t vertexCount);
     
     // Helper to get vertex neighbors from topology

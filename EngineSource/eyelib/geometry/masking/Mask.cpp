@@ -1,5 +1,5 @@
 #include "eyelib/geometry/masking/Mask.h"
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include <algorithm>
 #include <cmath>
@@ -7,11 +7,11 @@
 namespace eyelib {
 namespace geometry {
 
-Mask Mask::Create(const assets::EditableMesh& editable) {
+Mask Mask::Create(const geometry::EditableMesh& editable) {
     return Mask(editable.GetVertices().size());
 }
 
-Mask Mask::CreateFilled(const assets::EditableMesh& editable, float value) {
+Mask Mask::CreateFilled(const geometry::EditableMesh& editable, float value) {
     Mask mask(editable.GetVertices().size());
     mask.Fill(value);
     return mask;
@@ -58,7 +58,7 @@ void Mask::Fill(const Selection& selection, float value) {
     }
 }
 
-void Mask::Paint(const assets::EditableMesh& editable, const Selection& selection, float value, float falloff) {
+void Mask::Paint(const geometry::EditableMesh& editable, const Selection& selection, float value, float falloff) {
     if (selection.GetType() != Selection::Type::Vertices) {
         return;
     }

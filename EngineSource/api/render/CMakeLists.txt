@@ -72,6 +72,7 @@ target_include_directories(EyelibRenderAPI
 
 target_link_libraries(EyelibRenderAPI
     PUBLIC
+        EyelibGeometry
         EyelibRender
         EyelibMath
 )

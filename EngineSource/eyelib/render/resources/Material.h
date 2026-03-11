@@ -1,7 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
-#include "eyelib/assets/AssetId.h"
+#include "eyelib/asset/AssetId.h"
 #include <cstddef>
 #include <functional>
 #include <memory>

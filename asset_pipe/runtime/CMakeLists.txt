@@ -1,3 +1,0 @@
-add_library(AssetPipeRuntime STATIC asset_manager.cpp)
-target_include_directories(AssetPipeRuntime PUBLIC ${CMAKE_SOURCE_DIR})
-target_link_libraries(AssetPipeRuntime PUBLIC AssetPipeDatabase AssetPipeReaders)

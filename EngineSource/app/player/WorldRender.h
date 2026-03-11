@@ -4,7 +4,7 @@
 #include "BuiltinResourceManager.h"
 #include "RendererGPUResourceCache.h"
 
-#include "api/assets/All.h"
+#include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
 #include "api/render/All.h"
 #include "api/world/All.h"
@@ -26,11 +26,12 @@ class WorldAnimationBridge;
 
 class WorldRenderBridge {
 public:
-    /** Standalone: create pipeline and device from window (player app). */
+    /** Standalone: create pipeline and device from window (player app). Pass registry so GPU resolver is set. */
     bool Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
+                    eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default);
-    /** Editor Model A: use shared device (same as editor). No second device; resources stay in same lifetime domain. */
-    bool Initialize(void* sharedDevice, uint32_t width, uint32_t height);
+    /** Editor Model A: use shared device (same as editor). Pass registry so GPU resolver is set. */
+    bool Initialize(void* sharedDevice, uint32_t width, uint32_t height, eyelib::api::AssetRegistry* assetRegistry);
     void Shutdown();
 
     /** Full render path (BuildScene + pipeline). Use only when render runs on same thread as game. */
@@ -136,7 +137,7 @@ private:
     /** Resolve material by path using registry only for GetId, then ResolveMaterial(id). */
     std::shared_ptr<eyelib::api::Material> ResolveMaterial(const std::string& materialId,
                                                            eyelib::api::AssetRegistry* registry);
-    ModelEntry LoadModelEntry(const std::string& path);
+    ModelEntry LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path);
     /** Resolve builtin:// primitive mesh id to procedural mesh + default material. */
     ModelEntry GetPrimitiveEntry(const std::string& meshId);
     std::shared_ptr<eyelib::api::TextureCube> GetOrLoadSkybox(const std::string& assetId,
@@ -162,6 +163,7 @@ private:
     uint32_t m_height = 0;
 
     std::unique_ptr<BuiltinResourceManager> m_builtinManager;
+    eyelib::api::AssetRegistry* m_assetRegistryForResolver = nullptr;
     std::unique_ptr<RendererGPUResourceCache> m_gpuResourceCache;
     std::shared_ptr<eyelib::api::Shader> m_defaultShader;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;

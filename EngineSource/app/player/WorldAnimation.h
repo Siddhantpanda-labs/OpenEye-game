@@ -1,7 +1,7 @@
 #pragma once
 
 #include "api/animation/All.h"
-#include "api/assets/All.h"
+#include "api/asset/All.h"
 #include "api/world/All.h"
 
 #include <memory>

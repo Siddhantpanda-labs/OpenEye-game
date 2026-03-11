@@ -1,6 +1,6 @@
 #include "api/geometry/Primitives.h"
 #include "eyelib/geometry/primitives/MeshPrimitives.h"
-#include "eyelib/assets/AssetManager.h"
+#include "eyelib/asset/AssetManager.h"
 #include "api/render/Mesh.h"
 #include "api/render/RenderDevice.h"
 

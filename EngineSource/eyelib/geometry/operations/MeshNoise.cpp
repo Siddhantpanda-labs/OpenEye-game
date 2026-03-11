@@ -4,7 +4,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshNoise::ApplyNoise(assets::EditableMesh& editable, const Selection& selection,
+void MeshNoise::ApplyNoise(geometry::EditableMesh& editable, const Selection& selection,
                           std::function<float(const math::Vec3&)> noiseField,
                           float strength, const math::Vec3* direction,
                           const Mask* mask) {
@@ -16,14 +16,14 @@ void MeshNoise::ApplyNoise(assets::EditableMesh& editable, const Selection& sele
     MeshDisplace::DisplaceWithField(editable, selection, fieldFunc, direction, mask);
 }
 
-void MeshNoise::ApplyPerlinNoise(assets::EditableMesh& editable, const Selection& selection,
+void MeshNoise::ApplyPerlinNoise(geometry::EditableMesh& editable, const Selection& selection,
                                  float scale, float strength, uint32_t seed,
                                  const Mask* mask) {
     auto noiseField = NoiseField::Create(NoiseType::Perlin, scale, seed);
     ApplyNoise(editable, selection, noiseField, strength, nullptr, mask);
 }
 
-void MeshNoise::ApplyFBMNoise(assets::EditableMesh& editable, const Selection& selection,
+void MeshNoise::ApplyFBMNoise(geometry::EditableMesh& editable, const Selection& selection,
                               float scale, float strength, int octaves,
                               float persistence, uint32_t seed, const Mask* mask) {
     auto noiseField = NoiseField::Create(NoiseType::FBM, scale, seed, octaves, persistence);

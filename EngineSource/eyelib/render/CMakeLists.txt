@@ -110,6 +110,10 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDrawRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDrawRenderer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderWatcher.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderLoader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderLoader.h
 )
 
 add_library(EyelibRender STATIC ${RENDER_SOURCES})

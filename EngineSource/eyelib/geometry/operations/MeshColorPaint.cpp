@@ -8,7 +8,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshColorPaint::PaintVertexColor(assets::EditableMesh& editable, const Selection& selection,
+void MeshColorPaint::PaintVertexColor(geometry::EditableMesh& editable, const Selection& selection,
                                      const math::Vec4& color, float strength,
                                      float falloff, const Mask* mask) {
     auto& vertices = editable.GetVertices();
@@ -65,7 +65,7 @@ void MeshColorPaint::PaintVertexColor(assets::EditableMesh& editable, const Sele
     
 }
 
-void MeshColorPaint::FillColor(assets::EditableMesh& editable, const Selection& selection,
+void MeshColorPaint::FillColor(geometry::EditableMesh& editable, const Selection& selection,
                                const math::Vec4& color) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -92,7 +92,7 @@ void MeshColorPaint::FillColor(assets::EditableMesh& editable, const Selection& 
     
 }
 
-void MeshColorPaint::GradientColor(assets::EditableMesh& editable, const Selection& selection,
+void MeshColorPaint::GradientColor(geometry::EditableMesh& editable, const Selection& selection,
                                   const math::Vec4& startColor, const math::Vec4& endColor,
                                   const math::Vec3& direction, const Mask* mask) {
     auto& vertices = editable.GetVertices();
@@ -167,7 +167,7 @@ void MeshColorPaint::GradientColor(assets::EditableMesh& editable, const Selecti
     
 }
 
-void MeshColorPaint::NoisePaint(assets::EditableMesh& editable, const Selection& selection,
+void MeshColorPaint::NoisePaint(geometry::EditableMesh& editable, const Selection& selection,
                                const math::Vec4& baseColor, const math::Vec4& noiseColor,
                                float scale, float strength, uint32_t seed,
                                const Mask* mask) {
@@ -222,7 +222,7 @@ void MeshColorPaint::NoisePaint(assets::EditableMesh& editable, const Selection&
     
 }
 
-void MeshColorPaint::BlendColors(assets::EditableMesh& editable, const Selection& selection,
+void MeshColorPaint::BlendColors(geometry::EditableMesh& editable, const Selection& selection,
                                 const math::Vec4& blendColor, BlendMode blendMode,
                                 float strength, const Mask* mask) {
     auto& vertices = editable.GetVertices();
@@ -257,7 +257,7 @@ void MeshColorPaint::BlendColors(assets::EditableMesh& editable, const Selection
     
 }
 
-void MeshColorPaint::SampleColor(const assets::EditableMesh& source, assets::EditableMesh& target,
+void MeshColorPaint::SampleColor(const geometry::EditableMesh& source, geometry::EditableMesh& target,
                                 const Selection& sourceSelection, const Selection& targetSelection) {
     const auto& sourceVertices = source.GetVertices();
     auto& targetVertices = target.GetVertices();
@@ -298,7 +298,7 @@ void MeshColorPaint::SampleColor(const assets::EditableMesh& source, assets::Edi
     
 }
 
-math::Vec3 MeshColorPaint::ComputeSelectionCenter(const assets::EditableMesh& editable, const Selection& selection) {
+math::Vec3 MeshColorPaint::ComputeSelectionCenter(const geometry::EditableMesh& editable, const Selection& selection) {
     const auto& vertices = editable.GetVertices();
     math::Vec3 center(0.0f);
     size_t count = 0;

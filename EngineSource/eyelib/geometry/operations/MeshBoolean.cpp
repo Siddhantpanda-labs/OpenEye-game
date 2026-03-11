@@ -10,29 +10,29 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshBoolean::Union(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
+void MeshBoolean::Union(geometry::EditableMesh& meshA, const geometry::EditableMesh& meshB) {
     // Union: Keep all faces from A that are outside B, and all faces from B that are outside A
     ClassifyAndMerge(meshA, meshA, meshB, false, true, false, true);
 }
 
-void MeshBoolean::Difference(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
+void MeshBoolean::Difference(geometry::EditableMesh& meshA, const geometry::EditableMesh& meshB) {
     // Difference: Keep faces from A that are outside B, remove faces from A that are inside B
     ClassifyAndMerge(meshA, meshA, meshB, false, true, false, false);
 }
 
-void MeshBoolean::Intersection(assets::EditableMesh& meshA, const assets::EditableMesh& meshB) {
+void MeshBoolean::Intersection(geometry::EditableMesh& meshA, const geometry::EditableMesh& meshB) {
     // Intersection: Keep only faces that are inside both meshes
     ClassifyAndMerge(meshA, meshA, meshB, true, false, true, false);
 }
 
-bool MeshBoolean::IsVertexInside(const assets::EditableMesh& editable, const math::Vec3& point) {
+bool MeshBoolean::IsVertexInside(const geometry::EditableMesh& editable, const math::Vec3& point) {
     // Use ray casting to determine if point is inside mesh
     // Cast ray in random direction and count intersections
     math::Vec3 direction(1.0f, 0.0f, 0.0f); // Simple direction
     return RayCastInsideTest(editable, point, direction);
 }
 
-math::AABB MeshBoolean::ComputeMeshBounds(const assets::EditableMesh& editable) {
+math::AABB MeshBoolean::ComputeMeshBounds(const geometry::EditableMesh& editable) {
     const auto& vertices = editable.GetVertices();
     if (vertices.empty()) {
         return math::AABB();
@@ -49,7 +49,7 @@ math::AABB MeshBoolean::ComputeMeshBounds(const assets::EditableMesh& editable) 
     return math::AABB(min, max);
 }
 
-bool MeshBoolean::RayCastInsideTest(const assets::EditableMesh& editable, const math::Vec3& point, const math::Vec3& direction) {
+bool MeshBoolean::RayCastInsideTest(const geometry::EditableMesh& editable, const math::Vec3& point, const math::Vec3& direction) {
     // Cast ray from point and count triangle intersections
     // Odd number = inside, even number = outside
     
@@ -83,7 +83,7 @@ bool MeshBoolean::RayCastInsideTest(const assets::EditableMesh& editable, const 
     return (intersectionCount % 2) == 1; // Odd = inside
 }
 
-void MeshBoolean::ClassifyAndMerge(assets::EditableMesh& resultMesh, const assets::EditableMesh& meshA, const assets::EditableMesh& meshB,
+void MeshBoolean::ClassifyAndMerge(geometry::EditableMesh& resultMesh, const geometry::EditableMesh& meshA, const geometry::EditableMesh& meshB,
                                   bool keepAInside, bool keepAOutside, bool keepBInside, bool keepBOutside) {
     const auto& verticesA = meshA.GetVertices();
     const auto& verticesB = meshB.GetVertices();

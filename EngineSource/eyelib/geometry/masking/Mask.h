@@ -33,12 +33,12 @@ public:
     /**
      * @brief Create empty mask for a mesh (vertex count from editable).
      */
-    static Mask Create(const assets::EditableMesh& editable);
+    static Mask Create(const geometry::EditableMesh& editable);
     
     /**
      * @brief Create mask with all weights set to a value.
      */
-    static Mask CreateFilled(const assets::EditableMesh& editable, float value);
+    static Mask CreateFilled(const geometry::EditableMesh& editable, float value);
     
     Mask();
     ~Mask() = default;
@@ -84,7 +84,7 @@ public:
      * @param value Target weight value
      * @param falloff Falloff radius (0 = hard edge, >0 = smooth falloff)
      */
-    void Paint(const assets::EditableMesh& editable, const Selection& selection, float value, float falloff = 0.0f);
+    void Paint(const geometry::EditableMesh& editable, const Selection& selection, float value, float falloff = 0.0f);
     
     /**
      * @brief Blend this mask with another mask.

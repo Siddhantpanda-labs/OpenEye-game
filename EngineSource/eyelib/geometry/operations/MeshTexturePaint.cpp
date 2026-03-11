@@ -9,7 +9,7 @@
 namespace eyelib {
 namespace geometry {
 
-void MeshTexturePaint::GenerateUVs(assets::EditableMesh& editable, UVProjection projection,
+void MeshTexturePaint::GenerateUVs(geometry::EditableMesh& editable, UVProjection projection,
                                    int axis, const Selection& selection) {
     switch (projection) {
         case UVProjection::Planar: {
@@ -30,7 +30,7 @@ void MeshTexturePaint::GenerateUVs(assets::EditableMesh& editable, UVProjection 
     }
 }
 
-void MeshTexturePaint::GeneratePlanarUVs(assets::EditableMesh& editable, const math::Vec3& normal, const math::Vec3& up,
+void MeshTexturePaint::GeneratePlanarUVs(geometry::EditableMesh& editable, const math::Vec3& normal, const math::Vec3& up,
                                          const Selection& selection) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -81,7 +81,7 @@ void MeshTexturePaint::GeneratePlanarUVs(assets::EditableMesh& editable, const m
     
 }
 
-void MeshTexturePaint::GenerateCylindricalUVs(assets::EditableMesh& editable, int axis,
+void MeshTexturePaint::GenerateCylindricalUVs(geometry::EditableMesh& editable, int axis,
                                               const Selection& selection) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
@@ -131,7 +131,7 @@ void MeshTexturePaint::GenerateCylindricalUVs(assets::EditableMesh& editable, in
     
 }
 
-void MeshTexturePaint::GenerateSphericalUVs(assets::EditableMesh& editable, const Selection& selection) {
+void MeshTexturePaint::GenerateSphericalUVs(geometry::EditableMesh& editable, const Selection& selection) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
@@ -180,7 +180,7 @@ void MeshTexturePaint::GenerateSphericalUVs(assets::EditableMesh& editable, cons
     
 }
 
-void MeshTexturePaint::GenerateBoxUVs(assets::EditableMesh& editable, const Selection& selection) {
+void MeshTexturePaint::GenerateBoxUVs(geometry::EditableMesh& editable, const Selection& selection) {
     auto& vertices = editable.GetVertices();
     if (vertices.empty()) return;
     
@@ -252,7 +252,7 @@ void MeshTexturePaint::GenerateBoxUVs(assets::EditableMesh& editable, const Sele
     
 }
 
-void MeshTexturePaint::UnwrapUVs(assets::EditableMesh& editable, float padding) {
+void MeshTexturePaint::UnwrapUVs(geometry::EditableMesh& editable, float padding) {
     // Simplified UV unwrapping: uses planar projection per face
     // Full implementation would use LSCM or ABF algorithms
     
@@ -318,7 +318,7 @@ void MeshTexturePaint::UnwrapUVs(assets::EditableMesh& editable, float padding) 
     
 }
 
-void MeshTexturePaint::PackUVs(assets::EditableMesh& editable, float padding) {
+void MeshTexturePaint::PackUVs(geometry::EditableMesh& editable, float padding) {
     // Simplified UV packing: scales UVs to fit in [0, 1] with padding
     // Full implementation would use bin-packing algorithms
     
@@ -352,7 +352,7 @@ void MeshTexturePaint::PackUVs(assets::EditableMesh& editable, float padding) {
     
 }
 
-math::AABB MeshTexturePaint::ComputeMeshBounds(const assets::EditableMesh& editable, const Selection& selection) {
+math::AABB MeshTexturePaint::ComputeMeshBounds(const geometry::EditableMesh& editable, const Selection& selection) {
     const auto& vertices = editable.GetVertices();
     if (vertices.empty()) {
         return math::AABB();
@@ -413,7 +413,7 @@ void MeshTexturePaint::GetAxisVectors(int axis, math::Vec3& forward, math::Vec3&
 
 // Texture-Space Painting Implementation
 
-void MeshTexturePaint::PaintTexture(assets::EditableMesh& editable, render::Texture2D& texture,
+void MeshTexturePaint::PaintTexture(geometry::EditableMesh& editable, render::Texture2D& texture,
                                     const Selection& selection, const math::Vec4& color,
                                     float brushSize, float strength, const Mask* mask) {
     if (!texture.IsValid()) return;
@@ -519,7 +519,7 @@ void MeshTexturePaint::PaintTexture(assets::EditableMesh& editable, render::Text
     texture.SetData(texData.data(), 0, 0, texWidth, texHeight);
 }
 
-void MeshTexturePaint::FillTexture(assets::EditableMesh& editable, render::Texture2D& texture,
+void MeshTexturePaint::FillTexture(geometry::EditableMesh& editable, render::Texture2D& texture,
                                    const Selection& selection, const math::Vec4& color) {
     if (!texture.IsValid()) return;
     
@@ -577,7 +577,7 @@ void MeshTexturePaint::FillTexture(assets::EditableMesh& editable, render::Textu
     texture.SetData(texData.data(), 0, 0, texWidth, texHeight);
 }
 
-void MeshTexturePaint::BlendTexture(assets::EditableMesh& editable, render::Texture2D& texture,
+void MeshTexturePaint::BlendTexture(geometry::EditableMesh& editable, render::Texture2D& texture,
                                    const Selection& selection, const math::Vec4& blendColor,
                                    BlendMode blendMode, float strength, const Mask* mask) {
     if (!texture.IsValid()) return;

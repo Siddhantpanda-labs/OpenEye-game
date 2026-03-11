@@ -2,7 +2,7 @@
 
 #include "eyelib/render/resources/TextureTypes.h"
 #include "eyelib/render/rhi/RHI.h"
-#include "eyelib/assets/AssetId.h"
+#include "eyelib/asset/AssetId.h"
 #include <cstddef>
 
 #include "eyelib/render/TextureDescriptor.h"

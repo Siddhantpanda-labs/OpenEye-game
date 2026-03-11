@@ -1,6 +1,6 @@
 #pragma once
 
-#include "api/assets/All.h"
+#include "api/asset/All.h"
 #include "api/world/All.h"
 
 #include <string>

@@ -1,4 +1,4 @@
-# Canonical viewer: loads .mesh (asset_pipe format) and displays with default material.
+# Canonical viewer: loads .mesh (asset format) and displays with default material.
 # Exe ends up in Engine/bin/ (same as OpenEyePlayer).
 set(CANONICAL_VIEWER_SOURCES
     main.cpp
@@ -11,7 +11,7 @@ target_include_directories(CanonicalViewer PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 target_link_libraries(CanonicalViewer PRIVATE
-    AssetPipeReaders
+    AssetReaders
     EyelibCoreAPI
     EyelibPlatformAPI
     EyelibAssetsAPI

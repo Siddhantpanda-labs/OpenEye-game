@@ -34,7 +34,7 @@ target_link_libraries(EyelibAudio
     PUBLIC
         EyelibCore
         EyelibMath
-        EyelibAssets
+        EyelibPlatform
         OpenAL
 )
 

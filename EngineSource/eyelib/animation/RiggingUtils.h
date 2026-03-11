@@ -1,14 +1,13 @@
 #pragma once
 
 #include "Skeleton.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/math/Types.h"
 #include <memory>
 #include <vector>
 
 namespace eyelib {
-namespace assets { class EditableMesh; }
-
 namespace animation {
 
 /**
@@ -28,7 +27,7 @@ public:
      * @param power Power for distance weighting (higher = sharper falloff, default 2.0)
      */
     static void CalculateDistanceWeights(
-        assets::EditableMesh& editable,
+        ::eyelib::geometry::EditableMesh& editable,
         std::shared_ptr<Skeleton> skeleton,
         float falloffDistance = 1.0f,
         float power = 2.0f);
@@ -57,7 +56,7 @@ public:
      * @param iterations Number of diffusion iterations (more = smoother, default 10)
      */
     static void CalculateHeatDiffusionWeights(
-        assets::EditableMesh& editable,
+        ::eyelib::geometry::EditableMesh& editable,
         std::shared_ptr<Skeleton> skeleton,
         int iterations = 10);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/geometry/selection/Selection.h"
 #include <memory>
 #include <unordered_map>
@@ -19,14 +19,14 @@ namespace geometry {
 class MeshSubdivide {
 public:
     /** @param editable Mesh to subdivide (modified in-place) */
-    static void Subdivide(assets::EditableMesh& editable, const Selection& selection, int levels = 1);
+    static void Subdivide(geometry::EditableMesh& editable, const Selection& selection, int levels = 1);
     
     /** Subdivide using Loop subdivision (smoother result). */
-    static void SubdivideLoop(assets::EditableMesh& editable, const Selection& selection, int levels = 1);
+    static void SubdivideLoop(geometry::EditableMesh& editable, const Selection& selection, int levels = 1);
 
 private:
-    static void SubdivideFace(const assets::EditableMesh& inputMesh, size_t faceIndex,
-                             std::vector<assets::EditableMesh::Vertex>& newVertices,
+    static void SubdivideFace(const geometry::EditableMesh& inputMesh, size_t faceIndex,
+                             std::vector<geometry::EditableMesh::Vertex>& newVertices,
                              std::vector<uint32_t>& newIndices,
                              std::unordered_map<uint64_t, uint32_t>& edgeMidpoints);
     static uint64_t GetEdgeKey(uint32_t v0, uint32_t v1);

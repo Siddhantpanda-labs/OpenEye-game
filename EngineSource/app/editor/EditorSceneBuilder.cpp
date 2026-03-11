@@ -1,13 +1,13 @@
 #include "EditorSceneBuilder.h"
 
-#include "api/assets/AssetRegistry.h"
-#include "api/assets/AssetId.h"
-#include "api/assets/AssetTypes.h"
+#include "api/asset/AssetRegistry.h"
+#include "api/asset/AssetId.h"
+#include "api/asset/AssetTypes.h"
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/geometry/Primitives.h"
 #include "api/render/Light.h"
 #include "api/world/All.h"
-#include "api/assets/loaders/ModelLoader.h"
+#include "api/asset/loaders/ModelLoader.h"
 #include "api/core/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/platform/FileSystem.h"
@@ -15,7 +15,7 @@
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
 #include "api/render/TextureCube.h"
-#include "api/assets/AssetManager.h"
+#include "api/asset/AssetManager.h"
 
 #include <cmath>
 #include <exception>
@@ -128,9 +128,7 @@ std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialForSce
     if (!apiId.IsValid())
         apiId = registry->GetId(pathOrId);
     if (!apiId.IsValid()) return nullptr;
-    eyelib::assets::AssetId coreId(apiId.high, apiId.low);
-    auto internal = eyelib::assets::AssetManager::Get().GetMaterial(coreId);
-    return internal ? eyelib::api::Material::WrapInternal(internal) : nullptr;
+    return registry->GetMaterial(apiId);
 }
 
 void EditorSceneBuilder::EnsureDefaultMaterial() {
@@ -150,13 +148,13 @@ void EditorSceneBuilder::EnsureDefaultMaterial() {
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
 
-EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(const std::string& path) {
+EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path) {
     auto it = m_modelCache.find(path);
     if (it != m_modelCache.end()) return it->second;
 
     ModelEntry entry{};
     try {
-        std::shared_ptr<eyelib::api::ModelAsset> model = eyelib::api::ModelLoader::LoadModel(path);
+        std::shared_ptr<eyelib::api::ModelAsset> model = registry ? eyelib::api::ModelLoader::LoadModel(registry, path) : nullptr;
         if (!model) {
             m_modelCache.emplace(path, entry);
             return entry;
@@ -330,7 +328,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         } else {
             const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
             if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(meshResolved);
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
         if (!modelEntry.mesh) continue;
 
@@ -363,7 +361,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         } else {
             const std::string meshResolved = ResolveAssetPath(meshId, assetRoots);
             if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(meshResolved);
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
         }
         if (!modelEntry.mesh) continue;
 

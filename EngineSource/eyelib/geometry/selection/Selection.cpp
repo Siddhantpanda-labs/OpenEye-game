@@ -1,5 +1,5 @@
 #include "eyelib/geometry/selection/Selection.h"
-#include "eyelib/assets/EditableMesh.h"
+#include "eyelib/geometry/EditableMesh.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/geometry/core/MeshTopology.h"
 #include <algorithm>
@@ -99,7 +99,7 @@ Selection Selection::Invert(size_t totalCount) const {
 
 // SelectionBuilder implementation
 
-SelectionBuilder::SelectionBuilder(const assets::EditableMesh& editable) 
+SelectionBuilder::SelectionBuilder(const geometry::EditableMesh& editable) 
     : m_mesh(editable), m_current(Selection::Empty(Selection::Type::Vertices)) {}
 
 SelectionBuilder& SelectionBuilder::ByVertexIDs(const std::vector<uint32_t>& vertexIDs) {
