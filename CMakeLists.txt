@@ -47,8 +47,5 @@ if(OPENEYE_BUILD_PLAYER)
     set(OPENEYE_DILIGENT_AVAILABLE 0 CACHE INTERNAL "Diligent disabled for player build" FORCE)
 endif()
 
-# Engine source (all thirdparty, eyelib, api, app live here)
+# Engine source (all thirdparty, eyelib, api, app + asset_pipe live here)
 add_subdirectory(EngineSource)
-
-# Asset pipeline (canonical formats + importer tool; separate from eyelib assets)
-add_subdirectory(asset_pipe)

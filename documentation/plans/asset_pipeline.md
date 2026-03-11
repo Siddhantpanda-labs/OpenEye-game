@@ -620,4 +620,73 @@ This is **exactly the architecture used in modern engines**.
 
 ---
 
+# 20. Layered Architecture and Responsibility Split
+
+**asset_pipe** owns identity, database, canonical formats, and **CPU asset data only**.  
+**eyelib** owns GPU creation, audio, streaming, and shader compilation. No graphics API in asset_pipe.
+
+## 3-layer pipeline
+
+```text
+Importer Layer
+    ↓
+Canonical Assets (.omesh .mat .png .anim)
+    ↓
+Asset Identity Layer (GUID, .meta, AssetDatabase, snapshot)
+    ↓
+Runtime Asset Layer (AssetManager, CPU cache, readers)
+    ↓
+Engine Runtime Systems (render, audio, streaming)
+```
+
+## Where each system lives
+
+| System | Location | Responsibility |
+|--------|----------|----------------|
+| **asset_pipe** | core, meta, database, readers, runtime | Guid, AssetType, .meta, AssetDatabase, snapshot, dependency graph, CPU readers, AssetManager (CPU cache) |
+| **Compression** | asset_pipe/core (or shared) | Compress/Decompress for importer, packages, streaming |
+| **ShaderLoader** | eyelib/render | GUID → path → compile → GPU shader |
+| **AudioLoader** | eyelib/audio | GUID → path → decode → AudioBuffer |
+| **ShaderWatcher** | eyelib/tools (e.g. file_watcher) | Watch shader folder → reload |
+| **StreamingManager** | eyelib (e.g. asset_runtime) | Async load, priority queue, memory budget; calls AssetManager underneath |
+| **GPU resource creation** | eyelib/render | ImportMesh / LoadedTexture / LoadedMaterial → RenderDevice → GPU mesh/texture/material |
+| **ModelBuilder** | eyelib/render | Assemble mesh + materials + textures; call AssetManager then RenderDevice |
+
+## Module map
+
+**asset_pipe**
+
+- core: Guid, AssetType, (optional) Compression  
+- meta: MetaFile  
+- database: AssetDatabase, Snapshot  
+- readers: MeshReader, MaterialReader, TextureReader, AnimationReader  
+- runtime: AssetManager, CPU asset cache  
+
+**eyelib**
+
+- render: ShaderLoader, ModelBuilder, GPU resource creation  
+- audio: AudioLoader  
+- runtime: StreamingManager (above AssetManager)  
+- tools: ShaderWatcher  
+
+## Runtime flow
+
+```text
+Scene (entity + meshGuid)
+    ↓
+ModelBuilder / engine
+    ↓
+AssetManager::LoadMesh(guid)
+    ↓
+AssetDatabase → path → Readers → CPU asset (ImportMesh, etc.)
+    ↓
+RenderDevice::CreateMesh() / CreateTexture() / etc.
+    ↓
+GPU resource
+```
+
+**Rule:** asset_pipe returns CPU data only; eyelib converts CPU data → GPU/audio resources.
+
+---
+
 If you want, I can also show you the **single biggest mistake almost every custom engine makes in asset systems** (and how to avoid it). It will save you **months of refactoring later.**

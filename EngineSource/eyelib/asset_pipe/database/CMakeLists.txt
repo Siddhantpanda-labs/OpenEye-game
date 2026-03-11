@@ -1,0 +1,3 @@
+add_library(AssetPipeDatabase STATIC asset_database.cpp)
+target_include_directories(AssetPipeDatabase PUBLIC ${ASSET_PIPE_INCLUDE_DIR})
+target_link_libraries(AssetPipeDatabase PUBLIC AssetPipeCore AssetPipeMeta)

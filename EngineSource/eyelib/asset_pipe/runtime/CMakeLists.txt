@@ -1,0 +1,3 @@
+add_library(AssetPipeRuntime STATIC asset_manager.cpp)
+target_include_directories(AssetPipeRuntime PUBLIC ${ASSET_PIPE_INCLUDE_DIR})
+target_link_libraries(AssetPipeRuntime PUBLIC AssetPipeDatabase AssetPipeReaders)
