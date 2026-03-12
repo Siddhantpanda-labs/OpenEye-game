@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <unordered_map>
 
 namespace openeye::editor {
 
@@ -113,58 +114,73 @@ bool ReadMaterialMapFromOmesh(const std::string& omeshPath,
     return ParseMaterialMapText(text, outIndexedFiles);
 }
 
-int ReadFirstMaterialIndexFromMeshEntry(const std::string& omeshPath, const std::string& meshEntryName) {
-    std::vector<uint8_t> data;
-    if (!asset::OeaReader::ReadEntryData(omeshPath, meshEntryName, data)) return -1;
-    asset::ImportMesh part;
-    if (!asset::MeshReader::Read(data, part)) return -1;
-    if (part.submeshes.empty()) return -1;
-    return static_cast<int>(part.submeshes.front().materialIndex);
+std::unordered_map<std::string, int> BuildMeshPathToSubmeshStart(const std::string& omeshPath,
+                                                                  const std::vector<asset::OeaEntry>& entries) {
+    std::unordered_map<std::string, int> out;
+    int running = 0;
+    for (const auto& e : entries) {
+        if (e.type != asset::OeaFormat::Entry_Mesh) continue;
+        out[e.name] = running;
+        std::vector<uint8_t> data;
+        asset::ImportMesh part;
+        if (asset::OeaReader::ReadEntryData(omeshPath, e.name, data) && asset::MeshReader::Read(data, part) && !part.submeshes.empty())
+            running += static_cast<int>(part.submeshes.size());
+        else
+            running += 1;
+    }
+    return out;
 }
 
-std::vector<std::string> BuildMaterialIdsByMeshIndex(const std::string& omeshPath,
-                                                     const std::vector<asset::OeaEntry>& entries) {
+std::vector<std::string> BuildMaterialIdsBySubmeshIndex(const std::string& omeshPath,
+                                                        const std::vector<asset::OeaEntry>& entries) {
     std::vector<std::string> materialMap;
     ReadMaterialMapFromOmesh(omeshPath, entries, materialMap);
 
     std::vector<std::string> out;
     for (const auto& e : entries) {
         if (e.type != asset::OeaFormat::Entry_Mesh) continue;
-        std::string materialId;
-        const int matIndex = ReadFirstMaterialIndexFromMeshEntry(omeshPath, e.name);
-        if (matIndex >= 0 && static_cast<size_t>(matIndex) < materialMap.size() && !materialMap[static_cast<size_t>(matIndex)].empty()) {
-            const std::string materialPath = fs::NormalizePath(fs::GetDirectory(omeshPath) + "/" + materialMap[static_cast<size_t>(matIndex)]);
-            if (fs::FileExists(materialPath)) {
-                std::string matGuid = GetGuidFromMetaPath(materialPath);
-                materialId = matGuid.empty() ? materialPath : matGuid;
+        std::vector<uint8_t> data;
+        asset::ImportMesh part;
+        if (asset::OeaReader::ReadEntryData(omeshPath, e.name, data) && asset::MeshReader::Read(data, part) && !part.submeshes.empty()) {
+            for (const auto& s : part.submeshes) {
+                std::string materialId;
+                const int matIndex = static_cast<int>(s.materialIndex);
+                if (matIndex >= 0 && static_cast<size_t>(matIndex) < materialMap.size() && !materialMap[static_cast<size_t>(matIndex)].empty()) {
+                    const std::string materialPath = fs::NormalizePath(fs::GetDirectory(omeshPath) + "/" + materialMap[static_cast<size_t>(matIndex)]);
+                    if (fs::FileExists(materialPath)) {
+                        std::string matGuid = GetGuidFromMetaPath(materialPath);
+                        materialId = matGuid.empty() ? materialPath : matGuid;
+                    }
+                }
+                out.push_back(materialId);
             }
+        } else {
+            out.push_back(std::string{});
         }
-        out.push_back(materialId);
     }
     return out;
 }
 
-int MeshPathToIndex(const std::string& meshPath, const std::vector<asset::OeaEntry>& entries) {
-    int idx = 0;
-    for (const auto& e : entries) {
-        if (e.type == asset::OeaFormat::Entry_Mesh) {
-            if (e.name == meshPath) return idx;
-            idx++;
-        }
-    }
+int MeshPathToSubmeshStart(const std::string& meshPath,
+                           const std::unordered_map<std::string, int>& meshPathToSubmeshStart) {
+    auto it = meshPathToSubmeshStart.find(meshPath);
+    if (it != meshPathToSubmeshStart.end())
+        return it->second;
     return -1;
 }
 
-void AssignMeshIndicesRecurse(asset::PrefabNode& node, const std::vector<asset::OeaEntry>& entries) {
+void AssignMeshIndicesRecurse(asset::PrefabNode& node,
+                              const std::unordered_map<std::string, int>& meshPathToSubmeshStart) {
     if (!node.meshPath.empty())
-        node.meshIndex = MeshPathToIndex(node.meshPath, entries);
+        node.meshIndex = MeshPathToSubmeshStart(node.meshPath, meshPathToSubmeshStart);
     for (auto& child : node.children)
-        AssignMeshIndicesRecurse(child, entries);
+        AssignMeshIndicesRecurse(child, meshPathToSubmeshStart);
 }
 
-void AssignMeshIndices(std::vector<asset::PrefabNode>& roots, const std::vector<asset::OeaEntry>& entries) {
+void AssignMeshIndices(std::vector<asset::PrefabNode>& roots,
+                       const std::unordered_map<std::string, int>& meshPathToSubmeshStart) {
     for (auto& root : roots)
-        AssignMeshIndicesRecurse(root, entries);
+        AssignMeshIndicesRecurse(root, meshPathToSubmeshStart);
 }
 
 eyelib::math::Mat4 RowMajorToMat4(const float m[16]) {
@@ -257,8 +273,9 @@ eyelib::math::Mat4 RowMajorToMat4(const float m[16]) {
     std::vector<asset::PrefabNode> roots;
     if (!asset::PrefabReader::ReadHierarchyFromText(prefabText, roots)) return ::eyelib::world::InvalidEntity;
 
-    AssignMeshIndices(roots, entries);
-    const std::vector<std::string> materialIdsByMeshIndex = BuildMaterialIdsByMeshIndex(omeshPath, entries);
+    const auto meshPathToSubmeshStart = BuildMeshPathToSubmeshStart(omeshPath, entries);
+    AssignMeshIndices(roots, meshPathToSubmeshStart);
+    const std::vector<std::string> materialIdsByMeshIndex = BuildMaterialIdsBySubmeshIndex(omeshPath, entries);
 
     ::eyelib::world::EntityId rootEntity = ::eyelib::world::InvalidEntity;
     for (size_t i = 0; i < roots.size(); ++i) {
