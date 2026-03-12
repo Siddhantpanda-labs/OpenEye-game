@@ -1,5 +1,6 @@
 #include "HierarchyPanel.h"
 #include "EditorContext.h"
+#include "EditorSceneBuilder.h"
 #include "InstantiateOmesh.h"
 #include "PanelCommon.h"
 
@@ -184,6 +185,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
                     s_lastInstantiatedOmeshRoot = root;
                     ctx->sceneSelected = false;
                     ctx->selectedEntity = root;
+                    EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
                 }
             }
         }
@@ -449,6 +451,7 @@ void ShowHierarchyPanel(EditorContext* ctx) {
                         s_lastInstantiatedOmeshRoot = root;
                         ctx->sceneSelected = false;
                         ctx->selectedEntity = root;
+                        EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
                     }
                 }
             }

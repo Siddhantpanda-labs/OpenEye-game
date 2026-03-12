@@ -62,10 +62,10 @@ void LoadedMaterialToDescriptor(const asset::LoadedMaterial& src, eyelib::render
     dst.albedo.z = src.albedoColorB;
     dst.metallic = src.metallicValue;
     dst.roughness = src.roughnessValue;
-    if (!src.albedoPath.empty()) dst.texturePaths["albedo"] = src.albedoPath;
-    if (!src.normalPath.empty()) dst.texturePaths["normal"] = src.normalPath;
-    if (!src.metallicPath.empty()) dst.texturePaths["metallic"] = src.metallicPath;
-    if (!src.roughnessPath.empty()) dst.texturePaths["roughness"] = src.roughnessPath;
+    if (!src.albedoPath.empty()) dst.texturePaths["u_AlbedoTexture"] = src.albedoPath;
+    if (!src.normalPath.empty()) dst.texturePaths["u_NormalTexture"] = src.normalPath;
+    if (!src.metallicPath.empty()) dst.texturePaths["u_MetallicTexture"] = src.metallicPath;
+    if (!src.roughnessPath.empty()) dst.texturePaths["u_RoughnessTexture"] = src.roughnessPath;
 }
 
 std::string JoinRelative(const std::string& a, const std::string& b) {
@@ -168,6 +168,21 @@ std::string NormalizePathForDb(std::string path) {
     return path;
 }
 
+/** If path is absolute and starts with assetRoot, return path relative to assetRoot for DB lookup. */
+std::string ToRelativeIfUnder(std::string path, const std::string& assetRoot) {
+    if (assetRoot.empty() || path.empty()) return path;
+    std::string normPath = NormalizePathForDb(path);
+    std::string normRoot = NormalizePathForDb(assetRoot);
+    if (normRoot.empty()) return normPath;
+    if (normPath.size() < normRoot.size()) return normPath;
+    if (normPath.compare(0, normRoot.size(), normRoot) != 0) return normPath;
+    if (normPath.size() == normRoot.size()) return {};
+    if (normPath[normRoot.size()] != '/') return normPath;
+    std::string rel = normPath.substr(normRoot.size() + 1);
+    while (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+    return rel;
+}
+
 } // namespace
 
 class AssetRegistry::Impl {
@@ -213,9 +228,13 @@ bool AssetRegistry::RegisterAsset(const AssetId& id, const std::string& filePath
 }
 
 AssetId AssetRegistry::RegisterAsset(const std::string& filePath, const std::string& assetType) {
-    std::string rel = NormalizePathForDb(filePath);
-    asset::Guid g = m_impl->database.GetGuid(rel);
-    if (!g.IsValid()) g = m_impl->database.AddRuntimeAsset(rel, assetType);
+    std::string norm = NormalizePathForDb(filePath);
+    std::string relKey = norm;
+    std::string under = ToRelativeIfUnder(filePath, m_impl->assetRoot);
+    if (!under.empty()) relKey = under;
+    asset::Guid g = m_impl->database.GetGuid(norm);
+    if (!g.IsValid()) g = m_impl->database.GetGuid(relKey);
+    if (!g.IsValid()) g = m_impl->database.AddRuntimeAsset(relKey, assetType);
     return ToApi(g);
 }
 
@@ -275,11 +294,28 @@ bool AssetRegistry::IsRegistered(const AssetId& id) const {
 }
 
 bool AssetRegistry::IsRegistered(const std::string& filePath) const {
-    return m_impl->database.GetGuid(NormalizePathForDb(filePath)).IsValid();
+    if (filePath.empty()) return false;
+    AssetId id = AssetId::FromString(filePath);
+    if (id.IsValid()) return m_impl->database.AssetExists(ToGuid(id));
+    std::string norm = NormalizePathForDb(filePath);
+    if (m_impl->database.GetGuid(norm).IsValid()) return true;
+    std::string rel = ToRelativeIfUnder(filePath, m_impl->assetRoot);
+    return !rel.empty() && m_impl->database.GetGuid(rel).IsValid();
 }
 
 AssetId AssetRegistry::GetId(const std::string& filePath) const {
-    return ToApi(m_impl->database.GetGuid(NormalizePathForDb(filePath)));
+    if (filePath.empty()) return AssetId::Invalid();
+    AssetId id = AssetId::FromString(filePath);
+    if (id.IsValid()) return id;
+    std::string norm = NormalizePathForDb(filePath);
+    asset::Guid g = m_impl->database.GetGuid(norm);
+    if (g.IsValid()) return ToApi(g);
+    std::string rel = ToRelativeIfUnder(filePath, m_impl->assetRoot);
+    if (!rel.empty()) {
+        g = m_impl->database.GetGuid(rel);
+        if (g.IsValid()) return ToApi(g);
+    }
+    return AssetId::Invalid();
 }
 
 std::string AssetRegistry::GetFilePath(const AssetId& id) const {

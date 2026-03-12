@@ -345,11 +345,8 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderable.materialAssetId.empty() && assetRegistry) {
-            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, assetRoots, assetRegistry);
-            if (!matResolved.empty()) {
-                if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
-                    drawable.material = mat;
-            }
+            if (auto mat = ResolveMaterialForScene(assetRegistry, renderable.materialAssetId))
+                drawable.material = mat;
         }
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);
@@ -379,11 +376,8 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         if (!renderer.materialAssetId.empty() && assetRegistry) {
-            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, assetRoots, assetRegistry);
-            if (!matResolved.empty()) {
-                if (auto mat = ResolveMaterialForScene(assetRegistry, matResolved))
-                    drawable.material = mat;
-            }
+            if (auto mat = ResolveMaterialForScene(assetRegistry, renderer.materialAssetId))
+                drawable.material = mat;
         }
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);

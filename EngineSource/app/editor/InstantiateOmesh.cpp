@@ -32,8 +32,12 @@ std::string GetGuidFromMetaPath(const std::string& assetPath) {
         if (start == std::string::npos) continue;
         if (line.size() - start >= 5 && line.compare(start, 5, "guid:") == 0) {
             start = line.find_first_not_of(" \t", start + 5);
-            if (start != std::string::npos)
-                return line.substr(start);
+            if (start == std::string::npos) return {};
+            std::string guid = line.substr(start);
+            auto end = guid.find_last_not_of(" \t\r\n");
+            if (end != std::string::npos)
+                guid = guid.substr(0, end + 1);
+            return guid;
         }
     }
     return {};
