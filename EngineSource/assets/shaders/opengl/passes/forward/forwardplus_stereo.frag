@@ -70,10 +70,15 @@ float shadowFactor(vec3 worldPos) {
 
 vec3 calc_point_light(vec3 pos, vec3 color, float intensity, float radius,
     vec3 fragPos, vec3 normal, vec3 viewDir, vec3 albedo, float metallic, float roughness) {
-    vec3 lightDir = normalize(pos - fragPos);
-    float dist = length(pos - fragPos);
-    float atten = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
-    atten *= smoothstep(radius, radius * 0.5, dist);
+    vec3 toLight = pos - fragPos;
+    float dist = length(toLight);
+    if (dist >= radius) return vec3(0.0);
+    vec3 lightDir = toLight / max(dist, 1e-5);
+    float x = dist / max(radius, 1e-3);
+    float rangeAtt = clamp(1.0 - x * x, 0.0, 1.0);
+    rangeAtt *= rangeAtt;
+    float invSq = 1.0 / (1.0 + dist * dist);
+    float atten = invSq * rangeAtt * 4.0;
     float NdotL = max(dot(normal, lightDir), 0.0);
     vec3 H = normalize(viewDir + lightDir);
     float NdotH = max(dot(normal, H), 0.0);
@@ -85,12 +90,19 @@ vec3 calc_point_light(vec3 pos, vec3 color, float intensity, float radius,
 vec3 calc_spot_light(vec3 pos, vec3 dir, vec3 color, float intensity, float range,
     float innerCos, float outerCos, vec3 fragPos, vec3 normal, vec3 viewDir,
     vec3 albedo, float metallic, float roughness) {
-    vec3 lightDir = normalize(pos - fragPos);
-    float dist = length(pos - fragPos);
+    vec3 toLight = pos - fragPos;
+    float dist = length(toLight);
     if (dist > range) return vec3(0.0);
+    vec3 lightDir = toLight / max(dist, 1e-5);
     float cosAngle = dot(lightDir, -dir);
-    float spot = smoothstep(outerCos, innerCos, cosAngle);
-    float atten = 1.0 / (1.0 + 0.09 * dist + 0.032 * dist * dist);
+    float inner = max(innerCos, outerCos + 1e-4);
+    float spot = clamp((cosAngle - outerCos) / (inner - outerCos), 0.0, 1.0);
+    spot *= spot;
+    float x = dist / max(range, 1e-3);
+    float rangeAtt = clamp(1.0 - x * x, 0.0, 1.0);
+    rangeAtt *= rangeAtt;
+    float invSq = 1.0 / (1.0 + dist * dist);
+    float atten = invSq * rangeAtt * 4.0;
     float NdotL = max(dot(normal, lightDir), 0.0);
     vec3 H = normalize(viewDir + lightDir);
     float NdotH = max(dot(normal, H), 0.0);

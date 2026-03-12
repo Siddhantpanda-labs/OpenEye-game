@@ -653,12 +653,9 @@ void WorldRenderBridge::BuildSceneFromViews(
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         drawable.submeshIndex = renderable.submeshIndex;
-        if (!renderable.materialAssetId.empty()) {
-            const std::string matResolved = ResolveAssetPath(renderable.materialAssetId, options.assetRoots, assetRegistry);
-            if (!matResolved.empty() && assetRegistry) {
-                auto matId = assetRegistry->GetId(matResolved);
-                if (auto material = ResolveMaterial(matId)) drawable.material = material;
-            }
+        if (!renderable.materialAssetId.empty() && assetRegistry) {
+            if (auto material = ResolveMaterial(renderable.materialAssetId, assetRegistry))
+                drawable.material = material;
         }
         if (const auto transform = getTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);
@@ -716,12 +713,9 @@ void WorldRenderBridge::BuildSceneFromViews(
         drawable.mesh = modelEntry.mesh;
         drawable.material = modelEntry.material;
         drawable.submeshIndex = renderer.submeshIndex;
-        if (!renderer.materialAssetId.empty()) {
-            const std::string matResolved = ResolveAssetPath(renderer.materialAssetId, options.assetRoots, assetRegistry);
-            if (!matResolved.empty() && assetRegistry) {
-                auto matId = assetRegistry->GetId(matResolved);
-                if (auto material = ResolveMaterial(matId)) drawable.material = material;
-            }
+        if (!renderer.materialAssetId.empty() && assetRegistry) {
+            if (auto material = ResolveMaterial(renderer.materialAssetId, assetRegistry))
+                drawable.material = material;
         }
         if (const auto transform = getTransform(entry.entity)) {
             drawable.transform = TransformToMatrix(*transform);

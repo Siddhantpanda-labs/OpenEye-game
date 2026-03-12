@@ -51,7 +51,7 @@ struct SerializationTraits<eyelib::world::components::Renderable> {
         out.meshAssetId = j.value("meshAssetId", std::string{});
         out.materialAssetId = j.value("materialAssetId", std::string{});
         out.visible = j.value("visible", true);
-        out.submeshIndex = j.value("submeshIndex", 0);
+        out.submeshIndex = j.value("submeshIndex", -1);
         out.activeLOD = j.value("activeLOD", 0);
         if (j.contains("lodMeshAssetIds")) {
             out.lodMeshAssetIds = SerializationTraits<std::vector<std::string>>::Deserialize(j["lodMeshAssetIds"]);
@@ -222,7 +222,7 @@ struct SerializationTraits<eyelib::world::components::MeshRenderer> {
         out.meshAssetId = j.value("meshAssetId", std::string{});
         out.materialAssetId = j.value("materialAssetId", std::string{});
         out.visible = j.value("visible", true);
-        out.submeshIndex = j.value("submeshIndex", 0);
+        out.submeshIndex = j.value("submeshIndex", -1);
         return out;
     }
 };

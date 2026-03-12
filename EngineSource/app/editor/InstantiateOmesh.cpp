@@ -45,6 +45,29 @@ std::string GetGuidFromMetaPath(const std::string& assetPath) {
 
 namespace {
 
+std::string JoinPath(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (b.empty()) return a;
+    if (a.back() == '/' || a.back() == '\\') return a + b;
+    return a + "/" + b;
+}
+
+/**
+ * Convert absolute path to project-asset-relative id when possible.
+ * Example: C:/.../Assets/gr/materials/x.mat -> gr/materials/x.mat
+ */
+std::string ToAssetsRelativePath(const std::string& path) {
+    std::string p = fs::NormalizePath(path);
+    std::string lower = p;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const std::string marker = "/assets/";
+    const size_t pos = lower.find(marker);
+    if (pos == std::string::npos) return {};
+    return p.substr(pos + marker.size());
+}
+
 std::string Trim(const std::string& s) {
     const size_t b = s.find_first_not_of(" \t\r\n");
     if (b == std::string::npos) return {};
@@ -139,6 +162,8 @@ std::vector<std::string> BuildMaterialIdsBySubmeshIndex(const std::string& omesh
                                                         const std::vector<asset::OeaEntry>& entries) {
     std::vector<std::string> materialMap;
     ReadMaterialMapFromOmesh(omeshPath, entries, materialMap);
+    const std::string omeshAssetsRelPath = ToAssetsRelativePath(omeshPath);
+    const std::string omeshAssetsRelDir = fs::GetDirectory(omeshAssetsRelPath);
 
     std::vector<std::string> out;
     for (const auto& e : entries) {
@@ -153,7 +178,13 @@ std::vector<std::string> BuildMaterialIdsBySubmeshIndex(const std::string& omesh
                     const std::string materialPath = fs::NormalizePath(fs::GetDirectory(omeshPath) + "/" + materialMap[static_cast<size_t>(matIndex)]);
                     if (fs::FileExists(materialPath)) {
                         std::string matGuid = GetGuidFromMetaPath(materialPath);
-                        materialId = matGuid.empty() ? materialPath : matGuid;
+                        if (!matGuid.empty()) {
+                            materialId = matGuid;
+                        } else {
+                            // Avoid storing absolute paths in scene/component data.
+                            materialId = JoinPath(omeshAssetsRelDir, materialMap[static_cast<size_t>(matIndex)]);
+                            materialId = fs::NormalizePath(materialId);
+                        }
                     }
                 }
                 out.push_back(materialId);

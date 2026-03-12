@@ -2,6 +2,7 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <cmath>
 
 namespace eyelib {
@@ -68,15 +69,36 @@ void ShadowMap::UpdateMatrices(const math::Vec3& lightDir, const math::Mat4& vie
         len = glm::length(dir);
     }
     dir /= len;
-    glm::vec3 center(cameraPos.x, cameraPos.y, cameraPos.z);
-    const float lightDistance = 80.f;
+
+    // Stable single-cascade directional setup:
+    // anchor shadow volume to camera position (not camera orientation/FOV)
+    // so rotating/changing FOV does not make shadow coverage visibly slide/pop.
+    const float camNear = std::max(nearPlane, 0.05f);
+    const float camFar = std::max(farPlane, camNear + 1.0f);
+    const float shadowDistance = std::clamp(camFar * 0.18f, 90.0f, 220.0f);
+    const float extent = shadowDistance * 0.75f;
+    const glm::vec3 center(cameraPos.x, cameraPos.y, cameraPos.z);
+    const float lightDistance = shadowDistance + extent;
     glm::vec3 lightEye = center - dir * lightDistance;
     glm::vec3 up(0.f, 1.f, 0.f);
     if (std::abs(glm::dot(up, dir)) > 0.99f) up = glm::vec3(0.f, 0.f, 1.f);
     glm::mat4 lightView = glm::lookAt(lightEye, center, up);
-    float extent = 55.f;
-    const float orthoNear = 1.f, orthoFar = 200.f;
+
+    const float texelSize = (2.0f * extent) / static_cast<float>(std::max(1u, m_resolution));
+    glm::vec3 centerLS = glm::vec3(lightView * glm::vec4(center, 1.0f));
+    centerLS.x = std::floor(centerLS.x / texelSize) * texelSize;
+    centerLS.y = std::floor(centerLS.y / texelSize) * texelSize;
+    const glm::vec3 snappedCenter = glm::vec3(glm::inverse(lightView) * glm::vec4(centerLS, 1.0f));
+
+    lightEye = snappedCenter - dir * lightDistance;
+    lightView = glm::lookAt(lightEye, snappedCenter, up);
+    // Keep a symmetric light-space depth range so receivers/casters remain inside
+    // even when camera/light move; positive-only near/far can clip everything.
+    const float depthExtent = shadowDistance + 120.0f;
+    const float orthoNear = -depthExtent;
+    const float orthoFar = depthExtent;
     glm::mat4 lightProj = glm::ortho(-extent, extent, -extent, extent, orthoNear, orthoFar);
+
     m_lightView = math::Mat4(lightView);
     m_lightProj = math::Mat4(lightProj);
     m_shadowMatrix = m_lightProj * m_lightView;
