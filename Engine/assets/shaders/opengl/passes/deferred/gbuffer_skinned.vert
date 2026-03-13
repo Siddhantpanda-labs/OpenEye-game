@@ -24,7 +24,7 @@ uniform int u_UsePerDrawTransformBuffer = 0;
 uniform vec4 u_UVTransform = vec4(0.0, 0.0, 1.0, 1.0);
 uniform float u_UVRotation = 0.0;
 uniform float u_TexCoordIndex = 0.0;
-uniform float u_FlipV = 0.0;
+uniform float u_FlipV = 1.0;
 
 #define MAX_BONES 128
 layout(std140, binding = 3) uniform Bones {

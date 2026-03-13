@@ -21,7 +21,7 @@ public:
     Shader& operator=(Shader&& other) noexcept;
 
     bool BuildFromSource(RenderDevice device, const std::string& vertexSrc, const std::string& fragmentSrc);
-    /** Load shader by logical name (e.g. passes/forward/lit). Single path: resolve backend and create pipeline. */
+    /** Load shader by logical name (e.g. passes/forward/forward). Single path: resolve backend and create pipeline. */
     bool Load(RenderDevice device, const std::string& logicalName);
     bool LoadFromFile(RenderDevice device, const std::string& vertexPath, const std::string& fragmentPath);
     void Destroy();

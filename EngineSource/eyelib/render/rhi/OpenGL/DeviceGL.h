@@ -55,6 +55,7 @@ struct DeviceGL : IDevice {
                                       const std::vector<RHITextureFormat>& colorFormats,
                                       RHITextureFormat depthFormat,
                                       uint32_t samples) override;
+    IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) override;
     IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                       const std::vector<RHITextureFormat>& colorFormats,
                                                       ITexture* sharedDepthTexture,

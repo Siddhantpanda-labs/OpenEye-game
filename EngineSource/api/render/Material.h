@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/math/Types.h"
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,21 @@ namespace api {
 
 class Texture;
 class Shader;
+
+/** Refractor 6.4: shading model for pipeline/material variants (Lit PBR, Unlit, Custom). */
+enum class ShadingModel : uint8_t {
+    Lit,
+    Unlit,
+    Custom
+};
+
+/** Refractor 7.2: blending mode (Limitless-aligned). */
+enum class Blending : uint8_t {
+    Opaque,
+    Translucent,
+    Additive,
+    Modulate,
+};
 
 /**
  * @brief Material handle (opaque). Set shader, textures, PBR properties.
@@ -66,6 +82,36 @@ public:
 
     void SetKeyword(const std::string& keyword, bool enabled);
     bool IsKeywordEnabled(const std::string& keyword) const;
+
+    /** Refractor 6.4: shading model (Lit / Unlit / Custom). */
+    ShadingModel GetShadingModel() const;
+    void SetShadingModel(ShadingModel m);
+
+    /** Refractor 6.4: shader variant id for cache; 0 = default. */
+    uint64_t GetShaderIndex() const;
+    void SetShaderIndex(uint64_t id);
+
+    /** Refractor 6.4: optional GLSL snippets for MaterialCompiler (fragment / shading). */
+    std::string GetFragmentSnippet() const;
+    void SetFragmentSnippet(std::string s);
+    std::string GetShadingSnippet() const;
+    void SetShadingSnippet(std::string s);
+
+    /** Refractor 7.2: blending (Opaque / Translucent / Additive / Modulate). */
+    Blending GetBlending() const;
+    void SetBlending(Blending b);
+    /** Refractor 7.2: two-sided (disable back-face culling). */
+    bool GetTwoSided() const;
+    void SetTwoSided(bool v);
+    /** Refractor 7.2: refraction (compile-time HAS_REFRACTION in shader). */
+    bool GetRefraction() const;
+    void SetRefraction(bool v);
+    /** SSR: when true, surface receives screen-space reflections. */
+    bool GetReflective() const;
+    void SetReflective(bool v);
+    /** SSR: reflection amount 0 (none) to 1 (full). */
+    float GetReflectiveStrength() const;
+    void SetReflectiveStrength(float v);
 
     static std::shared_ptr<Material> WrapInternal(const std::shared_ptr<::eyelib::render::Material>& material);
     std::shared_ptr<::eyelib::render::Material> GetInternal() const;

@@ -16,11 +16,14 @@ struct RenderTargetGL : IRenderTarget {
     ITexture* GetColorTexture(uint32_t index) override;
     ITexture* GetDepthTexture() override;
     void* GetNativeFramebuffer() override;
+    void SetDepthLayer(uint32_t layer) override;
+    uint32_t GetDepthLayer() const override;
 
     unsigned int m_fbo = 0;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_ownsTextures = true;
+    uint32_t m_depthArrayLayer = 0;
     std::vector<std::unique_ptr<TextureGL>> m_colorTextures;
     std::unique_ptr<TextureGL> m_depthTexture;
     std::vector<TextureGL*> m_externalColorTextures;

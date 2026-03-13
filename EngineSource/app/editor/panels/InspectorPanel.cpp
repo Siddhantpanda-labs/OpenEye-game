@@ -3,8 +3,12 @@
 #include "PanelCommon.h"
 #include "ui/PhysicsColliderIcons.h"
 
+#include "api/asset/AssetRegistry.h"
+#include "api/asset/AssetTypes.h"
+#include "api/render/Material.h"
 #include "api/world/All.h"
 #include "api/world/Commands.h"
+#include "eyelib/world/components/Renderable.h"
 #include "scripting/ScriptSchema.h"
 
 #include <imgui.h>
@@ -19,6 +23,92 @@ namespace openeye::editor::panels {
 namespace {
 
 using EntityId = ::eyelib::world::EntityId;
+
+/** Must match AssetPanel's material drag payload. */
+constexpr const char* kMaterialPayloadType = "OpenEyeMaterial";
+struct MaterialDragPayload { char path[512]; };
+
+/** If path is under assetsRoot, return path relative to assetsRoot; else return path as-is. */
+static std::string ToMaterialAssetId(const std::string& path, const std::string& assetsRoot) {
+    if (assetsRoot.empty() || path.size() < assetsRoot.size()) return path;
+    if (path.compare(0, assetsRoot.size(), assetsRoot) != 0) return path;
+    if (path.size() == assetsRoot.size()) return "";
+    size_t start = assetsRoot.size();
+    if (start < path.size() && (path[start] == '/' || path[start] == '\\')) start++;
+    return path.substr(start);
+}
+
+void ShowRenderableComponent(EditorContext* ctx, eyelib::api::world::World& world, EntityId entity) {
+    using Renderable = ::eyelib::world::components::Renderable;
+    Renderable r;
+    if (!world.GetRenderable(entity, r)) return;
+    ImGui::PushID("InspectorRenderable");
+    ImGui::PushID(static_cast<int>(entity.index));
+    ImGui::PushID(static_cast<int>(entity.generation));
+
+    char meshBuf[512];
+    std::snprintf(meshBuf, sizeof(meshBuf), "%.511s", r.meshAssetId.c_str());
+    if (ImGui::InputText("Mesh", meshBuf, sizeof(meshBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        r.meshAssetId = meshBuf;
+        world.SetRenderable(entity, r);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        r.meshAssetId = meshBuf;
+        world.SetRenderable(entity, r);
+    }
+
+    char matBuf[512];
+    std::snprintf(matBuf, sizeof(matBuf), "%.511s", r.materialAssetId.c_str());
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::InputText("Material", matBuf, sizeof(matBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        r.materialAssetId = matBuf;
+        world.SetRenderable(entity, r);
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        r.materialAssetId = matBuf;
+        world.SetRenderable(entity, r);
+    }
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kMaterialPayloadType)) {
+            if (p->DataSize >= sizeof(MaterialDragPayload)) {
+                const auto* payload = static_cast<const MaterialDragPayload*>(p->Data);
+                std::string path(payload->path);
+                std::string assetId = ctx && !ctx->projectAssetsRoot.empty()
+                    ? ToMaterialAssetId(path, ctx->projectAssetsRoot)
+                    : path;
+                if (!assetId.empty()) {
+                    r.materialAssetId = assetId;
+                    world.SetRenderable(entity, r);
+                }
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    if (!r.materialAssetId.empty() && ctx && ctx->assetRegistry) {
+        ctx->assetRegistry->LoadAsset(r.materialAssetId, eyelib::api::AssetType::Material);
+        std::shared_ptr<eyelib::api::Material> mat = ctx->assetRegistry->GetMaterial(r.materialAssetId);
+        if (mat) {
+            if (ImGui::TreeNodeEx("Reflection", ImGuiTreeNodeFlags_DefaultOpen)) {
+                bool on = mat->GetReflective();
+                if (ImGui::Checkbox("Reflective", &on)) {
+                    mat->SetReflective(on);
+                }
+                if (on) {
+                    float strength = mat->GetReflectiveStrength();
+                    if (ImGui::SliderFloat("Strength", &strength, 0.01f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+                        mat->SetReflectiveStrength(strength);
+                    }
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    ImGui::PopID();
+    ImGui::PopID();
+    ImGui::PopID();
+}
 
 void ShowNameComponent(eyelib::api::world::World& world, EntityId entity) {
     ImGui::PushID("InspectorName");
@@ -372,6 +462,11 @@ void ShowComponent(EditorContext* ctx, const std::string& componentName) {
             ShowScriptComponent(ctx);
         return;
     }
+    if (componentName == "Renderable") {
+        if (ImGui::CollapsingHeader("Renderable", ImGuiTreeNodeFlags_DefaultOpen))
+            ShowRenderableComponent(ctx, world, entity);
+        return;
+    }
 
     ShowGenericComponent(world, entity, componentName, jsonStr);
 }
@@ -466,6 +561,25 @@ void ShowAddComponentPopup(EditorContext* ctx) {
     ImGui::EndPopup();
 }
 
+void ShowMaterialAssetEditor(EditorContext* ctx) {
+    if (!ctx || ctx->selectedMaterialAssetId.empty() || !ctx->assetRegistry) return;
+    ctx->assetRegistry->LoadAsset(ctx->selectedMaterialAssetId, eyelib::api::AssetType::Material);
+    std::shared_ptr<eyelib::api::Material> mat = ctx->assetRegistry->GetMaterial(ctx->selectedMaterialAssetId);
+    if (!mat) return;
+    if (ImGui::CollapsingHeader("Material (asset)", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextUnformatted(ctx->selectedMaterialAssetId.c_str());
+        bool refr = mat->GetRefraction();
+        if (ImGui::Checkbox("Refraction", &refr)) mat->SetRefraction(refr);
+        bool refl = mat->GetReflective();
+        if (ImGui::Checkbox("Reflective (SSR)", &refl)) mat->SetReflective(refl);
+        if (refl) {
+            float strength = mat->GetReflectiveStrength();
+            if (ImGui::SliderFloat("Reflection strength", &strength, 0.01f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+                mat->SetReflectiveStrength(strength);
+        }
+    }
+}
+
 } // namespace
 
 void ShowInspectorPanel(EditorContext* ctx) {
@@ -482,7 +596,11 @@ void ShowInspectorPanel(EditorContext* ctx) {
                 ctx->world.SetSkyboxAssetId(skyboxBuf[0] ? std::string(skyboxBuf) : std::string());
             }
         } else if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
-            ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
+            if (!ctx->selectedMaterialAssetId.empty()) {
+                ShowMaterialAssetEditor(ctx);
+            } else {
+                ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
+            }
         } else {
             ctx->sceneSelected = false;  // ensure entity selection takes precedence if both were set
             // Top name box: click to edit, click away or Enter to apply rename
@@ -533,6 +651,9 @@ void ShowInspectorPanel(EditorContext* ctx) {
                     }
                     ImGui::TreePop();
                 }
+            }
+            if (!ctx->selectedMaterialAssetId.empty()) {
+                ShowMaterialAssetEditor(ctx);
             }
             ImGui::Separator();
 

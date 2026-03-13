@@ -31,6 +31,9 @@ public:
     /** Overload: single array of 6 paths. */
     bool LoadFromFiles(rhi::IDevice* device, const std::vector<std::string>& facePaths, bool isSRGB = false, bool generateMipmaps = true);
 
+    /** Load from a single horizontal-cross image (e.g. 2048x1536 with 512x512 faces). Face order: +X,-X,+Y,-Y,+Z,-Z. */
+    bool LoadFromCrossLayout(rhi::IDevice* device, const std::string& path, uint32_t faceSize = 512, bool isSRGB = false, bool generateMipmaps = true);
+
     void Bind(int slot = 0) const;
     void GenerateMipmaps();
     void SetFilter(TextureFilter minFilter, TextureFilter magFilter);

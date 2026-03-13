@@ -18,7 +18,7 @@ struct LoadedMaterial {
     float albedoColorB = 1.f;
 };
 
-/** Reads canonical .material binary into LoadedMaterial. Returns true on success. */
+/** Reads canonical .mat binary into LoadedMaterial. Returns true on success. */
 class MaterialReader {
 public:
     static bool Read(const std::string& path, LoadedMaterial& out);

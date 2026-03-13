@@ -17,7 +17,7 @@ class Shader;
  */
 class ShaderLoader {
 public:
-    /** Build descriptor for loading by logical name (e.g. passes/forward/lit). */
+    /** Build descriptor for loading by logical name (e.g. passes/forward/forward). */
     static ShaderDescriptor BuildDescriptorByName(const std::string& shaderName);
 
     /** Build descriptor for loading by vertex/fragment paths. */

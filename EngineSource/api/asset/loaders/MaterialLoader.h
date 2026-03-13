@@ -17,7 +17,7 @@ public:
     /** No registry: returns Invalid. */
     static AssetId LoadMaterial(const std::string& path);
 
-    /** Save material to .mat JSON. Stub: returns false. */
+    /** Save material to canonical .mat binary. Stub: returns false. */
     static bool SaveMaterial(const std::string& path, const AssetId& materialAssetId);
 };
 

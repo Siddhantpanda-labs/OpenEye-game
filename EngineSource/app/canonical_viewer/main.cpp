@@ -1,6 +1,6 @@
 /**
  * Canonical viewer: loads .mesh (single) or .prefab (whole model with materials + textures).
- * Camera: same as editor — right-drag look, WASD + Q/E move. Forward + passes/forward/lit.
+ * Camera: same as editor — right-drag look, WASD + Q/E move. Forward + passes/forward/forward.
  * Usage: CanonicalViewer <path_to.mesh> | CanonicalViewer <path_to.prefab>
  */
 
@@ -280,8 +280,8 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
 
 std::shared_ptr<eyelib::api::Material> CreateDefaultMaterial(eyelib::api::RenderDevice device) {
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (!device || !shader->Load(device, "passes/forward/lit")) {
-        eyelib::api::core::Log::Warn("CanonicalViewer: default shader (passes/forward/lit) not loaded.");
+    if (!device || !shader->Load(device, "passes/forward/forward")) {
+        eyelib::api::core::Log::Warn("CanonicalViewer: default shader (passes/forward/forward) not loaded.");
         return nullptr;
     }
     auto mat = std::make_shared<eyelib::api::Material>();
@@ -420,8 +420,8 @@ int main(int argc, char** argv) {
     }
 
     auto litShader = std::make_shared<eyelib::api::Shader>();
-    if (!litShader->Load(device, "passes/forward/lit")) {
-        std::cerr << "CanonicalViewer: passes/forward/lit shader not found. Run from Engine/bin/Debug or set cwd.\n";
+    if (!litShader->Load(device, "passes/forward/forward")) {
+        std::cerr << "CanonicalViewer: passes/forward/forward shader not found. Run from Engine/bin/Debug or set cwd.\n";
         pipeline.Shutdown();
         window.Shutdown();
         eyelib::api::core::Engine::Shutdown();

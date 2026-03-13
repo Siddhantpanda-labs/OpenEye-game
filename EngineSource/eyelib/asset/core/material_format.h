@@ -5,7 +5,7 @@
 
 namespace asset {
 
-/** Canonical .material binary format. Shared by importer and runtime. */
+/** Canonical .mat binary format. Shared by importer and runtime (Limitless-style single binary). */
 namespace MaterialFormat {
 
 constexpr uint32_t kMagic = 0x4D415431u;  // "MAT1"

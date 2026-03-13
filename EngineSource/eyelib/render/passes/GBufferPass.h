@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/render/GBuffer.h"
+#include "eyelib/render/renderer/GBuffer.h"
 #include "eyelib/render/RenderContext.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -13,6 +13,7 @@ namespace render {
 
 class Mesh;
 class Shader;
+class ShaderCache;
 
 /** Renders geometry to G-buffer (position, normal, albedo, PBR). */
 class GBufferPass {
@@ -23,8 +24,13 @@ public:
     /** E9: When set and device supports bindless, pass uses bindless texture handles instead of binding units. */
     void SetBindlessHeap(rhi::IBindlessHeap* heap) { m_bindlessHeap = heap; }
     void SetBindlessGetHandle(std::function<rhi::BindlessHandle(rhi::ITexture*)> fn) { m_bindlessGetHandle = std::move(fn); }
+    /** @deprecated Geometry shaders come from ShaderCache only; no-op. */
     void SetGeometryShader(std::shared_ptr<Shader> shader);
-    std::shared_ptr<Shader> GetGeometryShader() const { return m_geometryShader; }
+    /** @deprecated Returns nullptr; shaders are obtained via ShaderCache per draw. */
+    std::shared_ptr<Shader> GetGeometryShader() const;
+    /** Required: pass uses ShaderCache + MaterialCompiler for all GBuffer shaders (stage × instance type × material). */
+    void SetShaderCache(ShaderCache* cache) { m_shaderCache = cache; }
+    ShaderCache* GetShaderCache() const { return m_shaderCache; }
 
     /** Render drawables into the G-buffer (context-based). */
     void Render(GBuffer& gbuffer,
@@ -133,11 +139,26 @@ public:
 
     GBuffer* GetGBuffer() { return m_currentGBuffer; }
 
-    /** Reload geometry shader (for hot-reload when shader files change). */
+    /**
+     * Instanced draw (7.3): one mesh + material, N instances. instanceMatrixBuffer must contain instanceCount mat4s (column-major).
+     * Requires SetShaderCache; uses ShaderKey(GBuffer, Instanced, material).
+     */
+    void RenderInstanced(GBuffer& gbuffer,
+                         rhi::IDevice* device,
+                         rhi::ICommandList* cmd,
+                         const Mesh* mesh,
+                         const Material* material,
+                         rhi::IBuffer* instanceMatrixBuffer,
+                         uint32_t instanceCount,
+                         const math::Mat4& view,
+                         const math::Mat4& projection,
+                         const math::Mat4& prevView,
+                         const math::Mat4& prevProjection);
+
+    /** Hot-reload: clears ShaderCache so next getOrCompile recompiles from templates. */
     void ReloadShaders();
 
 private:
-    void EnsureDefaultShader(rhi::IDevice* device);
     void RenderDrawables(GBuffer& gbuffer,
                          rhi::ICommandList* cmd,
                          rhi::IDevice* device,
@@ -147,10 +168,10 @@ private:
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection);
 
-    std::shared_ptr<Shader> m_geometryShader;
     GBuffer* m_currentGBuffer = nullptr;
     rhi::IBindlessHeap* m_bindlessHeap = nullptr;
     std::function<rhi::BindlessHandle(rhi::ITexture*)> m_bindlessGetHandle;
+    ShaderCache* m_shaderCache = nullptr;
 };
 
 } // namespace render

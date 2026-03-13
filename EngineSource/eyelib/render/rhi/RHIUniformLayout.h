@@ -50,6 +50,11 @@ namespace PassBindings {
     constexpr uint32_t ShadowMap = 5;
 }
 
+/** SSBO binding for per-instance model matrices (instanced draw). Shader: layout(std430, binding = InstanceMatrix) readonly buffer InstanceModels { mat4 u_InstanceModel[]; }. */
+namespace StorageBinding {
+    constexpr uint32_t InstanceMatrix = 4;
+}
+
 /**
  * ---- Compute and GPU-driven draw (Phase 4) ----
  * Compute: Use ICommandList::Dispatch(groupCountX, groupCountY, groupCountZ) with a compute pipeline.

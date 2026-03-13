@@ -1,8 +1,8 @@
 #include "api/render/MaterialInstance.h"
 #include "api/render/Material.h"
 #include "api/render/Texture.h"
-#include "eyelib/render/resources/MaterialInstance.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/MaterialInstance.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Texture2D.h"
 
 namespace eyelib {

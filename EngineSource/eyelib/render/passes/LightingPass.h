@@ -1,6 +1,6 @@
 #pragma once
 
-#include "eyelib/render/GBuffer.h"
+#include "eyelib/render/renderer/GBuffer.h"
 #include "eyelib/render/RenderContext.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -10,10 +10,9 @@ namespace eyelib {
 namespace render {
 
 class Shader;
+class CascadeShadowMap;
 
-class ShadowMap;
-
-/** Deferred lighting: reads G-buffer, outputs lit HDR color to current FBO. Optional shadow map. */
+/** Deferred lighting: reads G-buffer, outputs lit HDR color to current FBO. Optional cascade shadow map. */
 class LightingPass {
 public:
     LightingPass();
@@ -22,16 +21,17 @@ public:
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
 
-    /** Render to currently bound FBO (context-based). */
+    /** Render to currently bound FBO (context-based). If sceneLightingBuffer is non-null, it is bound at binding 5. cascadeMap: bind cascade depth array at 6, light-space SSBO at 7. */
     void Render(GBuffer& gbuffer,
                 const RenderContext& ctx,
                 const LightParams& light,
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Vec3& viewPos,
-                ShadowMap* shadowMap = nullptr,
+                CascadeShadowMap* cascadeMap = nullptr,
                 const std::vector<PointLight>* pointLights = nullptr,
-                const std::vector<SpotLight>* spotLights = nullptr);
+                const std::vector<SpotLight>* spotLights = nullptr,
+                rhi::IBuffer* sceneLightingBuffer = nullptr);
 
     /** Render to currently bound FBO. device and cmd must be non-null. */
     void Render(GBuffer& gbuffer,
@@ -41,9 +41,10 @@ public:
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Vec3& viewPos,
-                ShadowMap* shadowMap = nullptr,
+                CascadeShadowMap* cascadeMap = nullptr,
                 const std::vector<PointLight>* pointLights = nullptr,
-                const std::vector<SpotLight>* spotLights = nullptr);
+                const std::vector<SpotLight>* spotLights = nullptr,
+                rhi::IBuffer* sceneLightingBuffer = nullptr);
 
     /** Reload lighting shader (for hot-reload when shader files change). */
     void ReloadShaders();

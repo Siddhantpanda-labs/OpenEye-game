@@ -36,11 +36,32 @@
               1.0,
               1.0
             ],
-            "type": 0
+            "type": 2
           },
           "entity": {
             "generation": 0,
-            "index": 3
+            "index": 7
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
           }
         },
         {
@@ -63,31 +84,33 @@
             "generation": 0,
             "index": 0
           }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
         }
       ],
       "version": 1
     },
     "Light": {
       "items": [
-        {
-          "data": {
-            "castShadows": true,
-            "color": [
-              0.0,
-              1.0,
-              1.0
-            ],
-            "innerCone": 15.0,
-            "intensity": 1.0,
-            "outerCone": 30.0,
-            "range": 10.0,
-            "type": 1
-          },
-          "entity": {
-            "generation": 0,
-            "index": 5
-          }
-        },
         {
           "data": {
             "castShadows": true,
@@ -106,6 +129,25 @@
             "generation": 0,
             "index": 2
           }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              0.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
         }
       ],
       "version": 1
@@ -117,12 +159,27 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
-            "meshAssetId": "builtin://Cube",
+            "meshAssetId": "builtin://Cone",
+            "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 3
+            "index": 7
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Sphere",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
           }
         },
         {
@@ -131,6 +188,7 @@
             "lodMeshAssetIds": [],
             "materialAssetId": "",
             "meshAssetId": "builtin://Cube",
+            "submeshIndex": -1,
             "visible": true
           },
           "entity": {
@@ -143,7 +201,22 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
             "meshAssetId": "builtin://Torus",
+            "submeshIndex": -1,
             "visible": true
           },
           "entity": {
@@ -232,8 +305,8 @@
           "data": {
             "position": [
               0.0,
-              6.846065998077393,
-              3.9852302074432373
+              9.464734077453613,
+              -2.064940929412842
             ],
             "rotation": [
               1.0,
@@ -299,6 +372,54 @@
             "generation": 0,
             "index": 5
           }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              5.8813557624816895,
+              0.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              4.459968090057373,
+              4.459968090057373,
+              4.459968090057373
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              6.167832374572754,
+              7.444504737854004
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              5.637598991394043,
+              5.637598991394043,
+              5.637598991394043
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 7
+          }
         }
       ],
       "version": 1
@@ -314,26 +435,26 @@
       {
         "entity": {
           "generation": 0,
-          "index": 5
+          "index": 7
         },
         "flags": 0,
-        "name": "Point Light"
+        "name": "Cone"
       },
       {
         "entity": {
           "generation": 0,
-          "index": 3
+          "index": 6
         },
         "flags": 0,
-        "name": "Cube1"
+        "name": "Sphere"
       },
       {
         "entity": {
           "generation": 0,
-          "index": 2
+          "index": 0
         },
         "flags": 0,
-        "name": "Directional Light"
+        "name": "Cube"
       },
       {
         "entity": {
@@ -346,10 +467,26 @@
       {
         "entity": {
           "generation": 0,
-          "index": 0
+          "index": 2
         },
         "flags": 0,
-        "name": "Cube"
+        "name": "Directional Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Point Light"
       },
       {
         "entity": {
@@ -370,6 +507,8 @@
       0,
       0,
       1,
+      0,
+      0,
       0
     ]
   },

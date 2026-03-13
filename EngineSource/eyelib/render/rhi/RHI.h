@@ -93,6 +93,8 @@ struct IDevice {
                                               const std::vector<RHITextureFormat>& colorFormats,
                                               RHITextureFormat depthFormat,
                                               uint32_t samples = 1) = 0;
+    /** Depth-only render target with 2D array depth texture (for cascade shadow maps). Use SetDepthLayer then SetRenderTarget to render to each layer. */
+    virtual IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) { (void)width; (void)height; (void)arrayLayers; return nullptr; }
     /** Create render target with color attachment(s) and shared depth (e.g. entity ID pass reusing main depth). sharedDepthTexture must outlive the RT. */
     virtual IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                              const std::vector<RHITextureFormat>& colorFormats,
@@ -178,8 +180,10 @@ struct ICommandList {
     virtual void SetCullFace(bool enable) = 0;
     /** When cull face is enabled: true = cull front faces (e.g. shadow map), false = cull back. */
     virtual void SetCullFrontFace(bool cullFront) = 0;
-    /** Enable/disable alpha blending (src_alpha, one_minus_src_alpha). For transparency pass. */
+    /** Enable/disable alpha blending. Factors set by SetBlendFunc (default SrcAlpha, OneMinusSrcAlpha). */
     virtual void SetBlend(bool enable) = 0;
+    /** Blend factors when blending is enabled. Opaque pass should use SetBlend(false). */
+    virtual void SetBlendFunc(BlendFactor src, BlendFactor dst) = 0;
     /** Polygon offset for lines (GL_POLYGON_OFFSET_LINE + glPolygonOffset). Bias line depth toward camera; use negative factor/units so wireframe wins when co-planar but stays occluded when behind. Other backends may no-op. */
     virtual void SetPolygonOffsetLine(bool enable, float factor, float units) = 0;
 
@@ -359,6 +363,9 @@ struct IRenderTarget {
     virtual ITexture* GetDepthTexture() = 0;
     /** Backend-native framebuffer handle (e.g. GL FBO id as void*). For interop only. */
     virtual void* GetNativeFramebuffer() = 0;
+    /** For depth-only array RTs: set layer to render to (0..arrayLayers-1). No-op for non-array. */
+    virtual void SetDepthLayer(uint32_t layer) { (void)layer; }
+    virtual uint32_t GetDepthLayer() const { return 0; }
 };
 
 // ---- Query pool ----

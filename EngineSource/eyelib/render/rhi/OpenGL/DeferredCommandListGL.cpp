@@ -68,6 +68,9 @@ void DeferredCommandListGL::SetCullFrontFace(bool cullFront) {
 void DeferredCommandListGL::SetBlend(bool enable) {
     Record([enable](ICommandList* c) { c->SetBlend(enable); });
 }
+void DeferredCommandListGL::SetBlendFunc(BlendFactor src, BlendFactor dst) {
+    Record([src, dst](ICommandList* c) { c->SetBlendFunc(src, dst); });
+}
 void DeferredCommandListGL::SetPolygonOffsetLine(bool enable, float factor, float units) {
     Record([enable, factor, units](ICommandList* c) { c->SetPolygonOffsetLine(enable, factor, units); });
 }

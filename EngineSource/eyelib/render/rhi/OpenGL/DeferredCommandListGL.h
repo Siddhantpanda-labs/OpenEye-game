@@ -33,6 +33,7 @@ struct DeferredCommandListGL : ICommandList {
     void SetCullFace(bool enable) override;
     void SetCullFrontFace(bool cullFront) override;
     void SetBlend(bool enable) override;
+    void SetBlendFunc(BlendFactor src, BlendFactor dst) override;
     void SetPolygonOffsetLine(bool enable, float factor, float units) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;

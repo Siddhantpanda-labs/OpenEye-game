@@ -7,7 +7,7 @@
 #include "asset/readers/material_reader.h"
 #include "asset/readers/texture_reader.h"
 #include "asset/core/import_mesh.h"
-#include "eyelib/render/MaterialDescriptor.h"
+#include "eyelib/render/materials/MaterialDescriptor.h"
 #include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/TextureDescriptor.h"
 #include "eyelib/render/ShaderDescriptor.h"
@@ -56,7 +56,7 @@ struct AssetIdHash {
 };
 
 void LoadedMaterialToDescriptor(const asset::LoadedMaterial& src, eyelib::render::MaterialDescriptor& dst) {
-    dst.shaderName = "passes/forward/lit";
+    dst.shaderName = "passes/forward/forward";
     dst.albedo.x = src.albedoColorR;
     dst.albedo.y = src.albedoColorG;
     dst.albedo.z = src.albedoColorB;

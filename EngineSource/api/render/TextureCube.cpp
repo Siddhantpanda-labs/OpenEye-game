@@ -42,6 +42,11 @@ bool TextureCube::LoadFromFiles(RenderDevice device, const std::vector<std::stri
     return dev && m_impl->texture->LoadFromFiles(dev, facePaths, isSRGB, generateMipmaps);
 }
 
+bool TextureCube::LoadFromCrossLayout(RenderDevice device, const std::string& path, uint32_t faceSize, bool isSRGB, bool generateMipmaps) {
+    auto* dev = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    return dev && m_impl->texture->LoadFromCrossLayout(dev, path, faceSize, isSRGB, generateMipmaps);
+}
+
 void TextureCube::GenerateMipmaps() {
     m_impl->texture->GenerateMipmaps();
 }

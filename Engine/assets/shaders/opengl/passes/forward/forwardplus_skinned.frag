@@ -6,7 +6,6 @@ in vec3 v_WorldNormal;
 in vec2 v_TexCoord;
 in mat3 v_TBN;
 
-uniform vec3 u_ViewPos;
 uniform vec3 u_Albedo;
 uniform float u_Metallic;
 uniform float u_Roughness;
@@ -23,11 +22,6 @@ uniform sampler2D u_EmissiveTexture;
 uniform int u_UseEmissiveTexture;
 uniform vec3 u_Emission;
 uniform float u_Alpha;
-uniform vec3 u_DirLightDir;
-uniform vec3 u_DirLightColor;
-uniform float u_DirLightIntensity;
-uniform vec3 u_Ambient;
-uniform float u_Exposure;
 uniform int u_ScreenWidth;
 uniform int u_ScreenHeight;
 uniform int u_TileCountX;
@@ -39,10 +33,42 @@ uniform float u_NearPlane;
 uniform float u_FarPlane;
 uniform int u_PointLightCount;
 uniform int u_SpotLightCount;
-uniform sampler2D u_ShadowMap;
-uniform mat4 u_LightSpaceMatrix;
-uniform float u_ShadowBias;
-uniform int u_UseShadows;
+uniform sampler2DArray u_ShadowMap;
+
+// Enhancement 6.1: scene lighting from SSBO (binding 5); point/spot read from 3/4 for tiled culling
+#define SCENE_LIGHT_MAX_POINT 8
+#define SCENE_LIGHT_MAX_SPOT 4
+struct SceneLightHeader {
+    vec3 direction; float pad0;
+    vec3 color; float pad1;
+    float intensity; float pad2; float pad3; float pad4;
+    vec3 ambient; float pad5;
+    float exposure; float pad6; float pad7; float pad8;
+    vec3 viewPos; float pad9;
+    mat4 lightSpaceMatrix;
+    float shadowBias; float pad10; float pad11; float pad12;
+    int useShadows; float pad13; float pad14; float pad15;
+    int pointLightCount; int spotLightCount; float pad16; float pad17;
+    int cascadeCount; float pad18; float pad19; float pad20;
+    vec4 farBounds;
+};
+struct ScenePointLightData {
+    vec3 position; float pad0;
+    vec3 color; float intensity;
+    float radius; float pad1; float pad2; float pad3;
+};
+struct SceneSpotLightData {
+    vec3 position; float pad0;
+    vec3 direction; float pad1;
+    vec3 color; float intensity;
+    float range; float innerConeCos; float outerConeCos;
+    float pad2; float pad3; float pad4; float pad5; float pad6;
+};
+layout(std140, binding = 5) buffer SceneLightingBlock {
+    SceneLightHeader header;
+    ScenePointLightData pointLights[SCENE_LIGHT_MAX_POINT];
+    SceneSpotLightData spotLights[SCENE_LIGHT_MAX_SPOT];
+} sceneLight;
 
 layout(binding = 2) restrict readonly buffer LightIndexBuffer { uint lightIndices[]; };
 
@@ -75,14 +101,14 @@ layout(binding = 4) restrict readonly buffer SpotLightBuffer { SpotLight spotLig
 layout(location = 0) out vec4 o_Color;
 
 float shadowFactor(vec3 worldPos) {
-    if (u_UseShadows <= 0) return 0.0;
-    vec4 lightSpacePos = u_LightSpaceMatrix * vec4(worldPos, 1.0);
+    if (sceneLight.header.useShadows <= 0) return 0.0;
+    vec4 lightSpacePos = sceneLight.header.lightSpaceMatrix * vec4(worldPos, 1.0);
     vec3 ndc = lightSpacePos.xyz / lightSpacePos.w;
     ndc = ndc * 0.5 + 0.5;
     if (ndc.z > 1.0 || ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0)
         return 0.0;
-    float depth = texture(u_ShadowMap, ndc.xy).r;
-    return (ndc.z - u_ShadowBias > depth) ? 1.0 : 0.0;
+    float depth = texture(u_ShadowMap, vec3(ndc.xy, 0.0)).r;
+    return (ndc.z - sceneLight.header.shadowBias > depth) ? 1.0 : 0.0;
 }
 
 vec3 calc_point_light(vec3 pos, vec3 color, float intensity, float radius,
@@ -134,7 +160,7 @@ void main() {
         vec3 n = texture(u_NormalTexture, v_TexCoord).xyz * 2.0 - 1.0;
         N = normalize(v_TBN * n);
     }
-    vec3 V = normalize(u_ViewPos - v_WorldPos);
+    vec3 V = normalize(sceneLight.header.viewPos - v_WorldPos);
     vec3 albedo = u_UseAlbedoTexture > 0
         ? texture(u_AlbedoTexture, v_TexCoord).rgb * u_Albedo
         : u_Albedo;
@@ -157,12 +183,12 @@ void main() {
         emission = texture(u_EmissiveTexture, v_TexCoord).rgb;
     }
 
-    vec3 result = albedo * u_Ambient * ao;
-    vec3 L = normalize(-u_DirLightDir);
+    vec3 result = albedo * sceneLight.header.ambient * ao;
+    vec3 L = normalize(-sceneLight.header.direction);
     float NdotL = max(dot(N, L), 0.0);
     float shadow = shadowFactor(v_WorldPos);
     float lightVis = 1.0 - shadow;
-    result += albedo * u_DirLightColor * u_DirLightIntensity * NdotL * lightVis;
+    result += albedo * sceneLight.header.color * sceneLight.header.intensity * NdotL * lightVis;
 
     float viewZ = abs(v_ViewPos.z);
     float viewZClamped = clamp(viewZ, u_NearPlane, u_FarPlane);
@@ -196,5 +222,5 @@ void main() {
     }
 
     result += emission;
-    o_Color = vec4(result * u_Exposure, u_Alpha);
+    o_Color = vec4(result * sceneLight.header.exposure, u_Alpha);
 }

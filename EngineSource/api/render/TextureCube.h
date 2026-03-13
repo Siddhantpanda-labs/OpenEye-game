@@ -29,6 +29,9 @@ public:
     bool LoadFromFiles(RenderDevice device, const std::vector<std::string>& facePaths,
                        bool isSRGB = false, bool generateMipmaps = true);
 
+    /** Load from a single horizontal-cross image (e.g. 2048x1536 with 512x512 faces). */
+    bool LoadFromCrossLayout(RenderDevice device, const std::string& path, uint32_t faceSize = 512, bool isSRGB = false, bool generateMipmaps = true);
+
     void GenerateMipmaps();
     void SetFilter(TextureFilter minFilter, TextureFilter magFilter);
     void SetWrap(TextureWrap s, TextureWrap t, TextureWrap r);

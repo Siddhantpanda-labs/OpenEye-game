@@ -651,6 +651,40 @@ IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,
     return rt;
 }
 
+IRenderTarget* DeviceGL::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) {
+    if (!width || !height || !arrayLayers) return nullptr;
+    auto* rt = new RenderTargetGL();
+    rt->m_width = width;
+    rt->m_height = height;
+    rt->m_ownsTextures = true;
+    TextureDesc td;
+    td.type = TextureType::Texture2DArray;
+    td.width = width;
+    td.height = height;
+    td.depthOrArrayLayers = arrayLayers;
+    td.format = RHITextureFormat::Depth24;
+    td.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+    td.mipLevels = 1;
+    rt->m_depthTexture.reset(static_cast<TextureGL*>(CreateTexture(td, nullptr)));
+    if (!rt->m_depthTexture) {
+        delete rt;
+        return nullptr;
+    }
+    glCreateFramebuffers(1, &rt->m_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, rt->m_fbo);
+    auto* depthTex = static_cast<TextureGL*>(rt->m_depthTexture.get());
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTex->m_handle, 0, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        DestroyRenderTarget(rt);
+        return nullptr;
+    }
+    return rt;
+}
+
 IRenderTarget* DeviceGL::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                            const std::vector<RHITextureFormat>& colorFormats,
                                                            ITexture* sharedDepthTexture,

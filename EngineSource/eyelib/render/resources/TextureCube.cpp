@@ -128,6 +128,80 @@ bool TextureCube::LoadFromFiles(rhi::IDevice* device, const std::string& px, con
     return LoadFromFiles(device, faces, isSRGB, generateMipmaps);
 }
 
+namespace {
+// Horizontal cross layout: 4*faceSize x 3*faceSize. Faces (x0, y0) in pixels: +X, -X, +Y, -Y, +Z, -Z.
+constexpr int kCrossFaceCount = 6;
+struct CrossFace { int x0, y0; };
+void CrossLayoutFaceOffsets(uint32_t faceSize, CrossFace out[6]) {
+    const int s = static_cast<int>(faceSize);
+    out[0] = { 2 * s, s };   // +X
+    out[1] = { 0, s };       // -X
+    out[2] = { s, 0 };       // +Y
+    out[3] = { s, 2 * s };   // -Y
+    out[4] = { s, s };       // +Z
+    out[5] = { 3 * s, s };   // -Z
+}
+} // namespace
+
+bool TextureCube::LoadFromCrossLayout(rhi::IDevice* device, const std::string& path, uint32_t faceSize, bool isSRGB, bool generateMipmaps) {
+    if (!device || faceSize == 0) return false;
+    std::vector<uint8_t> bytes = platform::filesystem::ReadFile(path);
+    if (bytes.empty()) {
+        core::Log::ErrorF("TextureCube: LoadFromCrossLayout failed to read: %s", path.c_str());
+        return false;
+    }
+    int imgW = 0, imgH = 0, ch = 0;
+    unsigned char* decoded = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &imgW, &imgH, &ch, 0);
+    if (!decoded) {
+        core::Log::ErrorF("TextureCube: stb_image failed: %s", stbi_failure_reason());
+        return false;
+    }
+    const int expectedW = static_cast<int>(faceSize) * 4;
+    const int expectedH = static_cast<int>(faceSize) * 3;
+    if (imgW != expectedW || imgH != expectedH) {
+        stbi_image_free(decoded);
+        core::Log::ErrorF("TextureCube: cross image size %dx%d, expected %dx%d", imgW, imgH, expectedW, expectedH);
+        return false;
+    }
+    TextureFormat fmt = (ch == 1) ? TextureFormat::R8 : (ch == 2) ? TextureFormat::RG8 : (ch == 3) ? TextureFormat::RGB8 : TextureFormat::RGBA8;
+    const size_t bpp = BytesPerPixel(fmt);
+    const size_t faceBytes = static_cast<size_t>(faceSize) * static_cast<size_t>(faceSize) * bpp;
+    const int stride = imgW * ch;
+
+    CrossFace offsets[kCrossFaceCount];
+    CrossLayoutFaceOffsets(faceSize, offsets);
+
+    m_cpuData.resize(faceBytes * 6);
+    for (int f = 0; f < kCrossFaceCount; ++f) {
+        const int x0 = offsets[f].x0;
+        const int y0 = offsets[f].y0;
+        uint8_t* dst = m_cpuData.data() + f * faceBytes;
+        for (uint32_t row = 0; row < faceSize; ++row) {
+            const unsigned char* srcRow = decoded + (y0 + row) * stride + x0 * ch;
+            std::memcpy(dst + row * faceSize * bpp, srcRow, faceSize * bpp);
+        }
+    }
+    stbi_image_free(decoded);
+
+    (void)generateMipmaps;
+    if (m_deviceRHI && m_textureRHI) m_deviceRHI->DestroyTexture(m_textureRHI);
+    rhi::TextureDesc desc;
+    desc.type = rhi::TextureType::TextureCube;
+    desc.width = faceSize;
+    desc.height = faceSize;
+    desc.depthOrArrayLayers = 6;
+    if (isSRGB && (fmt == TextureFormat::RGB8 || fmt == TextureFormat::RGBA8))
+        desc.format = (fmt == TextureFormat::RGB8) ? rhi::RHITextureFormat::RGB8_SRGB : rhi::RHITextureFormat::RGBA8_SRGB;
+    else
+        desc.format = Texture2D::TextureFormatToRHI(fmt);
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    m_textureRHI = device->CreateTexture(desc, m_cpuData.data());
+    if (!m_textureRHI) return false;
+    m_deviceRHI = device;
+    m_size = static_cast<int>(faceSize);
+    return true;
+}
+
 void TextureCube::Bind(int slot) const {
     if (!m_textureRHI || !m_deviceRHI) return;
     rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();

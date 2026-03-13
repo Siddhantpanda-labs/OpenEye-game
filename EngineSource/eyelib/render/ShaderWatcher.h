@@ -31,7 +31,7 @@ public:
     /** Poll for changes and copy updated shaders. Call every frame or every N ms. Returns number of files copied this tick. */
     int Tick();
 
-    /** Optional: called after a file is copied (path is relative, e.g. "shaders/passes/forward/lit.vert"). */
+    /** Optional: called after a file is copied (path is relative, e.g. "shaders/passes/forward/forward.vert"). */
     void SetOnShaderCopied(std::function<void(const std::string&)> fn) { m_onCopied = std::move(fn); }
 
 private:

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -31,6 +32,11 @@ static bool IsOmeshFile(const std::string& path) {
     return ext == ".omesh";
 }
 
+static bool IsMatFile(const std::string& path) {
+    std::string ext = fs::GetExtension(path);
+    return ext == ".mat";
+}
+
 /** Skip .meta files in the asset browser listing. */
 static bool IsMetaFile(const std::string& path) {
     std::string ext = fs::GetExtension(path);
@@ -43,6 +49,12 @@ struct OmeshDragPayload {
     char guid[128];
 };
 static constexpr const char* kOmeshPayloadType = "OpenEyeOmesh";
+
+/** Payload for dragging a .mat onto Inspector Renderable material slot. */
+struct MaterialDragPayload {
+    char path[512];
+};
+static constexpr const char* kMaterialPayloadType = "OpenEyeMaterial";
 
 /** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty). */
 static const char* GetEmptySceneJson() {
@@ -103,6 +115,37 @@ static bool CreateNewFolder(const std::string& parentPath) {
     return fs::CreateDirectory(path);
 }
 
+/** Write minimal canonical .mat (MAT1 v2) so loader can load it. */
+static bool CreateEmptyMaterialFile(const std::string& folderPath) {
+    std::string path = fs::NormalizePath(folderPath + "/NewMaterial.mat");
+    int suffix = 0;
+    while (fs::FileExists(path)) {
+        suffix++;
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "/NewMaterial%d.mat", suffix);
+        path = fs::NormalizePath(folderPath + buf);
+    }
+    constexpr uint32_t kMat1Magic = 0x4D415431u;
+    constexpr uint32_t kMat1Version = 2u;
+#pragma pack(push, 1)
+    struct MinimalMatHeader {
+        uint32_t magic = kMat1Magic;
+        uint32_t version = kMat1Version;
+        uint32_t nameLen = 0;
+        uint32_t albedoPathLen = 0;
+        uint32_t normalPathLen = 0;
+        uint32_t metallicPathLen = 0;
+        uint32_t roughnessPathLen = 0;
+        float metallicValue = 0.f;
+        float roughnessValue = 0.5f;
+        float albedoColorR = 1.f;
+        float albedoColorG = 1.f;
+        float albedoColorB = 1.f;
+    } header;
+#pragma pack(pop)
+    return fs::WriteFile(path, reinterpret_cast<const char*>(&header), sizeof(header));
+}
+
 static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std::string& name, bool isDir) {
     const float cardW = 80.0f;
     const float cardH = 60.0f;
@@ -132,6 +175,25 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             ImGui::EndDragDropSource();
         }
     }
+    if (!isDir && IsMatFile(fullPath)) {
+        if (ImGui::IsItemClicked(0)) {
+            if (ctx && !ctx->projectAssetsRoot.empty() && fullPath.size() >= ctx->projectAssetsRoot.size()
+                && fullPath.compare(0, ctx->projectAssetsRoot.size(), ctx->projectAssetsRoot) == 0) {
+                size_t start = ctx->projectAssetsRoot.size();
+                if (start < fullPath.size() && (fullPath[start] == '/' || fullPath[start] == '\\')) start++;
+                ctx->selectedMaterialAssetId = fullPath.substr(start);
+            } else if (ctx) {
+                ctx->selectedMaterialAssetId = fullPath;
+            }
+        }
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            MaterialDragPayload payload{};
+            std::snprintf(payload.path, sizeof(payload.path), "%.511s", fullPath.c_str());
+            ImGui::SetDragDropPayload(kMaterialPayloadType, &payload, sizeof(payload));
+            ImGui::Text("Material: %s", name.c_str());
+            ImGui::EndDragDropSource();
+        }
+    }
     ImGui::SetCursorPos(ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_Text, isDir ? ImVec4(0.9f, 0.85f, 0.4f, 1.0f) : ImVec4(0.9f, 0.9f, 0.9f, 1.0f));
     ImGui::TextUnformatted(isDir ? "[Dir]" : "[File]");
@@ -146,6 +208,7 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             if (ImGui::BeginMenu("Create")) {
                 if (ImGui::MenuItem("Scene file")) CreateEmptySceneFile(fullPath);
                 if (ImGui::MenuItem("Folder")) CreateNewFolder(fullPath);
+                if (ImGui::MenuItem("Material")) CreateEmptyMaterialFile(fullPath);
                 ImGui::EndMenu();
             }
             ImGui::Separator();
@@ -339,6 +402,9 @@ void ShowAssetPanel(EditorContext* ctx) {
                     }
                     if (ImGui::MenuItem("Folder")) {
                         CreateNewFolder(s_currentPath);
+                    }
+                    if (ImGui::MenuItem("Material")) {
+                        CreateEmptyMaterialFile(s_currentPath);
                     }
                     ImGui::EndMenu();
                 }

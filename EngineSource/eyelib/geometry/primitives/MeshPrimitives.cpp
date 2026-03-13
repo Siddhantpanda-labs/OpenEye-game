@@ -118,15 +118,15 @@ void MeshPrimitives::CreateSphere(geometry::EditableMesh& editable, float radius
             int v2 = nextBase + x;
             int v3 = nextBase + ((x + 1) % segments);
             
-            // First triangle
+            // First triangle (winding so GenerateNormals produces outward normals)
             indices.push_back(v0);
-            indices.push_back(v2);
             indices.push_back(v1);
+            indices.push_back(v2);
             
             // Second triangle
             indices.push_back(v1);
-            indices.push_back(v2);
             indices.push_back(v3);
+            indices.push_back(v2);
         }
     }
     
@@ -437,7 +437,7 @@ void MeshPrimitives::CreateTorus(geometry::EditableMesh& editable, float radius,
         }
     }
     
-    // Generate indices
+    // Generate indices (winding so GenerateNormals produces outward normals)
     for (int s = 0; s < segments; ++s) {
         for (int t = 0; t < tubeSegments; ++t) {
             int a = s * (tubeSegments + 1) + t;
@@ -446,12 +446,12 @@ void MeshPrimitives::CreateTorus(geometry::EditableMesh& editable, float radius,
             int d = c + 1;
             
             indices.push_back(a);
-            indices.push_back(c);
             indices.push_back(b);
+            indices.push_back(c);
             
             indices.push_back(b);
-            indices.push_back(c);
             indices.push_back(d);
+            indices.push_back(c);
         }
     }
     

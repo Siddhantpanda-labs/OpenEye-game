@@ -16,7 +16,7 @@
 #include "api/render/RenderTarget.h"
 #include "api/render/LODManager.h"
 #include "api/render/GBuffer.h"
-#include "api/render/ShadowMap.h"
+#include "api/render/CascadeShadowMap.h"
 #include "api/render/IBL.h"
 #include "api/render/FrameGraph.h"
 #include "api/render/PostProcessor.h"
@@ -53,7 +53,7 @@ using ::eyelib::api::RenderTarget;
 using ::eyelib::api::LODSettings;
 using ::eyelib::api::LODManager;
 using ::eyelib::api::GBuffer;
-using ::eyelib::api::ShadowMap;
+using ::eyelib::api::CascadeShadowMap;
 using ::eyelib::api::IBL;
 using ::eyelib::api::FrameGraph;
 using ::eyelib::api::FGTextureDesc;

@@ -1,7 +1,7 @@
 #include "api/render/Material.h"
 #include "api/render/Texture.h"
 #include "api/render/Shader.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Texture2D.h"
 
 namespace eyelib {
@@ -141,6 +141,78 @@ void Material::SetKeyword(const std::string& keyword, bool enabled) {
 
 bool Material::IsKeywordEnabled(const std::string& keyword) const {
     return m_impl->material->IsKeywordEnabled(keyword);
+}
+
+ShadingModel Material::GetShadingModel() const {
+    return static_cast<ShadingModel>(static_cast<uint8_t>(m_impl->material->GetShadingModel()));
+}
+
+void Material::SetShadingModel(ShadingModel m) {
+    m_impl->material->SetShadingModel(static_cast<::eyelib::render::ShadingModel>(static_cast<uint8_t>(m)));
+}
+
+uint64_t Material::GetShaderIndex() const {
+    return m_impl->material->GetShaderIndex();
+}
+
+void Material::SetShaderIndex(uint64_t id) {
+    m_impl->material->SetShaderIndex(id);
+}
+
+std::string Material::GetFragmentSnippet() const {
+    return m_impl->material->GetFragmentSnippet();
+}
+
+void Material::SetFragmentSnippet(std::string s) {
+    m_impl->material->SetFragmentSnippet(std::move(s));
+}
+
+std::string Material::GetShadingSnippet() const {
+    return m_impl->material->GetShadingSnippet();
+}
+
+void Material::SetShadingSnippet(std::string s) {
+    m_impl->material->SetShadingSnippet(std::move(s));
+}
+
+Blending Material::GetBlending() const {
+    return static_cast<Blending>(static_cast<uint8_t>(m_impl->material->GetBlending()));
+}
+
+void Material::SetBlending(Blending b) {
+    m_impl->material->SetBlending(static_cast<::eyelib::render::Blending>(static_cast<uint8_t>(b)));
+}
+
+bool Material::GetTwoSided() const {
+    return m_impl->material->GetTwoSided();
+}
+
+void Material::SetTwoSided(bool v) {
+    m_impl->material->SetTwoSided(v);
+}
+
+bool Material::GetRefraction() const {
+    return m_impl->material->GetRefraction();
+}
+
+void Material::SetRefraction(bool v) {
+    m_impl->material->SetRefraction(v);
+}
+
+bool Material::GetReflective() const {
+    return m_impl->material->GetReflective();
+}
+
+void Material::SetReflective(bool v) {
+    m_impl->material->SetReflective(v);
+}
+
+float Material::GetReflectiveStrength() const {
+    return m_impl->material->GetReflectiveStrength();
+}
+
+void Material::SetReflectiveStrength(float v) {
+    m_impl->material->SetReflectiveStrength(v);
 }
 
 std::shared_ptr<Material> Material::WrapInternal(const std::shared_ptr<::eyelib::render::Material>& material) {

@@ -1,9 +1,9 @@
 #include "RendererGPUResourceCache.h"
-#include "eyelib/render/MaterialDescriptor.h"
+#include "eyelib/render/materials/MaterialDescriptor.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Texture2D.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <cassert>
 

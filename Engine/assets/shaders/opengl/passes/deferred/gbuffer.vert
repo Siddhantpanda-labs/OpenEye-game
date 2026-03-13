@@ -16,6 +16,11 @@ uniform mat4 u_Projection;
 uniform mat4 u_PrevView;
 uniform mat4 u_PrevProjection;
 
+uniform vec4 u_UVTransform = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float u_UVRotation = 0.0;
+uniform float u_TexCoordIndex = 0.0;
+uniform float u_FlipV = 1.0;
+
 out vec3 v_WorldPos;
 out vec3 v_WorldNormal;
 out vec2 v_TexCoord;
@@ -25,7 +30,15 @@ void main() {
     vec4 w = u_Model * vec4(a_Position, 1.0);
     v_WorldPos = w.xyz;
     v_WorldNormal = mat3(transpose(inverse(u_Model))) * a_Normal;
-    v_TexCoord = a_TexCoord;
+    // UV transform (same as gbuffer_skinned / forward)
+    vec2 baseUv = mix(a_TexCoord, a_TexCoord1, step(0.5, u_TexCoordIndex));
+    vec2 uv = baseUv * u_UVTransform.zw;
+    float c = cos(u_UVRotation);
+    float s = sin(u_UVRotation);
+    uv = mat2(c, -s, s, c) * uv;
+    uv += u_UVTransform.xy;
+    if (u_FlipV > 0.5) uv.y = 1.0 - uv.y;
+    v_TexCoord = uv;
     
     // Calculate current and previous screen positions
     vec4 currentPos = u_Projection * u_View * w;

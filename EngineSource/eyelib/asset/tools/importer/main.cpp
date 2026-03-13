@@ -209,13 +209,13 @@ bool SerializePrefab(const ImportScene& scene, std::vector<uint8_t>& out) {
     return true;
 }
 
-std::vector<uint8_t> BuildMaterialMapBytes(const ImportScene& scene, bool useMatExt, bool inMaterialsFolder) {
+std::vector<uint8_t> BuildMaterialMapBytes(const ImportScene& scene, bool inMaterialsFolder) {
     std::ostringstream ss;
     ss << "# material_index|material_file\n";
     for (size_t i = 0; i < scene.materials.size(); ++i) {
         if (inMaterialsFolder) ss << i << "|materials/";
         else ss << i << "|";
-        ss << scene.materials[i].name << (useMatExt ? ".mat" : ".material") << "\n";
+        ss << scene.materials[i].name << ".mat\n";
     }
     const std::string s = ss.str();
     return std::vector<uint8_t>(s.begin(), s.end());
@@ -303,7 +303,7 @@ int main(int argc, char** argv) {
         meshEntries.push_back({OeaFormat::Entry_Prefab, importScene.sourceName + ".prefab", "", std::move(prefabPayload)});
     }
     meshEntries.push_back({OeaFormat::Entry_MaterialMap, importScene.sourceName + ".materialmap", "",
-                           BuildMaterialMapBytes(importScene, true, mode == OutputMode::OmeshSplitMaterials)});
+                           BuildMaterialMapBytes(importScene, mode == OutputMode::OmeshSplitMaterials)});
 
     if (mode == OutputMode::OeaOnly) {
         std::vector<OeaInputEntry> packageEntries = meshEntries;

@@ -1,7 +1,7 @@
 #version 460 core
 #extension GL_ARB_shader_viewport_layer_array : require
 
-// Single-pass stereo from forward/lit: one draw, two eyes. gl_InstanceID selects eye; gl_ViewportIndex routes to left/right half.
+// Single-pass stereo from forward/forward: one draw, two eyes. gl_InstanceID selects eye; gl_ViewportIndex routes to left/right half.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;

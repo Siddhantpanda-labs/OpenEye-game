@@ -16,7 +16,7 @@ void BuiltinResourceManager::InitializeDefaultResources() {
 void BuiltinResourceManager::EnsureDefaultMaterial() {
     if (m_defaultMaterial) return;
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_device && shader->Load(m_device, "passes/forward/lit")) {
+    if (m_device && shader->Load(m_device, "passes/forward/forward")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
         mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
@@ -25,12 +25,12 @@ void BuiltinResourceManager::EnsureDefaultMaterial() {
         return;
     }
     if (!m_device) {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader not loaded — device is null (passes/forward/lit).");
+        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader not loaded — device is null (passes/forward/forward).");
     } else {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader failed to load (passes/forward/lit). Using empty material.");
+        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader failed to load (passes/forward/forward). Using empty material.");
     }
 #ifndef NDEBUG
-    assert(false && "BuiltinResourceManager: default shader required for primitives failed. Set device before InitializeDefaultResources; ensure passes/forward/lit exists.");
+    assert(false && "BuiltinResourceManager: default shader required for primitives failed. Set device before InitializeDefaultResources; ensure passes/forward/forward exists.");
 #endif
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
@@ -38,17 +38,17 @@ void BuiltinResourceManager::EnsureDefaultMaterial() {
 void BuiltinResourceManager::EnsureSkinnedMaterial() {
     if (m_skinnedShader) return;
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_device && shader->Load(m_device, "passes/forward/skinned")) {
+    if (m_device && shader->Load(m_device, "passes/forward/forward_skinned")) {
         m_skinnedShader = shader;
         return;
     }
     if (!m_device) {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader not loaded — device is null (passes/forward/skinned).");
+        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader not loaded — device is null (passes/forward/forward_skinned).");
     } else {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader failed to load (passes/forward/skinned).");
+        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader failed to load (passes/forward/forward_skinned).");
     }
 #ifndef NDEBUG
-    assert(false && "BuiltinResourceManager: skinned shader failed. Set device before InitializeDefaultResources; ensure passes/forward/skinned exists.");
+    assert(false && "BuiltinResourceManager: skinned shader failed. Set device before InitializeDefaultResources; ensure passes/forward/forward_skinned exists.");
 #endif
 }
 

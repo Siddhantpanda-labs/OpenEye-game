@@ -38,6 +38,9 @@ struct EditorContext {
     /** Selected entity in hierarchy; InvalidEntity when none selected. */
     ::eyelib::world::EntityId selectedEntity = ::eyelib::world::InvalidEntity;
 
+    /** When non-empty, Inspector shows material editor for this asset (path or id). Set by Asset panel when a .mat is selected. */
+    std::string selectedMaterialAssetId;
+
     /** True when the scene root (name from scene file) is selected in hierarchy; then Inspector shows skybox. */
     bool sceneSelected = false;
 

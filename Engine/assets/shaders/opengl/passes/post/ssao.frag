@@ -62,24 +62,24 @@ void main() {
     vec2 texelSize = 1.0 / u_Resolution;
     
     for (int i = 0; i < u_SampleCount && i < 16; ++i) {
-        // Get sample position in view space
+        // Sample position in world space (hemisphere around normal)
         vec3 samplePos = position + TBN * (sampleKernel[i] * u_Radius);
         
-        // Project sample position to screen space (samplePos is in world space)
-        // Convert to view space first, then project
+        // Project to screen: world -> view -> clip -> NDC -> UV
         vec4 samplePosView = u_ViewMatrix * vec4(samplePos, 1.0);
         vec4 offset = u_ProjectionMatrix * samplePosView;
         offset.xy /= offset.w;
         offset.xy = offset.xy * 0.5 + 0.5;
         
-        // Sample depth at offset position
         vec3 samplePosition = texture(g_Position, offset.xy).rgb;
+        float sceneViewZ = (u_ViewMatrix * vec4(samplePosition, 1.0)).z;
+        // depthDiff = sample Z - scene Z (OpenGL view: -Z forward). Negative = sample behind surface = occluded
+        float depthDiff = samplePosView.z - sceneViewZ;
         
-        // Range check and accumulate occlusion (use distance in world space)
         float distanceToSample = length(samplePos - position);
         float rangeCheck = smoothstep(0.0, 1.0, u_Radius / distanceToSample);
-        float depthDiff = samplePosView.z - (u_ViewMatrix * vec4(samplePosition, 1.0)).z;
-        if (depthDiff > -u_Bias && depthDiff < u_Radius) {
+        // Occlusion when sample is behind surface (depthDiff < 0), beyond bias, within radius
+        if (depthDiff < -u_Bias && depthDiff > -u_Radius) {
             occlusion += rangeCheck;
         }
     }

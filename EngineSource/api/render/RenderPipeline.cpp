@@ -6,7 +6,7 @@
 #include "api/core/All.h"
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/render/DebugDrawRenderer.h"
-#include "eyelib/render/RenderPipeline.h"
+#include "eyelib/render/renderer/RenderPipeline.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
 

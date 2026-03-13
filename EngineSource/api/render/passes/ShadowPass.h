@@ -2,8 +2,7 @@
 
 #include "api/render/RenderDevice.h"
 #include "api/render/RenderScene.h"
-#include "api/render/ShadowMap.h"
-#include "api/render/Shader.h"
+#include "api/render/CascadeShadowMap.h"
 #include "eyelib/math/Types.h"
 #include <memory>
 #include <vector>
@@ -23,17 +22,16 @@ public:
     ShadowPass& operator=(ShadowPass&& other) noexcept;
 
     void SetDevice(RenderDevice device) { m_device = device; }
-    void SetDepthShader(std::shared_ptr<Shader> shader);
-    std::shared_ptr<Shader> GetDepthShader() const;
 
-    void Render(ShadowMap& shadowMap,
+    void Render(CascadeShadowMap& cascadeShadowMap,
                 const std::vector<Drawable>& drawables,
                 const math::Vec3& lightDir,
                 const math::Mat4& view,
                 const math::Mat4& projection,
                 const math::Vec3& cameraPos,
                 float nearPlane,
-                float farPlane);
+                float farPlane,
+                float aspectRatio = 0.0f);
 
 private:
     class Impl;

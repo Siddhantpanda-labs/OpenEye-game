@@ -7,13 +7,13 @@ namespace render {
 
 /**
  * Single place that resolves any shader name or path to the logical name
- * (e.g. passes/forward/lit). Used by RHI CreateGraphicsPipelineFromName and
+ * (e.g. passes/forward/forward). Used by RHI CreateGraphicsPipelineFromName and
  * Shader::LoadFromFile so every shader goes through one resolver.
  *
  * Accepts:
- * - Full path: assets/shaders/opengl/passes/forward/lit.vert
- * - Path-like: ../shaders/passes/forward/lit, shaders/passes/forward/lit
- * - Already logical: passes/forward/lit
+ * - Full path: assets/shaders/opengl/passes/forward/forward.vert
+ * - Path-like: ../shaders/passes/forward/forward, shaders/passes/forward/forward
+ * - Already logical: passes/forward/forward
  */
 inline std::string ShaderPathToLogicalName(const std::string& nameOrPath) {
     if (nameOrPath.empty()) return std::string();

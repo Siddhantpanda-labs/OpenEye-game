@@ -297,7 +297,7 @@ int RunEditor(int argc, char** argv) {
 
     if (editorRenderDevice) {
         auto defaultShader = std::make_shared<eyelib::api::Shader>();
-        if (defaultShader->Load(editorRenderDevice, "passes/forward/lit")) {
+        if (defaultShader->Load(editorRenderDevice, "passes/forward/forward")) {
             auto defaultMat = std::make_shared<eyelib::api::Material>();
             defaultMat->SetShader(defaultShader);
             ctx.defaultMaterial = std::move(defaultMat);

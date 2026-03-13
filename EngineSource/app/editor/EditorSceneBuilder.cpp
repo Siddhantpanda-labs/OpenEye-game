@@ -22,6 +22,8 @@
 
 namespace {
 const float kPi = 3.14159265f;
+/** Default skybox when none is set: horizontal-cross cubemap (2048x1536, 512 per face). */
+const char* kDefaultSkyboxCrossPath = "Skybox/SkyMap/Cubemap_Sky_512x512.png";
 }
 
 namespace openeye::editor {
@@ -141,16 +143,16 @@ std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialForSce
 void EditorSceneBuilder::EnsureDefaultMaterial() {
     if (m_defaultMaterial) return;
     auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_renderDevice && shader->Load(m_renderDevice, "passes/forward/lit")) {
+    if (m_renderDevice && shader->Load(m_renderDevice, "passes/deferred/gbuffer")) {
         auto mat = std::make_shared<eyelib::api::Material>();
         mat->SetShader(shader);
         m_defaultMaterial = mat;
         return;
     }
     if (!m_renderDevice) {
-        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader not loaded — render device is null (passes/forward/lit). SetRenderDevice before Build.");
+        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader not loaded — render device is null (passes/forward/forward). SetRenderDevice before Build.");
     } else {
-        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader failed to load (passes/forward/lit). Check assets/shaders/opengl/ and runtime assets. Using empty material.");
+        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader failed to load (passes/forward/forward). Check assets/shaders/opengl/ and runtime assets. Using empty material.");
     }
     m_defaultMaterial = std::make_shared<eyelib::api::Material>();
 }
@@ -219,6 +221,12 @@ std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAsse
                                                                                     const std::vector<std::string>& assetRoots,
                                                                                     eyelib::api::RenderDevice device) {
     if (assetId.empty() || !device) return nullptr;
+    const std::string resolved = ResolveAssetPath(assetId, assetRoots);
+    if (!resolved.empty() && !api::platform::filesystem::IsDirectory(resolved)) {
+        auto skybox = std::make_shared<eyelib::api::TextureCube>();
+        if (skybox->LoadFromCrossLayout(device, resolved, 512, true, true))
+            return skybox;
+    }
     const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
     std::string paths[6];
     for (int i = 0; i < 6; ++i) {
@@ -265,20 +273,20 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.castShadows = true;
 
     scene.skybox.reset();
-    if (world) {
-        const std::string skyboxId = world->GetSkyboxAssetId();
-        if (!skyboxId.empty()) {
-            auto it = m_skyboxCache.find(skyboxId);
-            if (it != m_skyboxCache.end()) {
-                scene.skybox = it->second;  // cached success or failure — no retry, no log
+    const std::string skyboxId = (world && !world->GetSkyboxAssetId().empty())
+        ? world->GetSkyboxAssetId()
+        : std::string(kDefaultSkyboxCrossPath);
+    if (!skyboxId.empty()) {
+        auto it = m_skyboxCache.find(skyboxId);
+        if (it != m_skyboxCache.end()) {
+            scene.skybox = it->second;  // cached success or failure — no retry, no log
+        } else {
+            auto skybox = LoadSkyboxFromAssetId(skyboxId, assetRoots, m_renderDevice);
+            if (skybox) {
+                m_skyboxCache[skyboxId] = skybox;
+                scene.skybox = std::move(skybox);
             } else {
-                auto skybox = LoadSkyboxFromAssetId(skyboxId, assetRoots, m_renderDevice);
-                if (skybox) {
-                    m_skyboxCache[skyboxId] = skybox;
-                    scene.skybox = std::move(skybox);
-                } else {
-                    m_skyboxCache[skyboxId] = nullptr;  // cache failure so we don't retry every frame
-                }
+                m_skyboxCache[skyboxId] = nullptr;  // cache failure so we don't retry every frame
             }
         }
     }

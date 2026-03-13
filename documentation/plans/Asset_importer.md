@@ -12,7 +12,7 @@ Extract meshes / materials / textures / animations
 Convert to engine intermediate representation
         ↓
 Write canonical binary files
-(.mesh .material .texture .anim)
+(.mesh .mat .texture .anim)
 ```
 
 No GUIDs yet. Just **clean canonical assets**.
@@ -794,7 +794,7 @@ Your importer should follow this order:
 2. Extract meshes
 3. Write .mesh files
 4. Extract materials
-5. Write .material files
+5. Write .mat files (canonical binary)
 6. Traverse node graph
 7. Create scene entities
 8. Write .scene file
@@ -1997,7 +1997,7 @@ So your engine uses:
 .scene  → world / level
 .prefab → reusable asset hierarchy
 .mesh   → geometry
-.material → material
+.mat → material
 .texture → texture
 .anim → animation
 ```

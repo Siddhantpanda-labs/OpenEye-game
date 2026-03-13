@@ -1,5 +1,5 @@
 #include "api/render/GBuffer.h"
-#include "eyelib/render/GBuffer.h"
+#include "eyelib/render/renderer/GBuffer.h"
 #include "eyelib/render/rhi/RHI.h"
 
 namespace eyelib {

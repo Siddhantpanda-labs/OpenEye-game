@@ -35,6 +35,7 @@ struct CommandListGL : ICommandList {
     void SetCullFace(bool enable) override;
     void SetCullFrontFace(bool cullFront) override;
     void SetBlend(bool enable) override;
+    void SetBlendFunc(BlendFactor src, BlendFactor dst) override;
     void SetPolygonOffsetLine(bool enable, float factor, float units) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
@@ -113,6 +114,8 @@ private:
     BufferGL* m_currentIBO = nullptr;
     IndexType m_currentIndexType = IndexType::UInt32;
     bool m_cullFrontFace = false;
+    unsigned int m_blendSrc;
+    unsigned int m_blendDst;
 };
 
 } // namespace rhi

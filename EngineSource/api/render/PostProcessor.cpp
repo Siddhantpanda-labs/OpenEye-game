@@ -1,5 +1,5 @@
 #include "api/render/PostProcessor.h"
-#include "eyelib/render/PostProcessor.h"
+#include "eyelib/render/post/PostProcessor.h"
 
 namespace eyelib {
 namespace api {

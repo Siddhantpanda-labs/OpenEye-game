@@ -1,5 +1,5 @@
 #include "api/render/IBL.h"
-#include "eyelib/render/IBL.h"
+#include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/resources/TextureCube.h"
 

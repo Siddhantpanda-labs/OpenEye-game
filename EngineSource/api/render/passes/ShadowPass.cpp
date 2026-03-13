@@ -1,6 +1,7 @@
 #include "api/render/passes/ShadowPass.h"
-#include "eyelib/render/passes/ShadowPass.h"
+#include "eyelib/render/shadows/ShadowPass.h"
 #include "eyelib/render/RenderContext.h"
+#include "eyelib/render/shadows/CascadeShadowMap.h"
 
 namespace eyelib {
 namespace api {
@@ -28,29 +29,27 @@ ShadowPass::ShadowPass(ShadowPass&& other) noexcept = default;
 
 ShadowPass& ShadowPass::operator=(ShadowPass&& other) noexcept = default;
 
-void ShadowPass::SetDepthShader(std::shared_ptr<Shader> shader) {
-    m_impl->pass->SetDepthShader(shader ? shader->GetInternal() : nullptr);
-}
-
-std::shared_ptr<Shader> ShadowPass::GetDepthShader() const {
-    return Shader::WrapInternal(m_impl->pass->GetDepthShader());
-}
-
-void ShadowPass::Render(ShadowMap& shadowMap,
+void ShadowPass::Render(CascadeShadowMap& cascadeShadowMap,
                         const std::vector<Drawable>& drawables,
                         const math::Vec3& lightDir,
                         const math::Mat4& view,
                         const math::Mat4& projection,
                         const math::Vec3& cameraPos,
                         float nearPlane,
-                        float farPlane) {
+                        float farPlane,
+                        float aspectRatio) {
     std::vector<::eyelib::render::Drawable> internal;
     internal.reserve(drawables.size());
     for (const auto& d : drawables) {
         internal.push_back(ToInternal(d));
     }
-    auto ctx = m_device ? ::eyelib::render::RenderContext::FromDevice(static_cast<::eyelib::render::rhi::IDevice*>(m_device.Get())) : ::eyelib::render::RenderContext{};
-    m_impl->pass->Render(*shadowMap.GetInternal(), ctx, internal, lightDir, view, projection, cameraPos, nearPlane, farPlane);
+    auto* device = m_device ? static_cast<::eyelib::render::rhi::IDevice*>(m_device.Get()) : nullptr;
+    auto* cmd = device ? device->GetImmediateCommandList() : nullptr;
+    if (!device || !cmd) return;
+    ::eyelib::render::ShadowPass::DrawableFeed feed = [&internal](std::function<void(const ::eyelib::render::Drawable&)> c) {
+        for (const auto& d : internal) c(d);
+    };
+    m_impl->pass->Render(*cascadeShadowMap.GetInternal(), device, cmd, std::move(feed), lightDir, view, projection, cameraPos, nearPlane, farPlane, aspectRatio);
 }
 
 } // namespace api

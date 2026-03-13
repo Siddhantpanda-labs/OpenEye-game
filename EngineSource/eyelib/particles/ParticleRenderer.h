@@ -2,7 +2,7 @@
 
 #include "eyelib/particles/ParticleSystem.h"
 #include "eyelib/render/RenderTypes.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Mesh.h"
 
 #include <memory>

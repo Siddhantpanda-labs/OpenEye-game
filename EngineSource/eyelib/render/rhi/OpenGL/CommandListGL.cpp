@@ -16,7 +16,7 @@ namespace eyelib {
 namespace render {
 namespace rhi {
 
-CommandListGL::CommandListGL(DeviceGL* device) : m_device(device) {
+CommandListGL::CommandListGL(DeviceGL* device) : m_device(device), m_blendSrc(GL_SRC_ALPHA), m_blendDst(GL_ONE_MINUS_SRC_ALPHA) {
     glGenVertexArrays(1, reinterpret_cast<GLuint*>(&m_vao));
 }
 
@@ -54,6 +54,11 @@ void CommandListGL::SetRenderTarget(IRenderTarget* rt) {
     }
     auto* r = static_cast<RenderTargetGL*>(rt);
     glBindFramebuffer(GL_FRAMEBUFFER, r->m_fbo);
+    ITexture* depthTex = r->GetDepthTexture();
+    if (depthTex && depthTex->GetType() == TextureType::Texture2DArray) {
+        auto* tex = static_cast<TextureGL*>(depthTex);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, tex->m_handle, 0, r->GetDepthLayer());
+    }
 }
 
 void CommandListGL::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) {
@@ -127,10 +132,35 @@ void CommandListGL::SetCullFrontFace(bool cullFront) {
 void CommandListGL::SetBlend(bool enable) {
     if (enable) {
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFunc(static_cast<GLenum>(m_blendSrc), static_cast<GLenum>(m_blendDst));
     } else {
         glDisable(GL_BLEND);
     }
+}
+
+namespace {
+GLenum ToGL(BlendFactor f) {
+    switch (f) {
+    case BlendFactor::Zero: return GL_ZERO;
+    case BlendFactor::One: return GL_ONE;
+    case BlendFactor::SrcAlpha: return GL_SRC_ALPHA;
+    case BlendFactor::OneMinusSrcAlpha: return GL_ONE_MINUS_SRC_ALPHA;
+    case BlendFactor::DstAlpha: return GL_DST_ALPHA;
+    case BlendFactor::OneMinusDstAlpha: return GL_ONE_MINUS_DST_ALPHA;
+    case BlendFactor::SrcColor: return GL_SRC_COLOR;
+    case BlendFactor::OneMinusSrcColor: return GL_ONE_MINUS_SRC_COLOR;
+    case BlendFactor::DstColor: return GL_DST_COLOR;
+    case BlendFactor::OneMinusDstColor: return GL_ONE_MINUS_DST_COLOR;
+    default: return GL_SRC_ALPHA;
+    }
+}
+}
+
+void CommandListGL::SetBlendFunc(BlendFactor src, BlendFactor dst) {
+    m_blendSrc = ToGL(src);
+    m_blendDst = ToGL(dst);
+    if (glIsEnabled(GL_BLEND))
+        glBlendFunc(m_blendSrc, m_blendDst);
 }
 
 void CommandListGL::SetPolygonOffsetLine(bool enable, float factor, float units) {

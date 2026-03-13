@@ -2,7 +2,7 @@
 
 #include "eyelib/fluids/FluidSimulation.h"
 #include "eyelib/render/RenderTypes.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHI.h"
 

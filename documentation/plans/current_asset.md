@@ -170,7 +170,7 @@ So the editor uses **path-based** asset references from the world, resolved agai
 
 - **asset_pipe/writers/**  
   - **MeshWriter**: **Write(ImportMesh, path)** → canonical `.mesh` (MeshFormat layout).  
-  - **MaterialWriter**: **Write(ImportMaterial, path)** → canonical `.material` (MaterialFormat).  
+  - **MaterialWriter**: **Write(ImportMaterial, path)** → canonical `.mat` binary (MaterialFormat).  
   - **TextureWriter**: **Write(ImportTexture, path)** → canonical `.tex` (not used by current importer; see below).  
   - **PrefabWriter**: **Write(ImportScene, path)** → `.prefab` (YAML-like entity list).  
   - **AnimationWriter**: **Write(ImportAnimation, path)** → `.anim`.  
@@ -196,7 +196,7 @@ So the editor uses **path-based** asset references from the world, resolved agai
 ### 4.3 Canonical formats (asset_pipe)
 
 - **.mesh:** Binary (MeshFormat): header (vertex/index/submesh counts, offsets), LOD table, submesh table, vertex/index data, bounds. Used inside .oea/.omesh and for loose mesh writes.
-- **.material / .mat:** Binary (MaterialFormat): header (path lengths, metallic/roughness, albedoColor R/G/B), then name and texture paths. Materials reference **textures/&lt;name&gt;.png** (or similar), not .tex, in the current importer output.
+- **.mat:** Canonical binary (MaterialFormat): header (path lengths, metallic/roughness, albedoColor R/G/B), then name and texture paths. Materials reference **textures/&lt;name&gt;.png** (or similar), not .tex, in the current importer output. (Legacy .mat JSON is no longer used.)
 - **.tex:** Binary (TextureFormat): optional encoded image storage; reader decodes to pixels. **TextureWriter** exists but the importer does **not** write .tex files; it writes loose images or embeds encoded bytes in .oea.
 - **.prefab:** YAML-like text (prefab writer): entity list with name, transform, mesh path. Stored inside .oea/.omesh; viewer uses **PrefabReader::Read** or **ReadFromText**.
 - **.anim:** Binary (animation writer): ANI1 magic, channels (bone name, position/rotation/scale keys). Written loose or into .oea.
@@ -219,7 +219,7 @@ So the editor uses **path-based** asset references from the world, resolved agai
 | **Purpose** | Runtime load, registry, cache, GPU resolution | Offline import, canonical formats, package layout |
 | **Identity** | AssetId (128-bit), path ↔ id in registry | Path-based inside packages; no GUID on disk yet |
 | **Mesh** | OEA (eyelib single-asset), MeshBin (.mesh.bin), Assimp | .mesh (MeshFormat), inside .oea/.omesh |
-| **Material** | JSON .mat | Binary .material/.mat (MaterialFormat) |
+| **Material** | Canonical .mat (binary, MaterialFormat) | .mat (MaterialFormat); importer writes materials/*.mat |
 | **Texture** | Path → image load | Loose images or encoded in .oea; .tex optional |
 | **Prefab** | — | .prefab (text), inside .oea/.omesh |
 | **Animation** | AnimationLoader (path) | .anim (binary), loose or in .oea |

@@ -17,4 +17,4 @@ To have runtime shaders updated when running from `build/bin`, either:
 1. Run the app with working directory = project root, or  
 2. Copy or symlink the project `assets` folder into `build/bin` so `build/bin/assets` exists; the watcher will then copy changed shaders from the repo `assets/shaders` into `build/bin/assets/shaders`.
 
-**Forward mode:** For point/spot lights in Forward mode, use materials with shader `../shaders/passes/forward/lit` (e.g. in your `.mat` file set `"shader": "../shaders/passes/forward/lit"`).
+**Forward mode:** For point/spot lights in Forward mode, use materials with shader `../shaders/passes/forward/forward` (e.g. in your `.mat` file set `"shader": "../shaders/passes/forward/forward"`).

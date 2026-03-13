@@ -22,6 +22,14 @@ ITexture* RenderTargetGL::GetDepthTexture() {
     return m_depthTexture.get();
 }
 
+void RenderTargetGL::SetDepthLayer(uint32_t layer) {
+    m_depthArrayLayer = layer;
+}
+
+uint32_t RenderTargetGL::GetDepthLayer() const {
+    return m_depthArrayLayer;
+}
+
 void* RenderTargetGL::GetNativeFramebuffer() {
     return reinterpret_cast<void*>(static_cast<uintptr_t>(m_fbo));
 }

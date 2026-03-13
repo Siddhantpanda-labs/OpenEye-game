@@ -1,6 +1,6 @@
 #include "api/render/RenderScene.h"
 #include "api/render/Texture.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 
 namespace eyelib {
 namespace api {

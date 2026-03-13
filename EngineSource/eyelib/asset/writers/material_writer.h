@@ -6,7 +6,7 @@
 
 namespace asset {
 
-/** Writes ImportMaterial to canonical .material binary. Deterministic output. */
+/** Writes ImportMaterial to canonical .mat binary. Deterministic output. */
 class MaterialWriter {
 public:
     static bool Write(const ImportMaterial& material, const std::string& path);

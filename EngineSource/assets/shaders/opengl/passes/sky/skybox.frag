@@ -7,9 +7,9 @@ uniform samplerCube u_Skybox;
 uniform mat4 u_InverseViewMatrix;
 uniform mat4 u_InverseProjectionMatrix;
 
-// Subtle: slightly less saturation, slightly more contrast (tweak to taste)
-const float kSaturation = 0.28;
-const float kContrast = 1.08;
+// Preserve actual color: full saturation, neutral contrast (no wash-out)
+const float kSaturation = 1.0;
+const float kContrast = 1.0;
 
 void main() {
     vec2 ndc = v_TexCoord * 2.0 - 1.0;

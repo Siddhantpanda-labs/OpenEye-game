@@ -40,8 +40,8 @@ eyelib/render/
 │   └── FrameGraphRecipe.h/cpp  # Declarative pass list (name, reads, writes) + AddPassesFromRecipe()
 ├── passes/
 │   ├── GBufferPass         # Deferred: fill position, normal, albedo, PBR, velocity, depth
-│   ├── ShadowPass          # Directional shadow map
-│   ├── LightingPass        # Full-screen lighting from GBuffer (+ shadow)
+│   ├── ShadowPass          # Cascade directional shadow map
+│   ├── LightingPass        # Full-screen lighting from GBuffer (+ shadow); reads scene lighting from SSBO (binding 5) when provided
 │   ├── TransparencyPass    # Sorted transparent drawables
 │   ├── GpuCullPass         # GPU culling / indirect draw list
 │   └── LightCullPass       # Clustered/tiled light culling (Forward+)
@@ -61,7 +61,8 @@ eyelib/render/
 ├── RenderContext.h         # { device, cmd } for pass invocation
 ├── RenderPipeline.h/cpp    # Orchestrator: Init(device), Render(view), frame graph build/execute
 ├── GBuffer.h/cpp           # Deferred G-buffer RT and accessors
-├── ShadowMap.h/cpp
+├── CascadeShadowMap.h/cpp
+├── SceneLighting.h/cpp     # Phase 5: scene lighting SSBO (directional + point + spot); FillSceneLightingBuffer; bind in LightingPass
 ├── PostProcessor.h/cpp     # Tone mapping, bloom, FXAA, SSAO, SSR, etc.
 ├── FullscreenQuad.h/cpp
 ├── MeshDescriptor.h        # CPU mesh data (vertices, indices, submeshes)
@@ -76,7 +77,7 @@ eyelib/render/
 
 ### 2.2 api/render (public API)
 
-- Thin wrappers around eyelib types: **RenderPipeline**, **RenderScene**, **Renderer**, **Mesh**, **Material**, **Shader**, **Texture**, **TextureCube**, **Texture3D**, **TextureArray**, **GBuffer**, **ShadowMap**, **FrameGraph**, **PostProcessor**, **IBL**, **RenderTarget**, **Camera**, **Light**, **LODManager**, etc.
+- Thin wrappers around eyelib types: **RenderPipeline**, **RenderScene**, **Renderer**, **Mesh**, **Material**, **Shader**, **Texture**, **TextureCube**, **Texture3D**, **TextureArray**, **GBuffer**, **CascadeShadowMap**, **FrameGraph**, **PostProcessor**, **IBL**, **RenderTarget**, **Camera**, **Light**, **LODManager**, etc.
 - **RenderSceneAdapter**: `api::RenderScene` → `ApiRenderSceneView` implementing `eyelib::render::IRenderSceneView` (zero-copy: iterates API scene storage).
 - **RenderDevice**: opaque handle (`void*`) for passing the RHI device from pipeline to asset loaders and other systems.
 - **FrameGraph**: API `Compile(RenderDevice device)` forwards to eyelib `Compile(rhi::IDevice*)`; no parameterless overload.
@@ -212,10 +213,11 @@ Forward frame graph is similar but with a single forward pass instead of GBuffer
 - **TextureLoader** (resources/TextureLoader): LoadPNG(device, path), LoadHDR(device, path), CreateFromDecoded(device, img). Parameterless overloads remain for compatibility but prefer device-taking versions.
 - **TextureDescriptor**: path + options; used for reload and asset storage.
 
-### 7.4 Material / MaterialInstance
+### 7.4 Material / MaterialInstance / MaterialBuilder
 
 - **Material**: Parameters and texture bindings (albedo, normal, metallic-roughness, etc.).
 - **MaterialInstance**: Per-draw overrides; used at draw time with Material.
+- **MaterialBuilder** (Refractor 7.5, Limitless-inspired): Fluent API to construct a Material (Albedo, Metallic, Roughness, textures, Blending, TwoSided, Refraction, ShaderIndex, snippets, etc.); `build()` returns `std::shared_ptr<Material>`.
 
 ---
 

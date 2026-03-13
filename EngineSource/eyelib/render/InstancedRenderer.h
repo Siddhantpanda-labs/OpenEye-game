@@ -1,7 +1,7 @@
 #pragma once
 
 #include "eyelib/render/resources/Mesh.h"
-#include "eyelib/render/resources/Material.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
 #include <cstddef>

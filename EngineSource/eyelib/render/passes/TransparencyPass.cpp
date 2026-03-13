@@ -1,8 +1,9 @@
 #include "eyelib/render/passes/TransparencyPass.h"
 #include "eyelib/render/resources/Shader.h"
-#include "eyelib/render/resources/Material.h"
-#include "eyelib/render/resources/MaterialInstance.h"
+#include "eyelib/render/materials/Material.h"
+#include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,32 @@ namespace render {
 namespace {
 
 constexpr size_t kMaxBones = 128;
+
+void applyMaterialBlendAndCull(rhi::ICommandList* cmd, const Material* material) {
+    if (!cmd || !material) return;
+    cmd->SetCullFace(!material->GetTwoSided());
+    switch (material->GetBlending()) {
+    case Blending::Opaque:
+        cmd->SetBlend(false);
+        cmd->SetDepthWrite(true);
+        break;
+    case Blending::Translucent:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::SrcAlpha, rhi::BlendFactor::OneMinusSrcAlpha);
+        cmd->SetDepthWrite(false);
+        break;
+    case Blending::Additive:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::One, rhi::BlendFactor::One);
+        cmd->SetDepthWrite(false);
+        break;
+    case Blending::Modulate:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::DstColor, rhi::BlendFactor::Zero);
+        cmd->SetDepthWrite(false);
+        break;
+    }
+}
 
 float distanceToCamera(const math::Mat4& transform, const math::Vec3& viewPos) {
     math::Vec3 p(transform[3][0], transform[3][1], transform[3][2]);
@@ -54,15 +81,13 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
         return a.dist > b.dist;
     });
 
-    if (cmd) {
-        cmd->SetBlend(true);
-        cmd->SetDepthWrite(false);
-        cmd->SetDepthTest(true);
-    }
+    if (cmd) cmd->SetDepthTest(true);
 
     for (const auto& e : sorted) {
         const auto& d = transparent[e.idx];
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (cmd && material)
+            applyMaterialBlendAndCull(cmd, material.get());
         if (d.materialInstance) {
             d.materialInstance->Bind(device);
         } else if (material) {
@@ -93,6 +118,7 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
     if (cmd) {
         cmd->SetDepthWrite(true);
         cmd->SetBlend(false);
+        cmd->SetCullFace(true);
     }
 }
 

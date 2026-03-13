@@ -42,16 +42,24 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/FullscreenQuad.h
     ${CMAKE_CURRENT_SOURCE_DIR}/GpuProfilerRHI.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/GpuProfilerRHI.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/GBuffer.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ShadowMap.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/ClusteredLightGrid.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ClusteredLightGrid.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/PostProcessor.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/GBuffer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/GBuffer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/shadows/ShadowPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/shadows/ShadowPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/SceneLighting.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/SceneLighting.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/ClusteredLightGrid.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/ClusteredLightGrid.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/LightCullPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/LightCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/post/PostProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/post/PostProcessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraphRecipe.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.h
@@ -60,20 +68,20 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderReflection.h
     ${CMAKE_CURRENT_SOURCE_DIR}/PipelineCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PipelineCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ShaderCache.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialCompiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialCompiler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.cpp
@@ -85,8 +93,9 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/TextureCube.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/TextureArray.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/TextureLoader.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/resources/Material.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/resources/MaterialInstance.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/Material.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialInstance.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/MeshOptimizer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstancedRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BatchRenderer.cpp
@@ -104,8 +113,6 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/LODManager.h
     ${CMAKE_CURRENT_SOURCE_DIR}/CullingSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/CullingSystem.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/IBL.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderTarget.h
     ${CMAKE_CURRENT_SOURCE_DIR}/DebugDrawRenderer.cpp
