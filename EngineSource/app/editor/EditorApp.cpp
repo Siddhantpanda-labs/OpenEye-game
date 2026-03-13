@@ -10,6 +10,7 @@
 #include "panels/SceneViewPanel.h"
 #include "panels/GameViewPanel.h"
 #include "panels/AssetPanel.h"
+#include "panels/ProfilerPanel.h"
 #include "GameRuntime.h"
 
 #include "api/asset/All.h"
@@ -22,6 +23,7 @@
 #include "api/platform/GraphicsDevice.h"
 #include "api/render/RenderBackend.h"
 #include "api/render/StaticResources.h"
+#include "api/debug/All.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -296,12 +298,9 @@ int RunEditor(int argc, char** argv) {
     }
 
     if (editorRenderDevice) {
-        auto defaultShader = std::make_shared<eyelib::api::Shader>();
-        if (defaultShader->Load(editorRenderDevice, "passes/forward/forward")) {
-            auto defaultMat = std::make_shared<eyelib::api::Material>();
-            defaultMat->SetShader(defaultShader);
-            ctx.defaultMaterial = std::move(defaultMat);
-        }
+        auto defaultMat = std::make_shared<eyelib::api::Material>();
+        defaultMat->SetMaterialShaderId(0);  // PBR; variant from ShaderCache at draw time
+        ctx.defaultMaterial = std::move(defaultMat);
     }
 
     while (!window.ShouldClose()) {
@@ -333,6 +332,8 @@ int RunEditor(int argc, char** argv) {
         }
         window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
 
+        eyelib::api::debug::Profiler::BeginFrame();
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -348,6 +349,7 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowAssetPanel(&ctx);
         openeye::editor::panels::ShowSceneViewPanel(&ctx);
         openeye::editor::panels::ShowGameViewPanel(&ctx);
+        openeye::editor::panels::ShowProfilerPanel(&ctx);
 
         ImGui::Render();
         // Restore default framebuffer and full-window viewport so ImGui draws to the window.
@@ -359,6 +361,9 @@ int RunEditor(int argc, char** argv) {
             ctx.gameViewPipeline->RestoreDefaultFramebufferAndViewport(
                 static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        eyelib::api::debug::Profiler::EndFrame();
+
         window.SwapBuffers();
     }
 

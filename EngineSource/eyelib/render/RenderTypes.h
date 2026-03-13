@@ -84,5 +84,24 @@ struct RenderScene {
     std::vector<SpotLight> spotLights;
 };
 
+/**
+ * Immutable per-frame snapshot for the render pipeline (Phase B).
+ * Filled once per frame by PrepareFrameData from IRenderSceneView + culling.
+ * Passes and submission use this instead of re-querying the view.
+ */
+struct RenderFrameData {
+    CameraView camera;
+    LightParams light;
+    std::shared_ptr<TextureCube> skybox;
+    std::vector<PointLight> pointLights;
+    std::vector<SpotLight> spotLights;
+    /** Opaque drawables visible in the main camera (frustum-culled). Used by GBuffer and forward opaque. */
+    std::vector<Drawable> visibleOpaque;
+    /** All opaque drawables (no main-camera cull). Used by shadow pass (per-cascade culling inside pass). */
+    std::vector<Drawable> allOpaque;
+    /** Transparent drawables (caller may sort). Used by transparency pass. */
+    std::vector<Drawable> visibleTransparent;
+};
+
 } // namespace render
 } // namespace eyelib

@@ -11,7 +11,8 @@ namespace {
 bool AppendShaderSource(const std::string& path,
                         std::string& out,
                         std::unordered_set<std::string>& includeStack,
-                        int depth) {
+                        int depth,
+                        std::vector<std::string>* outDependencies) {
     if (depth > 32) {
         core::Log::ErrorF("Shader include depth exceeded: %s", path.c_str());
         return false;
@@ -22,6 +23,7 @@ bool AppendShaderSource(const std::string& path,
         core::Log::ErrorF("Shader include cycle detected: %s", normalized.c_str());
         return false;
     }
+    if (outDependencies) outDependencies->push_back(normalized);
 
     std::vector<uint8_t> data = platform::filesystem::ReadFile(normalized);
     if (data.empty()) {
@@ -44,7 +46,7 @@ bool AppendShaderSource(const std::string& path,
             if (firstQuote != std::string::npos && lastQuote != std::string::npos && lastQuote > firstQuote + 1) {
                 const std::string includeFile = trimmed.substr(firstQuote + 1, lastQuote - firstQuote - 1);
                 const std::string includePath = platform::filesystem::NormalizePath(baseDir + "/" + includeFile);
-                if (!AppendShaderSource(includePath, out, includeStack, depth + 1)) {
+                if (!AppendShaderSource(includePath, out, includeStack, depth + 1, outDependencies)) {
                     includeStack.erase(normalized);
                     return false;
                 }
@@ -64,7 +66,14 @@ bool AppendShaderSource(const std::string& path,
 bool LoadShaderSource(const std::string& path, std::string& out) {
     std::unordered_set<std::string> includeStack;
     out.clear();
-    return AppendShaderSource(path, out, includeStack, 0);
+    return AppendShaderSource(path, out, includeStack, 0, nullptr);
+}
+
+bool LoadShaderSourceWithDependencies(const std::string& path, std::string& out, std::vector<std::string>* outDependencies) {
+    std::unordered_set<std::string> includeStack;
+    out.clear();
+    if (outDependencies) outDependencies->clear();
+    return AppendShaderSource(path, out, includeStack, 0, outDependencies);
 }
 
 } // namespace render

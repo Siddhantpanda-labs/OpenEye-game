@@ -61,6 +61,7 @@ struct DeviceGL : IDevice {
                                                       ITexture* sharedDepthTexture,
                                                       uint32_t samples) override;
     IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) override;
+    IRenderTarget* CreateRenderTargetFromTextureWithDepth(ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture) override;
     void DestroyRenderTarget(IRenderTarget* rt) override;
 
     ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) override;

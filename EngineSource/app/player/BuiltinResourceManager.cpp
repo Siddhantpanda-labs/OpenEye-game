@@ -15,41 +15,14 @@ void BuiltinResourceManager::InitializeDefaultResources() {
 
 void BuiltinResourceManager::EnsureDefaultMaterial() {
     if (m_defaultMaterial) return;
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_device && shader->Load(m_device, "passes/forward/forward")) {
-        auto mat = std::make_shared<eyelib::api::Material>();
-        mat->SetShader(shader);
-        mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
-        m_defaultShader = shader;
-        m_defaultMaterial = mat;
-        return;
-    }
-    if (!m_device) {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader not loaded — device is null (passes/forward/forward).");
-    } else {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: default shader failed to load (passes/forward/forward). Using empty material.");
-    }
-#ifndef NDEBUG
-    assert(false && "BuiltinResourceManager: default shader required for primitives failed. Set device before InitializeDefaultResources; ensure passes/forward/forward exists.");
-#endif
-    m_defaultMaterial = std::make_shared<eyelib::api::Material>();
+    auto mat = std::make_shared<eyelib::api::Material>();
+    mat->SetMaterialShaderId(0);  // PBR; variant from ShaderCache at draw time
+    mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
+    m_defaultMaterial = mat;
 }
 
 void BuiltinResourceManager::EnsureSkinnedMaterial() {
-    if (m_skinnedShader) return;
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_device && shader->Load(m_device, "passes/forward/forward_skinned")) {
-        m_skinnedShader = shader;
-        return;
-    }
-    if (!m_device) {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader not loaded — device is null (passes/forward/forward_skinned).");
-    } else {
-        eyelib::api::core::Log::Warn("BuiltinResourceManager: skinned shader failed to load (passes/forward/forward_skinned).");
-    }
-#ifndef NDEBUG
-    assert(false && "BuiltinResourceManager: skinned shader failed. Set device before InitializeDefaultResources; ensure passes/forward/forward_skinned exists.");
-#endif
+    // Skinned variant resolved from ShaderCache at draw time (same PBR material, Forward+Skinned variant).
 }
 
 std::shared_ptr<eyelib::api::Material> BuiltinResourceManager::GetDefaultMaterial() {
@@ -58,8 +31,7 @@ std::shared_ptr<eyelib::api::Material> BuiltinResourceManager::GetDefaultMateria
 }
 
 std::shared_ptr<eyelib::api::Shader> BuiltinResourceManager::GetSkinnedShader() {
-    EnsureSkinnedMaterial();
-    return m_skinnedShader;
+    return nullptr;  // Shader from ShaderCache at draw time; no standalone shader object.
 }
 
 BuiltinResourceManager::PrimitiveEntry BuiltinResourceManager::GetPrimitiveEntry(const std::string& meshId) {

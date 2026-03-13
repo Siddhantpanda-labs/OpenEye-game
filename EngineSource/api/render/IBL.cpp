@@ -30,7 +30,7 @@ bool IBL::Initialize(const TextureCube& environment, uint32_t irradianceRes, uin
 }
 
 void IBL::BindForLighting(uint32_t irradianceUnit, uint32_t prefilterUnit, uint32_t brdfLutUnit) const {
-    m_impl->ibl->BindForLighting(irradianceUnit, prefilterUnit, brdfLutUnit);
+    m_impl->ibl->BindForLighting(nullptr, irradianceUnit, prefilterUnit, brdfLutUnit);
 }
 
 uint32_t IBL::GetIrradianceMap() const {

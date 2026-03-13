@@ -4,6 +4,7 @@
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
 
 namespace eyelib {
@@ -27,7 +28,9 @@ bool isKeySupported(const ShaderKey& key) {
     switch (key.stage) {
     case PipelineStage::GBuffer:
     case PipelineStage::Depth:
-        return key.materialTypeId == kDefaultMaterialTypeId;
+    case PipelineStage::Forward:
+    case PipelineStage::ForwardPlus:
+        return true;
     default:
         return false;
     }
@@ -48,20 +51,50 @@ std::shared_ptr<Shader> ShaderCache::getOrCompile(rhi::IDevice* device, const Sh
     return getOrCompile(device, key, getDefaultMaterial());
 }
 
+static int64_t getMaxFileTime(const std::vector<std::string>& paths) {
+    int64_t t = 0;
+    for (const std::string& p : paths) {
+        int64_t ft = platform::filesystem::GetFileTime(p);
+        if (ft > t) t = ft;
+    }
+    return t;
+}
+
+static bool anyFileNewerThan(const std::vector<std::string>& paths, int64_t timestamp) {
+    for (const std::string& p : paths) {
+        if (platform::filesystem::GetFileTime(p) > timestamp) return true;
+    }
+    return false;
+}
+
 std::shared_ptr<Shader> ShaderCache::getOrCompile(rhi::IDevice* device, const ShaderKey& key, const Material* material) {
     if (!device) return nullptr;
 
     auto it = m_cache.find(key);
     if (it != m_cache.end()) {
-        if (it->second && it->second->IsValid()) return it->second;
-        m_cache.erase(it);
+        ShaderCacheEntry& e = it->second;
+        if (e.shader && e.shader->IsValid()) {
+            if (!e.dependencyPaths.empty() && anyFileNewerThan(e.dependencyPaths, e.compiledTimestamp)) {
+                m_cache.erase(it);
+            } else {
+                return e.shader;
+            }
+        } else {
+            m_cache.erase(it);
+        }
     }
     if (!material) return nullptr;
 
+    std::vector<std::string> deps;
     MaterialCompiler compiler;
-    auto shader = compiler.compile(device, material, key.stage, key.instanceType);
+    auto shader = compiler.compile(device, material, key.stage, key.instanceType, &deps);
     if (!shader) return nullptr;
-    m_cache[key] = shader;
+
+    ShaderCacheEntry entry;
+    entry.shader = shader;
+    entry.dependencyPaths = std::move(deps);
+    entry.compiledTimestamp = getMaxFileTime(entry.dependencyPaths);
+    m_cache[key] = std::move(entry);
     return shader;
 }
 
@@ -70,8 +103,6 @@ void ShaderCache::clear() {
 }
 
 bool ShaderCache::reloadAll() {
-    // Cache entries are built via MaterialCompiler (template + material); they have no load path
-    // for Reload(). Clear the cache so next getOrCompile() recompiles from current template files.
     m_cache.clear();
     return true;
 }

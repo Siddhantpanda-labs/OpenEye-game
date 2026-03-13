@@ -324,47 +324,14 @@ void WorldRenderBridge::EnsureDefaultMaterial() {
         m_defaultMaterial = m_builtinManager->GetDefaultMaterial();
         return;
     }
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    eyelib::api::RenderDevice device = m_pipeline.GetDevice();
-    if (device && shader->Load(device, "passes/forward/forward")) {
-        auto mat = std::make_shared<eyelib::api::Material>();
-        mat->SetShader(shader);
-        mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
-        m_defaultShader = shader;
-        m_defaultMaterial = mat;
-        return;
-    }
-    if (!device) {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader not loaded — render device is null (passes/forward/forward). Primitives will be invisible.");
-    } else {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: default shader failed to load (passes/forward/forward). Check assets/shaders/opengl/ and working directory. Using empty material; primitives will be invisible.");
-    }
-#ifndef NDEBUG
-    assert(false && "WorldRenderBridge: default shader for primitives failed. Set device before scene build; ensure passes/forward/forward exists.");
-#endif
-    m_defaultMaterial = std::make_shared<eyelib::api::Material>();
+    auto mat = std::make_shared<eyelib::api::Material>();
+    mat->SetMaterialShaderId(0);  // PBR; variant from ShaderCache at draw time
+    mat->SetAlbedo(eyelib::math::Vec3(1.0f, 1.0f, 1.0f));
+    m_defaultMaterial = mat;
 }
 
 void WorldRenderBridge::EnsureSkinnedMaterial() {
-    if (m_skinnedShader) return;
-    if (m_builtinManager) {
-        m_skinnedShader = m_builtinManager->GetSkinnedShader();
-        return;
-    }
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    eyelib::api::RenderDevice device = m_pipeline.GetDevice();
-    if (device && shader->Load(device, "passes/forward/forward_skinned")) {
-        m_skinnedShader = shader;
-        return;
-    }
-    if (!device) {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: skinned shader not loaded — render device is null (passes/forward/forward_skinned).");
-    } else {
-        eyelib::api::core::Log::Warn("WorldRenderBridge: skinned shader failed to load (passes/forward/forward_skinned). Skinned meshes will fall back to default material.");
-    }
-#ifndef NDEBUG
-    assert(false && "WorldRenderBridge: skinned shader failed. Set device before scene build; ensure passes/forward/forward_skinned exists.");
-#endif
+    // Skinned variant from ShaderCache at draw time (same PBR material).
 }
 
 std::shared_ptr<eyelib::api::MaterialInstance> WorldRenderBridge::GetSkinnedMaterialInstance(
@@ -378,15 +345,8 @@ std::shared_ptr<eyelib::api::MaterialInstance> WorldRenderBridge::GetSkinnedMate
 
     std::shared_ptr<eyelib::api::Material> resolvedBase = baseMaterial;
     if (!resolvedBase) {
-        EnsureSkinnedMaterial();
-        auto material = std::make_shared<eyelib::api::Material>();
-        if (m_skinnedShader) {
-            material->SetShader(m_skinnedShader);
-        } else {
-            EnsureDefaultMaterial();
-            material = m_defaultMaterial;
-        }
-        resolvedBase = material;
+        EnsureDefaultMaterial();
+        resolvedBase = m_defaultMaterial;
     }
 
     auto instance = std::make_shared<eyelib::api::MaterialInstance>(resolvedBase);

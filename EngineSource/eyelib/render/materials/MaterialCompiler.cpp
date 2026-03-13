@@ -6,6 +6,7 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
+#include <algorithm>
 #include <cstring>
 
 namespace eyelib {
@@ -21,6 +22,12 @@ std::string getTemplateNameForStage(PipelineStage stage, InstanceType instanceTy
     case PipelineStage::Depth:
         if (instanceType == InstanceType::Instanced) return "passes/shadow/shadow_instanced";
         return (instanceType == InstanceType::Skinned) ? "passes/shadow/shadow_skinned" : "passes/shadow/shadow";
+    case PipelineStage::Forward:
+        if (instanceType == InstanceType::Instanced) return {};  // no forward_instanced template; use ForwardPlus for instanced
+        return (instanceType == InstanceType::Skinned) ? "passes/forward/forward_skinned" : "passes/forward/forward";
+    case PipelineStage::ForwardPlus:
+        if (instanceType == InstanceType::Instanced) return "passes/forward/forwardplus_instanced";
+        return (instanceType == InstanceType::Skinned) ? "passes/forward/forwardplus_skinned" : "passes/forward/forwardplus";
     default:
         return {};
     }
@@ -60,7 +67,8 @@ void replacePlaceholder(std::string& src, const char* placeholder, const std::st
 } // namespace
 
 std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Material* material,
-                                                  PipelineStage stage, InstanceType instanceType) {
+                                                  PipelineStage stage, InstanceType instanceType,
+                                                  std::vector<std::string>* outDependencies) {
     if (!device || !material) return nullptr;
 
     const char* backend = device->GetShaderBackendName();
@@ -82,9 +90,23 @@ std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Ma
     std::string fragmentPath = basePath + fragExt;
 
     std::string vertexSrc, fragmentSrc;
-    if (!LoadShaderSource(vertexPath, vertexSrc) || !LoadShaderSource(fragmentPath, fragmentSrc)) {
+    std::vector<std::string> vertDeps, fragDeps;
+    bool okVert = outDependencies
+        ? LoadShaderSourceWithDependencies(vertexPath, vertexSrc, &vertDeps)
+        : LoadShaderSource(vertexPath, vertexSrc);
+    bool okFrag = outDependencies
+        ? LoadShaderSourceWithDependencies(fragmentPath, fragmentSrc, &fragDeps)
+        : LoadShaderSource(fragmentPath, fragmentSrc);
+    if (!okVert || !okFrag) {
         core::Log::ErrorF("MaterialCompiler: failed to load template %s", logicalName.c_str());
         return nullptr;
+    }
+    if (outDependencies) {
+        *outDependencies = std::move(vertDeps);
+        for (const std::string& p : fragDeps) {
+            if (std::find(outDependencies->begin(), outDependencies->end(), p) == outDependencies->end())
+                outDependencies->push_back(p);
+        }
     }
 
     std::string defines = getMaterialDefines(material);

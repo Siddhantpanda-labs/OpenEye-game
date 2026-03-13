@@ -58,6 +58,8 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/lighting/LightCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/reflection/ReflectionProbe.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/reflection/ReflectionProbeManager.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/post/PostProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/post/PostProcessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/framegraph/FrameGraph.cpp
@@ -72,6 +74,7 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/ShaderCache.h
     ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialCompiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialCompiler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialShader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
@@ -82,6 +85,7 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/submission/BatchBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.cpp

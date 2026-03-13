@@ -3,6 +3,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHITypes.h"
 
 namespace eyelib {
@@ -167,48 +168,39 @@ rhi::IBuffer* MaterialInstance::GetMaterialBufferRHI(rhi::IDevice* device) const
     return m_materialBuffer.get();
 }
 
-void MaterialInstance::Bind(rhi::IDevice* device) const {
-    if (!device || !m_base || !m_base->GetShader() || !m_base->GetShader()->IsValid()) return;
+void MaterialInstance::ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd) const {
+    if (!device || !shader || !m_base) return;
 
-    Shader* sh = m_base->GetShader().get();
-    sh->Bind(device);
+    if (cmd) {
+        rhi::IBuffer* buf = GetMaterialBufferRHI(device);
+        if (buf)
+            cmd->BindUniformBuffer(buf, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+    }
 
     int unit = 0;
-    m_base->ForEachTexture([this, sh, &unit](const std::string& name, const std::shared_ptr<Texture2D>& baseTex) {
+    m_base->ForEachTexture([this, shader, &unit](const std::string& name, const std::shared_ptr<Texture2D>& baseTex) {
         std::shared_ptr<Texture2D> t;
         auto it = m_textureOverrides.find(name);
         if (it != m_textureOverrides.end()) t = it->second;
         else t = baseTex;
         if (t && t->IsValid()) {
             t->Bind(unit);
-            sh->SetInt(name, unit);
+            shader->SetInt(name, unit);
             ++unit;
         }
     });
 
-    math::Vec3 albedo = m_albedoOverride ? *m_albedoOverride : m_base->GetAlbedo();
-    float metallic = m_metallicOverride ? *m_metallicOverride : m_base->GetMetallic();
-    float roughness = m_roughnessOverride ? *m_roughnessOverride : m_base->GetRoughness();
-    math::Vec3 emission = m_emissionOverride ? *m_emissionOverride : m_base->GetEmission();
-    float alpha = m_alphaOverride ? *m_alphaOverride : m_base->GetAlpha();
+    // PBR params come from MaterialBlock UBO (binding 2); instance UBO is filled from base + overrides in GetMaterialBufferRHI; pipeline binds it before draw.
 
-    sh->SetVec3("u_Albedo", albedo);
-    sh->SetFloat("u_Metallic", metallic);
-    sh->SetFloat("u_Roughness", roughness);
-    sh->SetVec3("u_Emission", emission);
-    sh->SetFloat("u_AO", m_base->GetAO());
-    sh->SetFloat("u_Alpha", alpha);
-
-    m_base->ForEachFloat([sh](const std::string& n, float v) { sh->SetFloat(n, v); });
-    m_base->ForEachVec3([sh](const std::string& n, const math::Vec3& v) { sh->SetVec3(n, v); });
-    m_base->ForEachVec4([sh](const std::string& n, const math::Vec4& v) { sh->SetVec4(n, v); });
-    for (const auto& p : m_floatOverrides) sh->SetFloat(p.first, p.second);
-    for (const auto& p : m_vec3Overrides) sh->SetVec3(p.first, p.second);
-    for (const auto& p : m_vec4Overrides) sh->SetVec4(p.first, p.second);
+    m_base->ForEachFloat([shader](const std::string& n, float v) { shader->SetFloat(n, v); });
+    m_base->ForEachVec3([shader](const std::string& n, const math::Vec3& v) { shader->SetVec3(n, v); });
+    m_base->ForEachVec4([shader](const std::string& n, const math::Vec4& v) { shader->SetVec4(n, v); });
+    for (const auto& p : m_floatOverrides) shader->SetFloat(p.first, p.second);
+    for (const auto& p : m_vec3Overrides) shader->SetVec3(p.first, p.second);
+    for (const auto& p : m_vec4Overrides) shader->SetVec4(p.first, p.second);
     for (const auto& p : m_mat4ArrayOverrides) {
-        if (!p.second.empty()) {
-            sh->SetMat4Array(p.first, p.second.data(), p.second.size());
-        }
+        if (!p.second.empty())
+            shader->SetMat4Array(p.first, p.second.data(), p.second.size());
     }
 }
 

@@ -776,6 +776,47 @@ IRenderTarget* DeviceGL::CreateRenderTargetFromTexture(ITexture* colorTexture, u
     return rt;
 }
 
+IRenderTarget* DeviceGL::CreateRenderTargetFromTextureWithDepth(ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture) {
+    auto* tex = static_cast<TextureGL*>(colorTexture);
+    auto* depthTex = depthTexture ? static_cast<TextureGL*>(depthTexture) : nullptr;
+    if (!tex || tex->m_handle == 0 || !depthTex || depthTex->m_handle == 0) return nullptr;
+
+    auto* rt = new RenderTargetGL();
+    rt->m_ownsTextures = false;
+    rt->m_externalColorTextures.push_back(tex);
+    rt->m_externalDepthTexture = depthTex;
+
+    uint32_t mipWidth = std::max<uint32_t>(1u, tex->m_width >> mipLevel);
+    uint32_t mipHeight = std::max<uint32_t>(1u, tex->m_height >> mipLevel);
+    rt->m_width = mipWidth;
+    rt->m_height = mipHeight;
+
+    glCreateFramebuffers(1, &rt->m_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, rt->m_fbo);
+
+    GLenum target = GL_TEXTURE_2D;
+    if (tex->m_type == TextureType::TextureCube) {
+        uint32_t faceIndex = std::min<uint32_t>(face, 5u);
+        target = static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, tex->m_handle, static_cast<GLint>(mipLevel));
+    } else {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex->m_handle, static_cast<GLint>(mipLevel));
+    }
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTex->m_handle, 0);
+
+    GLenum drawBufs[1] = { GL_COLOR_ATTACHMENT0 };
+    glDrawBuffers(1, drawBufs);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        rt->m_externalDepthTexture = nullptr;
+        DestroyRenderTarget(rt);
+        return nullptr;
+    }
+    return rt;
+}
+
 void DeviceGL::DestroyRenderTarget(IRenderTarget* rt) {
     auto* r = static_cast<RenderTargetGL*>(rt);
     if (!r) return;

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 #include "eyelib/math/Types.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
@@ -98,7 +99,8 @@ public:
     rhi::ITexture* ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
                                        const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                                        const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                       const math::Vec3& viewPos, rhi::ITexture* skyboxTexture = nullptr, float time = 0.0f);
+                                       const math::Vec3& viewPos, rhi::ITexture* skyboxTexture = nullptr, float time = 0.0f,
+                                       rhi::ITexture* reflectionProbeTexture = nullptr);
 
     /**
      * @brief Individual effect methods (for testing/debugging)
@@ -110,10 +112,12 @@ public:
     rhi::ITexture* ApplyChromaticAberration(rhi::ITexture* texture, float intensity);
     rhi::ITexture* ApplyFXAA(rhi::ITexture* texture);
     rhi::ITexture* ApplySSAO(const GBuffer& gbuffer, const Settings& settings);
+    /** When outputRT is non-null, SSR renders to it (e.g. ping-pong for HDR chain); when null, uses internal output RT.
+     *  reflectionProbeTexture: optional cubemap for fallback when SSR misses (1=SSR hit, 2=probe, 3=skybox). */
     rhi::ITexture* ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,
                             const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                             const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                            const math::Vec3& viewPos);
+                            const math::Vec3& viewPos, rhi::IRenderTarget* outputRT = nullptr, rhi::ITexture* reflectionProbeTexture = nullptr);
     rhi::ITexture* ApplyMotionBlur(rhi::ITexture* texture, rhi::ITexture* velocityTexture, const Settings& settings);
     rhi::ITexture* ApplyVignette(rhi::ITexture* texture, const Settings& settings);
     rhi::ITexture* ApplyFilmGrain(rhi::ITexture* texture, const Settings& settings, float time = 0.0f);
@@ -143,6 +147,8 @@ private:
     void DestroyFramebuffers();
     rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
     void LoadShaders();
+    /** Build Hi-Z depth pyramid from GBuffer depth; call before ApplySSR when pyramid is used. */
+    void BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane);
 
     rhi::IDevice* m_deviceRHI = nullptr;
 
@@ -152,6 +158,10 @@ private:
 
     // Ping-pong render targets for multi-pass effects
     rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};
+
+    // SSR: previous frame for temporal accumulation; copy shader to resolve to it
+    rhi::IRenderTarget* m_ssrPrevRT = nullptr;
+    bool m_ssrHasPrevFrame = false;
 
     // Output render target (final result)
     rhi::IRenderTarget* m_outputRT = nullptr;
@@ -182,6 +192,11 @@ private:
     std::shared_ptr<Shader> m_filmGrainShader;
     std::shared_ptr<Shader> m_ssaoBlendShader;  // For blending SSAO with scene
     std::shared_ptr<Shader> m_ssaoBlurShader;   // Bilateral blur for SSAO (Limitless-style)
+    std::shared_ptr<Shader> m_copyShader;       // Fullscreen copy (e.g. SSR temporal)
+    std::shared_ptr<Shader> m_depthPyramidShader;
+    rhi::ITexture* m_depthPyramidTexture = nullptr;
+    std::vector<rhi::IRenderTarget*> m_depthPyramidRTs;
+    static constexpr uint32_t kDepthPyramidLevels = 8;
 };
 
 } // namespace render

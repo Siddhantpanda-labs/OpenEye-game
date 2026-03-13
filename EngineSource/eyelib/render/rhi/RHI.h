@@ -102,6 +102,11 @@ struct IDevice {
                                                              uint32_t samples = 1) = 0;
     /** Create render target from existing texture (face for cubemap, mip level). */
     virtual IRenderTarget* CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) = 0;
+    /** Create render target from cubemap face with shared depth (e.g. for reflection probe capture). depthTexture must be 2D, same size as face. */
+    virtual IRenderTarget* CreateRenderTargetFromTextureWithDepth(ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture) {
+        (void)colorTexture; (void)face; (void)mipLevel; (void)depthTexture;
+        return nullptr;
+    }
     virtual void DestroyRenderTarget(IRenderTarget* rt) = 0;
 
     virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;

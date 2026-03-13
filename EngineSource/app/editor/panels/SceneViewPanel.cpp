@@ -8,6 +8,7 @@
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
+#include "api/debug/Profiler.h"
 
 #include "ImGuizmo.h"
 
@@ -269,7 +270,9 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         if (canRender) {
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
+            eyelib::api::debug::Profiler::BeginSample("SceneView Build");
             s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, &drawableToEntity);
+            eyelib::api::debug::Profiler::EndSample();
             drawableCount = scene.opaqueCount;
             for (EntityId e : drawableToEntity)
                 entityIdsForOpaque.push_back(PackEntityId(e));
@@ -289,7 +292,9 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 }
                 ctx->sceneViewPipeline->SetPendingDebugLinesColored(view, proj, colored);
             }
+            eyelib::api::debug::Profiler::BeginSample("SceneView Render");
             ctx->sceneViewPipeline->Render(scene, entityIdsForOpaque.empty() ? nullptr : &entityIdsForOpaque);
+            eyelib::api::debug::Profiler::EndSample();
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
                 ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);
             void* texId = ctx->sceneViewPipeline->GetOutputColorTextureNativeHandle();

@@ -93,6 +93,21 @@ void RenderPipeline::RestoreDefaultFramebufferAndViewport(uint32_t width, uint32
     cmd->SetViewport(0, 0, width, height);
 }
 
+std::vector<RenderPipeline::FrameGraphPassInfo> RenderPipeline::GetFrameGraphPasses() const {
+    std::vector<FrameGraphPassInfo> out;
+    if (!m_impl->pipeline) return out;
+    const auto& passes = m_impl->pipeline->GetFrameGraphPasses();
+    out.reserve(passes.size());
+    for (const auto& p : passes) {
+        FrameGraphPassInfo info;
+        info.name = p.name;
+        info.gpuMs = p.gpuMs;
+        info.culled = p.culled;
+        out.push_back(info);
+    }
+    return out;
+}
+
 void* RenderPipeline::InsertFrameFence() {
     if (!m_impl->pipeline) return nullptr;
     auto* cmd = m_impl->pipeline->GetRHICommandList();

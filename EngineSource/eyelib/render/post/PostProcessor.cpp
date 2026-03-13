@@ -45,6 +45,13 @@ void PostProcessor::DestroyFramebuffers() {
     if (m_bloomExtractRT) { m_deviceRHI->DestroyRenderTarget(m_bloomExtractRT); m_bloomExtractRT = nullptr; }
     if (m_ssaoRT) { m_deviceRHI->DestroyRenderTarget(m_ssaoRT); m_ssaoRT = nullptr; }
     if (m_ssaoBlurRT) { m_deviceRHI->DestroyRenderTarget(m_ssaoBlurRT); m_ssaoBlurRT = nullptr; }
+    if (m_ssrPrevRT) { m_deviceRHI->DestroyRenderTarget(m_ssrPrevRT); m_ssrPrevRT = nullptr; }
+    m_ssrHasPrevFrame = false;
+    for (rhi::IRenderTarget* rt : m_depthPyramidRTs) {
+        if (rt) { m_deviceRHI->DestroyRenderTarget(rt); }
+    }
+    m_depthPyramidRTs.clear();
+    if (m_depthPyramidTexture) { m_deviceRHI->DestroyTexture(m_depthPyramidTexture); m_depthPyramidTexture = nullptr; }
 }
 
 bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* device) {
@@ -116,6 +123,27 @@ void PostProcessor::CreateFramebuffers() {
     if (!m_ssaoRT) core::Log::Error("PostProcessor::CreateFramebuffers: ssaoRT failed");
     m_ssaoBlurRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, r8, rhi::RHITextureFormat::None, 1);
     if (!m_ssaoBlurRT) core::Log::Error("PostProcessor::CreateFramebuffers: ssaoBlurRT failed");
+
+    m_ssrPrevRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    if (!m_ssrPrevRT) core::Log::Error("PostProcessor::CreateFramebuffers: ssrPrevRT failed");
+    m_ssrHasPrevFrame = false;
+
+    // Hi-Z depth pyramid for SSR (RGBA16F, R = linear view-space depth)
+    rhi::TextureDesc pyramidDesc;
+    pyramidDesc.type = rhi::TextureType::Texture2D;
+    pyramidDesc.width = m_width;
+    pyramidDesc.height = m_height;
+    pyramidDesc.format = rhi::RHITextureFormat::RGBA16F;
+    pyramidDesc.usage = rhi::TextureUsage::ShaderResource | rhi::TextureUsage::RenderTarget;
+    pyramidDesc.mipLevels = kDepthPyramidLevels;
+    m_depthPyramidTexture = m_deviceRHI->CreateTexture(pyramidDesc, nullptr);
+    m_depthPyramidRTs.clear();
+    if (m_depthPyramidTexture) {
+        for (uint32_t mip = 0; mip < kDepthPyramidLevels; ++mip) {
+            rhi::IRenderTarget* rt = m_deviceRHI->CreateRenderTargetFromTexture(m_depthPyramidTexture, 0, mip);
+            m_depthPyramidRTs.push_back(rt);
+        }
+    }
 }
 
 void PostProcessor::LoadShaders() {
@@ -212,6 +240,14 @@ void main() {
     if (!m_ssaoBlurShader->Load(m_deviceRHI, "passes/post/ssao_blur", fullscreenLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load SSAO blur shader");
     }
+    m_copyShader = std::make_shared<Shader>();
+    if (!m_copyShader->Load(m_deviceRHI, "passes/post/copy", fullscreenLayout)) {
+        core::Log::WarnF("PostProcessor: Failed to load copy shader");
+    }
+    m_depthPyramidShader = std::make_shared<Shader>();
+    if (!m_depthPyramidShader->Load(m_deviceRHI, "passes/post/depth_pyramid", fullscreenLayout)) {
+        core::Log::WarnF("PostProcessor: Failed to load depth_pyramid shader");
+    }
 }
 
 void PostProcessor::ReloadShaders() {
@@ -234,7 +270,8 @@ void PostProcessor::ReloadShaders() {
 rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
                                                   const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                                                   const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                                  const math::Vec3& viewPos, rhi::ITexture* skyboxTexture, float time) {
+                                                  const math::Vec3& viewPos, rhi::ITexture* skyboxTexture, float time,
+                                                  rhi::ITexture* reflectionProbeTexture) {
     m_lastOutputValid = false;
     if (!hdrInputTexture || !GetOutputTextureRHI()) {
         return hdrInputTexture;
@@ -249,15 +286,25 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         ssaoTexture = ApplySSAO(gbuffer, settings);
     }
 
-    // Bloom extraction and blur (if enabled)
+    // Bloom extraction and blur (if enabled) — from HDR before SSR
     rhi::ITexture* bloomTexture = nullptr;
     if (settings.enableBloom) {
         bloomTexture = ExtractBloom(hdrInputTexture, settings.bloomThreshold);
         bloomTexture = BlurTexture(bloomTexture, settings.bloomIterations);
     }
 
-    // Tone mapping
-    rhi::ITexture* toneMappedTexture = ApplyToneMapping(hdrInputTexture, settings);
+    // SSR on HDR lit buffer (before tone mapping); output to ping-pong so we can tone-map the result
+    rhi::ITexture* preToneMapTexture = hdrInputTexture;
+    if (settings.enableSSR && GetPingPongRT(0)) {
+        preToneMapTexture = ApplySSR(hdrInputTexture, gbuffer, skyboxTexture, settings,
+                                      viewMatrix, projectionMatrix, invViewMatrix, invProjectionMatrix, viewPos,
+                                      GetPingPongRT(0), reflectionProbeTexture);
+        if (cmdPost && preToneMapTexture)
+            rhi::BarrierTextureForShaderRead(cmdPost, preToneMapTexture);
+    }
+
+    // Tone mapping (HDR → LDR; input is post-SSR HDR when SSR enabled)
+    rhi::ITexture* toneMappedTexture = ApplyToneMapping(preToneMapTexture, settings);
 
     // Apply SSAO to tone-mapped result (multiply occlusion)
     if (settings.enableSSAO && ssaoTexture && m_ssaoBlendShader && m_ssaoBlendShader->IsValid()) {
@@ -307,12 +354,6 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     // General Blur (if enabled, applied after bloom)
     if (settings.enableBlur) {
         toneMappedTexture = ApplyGeneralBlur(toneMappedTexture, settings.blurIntensity, settings.blurIterations);
-    }
-
-    // SSR (Screen-Space Reflections) - before chromatic aberration
-    if (settings.enableSSR) {
-        toneMappedTexture = ApplySSR(toneMappedTexture, gbuffer, skyboxTexture, settings,
-                                      viewMatrix, projectionMatrix, invViewMatrix, invProjectionMatrix, viewPos);
     }
 
     // Motion Blur (requires velocity buffer texture)
@@ -593,16 +634,65 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
     return GetColorTexture(m_ssaoRT);
 }
 
+void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane) {
+    if (!m_depthPyramidShader || !m_depthPyramidShader->IsValid() || m_depthPyramidRTs.size() != kDepthPyramidLevels) return;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ITexture* depthTex = gbuffer.GetDepthTextureRHI();
+    if (!cmd || !depthTex) return;
+
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    m_depthPyramidShader->Bind(m_deviceRHI);
+    m_depthPyramidShader->SetFloat("u_NearPlane", nearPlane);
+    m_depthPyramidShader->SetFloat("u_FarPlane", farPlane);
+
+    // Level 0: copy linearized depth from gbuffer
+    m_depthPyramidShader->SetInt("u_SourceDepth", 0);
+    m_depthPyramidShader->SetInt("u_Pyramid", 1);
+    m_depthPyramidShader->SetInt("u_Level", 0);
+    m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
+    cmd->BindTexture(depthTex, 0);
+    if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 1);
+    cmd->SetRenderTarget(m_depthPyramidRTs[0]);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    if (m_depthPyramidShader->GetPipelineRHI()) cmd->DrawFullscreenQuad(m_depthPyramidShader->GetPipelineRHI());
+
+    if (m_depthPyramidTexture)
+        rhi::BarrierTextureForShaderRead(cmd, m_depthPyramidTexture);
+
+    // Levels 1..k-1: min of 2x2 from previous mip
+    for (uint32_t mip = 1; mip < kDepthPyramidLevels; ++mip) {
+        uint32_t prevW = std::max(1u, m_width >> (mip - 1));
+        uint32_t prevH = std::max(1u, m_height >> (mip - 1));
+        uint32_t currW = std::max(1u, m_width >> mip);
+        uint32_t currH = std::max(1u, m_height >> mip);
+        m_depthPyramidShader->SetInt("u_Level", static_cast<int>(mip));
+        m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(prevW), static_cast<float>(prevH)));
+        cmd->BindTexture(m_depthPyramidTexture, 1);
+        cmd->SetRenderTarget(m_depthPyramidRTs[mip]);
+        cmd->SetViewport(0, 0, currW, currH);
+        if (m_depthPyramidShader->GetPipelineRHI()) cmd->DrawFullscreenQuad(m_depthPyramidShader->GetPipelineRHI());
+        if (m_depthPyramidTexture)
+            rhi::BarrierTextureForShaderRead(cmd, m_depthPyramidTexture);
+    }
+    m_depthPyramidShader->Unbind();
+}
+
  rhi::ITexture* PostProcessor::ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,
                                        const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
                                        const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
-                                       const math::Vec3& viewPos) {
+                                       const math::Vec3& viewPos, rhi::IRenderTarget* outputRT, rhi::ITexture* reflectionProbeTexture) {
     if (!m_ssrShader || !m_ssrShader->IsValid()) {
         return sceneTexture;
     }
+    rhi::IRenderTarget* rt = (outputRT != nullptr) ? outputRT : m_outputRT;
     rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
-    if (!cmd || !m_outputRT) return sceneTexture;
-    cmd->SetRenderTarget(m_outputRT);
+    if (!cmd || !rt) return sceneTexture;
+
+    // Build Hi-Z depth pyramid for faster ray march
+    BuildDepthPyramid(gbuffer, settings.ssrNearPlane, settings.ssrFarPlane);
+
+    cmd->SetRenderTarget(rt);
     cmd->SetViewport(0, 0, m_width, m_height);
     cmd->SetDepthTest(false);
     cmd->SetDepthWrite(false);
@@ -617,6 +707,13 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
     m_ssrShader->SetInt("g_Depth", 4);
     m_ssrShader->SetInt("u_SceneTexture", 5);
     m_ssrShader->SetInt("u_Skybox", 6);
+    m_ssrShader->SetInt("u_ReflectionProbe", 7);
+    m_ssrShader->SetInt("u_PrevSSR", 8);
+    m_ssrShader->SetInt("u_DepthPyramid", 9);
+    m_ssrShader->SetInt("u_HasReflectionProbe", reflectionProbeTexture ? 1 : 0);
+    m_ssrShader->SetInt("u_TemporalEnabled", m_ssrHasPrevFrame && m_ssrPrevRT ? 1 : 0);
+    m_ssrShader->SetInt("u_HasDepthPyramid", m_depthPyramidTexture ? 1 : 0);
+    m_ssrShader->SetInt("u_PyramidLevels", static_cast<int>(kDepthPyramidLevels));
     m_ssrShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_ssrShader->SetFloat("u_StepSize", settings.ssrStepSize);
     m_ssrShader->SetInt("u_MaxSteps", settings.ssrMaxSteps);
@@ -637,9 +734,33 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
     if (depthTex) cmd->BindTexture(depthTex, 4);
     cmd->BindTexture(sceneTexture, 5);
     if (skyboxTexture) cmd->BindTexture(skyboxTexture, 6);
+    if (reflectionProbeTexture) cmd->BindTexture(reflectionProbeTexture, 7);
+    if (m_ssrHasPrevFrame && m_ssrPrevRT) {
+        rhi::ITexture* prevTex = GetColorTexture(m_ssrPrevRT);
+        if (prevTex) cmd->BindTexture(prevTex, 8);
+    }
+    if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 9);
     if (m_ssrShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssrShader->GetPipelineRHI()); }
     m_ssrShader->Unbind();
-    return GetOutputTextureRHI();
+
+    // Copy result to previous-frame buffer for temporal accumulation
+    if (m_ssrPrevRT && m_copyShader && m_copyShader->IsValid()) {
+        rhi::ITexture* ssrOut = GetColorTexture(rt);
+        if (ssrOut) {
+            cmd->SetRenderTarget(m_ssrPrevRT);
+            cmd->SetViewport(0, 0, m_width, m_height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            m_copyShader->Bind(m_deviceRHI);
+            m_copyShader->SetInt("u_Texture", 0);
+            cmd->BindTexture(ssrOut, 0);
+            if (m_copyShader->GetPipelineRHI()) cmd->DrawFullscreenQuad(m_copyShader->GetPipelineRHI());
+            m_copyShader->Unbind();
+            m_ssrHasPrevFrame = true;
+        }
+    }
+
+    return GetColorTexture(rt);
 }
 
  rhi::ITexture* PostProcessor::ApplyMotionBlur(rhi::ITexture* texture, rhi::ITexture* velocityTexture, const Settings& settings) {

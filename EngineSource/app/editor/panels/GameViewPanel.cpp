@@ -6,6 +6,7 @@
 #include "api/math/TransformUtils.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
+#include "api/debug/Profiler.h"
 #include "eyelib/vr/XRViewHelpers.h"
 
 #include <imgui.h>
@@ -127,11 +128,15 @@ void ShowGameViewPanel(EditorContext* ctx) {
             if (isRegularCamera) {
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;
+                eyelib::api::debug::Profiler::BeginSample("GameView Build");
                 s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
+                eyelib::api::debug::Profiler::EndSample();
                 SceneCameraToView(camTransform, camComp, w, h, scene.camera);
 
                 ctx->gameViewPipeline->Resize(w, h);
+                eyelib::api::debug::Profiler::BeginSample("GameView Render");
                 ctx->gameViewPipeline->Render(scene, nullptr);
+                eyelib::api::debug::Profiler::EndSample();
 
                 void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {
@@ -143,7 +148,9 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 // Single-pass stereo: one render, two viewports (left | right)
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;
+                eyelib::api::debug::Profiler::BeginSample("GameView Build");
                 s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
+                eyelib::api::debug::Profiler::EndSample();
 
                 eyelib::vr::XRViewData leftData, rightData;
                 eyelib::vr::StereoViewDataFromCenterPose(camTransform.position, camTransform.rotation,
@@ -168,7 +175,9 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 rightCam.farPlane = rightProj.farPlane;
 
                 ctx->gameViewPipeline->Resize(w, h);
+                eyelib::api::debug::Profiler::BeginSample("GameView Render");
                 ctx->gameViewPipeline->RenderStereo(scene, leftCam, rightCam);
+                eyelib::api::debug::Profiler::EndSample();
 
                 void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {

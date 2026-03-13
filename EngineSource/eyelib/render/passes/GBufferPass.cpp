@@ -415,7 +415,8 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
                                    const math::Mat4& view,
                                    const math::Mat4& projection,
                                    const math::Mat4& prevView,
-                                   const math::Mat4& prevProjection) {
+                                   const math::Mat4& prevProjection,
+                                   int32_t submeshIndex) {
     if (!device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0 || !m_shaderCache) return;
 
     m_currentGBuffer = &gbuffer;
@@ -490,7 +491,7 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
     shader->Bind(device);
     mesh->Bind(device);
     MeshHandle h = mesh->GetHandle();
-    if (h.IsValid()) h.DrawInstanced(device, -1, instanceCount);
+    if (h.IsValid()) h.DrawInstanced(device, submeshIndex, instanceCount);
     mesh->Unbind();
     shader->Unbind();
 

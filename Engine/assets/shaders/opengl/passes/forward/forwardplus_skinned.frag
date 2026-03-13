@@ -1,4 +1,5 @@
 #version 460 core
+@MATERIAL_DEFINES@
 
 in vec3 v_WorldPos;
 in vec3 v_ViewPos;
@@ -6,10 +7,15 @@ in vec3 v_WorldNormal;
 in vec2 v_TexCoord;
 in mat3 v_TBN;
 
-uniform vec3 u_Albedo;
-uniform float u_Metallic;
-uniform float u_Roughness;
-uniform float u_AO;
+layout(std140, binding = 2) uniform MaterialBlock {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    float ao;
+    float alpha;
+    vec3 emission;
+    float reflective;
+};
 uniform sampler2D u_AlbedoTexture;
 uniform int u_UseAlbedoTexture;
 uniform sampler2D u_NormalTexture;
@@ -20,8 +26,6 @@ uniform sampler2D u_AOTexture;
 uniform int u_UseAOTexture;
 uniform sampler2D u_EmissiveTexture;
 uniform int u_UseEmissiveTexture;
-uniform vec3 u_Emission;
-uniform float u_Alpha;
 uniform int u_ScreenWidth;
 uniform int u_ScreenHeight;
 uniform int u_TileCountX;
@@ -34,6 +38,10 @@ uniform float u_FarPlane;
 uniform int u_PointLightCount;
 uniform int u_SpotLightCount;
 uniform sampler2DArray u_ShadowMap;
+layout(binding = 11) uniform samplerCube u_IrradianceMap;
+layout(binding = 12) uniform samplerCube u_PrefilterMap;
+layout(binding = 13) uniform sampler2D u_BRDFLUT;
+uniform int u_UseIBL = 0;
 
 // Enhancement 6.1: scene lighting from SSBO (binding 5); point/spot read from 3/4 for tiled culling
 #define SCENE_LIGHT_MAX_POINT 8
@@ -100,6 +108,9 @@ layout(binding = 4) restrict readonly buffer SpotLightBuffer { SpotLight spotLig
 
 layout(location = 0) out vec4 o_Color;
 
+#include "../../common/material_surface.glsl"
+#include "../../common/brdf.glsl"
+
 float shadowFactor(vec3 worldPos) {
     if (sceneLight.header.useShadows <= 0) return 0.0;
     vec4 lightSpacePos = sceneLight.header.lightSpaceMatrix * vec4(worldPos, 1.0);
@@ -155,33 +166,24 @@ vec3 calc_spot_light(vec3 pos, vec3 dir, vec3 color, float intensity, float rang
 }
 
 void main() {
-    vec3 N = normalize(v_WorldNormal);
-    if (u_UseNormalTexture > 0) {
-        vec3 n = texture(u_NormalTexture, v_TexCoord).xyz * 2.0 - 1.0;
-        N = normalize(v_TBN * n);
-    }
+    MaterialSurface surf;
+    EvaluateMaterialSurface(
+        v_TexCoord, v_TBN, v_WorldNormal,
+        MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
+        u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
+        u_AlbedoTexture, u_AlbedoTexture, u_AOTexture, u_EmissiveTexture,
+        u_UseAlbedoTexture > 0, u_UseNormalTexture > 0, u_UseMetallicRoughnessTexture > 0,
+        false, false, u_UseAOTexture > 0, u_UseEmissiveTexture > 0,
+        surf
+    );
+    vec3 N = surf.normal;
+    vec3 albedo = surf.albedo;
+    float metallic = surf.metallic;
+    float roughness = surf.roughness;
+    float ao = surf.ao;
+    vec3 emission = surf.emission;
+
     vec3 V = normalize(sceneLight.header.viewPos - v_WorldPos);
-    vec3 albedo = u_UseAlbedoTexture > 0
-        ? texture(u_AlbedoTexture, v_TexCoord).rgb * u_Albedo
-        : u_Albedo;
-    float metallic = u_Metallic;
-    float roughness = u_Roughness;
-    if (u_UseMetallicRoughnessTexture > 0) {
-        vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg;
-        metallic = mr.x;
-        roughness = mr.y;
-    }
-    roughness = max(roughness, 0.04);
-
-    float ao = u_AO;
-    if (u_UseAOTexture > 0) {
-        ao = texture(u_AOTexture, v_TexCoord).r;
-    }
-
-    vec3 emission = u_Emission;
-    if (u_UseEmissiveTexture > 0) {
-        emission = texture(u_EmissiveTexture, v_TexCoord).rgb;
-    }
 
     vec3 result = albedo * sceneLight.header.ambient * ao;
     vec3 L = normalize(-sceneLight.header.direction);
@@ -221,6 +223,20 @@ void main() {
         }
     }
 
+    if (u_UseIBL != 0) {
+        float NdotV = max(dot(N, V), 0.0001);
+        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD = (1.0 - F) * (1.0 - metallic);
+        vec3 irradiance = texture(u_IrradianceMap, N).rgb;
+        result += kD * irradiance * albedo;
+        vec3 R = reflect(-V, N);
+        const float MAX_REFLECTION_LOD = 4.0;
+        vec3 prefilteredColor = textureLod(u_PrefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+        vec2 brdfLUT = texture(u_BRDFLUT, vec2(NdotV, roughness)).rg;
+        result += prefilteredColor * (F * brdfLUT.x + brdfLUT.y);
+    }
+
     result += emission;
-    o_Color = vec4(result * sceneLight.header.exposure, u_Alpha);
+    o_Color = vec4(result * sceneLight.header.exposure, MaterialBlock.alpha);
 }

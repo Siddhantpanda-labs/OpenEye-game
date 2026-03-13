@@ -14,7 +14,7 @@
 namespace eyelib {
 namespace render {
 
-namespace rhi { struct IDevice; struct ITexture; struct IBuffer; }
+namespace rhi { struct IDevice; struct ITexture; struct IBuffer; struct ICommandList; }
 class Shader;
 class Texture2D;
 
@@ -40,11 +40,11 @@ enum class Blending : uint8_t {
 class Material {
 public:
     Material();
-    explicit Material(std::shared_ptr<Shader> shader);
     ~Material() = default;
 
-    void SetShader(std::shared_ptr<Shader> shader);
-    std::shared_ptr<Shader> GetShader() const { return m_shader; }
+    /** MaterialShader id (e.g. PBR=0). Used by ShaderCache to compile pipeline variants. */
+    MaterialTypeId GetMaterialShaderId() const { return m_shaderIndex; }
+    void SetMaterialShaderId(MaterialTypeId id) { m_shaderIndex = id; m_hashDirty = true; }
 
     void SetTexture(const std::string& name, std::shared_ptr<Texture2D> texture);
     std::shared_ptr<Texture2D> GetTexture(const std::string& name) const;
@@ -87,16 +87,16 @@ public:
     void SetKeyword(const std::string& keyword, bool enabled);
     bool IsKeywordEnabled(const std::string& keyword) const;
 
-    /** Bind shader and textures. Device must be non-null. */
-    void Bind(rhi::IDevice* device) const;
+    /** Apply material parameters and textures to an already-bound shader. Call after shader->Bind(device). If cmd is non-null, binds MaterialBlock UBO at binding 2. */
+    void ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd = nullptr) const;
     size_t GetHash() const;
 
     /** Refractor Phase 2: GPU buffer (std140) for PBR props. Ensures buffer exists and is up to date; returns null if device is null. */
     rhi::IBuffer* GetMaterialBufferRHI(rhi::IDevice* device) const;
 
-    /** Refractor Phase 3: shader variant id for cache; default = kDefaultMaterialTypeId. */
+    /** Alias for GetMaterialShaderId (cache key). */
     MaterialTypeId GetShaderIndex() const { return m_shaderIndex; }
-    void SetShaderIndex(MaterialTypeId id) { m_shaderIndex = id; }
+    void SetShaderIndex(MaterialTypeId id) { SetMaterialShaderId(id); }
     /** Optional GLSL snippet injected into pass fragment template (e.g. custom surface). Empty = use pipeline default. */
     const std::string& GetFragmentSnippet() const { return m_fragmentSnippet; }
     void SetFragmentSnippet(std::string s) { m_fragmentSnippet = std::move(s); }
@@ -136,7 +136,6 @@ public:
 private:
     void UpdateHash() const;
 
-    std::shared_ptr<Shader> m_shader;
     std::unordered_map<std::string, std::shared_ptr<Texture2D>> m_textures;
     std::unordered_map<std::string, float> m_floats;
     std::unordered_map<std::string, math::Vec3> m_vec3s;

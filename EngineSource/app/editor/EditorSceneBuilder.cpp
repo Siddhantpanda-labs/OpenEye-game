@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <exception>
+#include <unordered_set>
 
 namespace {
 const float kPi = 3.14159265f;
@@ -130,6 +131,29 @@ std::string EditorSceneBuilder::ResolveAssetPath(const std::string& id, const st
     return {};
 }
 
+std::string EditorSceneBuilder::ResolveAssetPathCached(const std::string& id,
+                                                       const std::vector<std::string>& roots,
+                                                       eyelib::api::AssetRegistry* registry) {
+    if (id.empty()) return {};
+    auto it = m_resolvedAssetPathCache.find(id);
+    if (it != m_resolvedAssetPathCache.end()) return it->second;
+    std::string resolved = ResolveAssetPath(id, roots, registry);
+    m_resolvedAssetPathCache.emplace(id, resolved);
+    return resolved;
+}
+
+std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialCached(eyelib::api::AssetRegistry* registry,
+                                                                                  const std::string& pathOrId) {
+    if (!registry || pathOrId.empty()) return nullptr;
+    auto it = m_materialLookupCache.find(pathOrId);
+    if (it != m_materialLookupCache.end()) {
+        if (auto cached = it->second.lock()) return cached;
+    }
+    auto mat = ResolveMaterialForScene(registry, pathOrId);
+    m_materialLookupCache[pathOrId] = mat;
+    return mat;
+}
+
 std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialForScene(eyelib::api::AssetRegistry* registry,
                                                                                      const std::string& pathOrId) {
     if (!registry || pathOrId.empty()) return nullptr;
@@ -142,19 +166,10 @@ std::shared_ptr<eyelib::api::Material> EditorSceneBuilder::ResolveMaterialForSce
 
 void EditorSceneBuilder::EnsureDefaultMaterial() {
     if (m_defaultMaterial) return;
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    if (m_renderDevice && shader->Load(m_renderDevice, "passes/deferred/gbuffer")) {
-        auto mat = std::make_shared<eyelib::api::Material>();
-        mat->SetShader(shader);
-        m_defaultMaterial = mat;
-        return;
-    }
-    if (!m_renderDevice) {
-        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader not loaded — render device is null (passes/forward/forward). SetRenderDevice before Build.");
-    } else {
-        eyelib::api::core::Log::Warn("EditorSceneBuilder: default shader failed to load (passes/forward/forward). Check assets/shaders/opengl/ and runtime assets. Using empty material.");
-    }
-    m_defaultMaterial = std::make_shared<eyelib::api::Material>();
+    auto mat = std::make_shared<eyelib::api::Material>();
+    mat->SetMaterialShaderId(0);  // PBR; shader variant from ShaderCache at draw time
+    mat->SetAlbedo(eyelib::math::Vec3(0.8f, 0.8f, 0.8f));
+    m_defaultMaterial = mat;
 }
 
 EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path) {
@@ -217,6 +232,62 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::GetPrimitiveEntry(const std::
     return entry;
 }
 
+void EditorSceneBuilder::RebuildDrawableStaticIfNeeded(const DrawableCacheKey& key,
+                                                       const std::string& meshId,
+                                                       const std::string& materialAssetId,
+                                                       int32_t submeshIndex,
+                                                       const std::vector<std::string>& assetRoots,
+                                                       eyelib::api::AssetRegistry* assetRegistry) {
+    auto& cached = m_drawableStaticCache[key];
+    cached.lastTouchedFrame = m_buildFrameCounter;
+
+    const bool needsRebuild = !cached.valid
+        || cached.meshId != meshId
+        || cached.materialAssetId != materialAssetId
+        || cached.submeshIndex != submeshIndex;
+    if (!needsRebuild) return;
+
+    cached.meshId = meshId;
+    cached.materialAssetId = materialAssetId;
+    cached.submeshIndex = submeshIndex;
+    cached.mesh.reset();
+    cached.material.reset();
+    cached.valid = false;
+
+    ModelEntry modelEntry;
+    if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+        modelEntry = GetPrimitiveEntry(meshId);
+    } else {
+        const std::string meshResolved = ResolveAssetPathCached(meshId, assetRoots, assetRegistry);
+        if (meshResolved.empty()) return;
+        modelEntry = LoadModelEntry(assetRegistry, meshResolved);
+    }
+    if (!modelEntry.mesh) return;
+
+    cached.mesh = modelEntry.mesh;
+    cached.material = modelEntry.material;
+    if (!materialAssetId.empty() && assetRegistry) {
+        if (auto mat = ResolveMaterialCached(assetRegistry, materialAssetId))
+            cached.material = std::move(mat);
+    }
+    if (!cached.material) {
+        EnsureDefaultMaterial();
+        cached.material = m_defaultMaterial;
+    }
+    cached.valid = (cached.mesh != nullptr && cached.material != nullptr);
+}
+
+void EditorSceneBuilder::PruneStaleDrawableCache() {
+    std::vector<DrawableCacheKey> stale;
+    stale.reserve(m_drawableStaticCache.size());
+    for (const auto& [key, value] : m_drawableStaticCache) {
+        if (value.lastTouchedFrame != m_buildFrameCounter)
+            stale.push_back(key);
+    }
+    for (const auto& key : stale)
+        m_drawableStaticCache.erase(key);
+}
+
 std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAssetId(const std::string& assetId,
                                                                                     const std::vector<std::string>& assetRoots,
                                                                                     eyelib::api::RenderDevice device) {
@@ -256,6 +327,19 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               const eyelib::api::world::World* world,
                               std::vector<::eyelib::world::EntityId>* outDrawableToEntity) {
     m_renderDevice = assetRegistry ? assetRegistry->GetRenderDevice() : eyelib::api::RenderDevice();
+    ++m_buildFrameCounter;
+    std::string rootsSig;
+    for (const auto& root : assetRoots) {
+        rootsSig += root;
+        rootsSig.push_back(';');
+    }
+    if (rootsSig != m_assetRootsSignature) {
+        m_assetRootsSignature = std::move(rootsSig);
+        m_resolvedAssetPathCache.clear();
+        m_skyboxCache.clear();
+        m_materialLookupCache.clear();
+        m_drawableStaticCache.clear();
+    }
     if (defaultMaterial) m_defaultMaterial = std::move(defaultMaterial);
     scene.opaqueStorage.clear();
     scene.transparentStorage.clear();
@@ -339,29 +423,20 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
         std::string meshId = renderable.meshAssetId;
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size())
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
-        ModelEntry modelEntry;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            modelEntry = GetPrimitiveEntry(meshId);
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots, assetRegistry);
-            if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
-        }
-        if (!modelEntry.mesh) continue;
+        const DrawableCacheKey key{ entry.entity, 0u };
+        RebuildDrawableStaticIfNeeded(key, meshId, renderable.materialAssetId, renderable.submeshIndex, assetRoots, assetRegistry);
+        auto it = m_drawableStaticCache.find(key);
+        if (it == m_drawableStaticCache.end() || !it->second.valid) continue;
 
         eyelib::api::Drawable drawable{};
-        drawable.mesh = modelEntry.mesh;
-        drawable.material = modelEntry.material;
-        if (!renderable.materialAssetId.empty() && assetRegistry) {
-            if (auto mat = ResolveMaterialForScene(assetRegistry, renderable.materialAssetId))
-                drawable.material = mat;
-        }
+        drawable.mesh = it->second.mesh;
+        drawable.material = it->second.material;
+        drawable.submeshIndex = it->second.submeshIndex;
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);
-        drawable.submeshIndex = renderable.submeshIndex;
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
-        scene.opaqueStorage.push_back(drawable);
+        scene.opaqueStorage.push_back(std::move(drawable));
         if (outDrawableToEntity)
             outDrawableToEntity->push_back(entry.entity);
     }
@@ -369,33 +444,25 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     for (const auto& entry : snapshot.meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty()) continue;
-        const std::string& meshId = renderer.meshAssetId;
-        ModelEntry modelEntry;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            modelEntry = GetPrimitiveEntry(meshId);
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, assetRoots, assetRegistry);
-            if (meshResolved.empty()) continue;
-            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
-        }
-        if (!modelEntry.mesh) continue;
+        const DrawableCacheKey key{ entry.entity, 1u };
+        RebuildDrawableStaticIfNeeded(key, renderer.meshAssetId, renderer.materialAssetId, renderer.submeshIndex, assetRoots, assetRegistry);
+        auto it = m_drawableStaticCache.find(key);
+        if (it == m_drawableStaticCache.end() || !it->second.valid) continue;
 
         eyelib::api::Drawable drawable{};
-        drawable.mesh = modelEntry.mesh;
-        drawable.material = modelEntry.material;
-        if (!renderer.materialAssetId.empty() && assetRegistry) {
-            if (auto mat = ResolveMaterialForScene(assetRegistry, renderer.materialAssetId))
-                drawable.material = mat;
-        }
+        drawable.mesh = it->second.mesh;
+        drawable.material = it->second.material;
+        drawable.submeshIndex = it->second.submeshIndex;
         if (const auto transform = getTransform(entry.entity))
             drawable.transform = TransformToMatrix(*transform);
-        drawable.submeshIndex = renderer.submeshIndex;
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
-        scene.opaqueStorage.push_back(drawable);
+        scene.opaqueStorage.push_back(std::move(drawable));
         if (outDrawableToEntity)
             outDrawableToEntity->push_back(entry.entity);
     }
+
+    PruneStaleDrawableCache();
 
     scene.opaque = scene.opaqueStorage.empty() ? nullptr : scene.opaqueStorage.data();
     scene.opaqueCount = scene.opaqueStorage.size();

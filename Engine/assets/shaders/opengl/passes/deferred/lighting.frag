@@ -10,6 +10,13 @@ layout(binding = 6) uniform sampler2DArray u_ShadowMap;
 layout(std140, binding = 7) buffer LightSpaceBlock {
     mat4 lightSpace[4];
 };
+// IBL (binding 11, 12, 13) - bound by LightingPass when IBL is valid
+layout(binding = 11) uniform samplerCube u_IrradianceMap;
+layout(binding = 12) uniform samplerCube u_PrefilterMap;
+layout(binding = 13) uniform sampler2D u_BRDFLUT;
+uniform int u_UseIBL = 0;
+
+#include "../../common/brdf.glsl"
 
 // Phase 5 + 7.1: scene lighting from SSBO (binding 5); cascade count and farBounds for CSM
 #define MAX_POINT_LIGHTS 8
@@ -158,6 +165,20 @@ void main() {
             sceneLight.spotLights[i].color, sceneLight.spotLights[i].intensity,
             sceneLight.spotLights[i].range,
             sceneLight.spotLights[i].innerConeCos, sceneLight.spotLights[i].outerConeCos);
+    }
+
+    if (u_UseIBL != 0) {
+        float NdotV = max(dot(N, V), 0.0001);
+        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+        vec3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD = (1.0 - F) * (1.0 - metallic);
+        vec3 irradiance = texture(u_IrradianceMap, N).rgb;
+        diff += kD * irradiance * albedo;
+        vec3 R = reflect(-V, N);
+        const float MAX_REFLECTION_LOD = 4.0;
+        vec3 prefilteredColor = textureLod(u_PrefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+        vec2 brdfLUT = texture(u_BRDFLUT, vec2(NdotV, roughness)).rg;
+        diff += prefilteredColor * (F * brdfLUT.x + brdfLUT.y);
     }
 
     vec3 color = diff * sceneLight.header.exposure;

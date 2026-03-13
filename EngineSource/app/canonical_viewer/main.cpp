@@ -242,9 +242,8 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
     const std::string& baseDir,
     const std::string& fallbackBaseDir,
     std::shared_ptr<eyelib::api::Shader> litShader) {
-    if (!litShader) return nullptr;
     auto mat = std::make_shared<eyelib::api::Material>();
-    mat->SetShader(litShader);
+    mat->SetMaterialShaderId(0);  // PBR
     mat->SetAlbedo(eyelib::math::Vec3(loaded.albedoColorR, loaded.albedoColorG, loaded.albedoColorB));
     mat->SetMetallic(loaded.metallicValue);
     mat->SetRoughness(loaded.roughnessValue);
@@ -278,14 +277,9 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
     return mat;
 }
 
-std::shared_ptr<eyelib::api::Material> CreateDefaultMaterial(eyelib::api::RenderDevice device) {
-    auto shader = std::make_shared<eyelib::api::Shader>();
-    if (!device || !shader->Load(device, "passes/forward/forward")) {
-        eyelib::api::core::Log::Warn("CanonicalViewer: default shader (passes/forward/forward) not loaded.");
-        return nullptr;
-    }
+std::shared_ptr<eyelib::api::Material> CreateDefaultMaterial(eyelib::api::RenderDevice /*device*/) {
     auto mat = std::make_shared<eyelib::api::Material>();
-    mat->SetShader(shader);
+    mat->SetMaterialShaderId(0);  // PBR; variant from ShaderCache at draw time
     mat->SetAlbedo(eyelib::math::Vec3(0.85f, 0.85f, 0.88f));
     mat->SetMetallic(0.f);
     mat->SetRoughness(0.5f);

@@ -170,7 +170,7 @@ Pipeline code builds a nameToHandle map (ImportTextureRHI / CreateTexture), defi
 - **Deferred** — Frame graph: GPU Cull → Shadow → GBuffer → Copy depth (for occlusion) → Lighting → Transparency → Skybox → Post. Lighting reads GBuffer, writes HDR.
 - **ForwardPlus** — Legacy path: tiled/clustered many lights; skybox after; no frame graph.
 
-Render(view) dispatches by mode: Deferred → BuildAndExecuteFrameGraph; Forward → BuildAndExecuteForwardFrameGraph; ForwardPlus → RenderForwardPlus.
+Render(view) dispatches by mode: Deferred → BuildAndExecuteFrameGraph; Forward → BuildAndExecuteForwardFrameGraph; ForwardPlus → BuildAndExecuteForwardPlusFrameGraph (single path for all).
 
 ### 6.2 Initialization & Lifecycle
 
@@ -257,5 +257,7 @@ Applications (editor, player) get the device from the pipeline, pass it to asset
 - **Shaders**: Load/Bind take device; backend resolves paths (e.g. assets/shaders/opengl/...).
 
 ---
+
+**Refactor plan (clean, production-level):** See `documentation/refractor/Render_refractor.md` for the phased plan to split the pipeline into coordinators, introduce RenderFrameData/RenderWorldCache, submission layer, and editor/runtime split.
 
 *Last updated to reflect explicit device passing, FrameGraph DAG/Compile(device), TextureCube device-only LoadFromFiles, and CPU vs GPU mesh/texture split.*

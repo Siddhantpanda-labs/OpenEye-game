@@ -97,6 +97,10 @@ public:
     /** Restore default framebuffer (0) and viewport. Call after Render() when not calling BlitToScreen() (e.g. editor scene view) so subsequent drawing (e.g. ImGui) targets the window. */
     void RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height);
 
+    /** Profiler: per-pass GPU times from the frame graph (Shadow, GBuffer, Lighting, etc.). Updated each Render(). */
+    struct FrameGraphPassInfo { std::string name; double gpuMs = 0.0; bool culled = false; };
+    std::vector<FrameGraphPassInfo> GetFrameGraphPasses() const;
+
     /** Insert a GPU fence after current command stream. Call before Finish() so fence is after all draws. Returns opaque fence (null if unsupported). */
     void* InsertFrameFence();
     /** Wait for fence (no destroy). Call before SwapBuffers so present happens after GPU completes. No-op if fence is null. */

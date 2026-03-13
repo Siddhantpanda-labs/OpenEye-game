@@ -1,4 +1,6 @@
 #include "eyelib/render/passes/TransparencyPass.h"
+#include "eyelib/render/ShaderCache.h"
+#include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
@@ -54,8 +56,9 @@ void TransparencyPass::Render(const RenderContext& ctx,
                               const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
-                              const math::Vec3& viewPos) {
-    Render(ctx.cmd, ctx.device, transparent, view, projection, viewPos);
+                              const math::Vec3& viewPos,
+                              ShaderCache* shaderCache) {
+    Render(ctx.cmd, ctx.device, transparent, view, projection, viewPos, shaderCache);
 }
 
 void TransparencyPass::Render(rhi::ICommandList* cmd,
@@ -63,8 +66,9 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
                               const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
-                              const math::Vec3& viewPos) {
-    if (transparent.empty()) return;
+                              const math::Vec3& viewPos,
+                              ShaderCache* shaderCache) {
+    if (transparent.empty() || !device || !shaderCache) return;
 
     struct Entry { size_t idx; float dist; };
     std::vector<Entry> sorted;
@@ -86,15 +90,19 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
     for (const auto& e : sorted) {
         const auto& d = transparent[e.idx];
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-        if (cmd && material)
-            applyMaterialBlendAndCull(cmd, material.get());
-        if (d.materialInstance) {
-            d.materialInstance->Bind(device);
-        } else if (material) {
-            material->Bind(device);
-        }
-        Shader* sh = material ? material->GetShader().get() : nullptr;
-        if (!sh) continue;
+        if (!material) continue;
+        if (cmd) applyMaterialBlendAndCull(cmd, material.get());
+        const Material* baseMat = material.get();
+        InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
+        ShaderKey key{ PipelineStage::Forward, it, baseMat->GetMaterialShaderId() };
+        auto shader = shaderCache->getOrCompile(device, key, baseMat);
+        if (!shader || !shader->IsValid()) continue;
+        Shader* sh = shader.get();
+        sh->Bind(device);
+        if (d.materialInstance)
+            d.materialInstance->ApplyToShader(device, sh, cmd);
+        else
+            material->ApplyToShader(device, sh, cmd);
         sh->SetMat4("u_Model", d.transform);
         sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
         sh->SetMat4("u_View", view);
@@ -104,13 +112,8 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
             const size_t boneCount = std::min(d.boneCount, kMaxBones);
             sh->SetMat4Array("u_Bones", d.bones, boneCount);
         }
-        const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
-        sh->SetFloat("u_Alpha", alpha);
-        if (device) {
-            sh->Bind(device);
-            d.mesh->Bind(device);
-            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device); }
-        }
+        d.mesh->Bind(device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
         d.mesh->Unbind();
         sh->Unbind();
     }

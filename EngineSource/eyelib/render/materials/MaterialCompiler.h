@@ -3,6 +3,7 @@
 #include "eyelib/render/ShaderKey.h"
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace eyelib {
 namespace render {
@@ -22,9 +23,11 @@ public:
     /**
      * Load pass template for (stage, instanceType), replace @MATERIAL_DEFINES@, @MATERIAL_FRAGMENT_SNIPPET@,
      * @MATERIAL_SHADING_SNIPPET@ from material, compile via RHI, return shared shader. Returns null on failure.
+     * If outDependencies is non-null, fills it with all shader file paths used (templates + includes) for hot-reload.
      */
     std::shared_ptr<Shader> compile(rhi::IDevice* device, const Material* material,
-                                    PipelineStage stage, InstanceType instanceType);
+                                    PipelineStage stage, InstanceType instanceType,
+                                    std::vector<std::string>* outDependencies = nullptr);
 };
 
 } // namespace render

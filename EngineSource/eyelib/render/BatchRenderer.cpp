@@ -1,4 +1,5 @@
 #include "eyelib/render/BatchRenderer.h"
+#include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
@@ -9,9 +10,11 @@ namespace render {
 BatchRenderer::BatchRenderer() = default;
 
 BatchRenderer::BatchRenderer(BatchRenderer&& other) noexcept
-    : m_batches(std::move(other.m_batches)), m_sorted(other.m_sorted), m_device(other.m_device) {
+    : m_batches(std::move(other.m_batches)), m_sorted(other.m_sorted), m_device(other.m_device),
+      m_shaderCache(other.m_shaderCache), m_pipelineStage(other.m_pipelineStage), m_cmd(other.m_cmd) {
     other.m_sorted = false;
     other.m_device = nullptr;
+    other.m_cmd = nullptr;
 }
 
 BatchRenderer& BatchRenderer::operator=(BatchRenderer&& other) noexcept {
@@ -19,8 +22,12 @@ BatchRenderer& BatchRenderer::operator=(BatchRenderer&& other) noexcept {
         m_batches = std::move(other.m_batches);
         m_sorted = other.m_sorted;
         m_device = other.m_device;
+        m_shaderCache = other.m_shaderCache;
+        m_pipelineStage = other.m_pipelineStage;
+        m_cmd = other.m_cmd;
         other.m_sorted = false;
         other.m_device = nullptr;
+        other.m_cmd = nullptr;
     }
     return *this;
 }
@@ -49,21 +56,28 @@ void BatchRenderer::SortByMaterial() {
     m_sorted = true;
 }
 
+void BatchRenderer::SetShaderCache(ShaderCache* cache, PipelineStage stage) {
+    m_shaderCache = cache;
+    m_pipelineStage = stage;
+}
+
 void BatchRenderer::Flush() {
-    if (m_batches.empty() || !m_device) return;
+    if (m_batches.empty() || !m_device || !m_shaderCache) return;
     SortByMaterial();
     for (const auto& e : m_batches) {
         if (!e.mesh || !e.material) continue;
-        e.material->Bind(m_device);
+        ShaderKey skey{ m_pipelineStage, InstanceType::Static, e.material->GetMaterialShaderId() };
+        auto shader = m_shaderCache->getOrCompile(m_device, skey, e.material.get());
+        if (!shader || !shader->IsValid()) continue;
+        Shader* sh = shader.get();
+        sh->Bind(m_device);
+        e.material->ApplyToShader(m_device, sh, m_cmd);
+        sh->SetMat4("u_Model", e.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
         e.mesh->Bind(m_device);
-        Shader* sh = e.material->GetShader().get();
-        if (sh) {
-            sh->SetMat4("u_Model", e.transform);
-            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
-            { MeshHandle h = e.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
-            e.mesh->Unbind();
-            sh->Unbind();
-        }
+        { MeshHandle h = e.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
+        e.mesh->Unbind();
+        sh->Unbind();
     }
 }
 

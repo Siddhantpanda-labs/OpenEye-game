@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace openeye::editor {
@@ -50,16 +51,53 @@ private:
         std::shared_ptr<eyelib::api::Mesh> mesh;
         std::shared_ptr<eyelib::api::Material> material;
     };
+    struct DrawableCacheKey {
+        ::eyelib::world::EntityId entity;
+        uint8_t source = 0; // 0: Renderable, 1: MeshRenderer
+        bool operator==(const DrawableCacheKey& other) const {
+            return entity == other.entity && source == other.source;
+        }
+    };
+    struct DrawableCacheKeyHash {
+        size_t operator()(const DrawableCacheKey& k) const {
+            const size_t h = ::eyelib::world::EntityIdHash{}(k.entity);
+            return h ^ (static_cast<size_t>(k.source) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2));
+        }
+    };
+    struct CachedDrawableStatic {
+        std::string meshId;
+        std::string materialAssetId;
+        int32_t submeshIndex = -1;
+        std::shared_ptr<eyelib::api::Mesh> mesh;
+        std::shared_ptr<eyelib::api::Material> material;
+        bool valid = false;
+        uint64_t lastTouchedFrame = 0;
+    };
+
     /** Resolve asset ref (path or GUID) to full path. If \a registry is non-null and path lookup fails, tries GUID via registry->GetFilePath. */
     static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots, eyelib::api::AssetRegistry* registry = nullptr);
+    std::string ResolveAssetPathCached(const std::string& id, const std::vector<std::string>& roots, eyelib::api::AssetRegistry* registry = nullptr);
+    std::shared_ptr<eyelib::api::Material> ResolveMaterialCached(eyelib::api::AssetRegistry* registry, const std::string& pathOrId);
     ModelEntry LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path);
     /** Resolve builtin:// primitive mesh id to procedural mesh + default material. Returns empty entry if not builtin. */
     ModelEntry GetPrimitiveEntry(const std::string& meshId);
     void EnsureDefaultMaterial();
+    void RebuildDrawableStaticIfNeeded(const DrawableCacheKey& key,
+                                       const std::string& meshId,
+                                       const std::string& materialAssetId,
+                                       int32_t submeshIndex,
+                                       const std::vector<std::string>& assetRoots,
+                                       eyelib::api::AssetRegistry* assetRegistry);
+    void PruneStaleDrawableCache();
 
     std::unordered_map<std::string, ModelEntry> m_modelCache;
     std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
+    std::unordered_map<std::string, std::string> m_resolvedAssetPathCache;
+    std::unordered_map<std::string, std::weak_ptr<eyelib::api::Material>> m_materialLookupCache;
+    std::unordered_map<DrawableCacheKey, CachedDrawableStatic, DrawableCacheKeyHash> m_drawableStaticCache;
+    std::string m_assetRootsSignature;
+    uint64_t m_buildFrameCounter = 0;
     std::shared_ptr<eyelib::api::Material> m_defaultMaterial;
     eyelib::api::RenderDevice m_renderDevice;
 };

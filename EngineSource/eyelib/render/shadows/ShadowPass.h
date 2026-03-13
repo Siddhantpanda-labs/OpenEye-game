@@ -57,7 +57,8 @@ public:
                          const math::Vec3& cameraPos,
                          float nearPlane,
                          float farPlane,
-                         float aspectRatio = 0.0f);
+                         float aspectRatio = 0.0f,
+                         int32_t submeshIndex = -1);
 
     /** No-op; cache owns shaders and is reloaded at pipeline level. */
     void ReloadShaders() {}

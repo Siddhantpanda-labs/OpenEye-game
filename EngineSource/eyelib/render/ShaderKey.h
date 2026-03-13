@@ -8,6 +8,7 @@ namespace render {
 /** Pipeline stage (which pass / what we're rendering to). Used in ShaderKey. */
 enum class PipelineStage : uint8_t {
     Forward,
+    ForwardPlus,
     GBuffer,
     Depth,
     DirectionalShadow,

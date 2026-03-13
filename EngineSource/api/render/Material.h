@@ -44,7 +44,8 @@ public:
 
     /** Set texture by name. */
     void SetTexture(const std::string& name, std::shared_ptr<Texture> texture);
-    void SetShader(std::shared_ptr<Shader> shader);
+    /** Set material shader type (0 = PBR). Shader variant is resolved at draw time from ShaderCache. */
+    void SetMaterialShaderId(uint64_t id);
 
     /** Set PBR properties. */
     void SetAlbedo(const math::Vec3& color);

@@ -29,19 +29,33 @@ public:
     void SetDevice(rhi::IDevice* device) { m_injectedDevice = device; }
 
     /**
-     * @brief Get generated textures.
+     * @brief Get generated textures (native IDs for legacy bind paths).
      */
     unsigned int GetIrradianceMap() const;
     unsigned int GetPrefilterMap() const;
     unsigned int GetBRDFLUT() const;
 
+    /** RHI texture pointers for reflection probe / external binding. */
+    rhi::ITexture* GetIrradianceTextureRHI() const { return m_irradianceRHI; }
+    rhi::ITexture* GetPrefilterTextureRHI() const { return m_prefilterRHI; }
+    rhi::ITexture* GetBRDFLUTTextureRHI() const { return m_brdfLUTRHI; }
+
     /**
-     * @brief Bind textures for lighting pass.
+     * Generate irradiance and prefilter from a cubemap (e.g. for reflection probe). Caller owns returned textures and must destroy them.
+     * @return true on success; outIrradiance and outPrefilter are set. brdfLUT can be from any valid IBL for binding.
+     */
+    static bool GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* environmentCubemap,
+                                               uint32_t irradianceRes, uint32_t prefilterRes,
+                                               rhi::ITexture*& outIrradiance, rhi::ITexture*& outPrefilter);
+
+    /**
+     * @brief Bind textures for lighting pass (preferred: use same command list as the lighting pass).
+     * @param cmd Command list to bind textures on; when null, uses device immediate list.
      * @param irradianceUnit Texture unit for irradiance map (default 11)
      * @param prefilterUnit Texture unit for prefiltered map (default 12)
      * @param brdfLUTUnit Texture unit for BRDF LUT (default 13)
      */
-    void BindForLighting(unsigned int irradianceUnit = 11, unsigned int prefilterUnit = 12, unsigned int brdfLUTUnit = 13) const;
+    void BindForLighting(rhi::ICommandList* cmd, unsigned int irradianceUnit = 11, unsigned int prefilterUnit = 12, unsigned int brdfLUTUnit = 13) const;
 
     bool IsValid() const { return m_irradianceRHI && m_prefilterRHI && m_brdfLUTRHI; }
 

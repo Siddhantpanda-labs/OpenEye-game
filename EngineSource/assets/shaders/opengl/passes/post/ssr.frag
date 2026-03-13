@@ -10,6 +10,13 @@ uniform sampler2D g_PBRParams;
 uniform sampler2D g_Depth;
 uniform sampler2D u_SceneTexture;
 uniform samplerCube u_Skybox;
+uniform samplerCube u_ReflectionProbe;  // optional; fallback when SSR misses
+uniform int u_HasReflectionProbe = 0;
+uniform sampler2D u_PrevSSR;       // previous frame SSR result (temporal)
+uniform int u_TemporalEnabled = 0;
+uniform sampler2D u_DepthPyramid;  // Hi-Z min-depth pyramid (optional)
+uniform int u_HasDepthPyramid = 0;
+uniform int u_PyramidLevels = 8;
 uniform vec2 u_Resolution;
 uniform float u_StepSize = 0.1;
 uniform int u_MaxSteps = 32;
@@ -29,7 +36,8 @@ float linearizeDepth(float depthSample) {
     return -linear;
 }
 
-// Ray march in view space: origin and direction in view space, project with projection matrix only
+// Ray march in view space: origin and direction in view space, project with projection matrix only.
+// When Hi-Z pyramid is present, use it to skip empty regions (larger steps when ray is in front of cell min depth).
 vec3 RayMarch(vec3 rayOriginVs, vec3 rayDirVs, float rayLength) {
     float stepSize = u_StepSize;
     int maxSteps = u_MaxSteps;
@@ -49,6 +57,14 @@ vec3 RayMarch(vec3 rayOriginVs, vec3 rayDirVs, float rayLength) {
             break;
         }
 
+        // Hi-Z: sample pyramid at coarser mip; if ray is in front of cell min depth, take larger step next time
+        if (u_HasDepthPyramid != 0 && u_PyramidLevels > 0) {
+            float mip = min(float(i / 4), float(u_PyramidLevels - 1));
+            float cellMinViewZ = textureLod(u_DepthPyramid, screenCoord, mip).r;
+            if (currentPosVs.z > cellMinViewZ)
+                stepSize = min(stepSize * 1.5, u_StepSize * 4.0);
+        }
+
         float sceneDepthSample = texture(g_Depth, screenCoord).r;
         float sceneViewZ = linearizeDepth(sceneDepthSample);
 
@@ -58,7 +74,7 @@ vec3 RayMarch(vec3 rayOriginVs, vec3 rayDirVs, float rayLength) {
         // Hit test: view-space Z comparison (both negative in OpenGL)
         float depthDiff = abs(currentPosVs.z - sceneViewZ);
         if (depthDiff < u_Thickness) {
-            return texture(g_Albedo, screenCoord).rgb;
+            return texture(u_SceneTexture, screenCoord).rgb;
         }
     }
 
@@ -85,18 +101,44 @@ void main() {
 
     vec3 reflectionColor = RayMarch(rayOriginVs, rayDirVs, 10.0);
 
+    // Fallback hierarchy: 1) SSR hit, 2) Reflection probe, 3) Skybox
     if (reflectionColor.r < -0.5) {
         vec3 worldReflectDir = mat3(u_InverseViewMatrix) * reflectDirWs;
-        reflectionColor = texture(u_Skybox, worldReflectDir).rgb;
+        if (u_HasReflectionProbe != 0)
+            reflectionColor = texture(u_ReflectionProbe, worldReflectDir).rgb;
+        else
+            reflectionColor = texture(u_Skybox, worldReflectDir).rgb;
     }
 
     if (reflectionColor.r < -0.5) {
         reflectionColor = sceneColor;
     }
 
+    float roughness = texture(g_PBRParams, v_TexCoord).g;
+    vec3 skyColor = texture(u_Skybox, reflectDirWs).rgb;
+    reflectionColor = mix(reflectionColor, skyColor, roughness);
+
+    // Edge fading: remove cut-off artifact near screen edges
+    float edgeFade = smoothstep(0.0, 0.1, v_TexCoord.x) * smoothstep(0.0, 0.1, v_TexCoord.y)
+                   * smoothstep(0.0, 0.1, 1.0 - v_TexCoord.x) * smoothstep(0.0, 0.1, 1.0 - v_TexCoord.y);
+    reflectionColor *= edgeFade;
+
+    // BRDF weighting: PBR Fresnel for reflection weight (F0 = mix(0.04, albedo, metallic))
+    vec3 albedo = texture(g_Albedo, v_TexCoord).rgb;
+    float metallic = texture(g_PBRParams, v_TexCoord).r;
+    float NdotV = max(dot(normalWs, viewDirWs), 0.0);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+    vec3 reflectionTerm = F * reflectionColor;
+
     float reflective = texture(g_PBRParams, v_TexCoord).b;
-    float fresnel = pow(1.0 - max(dot(normalWs, viewDirWs), 0.0), 2.0);
-    vec3 finalColor = mix(sceneColor, reflectionColor, fresnel * 0.5 * reflective);
+    vec3 finalColor = mix(sceneColor, reflectionTerm, reflective);
+
+    // Temporal accumulation: blend with previous frame to stabilize reflections
+    if (u_TemporalEnabled != 0) {
+        vec3 prevColor = texture(u_PrevSSR, v_TexCoord).rgb;
+        finalColor = mix(prevColor, finalColor, 0.2);
+    }
 
     o_Color = vec4(finalColor, 1.0);
 }

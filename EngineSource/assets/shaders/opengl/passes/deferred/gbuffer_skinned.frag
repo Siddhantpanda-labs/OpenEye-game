@@ -76,66 +76,71 @@ uniform float u_HasRoughnessTexture = 0.0;
 uniform float u_HasAOTexture = 0.0;
 uniform float u_HasMetallicRoughnessTexture = 0.0;
 
+#include "../../common/material_surface.glsl"
+
 void main() {
     @MATERIAL_FRAGMENT_SNIPPET@
     g_Position = vec4(v_WorldPos, 1.0);
 
-    vec3 normal = normalize(v_WorldNormal);
-#ifdef HAS_NORMAL_MAP
-    vec3 normalSample = texture(u_NormalTexture, v_TexCoord).rgb;
-    normalSample = normalSample * 2.0 - 1.0;
-    normal = normalize(v_TBN * normalSample);
-#else
-    if (u_HasNormalTexture > 0.5) {
-        vec3 normalSample = texture(u_NormalTexture, v_TexCoord).rgb;
-        normalSample = normalSample * 2.0 - 1.0;
-        normal = normalize(v_TBN * normalSample);
-    }
-#endif
-    if (isnan(normal.x) || isnan(normal.y) || isnan(normal.z)) normal = vec3(0.0, 1.0, 0.0);
-    g_Normal = vec4(normal, 1.0);
-
-    vec3 albedoColor = albedo;
+    bool useAlbedo = false;
+    bool useNormal = false;
+    bool useMR = false;
+    bool useMetallic = false;
+    bool useRoughness = false;
+    bool useAO = false;
+    bool useEmissive = false;
 #ifdef HAS_ALBEDO_TEXTURE
-    albedoColor = texture(u_AlbedoTexture, v_TexCoord).rgb * albedo;
+    useAlbedo = true;
 #else
-    if (u_HasAlbedoTexture > 0.5) {
-        albedoColor = texture(u_AlbedoTexture, v_TexCoord).rgb * albedo;
-    }
+    useAlbedo = (u_HasAlbedoTexture > 0.5);
 #endif
-
-#if defined(SHADING_UNLIT)
-    g_Albedo = vec4(clamp(albedoColor + emission, vec3(0.0), vec3(1.0)), 1.0);
-    g_PBRParams = vec3(2.0, 1.0, 0.0);  // metallic=2.0: lighting pass treats as unlit
+#ifdef HAS_NORMAL_MAP
+    useNormal = true;
 #else
-    g_Albedo = vec4(clamp(albedoColor, vec3(0.0), vec3(1.0)), 1.0);
-
-    float metallicVal = metallic;
-    float roughnessVal = roughness;
+    useNormal = (u_HasNormalTexture > 0.5);
+#endif
 #ifdef HAS_METALLIC_ROUGHNESS_TEXTURE
-    vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg;
-    metallicVal = mix(metallicVal, mr.x, 1.0);
-    roughnessVal = mix(roughnessVal, mr.y, 1.0);
+    useMR = true;
 #else
-    if (u_HasMetallicRoughnessTexture > 0.5) {
-        vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg;
-        metallicVal = mix(metallicVal, mr.x, 1.0);
-        roughnessVal = mix(roughnessVal, mr.y, 1.0);
-    } else {
+    useMR = (u_HasMetallicRoughnessTexture > 0.5);
+#endif
 #ifdef HAS_METALLIC_TEXTURE
-        metallicVal = texture(u_MetallicTexture, v_TexCoord).r;
+    useMetallic = true;
 #else
-        if (u_HasMetallicTexture > 0.5) metallicVal = texture(u_MetallicTexture, v_TexCoord).r;
+    useMetallic = (u_HasMetallicTexture > 0.5);
 #endif
 #ifdef HAS_ROUGHNESS_TEXTURE
-        roughnessVal = texture(u_RoughnessTexture, v_TexCoord).r;
+    useRoughness = true;
 #else
-        if (u_HasRoughnessTexture > 0.5) roughnessVal = texture(u_RoughnessTexture, v_TexCoord).r;
+    useRoughness = (u_HasRoughnessTexture > 0.5);
 #endif
-    }
+#ifdef HAS_AO_TEXTURE
+    useAO = true;
+#else
+    useAO = (u_HasAOTexture > 0.5);
+#endif
+#ifdef HAS_EMISSIVE_TEXTURE
+    useEmissive = true;
 #endif
 
-    g_PBRParams = vec3(clamp(metallicVal, 0.0, 1.0), clamp(roughnessVal, 0.04, 1.0), clamp(reflective, 0.0, 1.0));
+    MaterialSurface surf;
+    EvaluateMaterialSurface(
+        v_TexCoord, v_TBN, v_WorldNormal,
+        albedo, metallic, roughness, ao, emission, alpha, reflective,
+        u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
+        u_MetallicTexture, u_RoughnessTexture, u_AOTexture, u_EmissiveTexture,
+        useAlbedo, useNormal, useMR, useMetallic, useRoughness, useAO, useEmissive,
+        surf
+    );
+
+    g_Normal = vec4(surf.normal, 1.0);
+
+#if defined(SHADING_UNLIT)
+    g_Albedo = vec4(clamp(surf.albedo + surf.emission, vec3(0.0), vec3(1.0)), 1.0);
+    g_PBRParams = vec3(2.0, 1.0, 0.0);
+#else
+    g_Albedo = vec4(surf.albedo, 1.0);
+    g_PBRParams = vec3(surf.metallic, surf.roughness, surf.reflective);
 #endif
 
     g_Velocity = v_Velocity;

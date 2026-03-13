@@ -9,7 +9,7 @@
 namespace eyelib {
 namespace render {
 
-namespace rhi { struct IDevice; struct ITexture; struct IBuffer; }
+namespace rhi { struct IDevice; struct ITexture; struct IBuffer; struct ICommandList; }
 class Material;
 class Shader;
 class Texture2D;
@@ -55,8 +55,8 @@ public:
     math::Vec4 GetVec4(const std::string& name, const math::Vec4& defaultValue = math::Vec4(0.0f)) const;
     void ForEachMat4Array(std::function<void(const std::string&, const math::Mat4*, size_t)> fn) const;
 
-    /** Bind base material shader and textures. Device must be non-null. */
-    void Bind(rhi::IDevice* device) const;
+    /** Apply base material + overrides to an already-bound shader. Call after shader->Bind(device). If cmd is non-null, binds MaterialBlock UBO at binding 2. */
+    void ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd = nullptr) const;
 
     /** Refractor Phase 2: GPU buffer with effective PBR props (base + overrides). Returns null if device is null. */
     rhi::IBuffer* GetMaterialBufferRHI(rhi::IDevice* device) const;

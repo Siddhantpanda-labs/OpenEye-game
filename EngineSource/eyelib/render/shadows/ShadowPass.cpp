@@ -7,6 +7,7 @@
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/math/Frustum.h"
 #include <algorithm>
 #include <map>
 
@@ -15,6 +16,14 @@ namespace render {
 
 namespace {
 constexpr size_t kMaxBones = 128;
+
+bool IsVisibleInCascade(const Drawable& d, const math::Frustum& cascadeFrustum) {
+    if (!d.mesh) return false;
+    // Skinned meshes use animated bounds; avoid false culling artifacts.
+    if (d.bones && d.boneCount > 0) return true;
+    const math::AABB worldAabb = d.mesh->GetAABB().Transform(d.transform);
+    return cascadeFrustum.Contains(worldAabb) != 0;
+}
 }
 
 ShadowPass::ShadowPass() = default;
@@ -39,6 +48,29 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
     cascadeMap.Update(lightDir, view, projection, cameraPos, nearPlane, farPlane, aspect);
     cascadeMap.MapLightSpaceToBuffer();
 
+    std::map<ShaderKey, std::vector<Drawable>> buckets;
+    feedDrawables([&](const Drawable& d) {
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (!d.mesh || !material) return;
+        InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
+        ShaderKey key{ PipelineStage::Depth, it, material->GetShaderIndex() };
+        buckets[key].push_back(d);
+    });
+
+    std::map<ShaderKey, std::shared_ptr<Shader>> shaders;
+    for (auto& [key, drawables] : buckets) {
+        const Material* matForCompile = (key.materialTypeId != kDefaultMaterialTypeId && !drawables.empty())
+            ? (drawables[0].materialInstance ? drawables[0].materialInstance->GetMaterial().get() : drawables[0].material.get())
+            : nullptr;
+        auto shader = matForCompile
+            ? m_shaderCache->getOrCompile(device, key, matForCompile)
+            : m_shaderCache->getOrCompile(device, key);
+        if (!shader || !shader->IsValid()) continue;
+        rhi::IPipeline* shaderPipe = shader->GetPipelineRHI();
+        if (shaderPipe && !shaderPipe->HasValidProgram()) continue;
+        shaders.emplace(key, std::move(shader));
+    }
+
     const uint32_t splitCount = cascadeMap.GetSplitCount();
 
     for (uint32_t i = 0; i < splitCount; ++i) {
@@ -49,6 +81,8 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
         cmd->SetCullFrontFace(true);
 
         const math::Mat4 lightMatrix = cascadeMap.GetLightSpaceMatrix(i);
+        math::Frustum cascadeFrustum;
+        cascadeFrustum.FromMatrix(lightMatrix);
 
         auto drawOne = [&](Shader* shader, const Drawable& d) {
             const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
@@ -68,38 +102,25 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                     if (name == "u_Bones" && count > 0) { bonePtr = values; boneCount = count; }
                 });
             }
-            shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             shader->SetMat4("u_Model", d.transform);
             if (bonePtr && boneCount > 0) {
                 boneCount = std::min(boneCount, kMaxBones);
                 shader->SetMat4Array("u_Bones", bonePtr, boneCount);
             }
             d.mesh->Bind(device);
-            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device); }
+            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
             d.mesh->Unbind();
         };
 
-        std::map<ShaderKey, std::vector<Drawable>> buckets;
-        feedDrawables([&](const Drawable& d) {
-            const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-            if (!d.mesh || !material) return;
-            InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
-            ShaderKey key{ PipelineStage::Depth, it, material->GetShaderIndex() };
-            buckets[key].push_back(d);
-        });
         for (auto& [key, drawables] : buckets) {
-            const Material* matForCompile = (key.materialTypeId != kDefaultMaterialTypeId && !drawables.empty())
-                ? (drawables[0].materialInstance ? drawables[0].materialInstance->GetMaterial().get() : drawables[0].material.get())
-                : nullptr;
-            auto shader = matForCompile
-                ? m_shaderCache->getOrCompile(device, key, matForCompile)
-                : m_shaderCache->getOrCompile(device, key);
-            if (!shader || !shader->IsValid()) continue;
-            rhi::IPipeline* shaderPipe = shader->GetPipelineRHI();
-            if (shaderPipe && !shaderPipe->HasValidProgram()) continue;
+            auto it = shaders.find(key);
+            if (it == shaders.end()) continue;
+            auto& shader = it->second;
             shader->Bind(device);
+            shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             for (const auto& d : drawables)
-                drawOne(shader.get(), d);
+                if (IsVisibleInCascade(d, cascadeFrustum))
+                    drawOne(shader.get(), d);
             shader->Unbind();
         }
 
@@ -122,7 +143,8 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
                                  const math::Vec3& cameraPos,
                                  float nearPlane,
                                  float farPlane,
-                                 float aspectRatio) {
+                                 float aspectRatio,
+                                 int32_t submeshIndex) {
     if (!m_shaderCache || !device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0) return;
 
     float aspect = aspectRatio;
@@ -152,7 +174,7 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
         shader->Bind(device);
         mesh->Bind(device);
         MeshHandle h = mesh->GetHandle();
-        if (h.IsValid()) h.DrawInstanced(device, -1, instanceCount);
+        if (h.IsValid()) h.DrawInstanced(device, submeshIndex, instanceCount);
         mesh->Unbind();
         shader->Unbind();
 

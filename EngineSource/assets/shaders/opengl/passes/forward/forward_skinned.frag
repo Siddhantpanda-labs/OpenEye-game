@@ -1,4 +1,5 @@
 #version 460 core
+@MATERIAL_DEFINES@
 
 in vec3 v_Position;
 in vec3 v_Normal;
@@ -16,11 +17,15 @@ uniform float u_HasMetallicRoughnessTexture;
 uniform float u_HasAOTexture;
 uniform float u_HasEmissiveTexture;
 
-uniform vec3 u_Albedo;
-uniform float u_Metallic;
-uniform float u_Roughness;
-uniform vec3 u_Emission;
-uniform float u_AO;
+layout(std140, binding = 2) uniform MaterialBlock {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    float ao;
+    float alpha;
+    vec3 emission;
+    float reflective;
+};
 
 // Enhancement 6.1: scene lighting from SSBO (binding 5); shadow at 6
 #define MAX_POINT_LIGHTS 8
@@ -58,8 +63,15 @@ layout(std140, binding = 5) buffer SceneLightingBlock {
 } sceneLight;
 
 layout(binding = 6) uniform sampler2DArray u_ShadowMap;
+layout(binding = 11) uniform samplerCube u_IrradianceMap;
+layout(binding = 12) uniform samplerCube u_PrefilterMap;
+layout(binding = 13) uniform sampler2D u_BRDFLUT;
+uniform int u_UseIBL = 0;
 
 out vec4 FragColor;
+
+#include "../../common/material_surface.glsl"
+#include "../../common/brdf.glsl"
 
 float shadowFactor(vec3 worldPos) {
     if (sceneLight.header.useShadows <= 0) return 0.0;
@@ -153,38 +165,26 @@ vec3 evalSpotLight(vec3 pos, vec3 N, vec3 V, vec3 albedo, float metallic, float 
 }
 
 void main() {
-    vec3 N = normalize(v_Normal);
-
-    if (u_HasNormalTexture > 0.5) {
-        vec3 normalSample = texture(u_NormalTexture, v_TexCoord).rgb;
-        normalSample = normalSample * 2.0 - 1.0;
-        N = normalize(v_TBN * normalSample);
-    }
+    MaterialSurface surf;
+    EvaluateMaterialSurface(
+        v_TexCoord, v_TBN, v_Normal,
+        MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
+        u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
+        u_AlbedoTexture, u_AlbedoTexture, u_AOTexture, u_EmissiveTexture,
+        true, u_HasNormalTexture > 0.5, u_HasMetallicRoughnessTexture > 0.5,
+        false, false, u_HasAOTexture > 0.5, u_HasEmissiveTexture > 0.5,
+        surf
+    );
+    vec3 N = surf.normal;
+    vec3 albedoColor = surf.albedo;
+    float metallic = surf.metallic;
+    float roughness = max(surf.roughness * 0.65, 0.035);
+    float ao = surf.ao;
+    vec3 emission = surf.emission;
 
     vec3 V = normalize(sceneLight.header.viewPos - v_Position);
     vec3 L = normalize(-sceneLight.header.direction);
     vec3 H = normalize(V + L);
-
-    vec3 albedoColor = texture(u_AlbedoTexture, v_TexCoord).rgb * u_Albedo;
-
-    float metallic = u_Metallic;
-    float roughness = u_Roughness;
-    if (u_HasMetallicRoughnessTexture > 0.5) {
-        vec2 mr = texture(u_MetallicRoughnessTexture, v_TexCoord).bg;
-        metallic = mix(metallic, mr.x, 1.0);
-        roughness = mix(roughness, mr.y, 1.0);
-    }
-    roughness = max(roughness * 0.65, 0.035);
-
-    float ao = u_AO;
-    if (u_HasAOTexture > 0.5) {
-        ao = texture(u_AOTexture, v_TexCoord).r;
-    }
-
-    vec3 emission = u_Emission;
-    if (u_HasEmissiveTexture > 0.5) {
-        emission = texture(u_EmissiveTexture, v_TexCoord).rgb;
-    }
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedoColor, metallic);
@@ -224,6 +224,20 @@ void main() {
             sceneLight.spotLights[i].color, sceneLight.spotLights[i].intensity,
             sceneLight.spotLights[i].range,
             sceneLight.spotLights[i].innerConeCos, sceneLight.spotLights[i].outerConeCos);
+    }
+
+    if (u_UseIBL != 0) {
+        float NdotV = max(dot(N, V), 0.0001);
+        vec3 F0 = mix(vec3(0.04), albedoColor, metallic);
+        vec3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+        vec3 kD = (1.0 - F) * (1.0 - metallic);
+        vec3 irradiance = texture(u_IrradianceMap, N).rgb;
+        color += kD * irradiance * albedoColor;
+        vec3 R = reflect(-V, N);
+        const float MAX_REFLECTION_LOD = 4.0;
+        vec3 prefilteredColor = textureLod(u_PrefilterMap, R, roughness * MAX_REFLECTION_LOD).rgb;
+        vec2 brdfLUT = texture(u_BRDFLUT, vec2(NdotV, roughness)).rg;
+        color += prefilteredColor * (F * brdfLUT.x + brdfLUT.y);
     }
 
     color = (color + emission) * sceneLight.header.exposure;

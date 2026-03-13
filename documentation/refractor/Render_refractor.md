@@ -1,976 +1,215 @@
-You should implement **visual rendering features in layers**, not randomly.
-Each layer unlocks the next one. This is roughly how real engines evolve.
+# Render Architecture Refactor — Clean, Production-Level Plan
 
-I’ll list them **in the correct dependency order**.
+This document is the **single source of truth** for refactoring the OpenEye render module into a clean, maintainable, production-grade architecture (Unreal-style separation of concerns, clear ownership, scalable submission). Follow phases in order; each phase is implementable without breaking the build.
 
----
-
-# 1️⃣ Core Rendering Foundation (Must exist first)
-
-Before visuals, the renderer must support:
-
-* **Render passes**
-* **Render targets / framebuffers**
-* **Depth buffer**
-* **Pipeline state objects**
-* **Shader system**
-* **Mesh + vertex buffers**
-* **Texture system**
-* **Camera system**
-* **Material system**
-
-Without this nothing else works.
-
-Result: you can render **basic geometry with shaders**.
+**Related docs:**
+- **Efficiency (FPS, compile-once, scene build, instancing):** `documentation/refractor/Pipeline_efficiency_roadmap.md`
+- **Current module layout:** `EngineSource/eyelib/render/RENDER_MODULE.md`
 
 ---
 
-# 2️⃣ Basic Lighting (First Visual Step)
+## 1. Goals
 
-Implement simple lighting first.
-
-Features:
-
-* Directional light
-* Point light
-* Spot light
-* Lambert / Blinn-Phong
-
-This stage verifies:
-
-* normals
-* light calculations
-* shadow coordinates
-* basic shading pipeline
-
-Do **not start with PBR yet**.
+- **Single responsibility** per subsystem: no 1800-line orchestrator owning init, frame graph, shadows, forward, deferred, stereo, post, debug, and streaming.
+- **Clear data flow:** immutable per-frame input (`RenderFrameData`), cached static/world data (`RenderWorldCache`), explicit submission (batches, not ad-hoc per-draw).
+- **Unified pipeline:** all modes (Forward, Deferred, Stereo) go through the same frame-graph and submission abstractions; no legacy fork.
+- **Testable and profileable:** subsystems can be tested in isolation; profiler hooks and metrics are first-class.
+- **Editor vs runtime:** editor-only features (picking, outline, debug overlays) live in an editor layer that calls into the core renderer; core stays runtime-agnostic.
 
 ---
 
-# 3️⃣ Shadow System
+## 2. Current State (Summary)
 
-Lighting is useless without shadows.
-
-Implement:
-
-1. **Shadow map**
-2. **PCF filtering**
-3. **Directional light shadows**
-4. **Point light shadows (cubemap)**
-5. **Spot light shadows**
-
-Then improve to:
-
-* **Cascaded Shadow Maps (CSM)**
-
-This is the real standard.
+- **Strengths:** RHI abstraction, `IRenderSceneView` zero-copy, frame graph DAG, CPU/GPU mesh split, explicit device passing.
+- **Debt:** `RenderPipeline` is a monolith (~1793 lines); forward/deferred/stereo/forward+ duplicate logic; submission is per-draw with high bind/uniform churn; no clear frame-data vs world-cache split.
 
 ---
 
-# 4️⃣ Physically Based Rendering (PBR)
+## 3. Target Architecture (Principles)
 
-Now upgrade materials.
-
-Implement:
-
-* **Cook–Torrance BRDF**
-* **Metallic / Roughness workflow**
-* **Fresnel (Schlick)**
-* **Normal maps**
-* **AO maps**
-
-Textures:
-
-* Albedo
-* Normal
-* Roughness
-* Metallic
-* AO
-
-This gives realistic materials.
+| Principle | Meaning |
+|-----------|--------|
+| **Coordinator per concern** | Frame graph build/execute, shadows, geometry submission, lighting, post-FX are separate systems; pipeline only wires them. |
+| **Frame data vs world cache** | Per-frame: camera, view, list of visible drawables (result of culling), light list. Cached: mesh/material/shader lookups, static scene structures. |
+| **Submission layer** | One place that turns “visible drawables + pass” into GPU commands: sort keys, material/pass buckets, instancing; no per-draw logic in pipeline. |
+| **Mode-agnostic graph** | Forward and Deferred differ only by recipe (pass list) and which passes run; same compile/execute and same submission interface. |
+| **Editor on top** | Entity ID pass, outline, debug lines, profiler overlay are optional features that feed into or wrap the core render path. |
 
 ---
 
-# 5️⃣ Image Based Lighting (IBL)
+## 4. Refactor Phases (Order of Execution)
 
-PBR without environment lighting looks bad.
+### Phase A: Extract Frame-Graph Coordination
 
-Implement:
+**Goal:** Frame graph build, compile, and execute are owned by a dedicated component; `RenderPipeline` only holds it and invokes it with current frame data.
 
-* HDR skybox
-* Irradiance map
-* Prefiltered environment map
-* BRDF LUT
+**Tasks:**
 
-Now materials respond to environment lighting.
+1. **Introduce `FrameGraphCoordinator`** (or keep logic in pipeline but behind a clear API):
+   - `SetRecipe(recipe)` / `SetFrameSize(w,h)` / `CompileIfNeeded(device)` / `Execute(ctx)`.
+   - Recipe and nameToHandle built from pipeline-owned resources (HDR, GBuffer, Shadow, etc.); executors still receive “current view” from pipeline (e.g. `GetCurrentView()`).
+   - Move all `BuildAndExecute*` frame-graph construction into this coordinator (or into a single `BuildFrameGraph(...)` function that returns a compiled graph state).
 
-This is the **first AAA visual milestone**.
+2. **Pipeline’s only frame-graph duties:** Provide resource handles (HDR, GBuffer, Shadow RTs), provide per-frame view/camera/light, call coordinator’s `CompileIfNeeded` and `Execute`.
 
----
+3. **Success criteria:** No behavior change. Frame graph compile/execute logic is in one place; pipeline code that builds the graph is readable and under 150 lines per mode.
 
-# 6️⃣ Deferred Rendering (or Forward+)
-
-Now restructure lighting for many lights.
-
-Choose one:
-
-* **Deferred renderer**
-* **Forward+**
-* **Clustered**
-
-Typical pipeline:
-
-GBuffer pass
-Lighting pass
-
-GBuffer stores:
-
-* position / depth
-* normal
-* albedo
-* roughness
-* metallic
-
-Now you can handle **hundreds of lights**.
+**Files:** `eyelib/render/renderer/RenderPipeline.cpp` (.h), optionally `eyelib/render/framegraph/FrameGraphCoordinator.h` (.cpp) if you extract a class.
 
 ---
 
-# 7️⃣ Screen Space Effects
+### Phase B: RenderFrameData and RenderWorldCache
 
-Add realism.
+**Goal:** Explicit immutable snapshot for the frame (camera, view, lights, visible drawables); cached world-side data (resolved meshes, materials, static buffers) so submission and culling don’t re-resolve every frame.
 
-Implement in this order:
+**Tasks:**
 
-1. **SSAO** (ambient occlusion)
-2. **SSR** (screen reflections)
-3. **SSGI** (optional)
-4. **Contact shadows**
+1. **Define `RenderFrameData`** (e.g. in `RenderTypes.h` or `RenderFrameData.h`):
+   - Camera view, projection, view pos, frustum.
+   - Directional light (and optionally point/spot arrays).
+   - List of visible opaque drawables (result of culling; references to mesh/material + transform only).
+   - Optional: visible transparent list (sorted).
+   - Filled once per frame by a “prepare” step (after scene build and culling).
 
-These enhance depth perception.
+2. **Define `RenderWorldCache` (or equivalent) for static/cached data:**
+   - Resolved mesh/material per entity or per drawable key (you already have partial cache in `EditorSceneBuilder`; generalize or mirror in render layer).
+   - Optional: instance buffers, indirect buffers, or other GPU state that persists across frames.
+   - Invalidated when scene/world changes (e.g. scene revision, load/unload).
 
----
+3. **Pipeline (or a “PrepareFrame” step) fills `RenderFrameData` from `IRenderSceneView` + culling; passes only `RenderFrameData` (and device/cache) into submission and passes.**
 
-# 8️⃣ Post Processing Pipeline
+4. **Success criteria:** One clear place that builds “what to draw this frame”; submission and passes take `const RenderFrameData&` (or equivalent); no per-draw resolution inside the hot path.
 
-Now add cinematic effects.
-
-Implement:
-
-* HDR rendering
-* Tone mapping
-* Bloom
-* Color grading
-* Vignette
-* Film grain
-* Chromatic aberration
-
-This stage makes visuals **look like a finished game**.
+**Files:** `eyelib/render/RenderTypes.h`, new `eyelib/render/RenderFrameData.h` (optional), `eyelib/render/renderer/RenderPipeline.cpp`, and any place that currently iterates `ForEachOpaqueDrawable` and does work (passes, GBuffer, forward).
 
 ---
 
-# 9️⃣ Transparency & Forward Pass
+### Phase C: Unify All Modes Through Frame Graph
 
-Transparent objects cannot use deferred.
+**Goal:** Forward, Deferred, and Stereo are three recipes on the same frame graph and same submission path; remove or isolate the legacy Forward+ branch.
 
-Implement:
+**Tasks:**
 
-* Forward transparency pass
-* Order sorting
-* Alpha blending
-* Particle rendering
+1. **Represent Forward, Deferred, Stereo as three recipes:**
+   - Same `FrameGraph` API: same `Compile(device)`, `Execute(ctx)`.
+   - Only the list of passes and their read/write resources differ (and stereo uses a different vertex path with two viewports).
 
-Used for:
+2. **Forward+ (tiled/clustered):** Either migrate to a frame-graph pass that runs a “forward tiled” pass, or keep it as a separate code path but behind a single entry point (e.g. `RenderForwardPlus(view)` that builds a minimal graph or a dedicated path). No duplicated init/shadow/light logic.
 
-* glass
-* particles
-* UI
-* vegetation
+3. **Success criteria:** One code path that “builds recipe for mode M and executes”; no copy-paste of shadow setup, lighting buffer, or pass order across four places.
+
+**Files:** `eyelib/render/renderer/RenderPipeline.cpp`, frame-graph recipe construction.
 
 ---
 
-# 🔟 Advanced Lighting
+### Phase D: Submission Layer (Batching, Sort Key, Instancing)
 
-Now move to modern techniques.
+**Goal:** A single submission layer that takes `RenderFrameData` + pass type (e.g. GBuffer, Shadow, Forward Opaque) and emits GPU commands in batches (by material/pass/sort key); supports instancing where mesh+material match.
 
-Implement:
+**Tasks:**
 
-* **Clustered lighting**
-* **Volumetric lighting**
-* **Light shafts**
-* **Area lights**
+1. **Define a “draw batch” or “command bucket” abstraction:**
+   - Input: list of drawables (or visible set), pass (e.g. depth, gbuffer, forward).
+   - Output: ordered batches (e.g. by shader, then material, then mesh); each batch = one bind + N draws (or one instanced draw with N instances).
 
-Clustered lighting greatly improves scalability.
+2. **Integrate with existing passes:** GBufferPass, ShadowPass, and forward opaque submission call into this layer (or use a shared “submit visible set for pass P” API) instead of ad-hoc per-draw loops.
 
----
+3. **Instancing:** When building batches, group by (mesh, material); for each group with >1 drawable, fill instance buffer and issue `DrawIndexedInstanced`; otherwise single draw. Reuse or add instanced shader variants.
 
-# 1️⃣1️⃣ Reflection System
+4. **Success criteria:** Draw call count scales with unique (mesh, material) per pass; no per-draw material bind in hot path; submission logic is in one place and testable.
 
-Implement:
-
-* Reflection probes
-* Box projection
-* Probe blending
-* Planar reflections (optional)
-
-SSR alone is not enough.
+**Files:** New `eyelib/render/submission/` (e.g. `SubmissionLayer.h/.cpp`, `DrawBatch.h`), then `GBufferPass.cpp`, `ShadowPass.cpp`, `RenderPipeline.cpp` (forward opaque) call into it. Align with **Pipeline_efficiency_roadmap Phase 4** (GPU instancing).
 
 ---
 
-# 1️⃣2️⃣ Global Illumination Approximations
+### Phase E: Threading (Render Prep on Workers)
 
-Full GI is expensive, so engines approximate.
+**Goal:** Visibility/culling, sort-key computation, and batch building run on worker threads; only final submission (command list record) runs on main thread.
 
-Options:
+**Tasks:**
 
-* Screen space GI
-* Light probes
-* Irradiance volumes
-* Voxel GI
-* DDGI (advanced)
+1. **Identify thread-safe inputs:** `IRenderSceneView` or a snapshot of it (or `RenderFrameData` built from it) must be readable from a worker (e.g. copy minimal data at start of frame).
 
-You don't need this immediately.
+2. **Run on workers:** Frustum culling, optional occlusion, sort key per drawable, and “build batch list” (no GPU calls). Result: a list of batches (or indirect args) that the main thread will consume.
 
----
+3. **Main thread:** Takes batch list, records commands (bind pipeline, bind resources, draw). No heavy CPU work in this path.
 
-# 1️⃣3️⃣ Advanced Post Effects
+4. **Success criteria:** Profiler shows culling/batch build off main thread; main-thread render time drops; no GPU calls from worker threads.
 
-These add cinematic quality.
-
-Implement:
-
-* Motion blur
-* Depth of field
-* Temporal AA (TAA)
-* Sharpening filters
-* Exposure adaptation
-
-TAA is very important for modern rendering.
+**Files:** New job system or use existing; `RenderPipeline` or a “RenderScheduler” dispatches prep jobs and waits before submission. Optional after Phases A–D if you prefer to optimize single-thread first.
 
 ---
 
-# 1️⃣4️⃣ Atmospheric Effects
+### Phase F: Editor / Runtime Split
 
-World-scale visuals.
+**Goal:** Entity ID pass, outline pass, debug lines, and profiler overlay are clearly editor-only; core renderer has no knowledge of “selection” or “editor camera”; API layer or editor app wires these on top.
 
-Implement:
+**Tasks:**
 
-* Sky atmosphere
-* Volumetric fog
-* Height fog
-* Clouds
+1. **Entity ID and outline:** Triggered only when editor provides `entityIdsForOpaque` and a valid entity ID RT; pipeline exposes “run entity ID pass” and “run outline pass” as optional steps after main render. No branching in core path when not used.
 
-These dramatically improve outdoor scenes.
+2. **Debug lines / debug draw:** Injected via a callback or a “debug command list” that the pipeline executes before/after post; not mixed with main scene submission.
 
----
+3. **Profiler:** Already in editor; ensure it only samples and displays; no profiler logic inside core render hot path.
 
-# 1️⃣5️⃣ GPU Driven Rendering
+4. **Success criteria:** Standalone runtime (no editor) builds and runs with no editor-only code in the core render path; editor adds features by composition (call pipeline, then call outline, then present).
 
-Performance stage.
-
-Implement:
-
-* Frustum culling
-* GPU culling
-* Multi-draw indirect
-* Compute-based visibility
-* Instance rendering
-* LOD switching
-
-This is **modern engine optimization**.
+**Files:** `eyelib/render/renderer/RenderPipeline.cpp` (optional steps guarded by “if (entityIdsForOpaque)” etc.), `api/render`, `app/editor` (outline, picking, profiler UI).
 
 ---
 
-# 1️⃣6️⃣ Streaming Systems
+## 5. Relationship to Pipeline_efficiency_roadmap.md
 
-Large worlds require streaming.
+| Roadmap phase | Render_refractor alignment |
+|---------------|----------------------------|
+| 1 — Frame graph compile once | Already done; Phase A keeps this and clarifies ownership. |
+| 2 — Incremental scene build | In progress (EditorSceneBuilder); Phase B’s cache aligns with “dirty scene” and stable drawable list. |
+| 3 — Async mesh + deferred upload | Independent; do in parallel or after Phase B. |
+| 4 — GPU instancing | Implemented inside **Phase D** (submission layer). |
+| 5 — Zero-copy mesh (optional) | Independent; can follow Phase D. |
+| 6 — Consolidation and polish | Matches **Phase F** and final audit; also “single source of truth” from Phase A–D. |
 
-Implement:
-
-* texture streaming
-* mesh LOD streaming
-* async asset loading
-* memory budgeting
-
----
-
-# 1️⃣7️⃣ Optional Next-Gen Features
-
-Only after everything above works.
-
-Examples:
-
-* ray traced shadows
-* ray traced reflections
-* path tracing mode
-* mesh shaders
-* virtual shadow maps
-* virtual texturing
-
-These are **late-stage features**.
+Implement efficiency roadmap phases 1–2 (and 3 if you want) as now; use **Render_refractor** Phases A–D to restructure the pipeline and submission so that roadmap 4–6 land in the right place.
 
 ---
 
-# 📊 The True AAA Rendering Ladder
+## 6. Implementation Order (Recommended)
 
-Real engines roughly follow this progression:
+1. **Phase A** — Extract frame-graph coordination (no behavior change).
+2. **Phase B** — Introduce RenderFrameData (and optional RenderWorldCache); pipeline and passes consume it.
+3. **Phase C** — Unify Forward/Deferred/Stereo recipes; remove duplication.
+4. **Phase D** — Submission layer + batching + instancing (fulfills roadmap Phase 4).
+5. **Phase E** — Threading (optional; after D if needed).
+6. **Phase F** — Editor/runtime split and polish.
 
-```
-Geometry Rendering
-↓
-Basic Lighting
-↓
-Shadow Maps
-↓
-PBR
-↓
-IBL
-↓
-Deferred / Forward+
-↓
-SSAO + SSR
-↓
-Post Processing
-↓
-Transparency
-↓
-Clustered Lighting
-↓
-Reflection Probes
-↓
-Atmosphere / Fog
-↓
-TAA / Motion Blur
-↓
-GPU Driven Rendering
-↓
-Streaming
-↓
-Next-gen features
-```
+Each phase ends with a green build and no regressions; then update the Implemented table below.
 
 ---
 
-# ⚠️ Important Reality
+## 7. Implemented
 
-Many people try to implement **ray tracing early**.
+Update this section as each phase is completed. Use **Done** only when the implementation is production-quality and meets the phase success criteria.
 
-That is a mistake.
-
-A renderer with:
-
-* PBR
-* IBL
-* SSAO
-* SSR
-* TAA
-* Bloom
-* Atmosphere
-
-already looks **AAA quality**.
-
----
-You are asking the **right question**.
-Most engines fail not because of algorithms, but because **features are scattered instead of structured**.
-
-For steps **2–5 (Lighting, Shadows, PBR, IBL)** the key rule is:
-
-> **Lighting is the system. Everything else feeds lighting.**
-
-So these should not be random modules. They should live under a **single lighting architecture**.
-
-Below is a **clean professional structure**.
+| Phase | Status | Notes |
+|-------|--------|--------|
+| A — Frame-graph coordination | Done | CompileFrameGraphIfNeeded(mode, stereo) + BuildDeferredGraph/BuildForwardGraph/BuildForwardStereoGraph; BuildAndExecute* now set state, prepare, CompileFrameGraphIfNeeded, Execute. No behavior change. |
+| B — RenderFrameData / RenderWorldCache | Done | RenderFrameData in RenderTypes.h (camera, light, skybox, point/spot, visibleOpaque, allOpaque, visibleTransparent). PrepareFrameData(view) + PrepareGpuCullFromFrameData(). Executors use m_currentFrameData; GBuffer/forward/shadow/transparency/skybox take frame data. RenderWorldCache left to EditorSceneBuilder. |
+| C — Unify modes through frame graph | Done | Deferred/Forward/Stereo already use same frame-graph flow (Phase A). Forward+ now uses PrepareFrameData + m_frameData (shadow feed, lights, draw loop, transparency); no duplicate scene/light gather or shadow drawable source. Single entry point: Render(view) switch. |
+| D — Submission layer (batching, instancing) | Done | DrawBatch + BuildBatches in submission/; GBuffer and Shadow use batches (instanced draw for multi-instance, singles feed otherwise). Pipeline owns m_instanceMatrixBuffer (4K mat4s); GBufferPass/ShadowPass RenderInstanced take submeshIndex. Forward+ opaque now batched (forwardplus_instanced shader + binding 6); frame-graph Forward+ uses BuildForwardPlusGraph, PrepareForwardPlusFrame, RenderForwardPlusOpaqueBatched. Forward (non-Plus) opaque still per-draw. |
+| E — Threading (render prep on workers) | Not started | |
+| F — Editor/runtime split | Not started | |
 
 ---
 
-# 1. High Level Renderer Structure
+## 8. Conventions (After Refactor)
 
-```
-render/
-│
-├─ renderer/
-│   ├─ SceneRenderer.cpp
-│   ├─ SceneRenderer.h
-│
-├─ lighting/
-│   ├─ LightTypes.h
-│   ├─ LightManager.cpp
-│   ├─ LightManager.h
-│
-├─ shadows/
-│   ├─ ShadowRenderer.cpp
-│   ├─ ShadowRenderer.h
-│   ├─ ShadowAtlas.cpp
-│   ├─ ShadowAtlas.h
-│
-├─ materials/
-│   ├─ Material.cpp
-│   ├─ Material.h
-│   ├─ PBRMaterial.cpp
-│   ├─ PBRMaterial.h
-│
-├─ ibl/
-│   ├─ IBLSystem.cpp
-│   ├─ IBLSystem.h
-│   ├─ EnvironmentCapture.cpp
-│   ├─ EnvironmentCapture.h
-│
-└─ shaders/
-    ├─ pbr/
-    ├─ lighting/
-    ├─ shadows/
-    ├─ ibl/
-```
-
-This structure mirrors how **real engines isolate responsibilities**.
+- **Device:** Always pass `rhi::IDevice*` (or `api::RenderDevice`); no global device.
+- **Scene input:** Pipeline receives `IRenderSceneView` or a prepared `RenderFrameData`; no copy of full scene inside pipeline.
+- **Frame graph:** Single coordinator builds/compiles/executes; recipe is mode-dependent; executors receive current frame data from pipeline or context.
+- **Submission:** One layer turns “visible set + pass” into batches and GPU commands; passes call into it.
+- **Editor:** Picking, outline, debug draw, profiler are optional add-ons on top of core render API.
 
 ---
 
-# 2. Lighting System (Step 2)
-
-Lighting should be a **central manager**.
-
-### Folder
-
-```
-lighting/
-```
-
-### Files
-
-```
-LightTypes.h
-LightManager.h
-LightManager.cpp
-LightCulling.cpp
-```
-
-### Responsibilities
-
-LightTypes:
-
-```
-DirectionalLight
-PointLight
-SpotLight
-```
-
-LightManager:
-
-* collects lights from scene
-* uploads GPU light buffers
-* performs light culling
-* provides data for lighting pass
-
-LightCulling:
-
-* tiled / clustered light assignment
-* GPU buffers
-
-### Dependency
-
-```
-Scene
- ↓
-LightManager
- ↓
-LightingPass
-```
-
-Lighting does **not know about materials**.
-
----
-
-# 3. Shadow System (Step 3)
-
-Shadows must be **completely separate from lighting**.
-
-Lighting just samples shadow maps.
-
-### Folder
-
-```
-shadows/
-```
-
-### Files
-
-```
-ShadowRenderer.cpp
-ShadowRenderer.h
-
-ShadowAtlas.cpp
-ShadowAtlas.h
-
-CascadedShadowMaps.cpp
-CascadedShadowMaps.h
-```
-
-### Responsibilities
-
-ShadowRenderer:
-
-* render shadow maps
-* generate shadow matrices
-* manage shadow passes
-
-ShadowAtlas:
-
-* pack multiple shadow maps
-* manage shadow resolution
-
-CSM module:
-
-* cascade splits
-* cascade matrices
-
-### Dependency
-
-```
-Scene
- ↓
-ShadowRenderer
- ↓
-Shadow maps
- ↓
-LightingPass
-```
-
-Lighting pass only **reads shadow maps**.
-
----
-
-# 4. PBR Material System (Step 4)
-
-PBR belongs to **materials**, not lighting.
-
-Lighting implements BRDF evaluation.
-
-### Folder
-
-```
-materials/
-```
-
-### Files
-
-```
-Material.h
-Material.cpp
-
-PBRMaterial.h
-PBRMaterial.cpp
-
-MaterialManager.cpp
-MaterialManager.h
-```
-
-### Responsibilities
-
-Material:
-
-* generic GPU material data
-* textures
-* parameters
-
-PBRMaterial:
-
-* albedo
-* metallic
-* roughness
-* normal
-* AO
-
-MaterialManager:
-
-* create materials
-* upload parameters
-* bind descriptor sets
-
-### Shader Side
-
-```
-shaders/pbr/
-    pbr.glsl
-    brdf.glsl
-    fresnel.glsl
-    lighting_model.glsl
-```
-
-Important rule:
-
-Lighting computes BRDF using material data.
-
-Material does **not know about lights**.
-
----
-
-# 5. Image Based Lighting (Step 5)
-
-IBL is **environment lighting**, not part of materials.
-
-It should be a dedicated system.
-
-### Folder
-
-```
-ibl/
-```
-
-### Files
-
-```
-IBLSystem.cpp
-IBLSystem.h
-
-EnvironmentCapture.cpp
-EnvironmentCapture.h
-
-BRDFLUTGenerator.cpp
-```
-
-### Responsibilities
-
-IBLSystem:
-
-* manages environment maps
-* provides irradiance and prefiltered maps
-* binds them to lighting pass
-
-EnvironmentCapture:
-
-* generate cubemap from scene
-* bake reflection probes
-
-BRDFLUTGenerator:
-
-* generate BRDF integration LUT
-
-### Resources
-
-```
-irradianceMap
-prefilteredMap
-brdfLUT
-```
-
-Lighting shader samples these.
-
----
-
-# 6. Scene Renderer (Where Everything Connects)
-
-```
-renderer/
-    SceneRenderer.cpp
-```
-
-SceneRenderer orchestrates passes.
-
-Example pipeline:
-
-```
-Shadow Pass
- ↓
-GBuffer Pass
- ↓
-Lighting Pass
-    ↳ LightManager
-    ↳ ShadowRenderer
-    ↳ IBLSystem
- ↓
-Post Processing
-```
-
-SceneRenderer **does not implement algorithms**, it just orchestrates systems.
-
----
-
-# 7. Dependency Graph (Correct Coupling)
-
-Correct dependency direction:
-
-```
-Scene
- ↓
-SceneRenderer
- ↓
-LightingPass
- ↓
-Material + LightManager + ShadowRenderer + IBLSystem
-```
-
-Important rule:
-
-```
-Lighting depends on materials
-Materials do NOT depend on lighting
-```
-
-This prevents circular architecture.
-
----
-
-# 8. Shader Folder Structure
-
-```
-shaders/
-
-pbr/
-    brdf.glsl
-    fresnel.glsl
-    distribution.glsl
-
-lighting/
-    lighting.glsl
-    clustered_lighting.glsl
-
-shadows/
-    shadow_sampling.glsl
-    shadow_filter.glsl
-
-ibl/
-    irradiance.glsl
-    reflection.glsl
-```
-
-Shaders should be **modular libraries**, not monolithic.
-
----
-
-# 9. The Clean Mental Model
-
-Think of the renderer like this:
-
-```
-Materials describe surfaces
-Lights describe energy sources
-Shadows block energy
-IBL provides ambient energy
-Lighting pass evaluates BRDF
-```
-
-Each system should reflect this physical model.
-
----
-
-# 10. What Should NOT Be Coupled
-
-Do NOT do these mistakes:
-
-Lighting → MaterialManager
-Material → LightManager
-ShadowRenderer → Materials
-
-Correct coupling:
-
-```
-Lighting reads:
-    lights
-    shadow maps
-    material parameters
-    IBL maps
-```
-
-But they **do not know each other internally**.
-
----
-
-✅ If structured this way:
-
-* renderer stays modular
-* Vulkan migration becomes easy
-* systems remain replaceable
-* complexity stays manageable
-
----
-
-# OpenEye: Present and Implemented (vs. Refractor Ladder)
-
-Below is what exists in the OpenEye codebase as of the last scan, mapped to the refractor layers. Only **EngineSource** (eyelib, api, app, assets) is considered; third-party libs are excluded.
-
----
-
-## 1️⃣ Core Rendering Foundation — **Present**
-
-| Item | Location / Notes |
-|------|------------------|
-| Render passes | `eyelib/render/passes/` (GBufferPass, ShadowPass, LightingPass, TransparencyPass, GpuCullPass, LightCullPass) |
-| Render targets / framebuffers | `rhi/RenderTarget*.h/cpp`, `GBuffer.h/cpp`, HDR RT in `RenderPipeline` |
-| Depth buffer | RTs with depth (GBuffer, HDR); `BlitDepthOnly` for depth copy |
-| Pipeline state | `rhi/PipelineGL`, depth/stencil, cull, blend in passes |
-| Shader system | `resources/Shader.h/cpp`, `ShaderCache`, `MaterialCompiler`, `ShaderSourceLoader` |
-| Mesh + vertex buffers | `resources/Mesh.h/cpp`, `MeshDescriptor`, Bind/Draw, submeshes |
-| Texture system | `Texture2D`, `TextureCube`, `Texture3D`, `TextureArray`, `TextureLoader` |
-| Camera system | `CameraView` in `RenderTypes.h`; view/projection, viewPos, near/far |
-| Material system | `Material`, `MaterialInstance`, `MaterialBuilder`, UBO (std140), texture bindings |
-
-Result: basic geometry rendering with shaders is supported.
-
----
-
-## 2️⃣ Basic Lighting — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| Directional light | `LightParams` (direction, color, intensity, ambient, exposure); `SceneLighting.h/cpp`, lighting pass |
-| Point light | `PointLight`; up to 8 in `SceneLightingBlock` SSBO; eval in `lighting.frag` |
-| Spot light | `SpotLight`; up to 4 in SSBO; eval in `lighting.frag` |
-| Lambert / Blinn-Phong–style | Deferred lighting uses diffuse + specular (NdotL, NdotH); PBR-oriented but same pipeline |
-
----
-
-## 3️⃣ Shadow System — **Present (directional + CSM)**
-
-| Feature | Implementation |
-|---------|----------------|
-| Shadow map | `CascadeShadowMap.h/cpp`, depth texture array |
-| PCF filtering | Shadow sampling in `lighting.frag` (bias, sample) |
-| Directional light shadows | Shadow pass from light view; cascade matrices |
-| Cascaded Shadow Maps (CSM) | `CascadeShadowMap`, splits, `farBounds`, cascade selection in shader |
-| Point / spot light shadows | **Not present** (no cubemap shadow or spot shadow map) |
-
----
-
-## 4️⃣ PBR — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| Metallic / roughness workflow | MaterialBlock (albedo, metallic, roughness); GBuffer PBR channel; lighting uses them |
-| Normal maps | `HAS_NORMAL_MAP`, `u_NormalTexture` in gbuffer/forward shaders |
-| AO / AO maps | MaterialBlock `ao`; optional `u_AOTexture` in materials |
-| Albedo, roughness, metallic textures | Material textures in GBuffer/forward; `MaterialCompiler` defines |
-| Cook–Torrance / Fresnel | `common/brdf.glsl`; lighting uses specular and exposure |
-
----
-
-## 5️⃣ IBL — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| HDR skybox | `TextureCube`, cubemap skybox pass; procedural fallback (`skybox_procedural`) |
-| Irradiance map | `IBL.cpp`: irradiance convolution shader, `BindForLighting` |
-| Prefiltered environment map | Prefilter pass; bound for lighting |
-| BRDF LUT | BRDF integration LUT generated and bound by IBL |
-
----
-
-## 6️⃣ Deferred (and Forward / Forward+) — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| Deferred renderer | `GBufferPass` → position, normal, albedo, PBR, velocity, depth; `LightingPass` fullscreen from GBuffer |
-| GBuffer contents | Position, normal, albedo, PBR (metallic, roughness, reflective), velocity, depth |
-| Forward | Frame graph: Shadow → Forward Opaque → Transparency → Skybox → Post |
-| Forward+ (tiled) | `LightCullPass`, `ClusteredLightGrid`, `TiledLightGrid`; legacy path with many lights |
-
----
-
-## 7️⃣ Screen-Space Effects — **Partially present**
-
-| Feature | Status |
-|----------|--------|
-| SSAO | **Present**: `PostProcessor` SSAO + blur; `ssao.frag`, `ssao_blur.frag` |
-| SSR | **Present**: `PostProcessor` SSR; `ssr.frag`; uses G-buffer + reflective strength |
-| SSGI | **Not present** |
-| Contact shadows | **Not present** |
-
----
-
-## 8️⃣ Post-Processing Pipeline — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| HDR rendering | HDR render target; tone mapping to LDR |
-| Tone mapping | `PostProcessor` (ACES-style option), `tonemap.frag` |
-| Bloom | Bloom extract, blur, composite; `PostProcessor::Settings` |
-| FXAA | `fxaa.frag`, enable in PostProcessor |
-| Vignette | `vignette.frag` |
-| Film grain | `film_grain.frag` |
-| Chromatic aberration | `chromatic_aberration.frag` |
-| Color grading | **Not present** as a dedicated pass |
-
----
-
-## 9️⃣ Transparency & Forward Pass — **Present**
-
-| Feature | Implementation |
-|---------|----------------|
-| Forward transparency pass | `TransparencyPass`; sorted transparent drawables over HDR |
-| Alpha blending | Material `Blending::Translucent`, blend state in passes |
-| Particle rendering | Particle shaders (`particle.vert/frag`, `particle_volumetric.frag`) |
-| Order sorting | Transparency pass uses drawable list (sorting by pipeline) |
-
----
-
-## 🔟 Advanced Lighting — **Partially present**
-
-| Feature | Status |
-|----------|--------|
-| Clustered / tiled lighting | **Present**: `LightCullPass`, `ClusteredLightGrid`, `TiledLightGrid` for Forward+ |
-| Volumetric lighting / light shafts | **Not present** |
-| Area lights | **Not present** |
-
----
-
-## 1️⃣1️⃣ Reflection System — **Partial (SSR only)**
-
-| Feature | Status |
-|----------|--------|
-| SSR | **Present** (see 7️⃣) |
-| Reflection probes / box projection / blending | **Not present** |
-| Planar reflections | **Not present** |
-
----
-
-## 1️⃣2️⃣–1️⃣4️⃣ GI, Advanced Post, Atmosphere — **Mostly not present**
-
-| Layer | Status |
-|-------|--------|
-| GI approximations (SSGI, light probes, voxel, DDGI) | **Not present** |
-| Motion blur | **Present**: `PostProcessor` + `motion_blur.frag` |
-| DoF, TAA, sharpening, exposure adaptation | **Not present** |
-| Sky atmosphere, volumetric fog, height fog, clouds | **Not present** (only procedural skybox) |
-
----
-
-## 1️⃣5️⃣ GPU-Driven Rendering — **Partially present**
-
-| Feature | Implementation |
-|---------|----------------|
-| GPU culling | `GpuCullPass`; compute cull; indirect draw list |
-| Multi-draw indirect | `MultiDrawIndexedIndirect` in GBuffer/Shadow when using GPU cull |
-| Instance rendering | `gbuffer_instanced`, `shadow_instanced`; instanced draw path |
-| LOD | `LODManager.h/cpp`; LOD selection in scene/build path |
-| Frustum culling | CPU-side in scene/prepare; GPU cull in GpuCullPass |
-
----
-
-## 1️⃣6️⃣–1️⃣7️⃣ Streaming and Next-Gen — **Hooks / not present**
-
-| Feature | Status |
-|----------|--------|
-| Texture/mesh streaming, async load, memory budget | `StreamingHooks`; no full streaming system |
-| Ray tracing, mesh shaders, virtual shadow maps, virtual texturing | **Not present** |
-
----
-
-## Summary Table
-
-| Refractor layer | OpenEye status |
-|-----------------|----------------|
-| 1 Core foundation | ✅ Present |
-| 2 Basic lighting | ✅ Present (dir + point + spot) |
-| 3 Shadows | ✅ Directional + CSM; ❌ point/spot shadows |
-| 4 PBR | ✅ Present |
-| 5 IBL | ✅ Present |
-| 6 Deferred / Forward+ | ✅ Present |
-| 7 Screen space | ✅ SSAO, SSR; ❌ SSGI, contact shadows |
-| 8 Post | ✅ Tone map, bloom, FXAA, vignette, film grain, chroma, motion blur; ❌ color grading |
-| 9 Transparency | ✅ Present |
-| 10 Advanced lighting | ✅ Tiled/clustered; ❌ volumetric, area lights |
-| 11 Reflection | ✅ SSR only; ❌ probes, planar |
-| 12–14 GI, advanced post, atmosphere | ❌ Except motion blur |
-| 15 GPU-driven | ✅ GPU cull, indirect draw, instancing, LOD |
-| 16–17 Streaming, next-gen | ❌ Only hooks |
-
----
+*Document: Render architecture refactor — clean, production-level plan.*  
+*Location: `documentation/refractor/Render_refractor.md`.*

@@ -153,7 +153,8 @@ public:
                          const math::Mat4& view,
                          const math::Mat4& projection,
                          const math::Mat4& prevView,
-                         const math::Mat4& prevProjection);
+                         const math::Mat4& prevProjection,
+                         int32_t submeshIndex = -1);
 
     /** Hot-reload: clears ShaderCache so next getOrCompile recompiles from templates. */
     void ReloadShaders();

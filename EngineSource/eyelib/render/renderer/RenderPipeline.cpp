@@ -4,6 +4,8 @@
 #include "eyelib/render/shadows/CascadeShadowMap.h"
 #include "eyelib/render/lighting/ClusteredLightGrid.h"
 #include "eyelib/render/post/PostProcessor.h"
+#include "eyelib/render/ibl/IBL.h"
+#include "eyelib/render/reflection/ReflectionProbeManager.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/passes/GBufferPass.h"
 #include "eyelib/render/shadows/ShadowPass.h"
@@ -20,6 +22,7 @@
 #include "eyelib/debug/Profiler.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/framegraph/FrameGraphRecipe.h"
+#include "eyelib/render/submission/DrawBatch.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/MeshDescriptor.h"
@@ -36,6 +39,7 @@
 #include "eyelib/render/ShaderSourceLoader.h"
 
 #include "eyelib/math/TransformUtils.h"
+#include "eyelib/math/Frustum.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -48,6 +52,17 @@ namespace render {
 
 namespace {
 constexpr size_t kMaxBones = 128;
+constexpr uint32_t kDefaultDirectionalShadowResolution = 1536u;
+constexpr uint32_t kDefaultDirectionalShadowCascades = 3u;
+constexpr float kMaxDirectionalShadowDistance = 180.0f;
+
+bool IsForwardDrawableVisible(const Drawable& d, const math::Frustum& frustum) {
+    if (!d.mesh) return false;
+    // Keep skinned meshes conservative to avoid incorrect culling with animated bounds.
+    if (d.bones && d.boneCount > 0) return true;
+    const math::AABB worldAabb = d.mesh->GetAABB().Transform(d.transform);
+    return frustum.Contains(worldAabb) != 0;
+}
 }
 
 RenderPipeline::RenderPipeline() = default;
@@ -63,8 +78,9 @@ void RenderPipeline::Shutdown() {
 
     DestroyHDRFramebuffer();
     m_postProcessor.reset();
-    m_forwardPlusShader.reset();
-    m_forwardPlusSkinnedShader.reset();
+    m_reflectionProbeManager.reset();
+    m_ibl.reset();
+    m_iblEnvironmentTexture = nullptr;
     m_stereoForwardShader.reset();
     m_outlinePostShader.reset();
     m_entityIdShader.reset();
@@ -89,6 +105,7 @@ void RenderPipeline::Shutdown() {
         if (m_bindlessHeap) { m_device->DestroyBindlessHeap(m_bindlessHeap); m_bindlessHeap = nullptr; }
         m_bindlessHandleCache.clear();
         if (m_gpuCullTransformBuffer) { m_device->DestroyBuffer(m_gpuCullTransformBuffer); m_gpuCullTransformBuffer = nullptr; }
+        if (m_instanceMatrixBuffer) { m_device->DestroyBuffer(m_instanceMatrixBuffer); m_instanceMatrixBuffer = nullptr; }
         if (m_prevFrameDepthRT) { m_device->DestroyRenderTarget(m_prevFrameDepthRT); m_prevFrameDepthRT = nullptr; }
         if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
         if (m_spotLightBuffer) { m_device->DestroyBuffer(m_spotLightBuffer); m_spotLightBuffer = nullptr; }
@@ -135,7 +152,7 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
 
     core::Log::Info("RenderPipeline::Initialize: initializing CascadeShadowMap");
     m_cascadeShadowMap = std::make_unique<CascadeShadowMap>();
-    if (!m_cascadeShadowMap->Initialize(m_device, 2048, CascadeShadowMap::kDefaultSplitCount)) {
+    if (!m_cascadeShadowMap->Initialize(m_device, kDefaultDirectionalShadowResolution, kDefaultDirectionalShadowCascades)) {
         core::Log::Error("RenderPipeline::Initialize: CascadeShadowMap::Initialize failed");
         return false;
     }
@@ -162,6 +179,13 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
         bd.usage = rhi::BufferUsage::Storage;
         bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
         m_gpuCullTransformBuffer = m_device->CreateBuffer(bd, nullptr);
+    }
+    if (m_device) {
+        rhi::BufferDesc bd;
+        bd.sizeInBytes = kMaxInstanceBatchSize * sizeof(math::Mat4);
+        bd.usage = rhi::BufferUsage::Storage;
+        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_instanceMatrixBuffer = m_device->CreateBuffer(bd, nullptr);
     }
     // Quad for GPU-driven GBuffer path (E8): matches cull_indirect.comp output (6 indices, 1 draw).
     {
@@ -219,6 +243,7 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
         core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
         return false;
     }
+    m_reflectionProbeManager = std::make_unique<ReflectionProbeManager>();
 
     core::Log::Info("RenderPipeline::Initialize: creating HDR framebuffer");
     CreateHDRFramebuffer();
@@ -262,6 +287,7 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     if (renderW == m_width && renderH == m_height) return;
     m_width = renderW;
     m_height = renderH;
+    m_frameGraphNeedsCompile = true;
     if (m_gbuffer) m_gbuffer->Resize(renderW, renderH);
     if (m_prevFrameDepthRT) {
         m_device->DestroyRenderTarget(m_prevFrameDepthRT);
@@ -349,6 +375,106 @@ rhi::BindlessHandle RenderPipeline::GetOrAllocateBindlessHandle(rhi::ITexture* t
     return h;
 }
 
+void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
+    m_frameData.camera = view.GetCamera();
+    m_frameData.light = view.GetLight();
+    m_frameData.skybox = view.GetSkybox();
+    m_frameData.pointLights.clear();
+    m_frameData.spotLights.clear();
+    view.ForEachPointLight([this](const PointLight& p) { m_frameData.pointLights.push_back(p); });
+    view.ForEachSpotLight([this](const SpotLight& s) { m_frameData.spotLights.push_back(s); });
+
+    math::Frustum cameraFrustum;
+    cameraFrustum.FromMatrix(m_frameData.camera.projection * m_frameData.camera.view);
+
+    m_frameData.allOpaque.clear();
+    m_frameData.visibleOpaque.clear();
+    view.ForEachOpaqueDrawable([this, &cameraFrustum](const Drawable& d) {
+        m_frameData.allOpaque.push_back(d);
+        if (!d.mesh) return;
+        if (d.bones && d.boneCount > 0) {
+            m_frameData.visibleOpaque.push_back(d);
+            return;
+        }
+        const math::AABB worldAabb = d.mesh->GetAABB().Transform(d.transform);
+        if (cameraFrustum.Contains(worldAabb) != 0)
+            m_frameData.visibleOpaque.push_back(d);
+    });
+
+    m_frameData.visibleTransparent.clear();
+    view.ForEachTransparentDrawable([this](const Drawable& d) { m_frameData.visibleTransparent.push_back(d); });
+}
+
+uint32_t RenderPipeline::PrepareGpuCullFromFrameData(const RenderFrameData& frameData, const CameraView& cam) {
+    constexpr uint32_t kMaxGpuCullDraws = 256;
+    m_scratchGpuCullDrawList.clear();
+    m_scratchGpuCullTransforms.clear();
+    m_gpuCullSingleMesh = true;
+    m_gpuCullRepresentativeMesh.reset();
+    Mesh* firstMeshPtr = nullptr;
+    for (const Drawable& d : frameData.visibleOpaque) {
+        if (!d.mesh || !d.mesh->IsValid() || m_scratchGpuCullDrawList.size() >= kMaxGpuCullDraws) continue;
+        if (!firstMeshPtr) {
+            firstMeshPtr = d.mesh.get();
+            m_gpuCullRepresentativeMesh = d.mesh;
+        } else if (d.mesh.get() != firstMeshPtr) {
+            m_gpuCullSingleMesh = false;
+        }
+        math::AABB localAABB = d.mesh->GetAABB();
+        if (!localAABB.IsValid()) continue;
+        math::AABB worldAABB = localAABB.Transform(d.transform);
+        GpuCullDrawEntry e = {};
+        e.aabbMin[0] = worldAABB.min.x; e.aabbMin[1] = worldAABB.min.y; e.aabbMin[2] = worldAABB.min.z;
+        e.aabbMax[0] = worldAABB.max.x; e.aabbMax[1] = worldAABB.max.y; e.aabbMax[2] = worldAABB.max.z;
+        const size_t indexCount = d.mesh->GetIndexCount();
+        e.indexCount = static_cast<uint32_t>(indexCount);
+        e.instanceCount = 1u;
+        e.firstIndex = 0u;
+        e.baseVertex = 0;
+        e.baseInstance = 0u;
+        m_scratchGpuCullDrawList.push_back(e);
+        m_scratchGpuCullTransforms.push_back(d.transform);
+    }
+    if (m_scratchGpuCullDrawList.empty()) m_gpuCullSingleMesh = false;
+    const uint32_t gpuCullDrawListCount = static_cast<uint32_t>(m_scratchGpuCullDrawList.size());
+
+    if (m_gpuCullPass && m_gpuCullPass->IsSupported(m_device)) {
+        if (gpuCullDrawListCount > 0) {
+            m_gpuCullPass->SetDrawList(m_scratchGpuCullDrawList.data(), gpuCullDrawListCount);
+            if (m_gpuCullTransformBuffer && m_scratchGpuCullTransforms.size() >= gpuCullDrawListCount) {
+                const size_t transformSize = gpuCullDrawListCount * sizeof(math::Mat4);
+                m_gpuCullTransformBuffer->Update(m_scratchGpuCullTransforms.data(), 0, transformSize);
+            }
+            const math::Mat4 viewProj = cam.projection * cam.view;
+            m_gpuCullPass->SetViewProj(&viewProj[0][0]);
+        } else {
+            m_gpuCullPass->SetDrawList(nullptr, 0);
+        }
+        if (m_havePrevDepth && m_prevFrameDepthRT && m_prevFrameDepthRT->GetDepthTexture())
+            m_gpuCullPass->SetOcclusionDepth(m_prevFrameDepthRT->GetDepthTexture(), m_width, m_height);
+        else
+            m_gpuCullPass->SetOcclusionDepth(nullptr, 0, 0);
+    }
+    return gpuCullDrawListCount;
+}
+
+IBL* RenderPipeline::EnsureIBLFromFrameData(const RenderFrameData& frameData) {
+    if (!frameData.skybox || !frameData.skybox->IsValid()) {
+        m_iblEnvironmentTexture = nullptr;
+        return nullptr;
+    }
+    rhi::ITexture* skyTex = frameData.skybox->GetTextureRHI();
+    if (!skyTex) return nullptr;
+    if (!m_ibl) {
+        m_ibl = std::make_unique<IBL>();
+        m_ibl->SetDevice(m_device);
+    }
+    if (m_iblEnvironmentTexture != skyTex) {
+        if (m_ibl->Initialize(skyTex, 32, 512)) m_iblEnvironmentTexture = skyTex;
+    }
+    return m_ibl->IsValid() ? m_ibl.get() : nullptr;
+}
+
 uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam) {
     constexpr uint32_t kMaxGpuCullDraws = 256;
     m_scratchGpuCullDrawList.clear();
@@ -402,7 +528,7 @@ uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, co
     return gpuCullDrawListCount;
 }
 
-void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount) {
+void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, uint32_t gpuCullDrawListCount) {
     if (!m_gbufferPass || !m_gbuffer) return;
     RenderContext ctx = RenderContext::FromDevice(m_device);
     if (!ctx) return;
@@ -428,25 +554,85 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
             gpuCullDrawListCount,
             cam.view, cam.projection, &m_prevView, &m_prevProjection);
     } else {
-        m_gbufferPass->Render(*m_gbuffer, ctx,
-            [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-            cam.view, cam.projection, m_prevView, m_prevProjection);
+        // Phase D: batch by (mesh, material); instanced draw for multi-instance batches, single draws for the rest.
+        std::vector<DrawBatch> batches = BuildBatches(frameData.visibleOpaque);
+        std::vector<Drawable> singles;
+        for (DrawBatch& batch : batches) {
+            if (batch.IsInstanced() && m_instanceMatrixBuffer && batch.transforms.size() <= kMaxInstanceBatchSize) {
+                const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
+                m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
+                m_gbufferPass->RenderInstanced(*m_gbuffer, m_device, cmd,
+                    batch.mesh.get(), batch.material.get(), m_instanceMatrixBuffer,
+                    static_cast<uint32_t>(batch.transforms.size()),
+                    cam.view, cam.projection, m_prevView, m_prevProjection, batch.submeshIndex);
+            } else {
+                for (size_t i = 0; i < batch.transforms.size(); ++i)
+                    singles.push_back(batch.ToDrawable(i));
+            }
+        }
+        if (!singles.empty()) {
+            m_gbufferPass->Render(*m_gbuffer, ctx, singles, cam.view, cam.projection, m_prevView, m_prevProjection);
+        }
     }
 }
 
-void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
-    if (!m_frameGraph || !m_gbuffer || !m_cascadeShadowMap || !m_gbufferPass || !m_shadowPass || !m_lightingPass) return;
+void RenderPipeline::RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView) {
+    if (!m_shadowPass || !frameData.light.castShadows) return;
+    const float aspect = (camView.projection[0][0] != 0.0f) ? (camView.projection[1][1] / camView.projection[0][0]) : 1.0f;
+    const float shadowFar = std::min(camView.farPlane, kMaxDirectionalShadowDistance);
+    std::vector<DrawBatch> batches = BuildBatches(frameData.allOpaque);
+    std::vector<Drawable> singles;
+    for (DrawBatch& batch : batches) {
+        if (batch.IsInstanced() && m_instanceMatrixBuffer && batch.transforms.size() <= kMaxInstanceBatchSize) {
+            const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
+            m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
+            m_shadowPass->RenderInstanced(*m_cascadeShadowMap, m_device, cmd,
+                batch.mesh.get(), batch.material.get(), m_instanceMatrixBuffer,
+                static_cast<uint32_t>(batch.transforms.size()),
+                frameData.light.direction, camView.view, camView.projection, camView.viewPos,
+                camView.nearPlane, shadowFar, aspect, batch.submeshIndex);
+        } else {
+            for (size_t i = 0; i < batch.transforms.size(); ++i)
+                singles.push_back(batch.ToDrawable(i));
+        }
+    }
+    if (!singles.empty()) {
+        RenderContext c = RenderContext::FromDevice(m_device);
+        m_shadowPass->Render(*m_cascadeShadowMap, c.device, c.cmd,
+            [&singles](std::function<void(const Drawable&)> cb) { for (const auto& d : singles) cb(d); },
+            frameData.light.direction, camView.view, camView.projection, camView.viewPos, camView.nearPlane, shadowFar, aspect);
+    }
+}
+
+void RenderPipeline::CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo) {
+    if (!m_frameGraph) return;
+    const bool needsCompile = m_frameGraphNeedsCompile
+        || m_frameGraphLastWidth != m_width || m_frameGraphLastHeight != m_height
+        || m_frameGraphLastMode != mode || m_frameGraphLastStereo != stereo;
+    if (!needsCompile) return;
+
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
 
-    const CameraView cam = view.GetCamera();
-    const LightParams light = view.GetLight();
+    if (mode == PipelineMode::Deferred)
+        BuildDeferredGraph();
+    else if (mode == PipelineMode::ForwardPlus)
+        BuildForwardPlusGraph();
+    else if (stereo)
+        BuildForwardStereoGraph();
+    else
+        BuildForwardGraph();
 
-    m_scratchPointLights.clear();
-    m_scratchSpotLights.clear();
-    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
-    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
+    m_frameGraph->Compile(m_device);
+    m_frameGraphLastWidth = m_width;
+    m_frameGraphLastHeight = m_height;
+    m_frameGraphLastMode = mode;
+    m_frameGraphLastStereo = stereo;
+    m_frameGraphNeedsCompile = false;
+}
 
+void RenderPipeline::BuildDeferredGraph() {
+    if (!m_frameGraph || !m_gbuffer || !m_cascadeShadowMap) return;
     FGNameToHandle nameToHandle;
     rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
     rhi::ITexture* hdrDepthTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetDepthTexture() : nullptr;
@@ -460,124 +646,119 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     nameToHandle["GBufferDepth"] = m_frameGraph->ImportTextureRHI("GBufferDepth", m_gbuffer->GetDepthTextureRHI(), m_width, m_height);
     nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_cascadeShadowMap->GetDepthTextureRHI(), m_cascadeShadowMap->GetResolution(), m_cascadeShadowMap->GetResolution());
 
-    RenderContext ctx = RenderContext::FromDevice(m_device);
-    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
-
     FrameGraphRecipe recipe;
     recipe.push_back({ "GPU Cull", {}, {}, true });
-    if (light.castShadows)
-        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
     recipe.push_back({ "GBuffer", {}, { "GBufferPos", "GBufferNorm", "GBufferAlb", "GBufferPBR", "GBufferVelocity", "GBufferDepth" }, true });
     recipe.push_back({ "Copy depth for occlusion", { "GBufferDepth" }, {}, true });
-    std::vector<std::string> lightingReads = { "GBufferPos", "GBufferNorm", "GBufferAlb", "GBufferPBR" };
-    if (light.castShadows) lightingReads.push_back("Shadow");
-    recipe.push_back({ "Lighting", lightingReads, { "HDR" }, true });
+    recipe.push_back({ "Lighting", { "GBufferPos", "GBufferNorm", "GBufferAlb", "GBufferPBR", "Shadow" }, { "HDR" }, true });
     recipe.push_back({ "Transparency", {}, { "HDR" }, true });
 
-    auto getExecutor = [this, &view, &cam, &light, ctx, gpuCullDrawListCount, clearBlack](const std::string& name) -> FrameGraph::ExecuteFunc {
+    auto getExecutor = [this](const std::string& name) -> FrameGraph::ExecuteFunc {
         if (name == "GPU Cull")
-            return [this, ctx](const FGPassResources&) { if (m_gpuCullPass) m_gpuCullPass->Execute(ctx); };
+            return [this](const FGPassResources&) { RenderContext c = RenderContext::FromDevice(m_device); if (m_gpuCullPass) m_gpuCullPass->Execute(c); };
         if (name == "Shadow")
-            return [this, &view, &light, &cam, ctx](const FGPassResources&) {
-                float aspect = (cam.projection[0][0] != 0.0f) ? (cam.projection[1][1] / cam.projection[0][0]) : 1.0f;
-                m_shadowPass->Render(*m_cascadeShadowMap, ctx.device, ctx.cmd,
-                    [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-                    light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane, aspect);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
             };
         if (name == "GBuffer")
-            return [this, &view, &cam, ctx, gpuCullDrawListCount](const FGPassResources&) {
-                RenderOpaqueGeometryToGBuffer(ctx.cmd, view, cam, gpuCullDrawListCount);
-            };
-        if (name == "Copy depth for occlusion")
             return [this](const FGPassResources&) {
-                if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
-                    m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
-                m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                RenderOpaqueGeometryToGBuffer(c.cmd, *m_currentFrameData, m_currentFrameData->camera, m_lastGpuCullDrawListCount);
             };
-        if (name == "Lighting")
-            return [this, &view, &cam, ctx, clearBlack](const FGPassResources&) {
-                if (ctx.cmd && m_hdrRenderTarget)
-                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
-                CascadeShadowMap* cascadeForLighting = view.GetLight().castShadows ? m_cascadeShadowMap.get() : nullptr;
-                const LightParams& light = view.GetLight();
-                math::Mat4 lightSpaceMatrix(1.0f);
-                if (cascadeForLighting && cascadeForLighting->GetSplitCount() > 0)
-                    lightSpaceMatrix = cascadeForLighting->GetLightSpaceMatrix(0);
-                FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-                    light.castShadows, &m_scratchPointLights, &m_scratchSpotLights, cascadeForLighting);
-                m_lightingPass->Render(*m_gbuffer, ctx, light, cam.view, cam.projection, cam.viewPos, cascadeForLighting,
-                    &m_scratchPointLights, &m_scratchSpotLights, m_sceneLightingBuffer);
-            };
-        if (name == "Transparency")
-            return [this, &view, &cam, ctx](const FGPassResources&) {
-                if (m_device && m_hdrRenderTarget)
-                    m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
-                if (ctx.cmd && m_hdrRenderTarget) {
-                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
-                    ctx.cmd->SetViewport(0, 0, m_width, m_height);
-                }
-                m_scratchTransparent.clear();
-                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-                TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
-            };
+            if (name == "Copy depth for occlusion")
+                return [this](const FGPassResources&) {
+                    if (m_prevFrameDepthRT && m_gbuffer && m_gbuffer->GetRenderTargetRHI())
+                        m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_prevFrameDepthRT);
+                    m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
+                };
+            if (name == "Lighting")
+                return [this](const FGPassResources&) {
+                    if (!m_currentFrameData) return;
+                    RenderContext c = RenderContext::FromDevice(m_device);
+                    const CameraView& camView = m_currentFrameData->camera;
+                    const LightParams& lightParams = m_currentFrameData->light;
+                    const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
+                    if (c.cmd && m_hdrRenderTarget)
+                        rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
+                    CascadeShadowMap* cascadeForLighting = lightParams.castShadows ? m_cascadeShadowMap.get() : nullptr;
+                    math::Mat4 lightSpaceMatrix(1.0f);
+                    if (cascadeForLighting && cascadeForLighting->GetSplitCount() > 0)
+                        lightSpaceMatrix = cascadeForLighting->GetLightSpaceMatrix(0);
+                    FillSceneLightingBuffer(m_sceneLightingBuffer, lightParams, camView.viewPos, lightSpaceMatrix, 0.005f,
+                        lightParams.castShadows, &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, cascadeForLighting);
+                    IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
+                    m_lightingPass->Render(*m_gbuffer, c, lightParams, camView.view, camView.projection, camView.viewPos, cascadeForLighting,
+                        &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, m_sceneLightingBuffer, iblPtr);
+                };
+            if (name == "Transparency")
+                return [this](const FGPassResources&) {
+                    if (!m_currentFrameData) return;
+                    RenderContext c = RenderContext::FromDevice(m_device);
+                    const CameraView& camView = m_currentFrameData->camera;
+                    if (m_device && m_hdrRenderTarget)
+                        m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
+                    if (c.cmd && m_hdrRenderTarget) {
+                        c.cmd->SetRenderTarget(m_hdrRenderTarget);
+                        c.cmd->SetViewport(0, 0, m_width, m_height);
+                    }
+                    TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
+                };
         return [](const FGPassResources&) {};
     };
-
     AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
-    AddSkyboxPassToFrameGraph(view, nameToHandle["HDR"], true);
+    AddSkyboxPassToFrameGraph(nameToHandle["HDR"], true);
+}
 
-    m_frameGraph->Compile(m_device);
+void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
+    if (!m_frameGraph || !m_gbuffer || !m_cascadeShadowMap || !m_gbufferPass || !m_shadowPass || !m_lightingPass) return;
+
+    m_currentView = &view;
+    PrepareFrameData(view);
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
+    m_currentFrameData = &m_frameData;
+
+    CompileFrameGraphIfNeeded(PipelineMode::Deferred, false);
     m_frameGraph->Execute(ctx);
 }
 
-void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view) {
-    if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
-    m_frameGraph->Clear();
-    m_frameGraph->SetFrameSize(m_width, m_height);
-
-    const CameraView cam = view.GetCamera();
-    const LightParams light = view.GetLight();
-
-    m_scratchPointLights.clear();
-    m_scratchSpotLights.clear();
-    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
-    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
-
+void RenderPipeline::BuildForwardGraph() {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_hdrRenderTarget) return;
     FGNameToHandle nameToHandle;
     rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
     nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
     nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_cascadeShadowMap->GetDepthTextureRHI(), m_cascadeShadowMap->GetResolution(), m_cascadeShadowMap->GetResolution());
 
-    RenderContext ctx = RenderContext::FromDevice(m_device);
-    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, cam);
-    const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
-
     FrameGraphRecipe recipe;
     if (m_gpuCullPass && m_gpuCullPass->IsSupported(m_device))
         recipe.push_back({ "GPU Cull", {}, {}, true });
-    if (light.castShadows)
-        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
     recipe.push_back({ "Forward Opaque", {}, { "HDR" }, true });
     recipe.push_back({ "Copy depth for occlusion", { "HDR" }, {}, true });
     recipe.push_back({ "Transparency", {}, { "HDR" }, true });
 
-    auto getExecutor = [this, &view, &cam, &light, ctx, clearFwd](const std::string& name) -> FrameGraph::ExecuteFunc {
+    auto getExecutor = [this](const std::string& name) -> FrameGraph::ExecuteFunc {
         if (name == "GPU Cull")
-            return [this, ctx](const FGPassResources&) { if (m_gpuCullPass) m_gpuCullPass->Execute(ctx); };
+            return [this](const FGPassResources&) { RenderContext c = RenderContext::FromDevice(m_device); if (m_gpuCullPass) m_gpuCullPass->Execute(c); };
         if (name == "Shadow")
-            return [this, &view, &light, &cam, ctx](const FGPassResources&) {
-                float aspect = (cam.projection[0][0] != 0.0f) ? (cam.projection[1][1] / cam.projection[0][0]) : 1.0f;
-                m_shadowPass->Render(*m_cascadeShadowMap, ctx.device, ctx.cmd,
-                    [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-                    light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane, aspect);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
             };
         if (name == "Forward Opaque")
-            return [this, &view, ctx, clearFwd](const FGPassResources&) {
-                if (ctx.cmd && m_hdrRenderTarget)
-                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
-                if (ctx.cmd) { ctx.cmd->SetDepthTest(true); ctx.cmd->SetCullFace(false); }
-                RenderForwardOpaque(ctx.cmd, view);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+                if (c.cmd && m_hdrRenderTarget)
+                    rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+                if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
+                RenderForwardOpaque(c.cmd, *m_currentFrameData);
             };
         if (name == "Copy depth for occlusion")
             return [this](const FGPassResources&) {
@@ -586,29 +767,97 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
                 m_havePrevDepth = (m_prevFrameDepthRT != nullptr);
             };
         if (name == "Transparency")
-            return [this, &view, &cam, ctx](const FGPassResources&) {
-                if (ctx.cmd && m_hdrRenderTarget) {
-                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
-                    ctx.cmd->SetViewport(0, 0, m_width, m_height);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                const CameraView& camView = m_currentFrameData->camera;
+                if (c.cmd && m_hdrRenderTarget) {
+                    c.cmd->SetRenderTarget(m_hdrRenderTarget);
+                    c.cmd->SetViewport(0, 0, m_width, m_height);
                 }
-                m_scratchTransparent.clear();
-                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-                TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
             };
         return [](const FGPassResources&) {};
     };
-
     AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
-    AddSkyboxPassToFrameGraph(view, nameToHandle["HDR"], false);
+    AddSkyboxPassToFrameGraph(nameToHandle["HDR"], false);
+}
 
-    m_frameGraph->Compile(m_device);
+void RenderPipeline::BuildForwardPlusGraph() {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_hdrRenderTarget) return;
+    FGNameToHandle nameToHandle;
+    rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
+    nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
+    nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_cascadeShadowMap->GetDepthTextureRHI(), m_cascadeShadowMap->GetResolution(), m_cascadeShadowMap->GetResolution());
+
+    FrameGraphRecipe recipe;
+    recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Forward+ Opaque", {}, { "HDR" }, true });
+    recipe.push_back({ "Transparency", {}, { "HDR" }, true });
+
+    auto getExecutor = [this](const std::string& name) -> FrameGraph::ExecuteFunc {
+        if (name == "Shadow")
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
+            };
+        if (name == "Forward+ Opaque")
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                PrepareForwardPlusFrame(c.cmd, *m_currentFrameData);
+                RenderForwardPlusOpaqueBatched(c.cmd, *m_currentFrameData);
+            };
+        if (name == "Transparency")
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                const CameraView& camView = m_currentFrameData->camera;
+                if (c.cmd && m_hdrRenderTarget) {
+                    c.cmd->SetRenderTarget(m_hdrRenderTarget);
+                    c.cmd->SetViewport(0, 0, m_width, m_height);
+                }
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
+            };
+        return [](const FGPassResources&) {};
+    };
+    AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
+    AddSkyboxPassToFrameGraph(nameToHandle["HDR"], false);
+}
+
+void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view) {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
+
+    m_currentView = &view;
+    PrepareFrameData(view);
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
+    m_currentFrameData = &m_frameData;
+
+    CompileFrameGraphIfNeeded(PipelineMode::Forward, false);
     m_frameGraph->Execute(ctx);
 }
 
-void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view) {
-    const CameraView cam = view.GetCamera();
-    const LightParams light = view.GetLight();
-    // Forward shaders (forward.frag, forward_skinned.frag) use scene lighting SSBO at 5, shadow at 6
+void RenderPipeline::BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView& view) {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget || !m_clusteredLightGrid) return;
+
+    m_currentView = &view;
+    PrepareFrameData(view);
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+    m_currentFrameData = &m_frameData;
+
+    CompileFrameGraphIfNeeded(PipelineMode::ForwardPlus, false);
+    m_frameGraph->Execute(ctx);
+}
+
+void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    const CameraView& cam = frameData.camera;
+    const LightParams& light = frameData.light;
+    IBL* iblPtr = EnsureIBLFromFrameData(frameData);
+    const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
+    if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+    // Forward shaders (forward.frag, forward_skinned.frag) use scene lighting SSBO at 5, shadow at 6, IBL at 11/12/13
     const int kShadowMapUnit = 6;
     const int kAlbedoTextureUnit = 0;
     const int kNormalTextureUnit = 1;
@@ -626,76 +875,77 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSc
     if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-        light.castShadows, &m_scratchPointLights, &m_scratchSpotLights, m_cascadeShadowMap.get());
+        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
     if (cmd && m_sceneLightingBuffer)
         cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
 
-    view.ForEachOpaqueDrawable([&](const Drawable& d) {
-        if (!d.mesh || !d.material) return;
-        if (d.materialInstance) {
-            d.materialInstance->Bind(m_device);
-        } else {
-            d.material->Bind(m_device);
-        }
-        Shader* sh = (d.materialInstance ? d.materialInstance->GetMaterial() : d.material)->GetShader().get();
-        if (!sh) return;
-        sh->SetMat4("u_Model", d.transform);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+    if (!m_shaderCache) { if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit); return; }
+    std::map<ShaderKey, std::vector<Drawable>> buckets;
+    for (const Drawable& d : frameData.visibleOpaque) {
+        if (!d.mesh || !d.material) continue;
+        const Material* baseMat = d.materialInstance ? d.materialInstance->GetMaterial().get() : d.material.get();
+        InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
+        ShaderKey key{ PipelineStage::Forward, it, baseMat->GetMaterialShaderId() };
+        buckets[key].push_back(d);
+    }
+    for (auto& [key, drawables] : buckets) {
+        const Material* matForCompile = drawables[0].materialInstance ? drawables[0].materialInstance->GetMaterial().get() : drawables[0].material.get();
+        auto shader = m_shaderCache->getOrCompile(m_device, key, matForCompile);
+        if (!shader || !shader->IsValid()) continue;
+        Shader* sh = shader.get();
+        sh->Bind(m_device);
         sh->SetMat4("u_View", cam.view);
         sh->SetMat4("u_Projection", cam.projection);
-        const math::Mat4* bonePtr = d.bones;
-        size_t boneCount = d.boneCount;
-        if ((!bonePtr || boneCount == 0) && d.materialInstance) {
-            d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
-                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
-            });
-        } else if (!bonePtr || boneCount == 0) {
-            d.material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
-                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
-            });
+        if (cmd) {
+            if (envProbe && envProbe->IsValid())
+                envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
+            else if (iblPtr && iblPtr->IsValid())
+                iblPtr->BindForLighting(cmd, 11, 12, 13);
+            sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
+        } else {
+            sh->SetInt("u_UseIBL", 0);
         }
-        if (bonePtr && boneCount > 0) {
-            boneCount = std::min(boneCount, kMaxBones);
-            sh->SetMat4Array("u_Bones", bonePtr, boneCount);
-        }
-
-        // Bind forward material textures with explicit slots and robust fallback flags.
-        auto getTex = [&](const std::string& name) -> std::shared_ptr<Texture2D> {
-            return d.materialInstance ? d.materialInstance->GetTexture(name) : d.material->GetTexture(name);
-        };
-        auto bindTexFlag = [&](const std::string& samplerName, const std::string& flagName,
-                               const std::shared_ptr<Texture2D>& tex, int unit) {
-            if (tex && tex->IsValid()) {
-                tex->Bind(unit);
-                sh->SetInt(samplerName, unit);
-                sh->SetInt(flagName, 1);
-            } else {
-                sh->SetInt(flagName, 0);
+        for (const Drawable& d : drawables) {
+            if (d.materialInstance)
+                d.materialInstance->ApplyToShader(m_device, sh, cmd);
+            else
+                d.material->ApplyToShader(m_device, sh, cmd);
+            sh->SetMat4("u_Model", d.transform);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+            const math::Mat4* bonePtr = d.bones;
+            size_t boneCount = d.boneCount;
+            if ((!bonePtr || boneCount == 0) && d.materialInstance) {
+                d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                    if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+                });
+            } else if (!bonePtr || boneCount == 0) {
+                d.material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                    if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+                });
             }
-        };
-
-        bindTexFlag("u_AlbedoTexture", "u_UseAlbedoTexture", getTex("u_AlbedoTexture"), kAlbedoTextureUnit);
-        bindTexFlag("u_NormalTexture", "u_UseNormalTexture", getTex("u_NormalTexture"), kNormalTextureUnit);
-        bindTexFlag("u_MetallicRoughnessTexture", "u_UseMetallicRoughnessTexture", getTex("u_MetallicRoughnessTexture"), kMetallicRoughnessTextureUnit);
-        bindTexFlag("u_MetallicTexture", "u_UseMetallicTexture", getTex("u_MetallicTexture"), kMetallicTextureUnit);
-        bindTexFlag("u_RoughnessTexture", "u_UseRoughnessTexture", getTex("u_RoughnessTexture"), kRoughnessTextureUnit);
-        bindTexFlag("u_AOTexture", "u_UseAOTexture", getTex("u_AOTexture"), kAOTextureUnit);
-        bindTexFlag("u_EmissiveTexture", "u_UseEmissiveTexture", getTex("u_EmissiveTexture"), kEmissiveTextureUnit);
-
-        d.mesh->Bind(m_device);
-        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
-        d.mesh->Unbind();
+            if (bonePtr && boneCount > 0) {
+                boneCount = std::min(boneCount, kMaxBones);
+                sh->SetMat4Array("u_Bones", bonePtr, boneCount);
+            }
+            d.mesh->Bind(m_device);
+            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
+            d.mesh->Unbind();
+        }
         sh->Unbind();
-    });
+    }
 
     if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
 }
 
-void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
+void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& leftCam, const CameraView& rightCam) {
     EnsureStereoForwardShader();
     if (!m_stereoForwardShader || !m_stereoForwardShader->IsValid()) return;
+    math::Frustum leftFrustum;
+    math::Frustum rightFrustum;
+    leftFrustum.FromMatrix(leftCam.projection * leftCam.view);
+    rightFrustum.FromMatrix(rightCam.projection * rightCam.view);
 
-    const LightParams light = view.GetLight();
+    const LightParams& light = frameData.light;
     const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
     const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
     if (useShadows && cmd) {
@@ -711,16 +961,22 @@ void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRe
 
     const int kMaxPointLights = 8;
     const int kMaxSpotLights = 4;
-    const int numPoint = static_cast<int>(std::min(m_scratchPointLights.size(), size_t(kMaxPointLights)));
-    const int numSpot = static_cast<int>(std::min(m_scratchSpotLights.size(), size_t(kMaxSpotLights)));
+    const int numPoint = static_cast<int>(std::min(frameData.pointLights.size(), size_t(kMaxPointLights)));
+    const int numSpot = static_cast<int>(std::min(frameData.spotLights.size(), size_t(kMaxSpotLights)));
 
     math::Mat4 viewArr[2] = { leftCam.view, rightCam.view };
     math::Mat4 projArr[2] = { leftCam.projection, rightCam.projection };
 
-    view.ForEachOpaqueDrawable([&](const Drawable& d) {
-        if (!d.mesh || !d.material) return;
+    FillSceneLightingBuffer(m_sceneLightingBuffer, light, leftCam.viewPos, m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0 ? m_cascadeShadowMap->GetLightSpaceMatrix(0) : math::Mat4(1.0f), 0.005f,
+        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
+    if (cmd && m_sceneLightingBuffer)
+        cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
+
+    for (const Drawable& d : frameData.allOpaque) {
+        if (!d.mesh || !d.material) continue;
+        if (!IsForwardDrawableVisible(d, leftFrustum) && !IsForwardDrawableVisible(d, rightFrustum)) continue;
         Material* mat = (d.materialInstance ? d.materialInstance->GetMaterial().get() : d.material.get());
-        if (!mat) return;
+        if (!mat) continue;
 
         m_stereoForwardShader->Bind(m_device);
         Shader* sh = m_stereoForwardShader.get();
@@ -749,7 +1005,7 @@ void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRe
         sh->SetFloat("u_Alpha", mat->GetAlpha());
         sh->SetInt("u_PointLightCount", numPoint);
         for (int i = 0; i < numPoint; ++i) {
-            const auto& p = m_scratchPointLights[static_cast<size_t>(i)];
+            const auto& p = frameData.pointLights[static_cast<size_t>(i)];
             sh->SetVec3("u_PointLightPos[" + std::to_string(i) + "]", p.position);
             sh->SetVec3("u_PointLightColor[" + std::to_string(i) + "]", p.color);
             sh->SetFloat("u_PointLightIntensity[" + std::to_string(i) + "]", p.intensity);
@@ -757,7 +1013,7 @@ void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRe
         }
         sh->SetInt("u_SpotLightCount", numSpot);
         for (int i = 0; i < numSpot; ++i) {
-            const auto& s = m_scratchSpotLights[static_cast<size_t>(i)];
+            const auto& s = frameData.spotLights[static_cast<size_t>(i)];
             sh->SetVec3("u_SpotLightPos[" + std::to_string(i) + "]", s.position);
             sh->SetVec3("u_SpotLightDir[" + std::to_string(i) + "]", s.direction);
             sh->SetVec3("u_SpotLightColor[" + std::to_string(i) + "]", s.color);
@@ -770,93 +1026,93 @@ void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRe
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.DrawInstanced(m_device, -1, 2); }
         d.mesh->Unbind();
         m_stereoForwardShader->Unbind();
-    });
+    }
 
     if (useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
 }
 
-void RenderPipeline::BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
-    if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
-    m_frameGraph->Clear();
-    m_frameGraph->SetFrameSize(m_width, m_height);
-
-    const LightParams light = view.GetLight();
-    m_scratchPointLights.clear();
-    m_scratchSpotLights.clear();
-    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
-    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
-
+void RenderPipeline::BuildForwardStereoGraph() {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_hdrRenderTarget) return;
     FGNameToHandle nameToHandle;
     rhi::ITexture* hdrColorTex = m_hdrRenderTarget ? m_hdrRenderTarget->GetColorTexture(0) : nullptr;
     nameToHandle["HDR"] = m_frameGraph->ImportTextureRHI("HDR", hdrColorTex, m_width, m_height);
     nameToHandle["Shadow"] = m_frameGraph->ImportTextureRHI("Shadow", m_cascadeShadowMap->GetDepthTextureRHI(), m_cascadeShadowMap->GetResolution(), m_cascadeShadowMap->GetResolution());
 
-    RenderContext ctx = RenderContext::FromDevice(m_device);
-    const uint32_t gpuCullDrawListCount = PrepareGpuCullFromView(view, leftCam);
-    const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
-
     FrameGraphRecipe recipe;
-    if (light.castShadows)
-        recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
     recipe.push_back({ "Forward Opaque", {}, { "HDR" }, true });
     recipe.push_back({ "Transparency", {}, { "HDR" }, true });
 
-    auto getExecutor = [this, &view, &leftCam, &rightCam, &light, ctx, clearFwd](const std::string& name) -> FrameGraph::ExecuteFunc {
+    auto getExecutor = [this](const std::string& name) -> FrameGraph::ExecuteFunc {
         if (name == "Shadow")
-            return [this, &view, &light, &leftCam, ctx](const FGPassResources&) {
-                float aspect = (leftCam.projection[0][0] != 0.0f) ? (leftCam.projection[1][1] / leftCam.projection[0][0]) : 1.0f;
-                m_shadowPass->Render(*m_cascadeShadowMap, ctx.device, ctx.cmd,
-                    [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-                    light.direction, leftCam.view, leftCam.projection, leftCam.viewPos, leftCam.nearPlane, leftCam.farPlane, aspect);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentLeftCam);
             };
         if (name == "Forward Opaque")
-            return [this, &view, &leftCam, &rightCam, ctx, clearFwd](const FGPassResources&) {
-                if (ctx.cmd && m_hdrRenderTarget)
-                    rhi::ClearAndSetRenderTargetWithViewport(ctx.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
-                if (ctx.cmd) { ctx.cmd->SetDepthTest(true); ctx.cmd->SetCullFace(false); }
-                RenderForwardOpaqueStereo(ctx.cmd, view, leftCam, rightCam);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+                if (c.cmd && m_hdrRenderTarget)
+                    rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+                if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
+                RenderForwardOpaqueStereo(c.cmd, *m_currentFrameData, m_currentLeftCam, m_currentRightCam);
             };
         if (name == "Transparency")
-            return [this, &view, &leftCam, &rightCam, ctx](const FGPassResources&) {
-                if (ctx.cmd && m_hdrRenderTarget) {
-                    ctx.cmd->SetRenderTarget(m_hdrRenderTarget);
+            return [this](const FGPassResources&) {
+                if (!m_currentFrameData) return;
+                RenderContext c = RenderContext::FromDevice(m_device);
+                if (c.cmd && m_hdrRenderTarget) {
+                    c.cmd->SetRenderTarget(m_hdrRenderTarget);
                     const uint32_t halfW = m_width / 2;
-                    ctx.cmd->SetViewport(0, 0, halfW, m_height);
+                    c.cmd->SetViewport(0, 0, halfW, m_height);
                 }
-                m_scratchTransparent.clear();
-                view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-                TransparencyPass::Render(ctx, m_scratchTransparent, leftCam.view, leftCam.projection, leftCam.viewPos);
-                if (ctx.cmd && m_hdrRenderTarget) {
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentLeftCam.view, m_currentLeftCam.projection, m_currentLeftCam.viewPos, m_shaderCache.get());
+                if (c.cmd && m_hdrRenderTarget) {
                     const uint32_t halfW = m_width / 2;
-                    ctx.cmd->SetViewport(halfW, 0, halfW, m_height);
+                    c.cmd->SetViewport(halfW, 0, halfW, m_height);
                 }
-                TransparencyPass::Render(ctx, m_scratchTransparent, rightCam.view, rightCam.projection, rightCam.viewPos);
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentRightCam.view, m_currentRightCam.projection, m_currentRightCam.viewPos, m_shaderCache.get());
             };
         return [](const FGPassResources&) {};
     };
-
     AddPassesFromRecipe(*m_frameGraph, recipe, nameToHandle, getExecutor);
-    {
-        auto skybox = view.GetSkybox();
-        m_frameGraph->AddPass("SkyboxLeft", [this, skybox, &view, &leftCam](const FGPassResources&) {
-            rhi::ICommandList* cmd = GetRHICommandList();
-            if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(0, 0, m_width / 2, m_height); }
-            if (skybox && skybox->IsValid())
-                RenderSkyboxImpl(leftCam, skybox, false);
-            else
-                RenderProceduralSkyboxImpl(leftCam, false);
-        }, {}, { nameToHandle["HDR"] }, true);
-        m_frameGraph->AddPass("SkyboxRight", [this, skybox, &view, &rightCam](const FGPassResources&) {
-            rhi::ICommandList* cmd = GetRHICommandList();
-            if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(m_width / 2, 0, m_width / 2, m_height); }
-            if (skybox && skybox->IsValid())
-                RenderSkyboxImpl(rightCam, skybox, false);
-            else
-                RenderProceduralSkyboxImpl(rightCam, false);
-        }, {}, { nameToHandle["HDR"] }, true);
-    }
+    m_frameGraph->AddPass("SkyboxLeft", [this](const FGPassResources&) {
+        if (!m_currentFrameData) return;
+        rhi::ICommandList* cmd = GetRHICommandList();
+        if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(0, 0, m_width / 2, m_height); }
+        auto skybox = m_currentFrameData->skybox;
+        if (skybox && skybox->IsValid())
+            RenderSkyboxImpl(m_currentLeftCam, skybox, false);
+        else
+            RenderProceduralSkyboxImpl(m_currentLeftCam, false);
+    }, {}, { nameToHandle["HDR"] }, true);
+    m_frameGraph->AddPass("SkyboxRight", [this](const FGPassResources&) {
+        if (!m_currentFrameData) return;
+        rhi::ICommandList* cmd = GetRHICommandList();
+        if (cmd && m_hdrRenderTarget) { cmd->SetRenderTarget(m_hdrRenderTarget); cmd->SetViewport(m_width / 2, 0, m_width / 2, m_height); }
+        auto skybox = m_currentFrameData->skybox;
+        if (skybox && skybox->IsValid())
+            RenderSkyboxImpl(m_currentRightCam, skybox, false);
+        else
+            RenderProceduralSkyboxImpl(m_currentRightCam, false);
+    }, {}, { nameToHandle["HDR"] }, true);
+}
 
-    m_frameGraph->Compile(m_device);
+void RenderPipeline::BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam) {
+    if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
+
+    m_currentView = &view;
+    m_currentLeftCam = leftCam;
+    m_currentRightCam = rightCam;
+    PrepareFrameData(view);
+    m_currentFrameData = &m_frameData;
+
+    RenderContext ctx = RenderContext::FromDevice(m_device);
+
+    CompileFrameGraphIfNeeded(PipelineMode::Forward, true);
     m_frameGraph->Execute(ctx);
 }
 
@@ -871,7 +1127,7 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
     m_rendering = true;
 #endif
     cmd->Begin();
-    if (m_device) m_device->Finish();
+    // Intentionally do not force GPU sync here; explicit sync is handled by Finish()/fences when needed.
 
     BuildAndExecuteForwardFrameGraphStereo(view, leftCam, rightCam);
 
@@ -889,6 +1145,15 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
     }
 
     if (m_postProcessor) {
+        RenderFrameData probeFrameData;
+        probeFrameData.skybox = view.GetSkybox();
+        IBL* ibl = EnsureIBLFromFrameData(probeFrameData);
+        if (ibl && ibl->IsValid())
+            m_reflectionProbeManager->SetGlobalProbeFromPrefiltered(ibl->GetPrefilterTextureRHI(), ibl->GetIrradianceTextureRHI());
+        rhi::ITexture* probeTex = nullptr;
+        const ReflectionProbe* probe = m_reflectionProbeManager->FindClosestProbe(cam.viewPos);
+        if (!probe) probe = m_reflectionProbeManager->GetGlobalProbe();
+        if (probe && probe->IsValid()) probeTex = probe->GetCubemapTexture();
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);
@@ -898,7 +1163,7 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
         rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
         settings.ssrNearPlane = cam.nearPlane;
         settings.ssrFarPlane = cam.farPlane;
-        m_postProcessor->ApplyPostProcessing(hdrTex, *m_gbuffer, settings, cam.view, cam.projection, invView, invProj, cam.viewPos, skyboxTex, time);
+        m_postProcessor->ApplyPostProcessing(hdrTex, *m_gbuffer, settings, cam.view, cam.projection, invView, invProj, cam.viewPos, skyboxTex, time, probeTex);
     }
 
     m_prevView = cam.view;
@@ -912,6 +1177,7 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
 void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     m_frameGraph->Clear();
     m_frameGraph->SetFrameSize(m_width, m_height);
+    PrepareFrameData(view);
     rhi::ICommandList* cmd = GetRHICommandList();
     if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
@@ -919,47 +1185,29 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
-    m_scratchPointLights.clear();
-    m_scratchSpotLights.clear();
-    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
-    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
+    RenderForwardOpaque(cmd, m_frameData);
 
-    RenderForwardOpaque(cmd, view);
-
-    const CameraView cam = view.GetCamera();
-    m_scratchTransparent.clear();
-    view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
+    const CameraView& cam = m_frameData.camera;
     RenderContext ctx = RenderContext::FromDevice(m_device);
-    TransparencyPass::Render(ctx, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
+    TransparencyPass::Render(ctx, m_frameData.visibleTransparent, cam.view, cam.projection, cam.viewPos, m_shaderCache.get());
     if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
-void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
-    if (!m_clusteredLightGrid) {
-        RenderForward(view);
-        return;
-    }
+void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    const CameraView& cam = frameData.camera;
+    const LightParams& light = frameData.light;
+    const std::vector<PointLight>& pointLights = frameData.pointLights;
+    const std::vector<SpotLight>& spotLights = frameData.spotLights;
 
-    const CameraView cam = view.GetCamera();
-    const LightParams light = view.GetLight();
-
-    m_scratchPointLights.clear();
-    m_scratchSpotLights.clear();
-    view.ForEachPointLight([this](const PointLight& p) { m_scratchPointLights.push_back(p); });
-    view.ForEachSpotLight([this](const SpotLight& s) { m_scratchSpotLights.push_back(s); });
-
-    // Reinitialize clustered grid if camera planes changed
     if (m_clusteredLightGrid->GetNearPlane() != cam.nearPlane ||
         m_clusteredLightGrid->GetFarPlane() != cam.farPlane) {
         m_clusteredLightGrid->Initialize(m_width, m_height, cam.nearPlane, cam.farPlane);
     }
 
-    // Upload lights to SSBOs (RHI)
-    rhi::ICommandList* cmdFwd = GetRHICommandList();
     const size_t kMaxPointLights = 256;
     const size_t kMaxSpotLights = 64;
     const size_t kMaxLightIndices = 4 * 1024 * 1024;
-    if (!m_scratchPointLights.empty() && m_device) {
+    if (!pointLights.empty() && m_device) {
         if (!m_pointLightBuffer) {
             rhi::BufferDesc bd;
             bd.sizeInBytes = kMaxPointLights * sizeof(PointLight);
@@ -968,11 +1216,11 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
             m_pointLightBuffer = m_device->CreateBuffer(bd, nullptr);
         }
         if (m_pointLightBuffer) {
-            const size_t sz = m_scratchPointLights.size() * sizeof(PointLight);
-            m_pointLightBuffer->Update(m_scratchPointLights.data(), 0, sz);
+            const size_t sz = pointLights.size() * sizeof(PointLight);
+            m_pointLightBuffer->Update(pointLights.data(), 0, sz);
         }
     }
-    if (!m_scratchSpotLights.empty() && m_device) {
+    if (!spotLights.empty() && m_device) {
         if (!m_spotLightBuffer) {
             rhi::BufferDesc bd;
             bd.sizeInBytes = kMaxSpotLights * sizeof(SpotLight);
@@ -981,8 +1229,8 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
             m_spotLightBuffer = m_device->CreateBuffer(bd, nullptr);
         }
         if (m_spotLightBuffer) {
-            const size_t sz = m_scratchSpotLights.size() * sizeof(SpotLight);
-            m_spotLightBuffer->Update(m_scratchSpotLights.data(), 0, sz);
+            const size_t sz = spotLights.size() * sizeof(SpotLight);
+            m_spotLightBuffer->Update(spotLights.data(), 0, sz);
         }
     }
     if (m_device && !m_lightIndexBuffer) {
@@ -993,10 +1241,9 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
     }
 
-    // Light grid: GPU compute cull (when supported) or CPU fallback
     if (m_lightCullPass && m_lightCullPass->IsSupported(m_device) && m_lightIndexBuffer) {
-        m_lightCullPass->SetPointLights(m_pointLightBuffer, static_cast<uint32_t>(m_scratchPointLights.size()));
-        m_lightCullPass->SetSpotLights(m_spotLightBuffer, static_cast<uint32_t>(m_scratchSpotLights.size()));
+        m_lightCullPass->SetPointLights(m_pointLightBuffer, static_cast<uint32_t>(pointLights.size()));
+        m_lightCullPass->SetSpotLights(m_spotLightBuffer, static_cast<uint32_t>(spotLights.size()));
         m_lightCullPass->SetOutputBuffer(m_lightIndexBuffer);
         m_lightCullPass->SetViewProj(&cam.view[0][0], &cam.projection[0][0]);
         m_lightCullPass->SetParams(
@@ -1011,57 +1258,41 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         RenderContext lightCullCtx = RenderContext::FromDevice(m_device);
         m_lightCullPass->Execute(lightCullCtx);
     } else {
-        m_clusteredLightGrid->BuildLightGrid(m_scratchPointLights, m_scratchSpotLights,
+        m_clusteredLightGrid->BuildLightGrid(pointLights, spotLights,
                                              cam.view, cam.projection, cam.viewPos);
         m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
     }
-    if (cmdFwd && m_lightIndexBuffer) cmdFwd->BindStorageBuffer(m_lightIndexBuffer, 2);
+    if (cmd && m_lightIndexBuffer) cmd->BindStorageBuffer(m_lightIndexBuffer, 2);
 
-    if (light.castShadows && m_cascadeShadowMap && m_shadowPass) {
-        RenderContext ctx = RenderContext::FromDevice(m_device);
-        float aspect = (cam.projection[0][0] != 0.0f) ? (cam.projection[1][1] / cam.projection[0][0]) : 1.0f;
-        m_shadowPass->Render(*m_cascadeShadowMap, ctx.device, ctx.cmd,
-            [&view](std::function<void(const Drawable&)> c) { view.ForEachOpaqueDrawable(c); },
-            light.direction, cam.view, cam.projection, cam.viewPos, cam.nearPlane, cam.farPlane, aspect);
-    }
-
-    // Ensure forward+ shader exists (backend-owned loading by logical name)
-    if (!m_forwardPlusShader || !m_forwardPlusShader->IsValid()) {
-        m_forwardPlusShader = std::make_shared<Shader>();
-        if (m_device)
-            m_forwardPlusShader->Load(m_device, "passes/forward/forwardplus", Mesh::GetVertexLayoutRHI());
-    }
-
-    if (!m_forwardPlusShader->IsValid()) {
-        RenderForward(view);
-        return;
-    }
-
-    if (!m_forwardPlusSkinnedShader || !m_forwardPlusSkinnedShader->IsValid()) {
-        m_forwardPlusSkinnedShader = std::make_shared<Shader>();
-        if (m_device)
-            m_forwardPlusSkinnedShader->Load(m_device, "passes/forward/forwardplus_skinned", Mesh::GetVertexLayoutRHI());
-    }
-
-    if (cmdFwd && m_hdrRenderTarget) {
+    if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        rhi::ClearAndSetRenderTargetWithViewport(cmdFwd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
+        rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
-    if (cmdFwd) { cmdFwd->SetDepthTest(true); cmdFwd->SetCullFace(false); }
+    if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
     const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
-    if (light.castShadows && m_cascadeShadowMap && cmdFwd) {
+    if (light.castShadows && m_cascadeShadowMap && cmd) {
         rhi::ITexture* shadowTex = m_cascadeShadowMap->GetDepthTextureRHI();
-        if (shadowTex) cmdFwd->BindTexture(shadowTex, kShadowMapUnit);
+        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
     }
     math::Mat4 lightSpaceMatrix(1.0f);
     if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-        light.castShadows, &m_scratchPointLights, &m_scratchSpotLights, m_cascadeShadowMap.get());
-    if (cmdFwd && m_sceneLightingBuffer)
-        cmdFwd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
+        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
+    if (cmd && m_sceneLightingBuffer)
+        cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
+}
 
+void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    const CameraView& cam = frameData.camera;
+    const LightParams& light = frameData.light;
+    const std::vector<PointLight>& pointLights = frameData.pointLights;
+    const std::vector<SpotLight>& spotLights = frameData.spotLights;
+
+    if (!m_shaderCache) return;
+
+    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
     auto setCommonForwardPlusUniforms = [&](Shader* sh) {
         sh->SetMat4("u_View", cam.view);
         sh->SetMat4("u_Projection", cam.projection);
@@ -1074,25 +1305,31 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         sh->SetFloat("u_LogFar", m_clusteredLightGrid->GetLogFar());
         sh->SetFloat("u_NearPlane", m_clusteredLightGrid->GetNearPlane());
         sh->SetFloat("u_FarPlane", m_clusteredLightGrid->GetFarPlane());
-        sh->SetInt("u_PointLightCount", static_cast<int>(m_scratchPointLights.size()));
-        sh->SetInt("u_SpotLightCount", static_cast<int>(m_scratchSpotLights.size()));
+        sh->SetInt("u_PointLightCount", static_cast<int>(pointLights.size()));
+        sh->SetInt("u_SpotLightCount", static_cast<int>(spotLights.size()));
         sh->SetInt("u_ShadowMap", kShadowMapUnit);
     };
 
+    IBL* iblPtr = EnsureIBLFromFrameData(frameData);
+    const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
+    if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
     const int kAlbedoTextureUnit = 0;
     const int kNormalTextureUnit = 1;
     const int kMetallicRoughnessTextureUnit = 2;
     const int kAOTextureUnit = 3;
     const int kEmissiveTextureUnit = 4;
     const math::Vec4 kDefaultUVTransform(0.0f, 0.0f, 1.0f, 1.0f);
-    bool commonSetNonSkinned = false;
-    bool commonSetSkinned = false;
+    constexpr uint32_t kForwardPlusInstanceBinding = 6u;
 
-    view.ForEachOpaqueDrawable([&](const Drawable& d) {
-        if (!d.mesh) return;
+    auto drawOneForwardPlus = [&](Shader* sh, const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-        if (!material) return;
-
+        if (!d.mesh || !material) return;
+        if (d.materialInstance)
+            d.materialInstance->ApplyToShader(m_device, sh, cmd);
+        else
+            d.material->ApplyToShader(m_device, sh, cmd);
+        sh->SetMat4("u_Model", d.transform);
+        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
         const math::Mat4* bonePtr = d.bones;
         size_t boneCount = d.boneCount;
         auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
@@ -1100,100 +1337,76 @@ void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
         };
         if ((!bonePtr || boneCount == 0) && d.materialInstance) d.materialInstance->ForEachMat4Array(collectBones);
         else if (!bonePtr || boneCount == 0) material->ForEachMat4Array(collectBones);
-
-        const bool useSkinned = (bonePtr && boneCount > 0 && m_forwardPlusSkinnedShader && m_forwardPlusSkinnedShader->IsValid());
-        Shader* sh = useSkinned ? m_forwardPlusSkinnedShader.get() : m_forwardPlusShader.get();
-        sh->Bind(m_device);
-
-        if (useSkinned) {
-            if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; }
-        } else {
-            if (!commonSetNonSkinned) { setCommonForwardPlusUniforms(sh); commonSetNonSkinned = true; }
-        }
-
-        sh->SetMat4("u_Model", d.transform);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
-        if (useSkinned) {
+        if (bonePtr && boneCount > 0) {
             boneCount = std::min(boneCount, kMaxBones);
             sh->SetMat4Array("u_Bones", bonePtr, boneCount);
         }
-
-        const math::Vec4 uvTransform = d.materialInstance ? d.materialInstance->GetVec4("u_UVTransform", kDefaultUVTransform) : material->GetVec4("u_UVTransform", kDefaultUVTransform);
-        const float uvRotation = d.materialInstance ? d.materialInstance->GetFloat("u_UVRotation", 0.0f) : material->GetFloat("u_UVRotation", 0.0f);
-        const float texCoordIndex = d.materialInstance ? d.materialInstance->GetFloat("u_TexCoordIndex", 0.0f) : material->GetFloat("u_TexCoordIndex", 0.0f);
-        const float flipV = d.materialInstance ? d.materialInstance->GetFloat("u_FlipV", 0.0f) : material->GetFloat("u_FlipV", 0.0f);
-        sh->SetVec4("u_UVTransform", uvTransform);
-        sh->SetFloat("u_UVRotation", uvRotation);
-        sh->SetFloat("u_TexCoordIndex", texCoordIndex);
-        sh->SetFloat("u_FlipV", flipV);
-
-        const math::Vec3 albedo = d.materialInstance ? d.materialInstance->GetAlbedo() : material->GetAlbedo();
-        const float metallic = d.materialInstance ? d.materialInstance->GetMetallic() : material->GetMetallic();
-        const float roughness = d.materialInstance ? d.materialInstance->GetRoughness() : material->GetRoughness();
-        const float ao = d.materialInstance ? d.materialInstance->GetAO() : material->GetAO();
-        const math::Vec3 emission = d.materialInstance ? d.materialInstance->GetEmission() : material->GetEmission();
-        const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
-        sh->SetVec3("u_Albedo", albedo);
-        sh->SetFloat("u_Metallic", metallic);
-        sh->SetFloat("u_Roughness", roughness);
-        sh->SetFloat("u_AO", ao);
-        sh->SetVec3("u_Emission", emission);
-        sh->SetFloat("u_Alpha", alpha);
-
-        auto albedoTex = d.materialInstance ? d.materialInstance->GetTexture("u_AlbedoTexture") : material->GetTexture("u_AlbedoTexture");
-        if (albedoTex && albedoTex->IsValid()) {
-            albedoTex->Bind(kAlbedoTextureUnit);
-            sh->SetInt("u_AlbedoTexture", kAlbedoTextureUnit);
-            sh->SetInt("u_UseAlbedoTexture", 1);
-        } else {
-            sh->SetInt("u_UseAlbedoTexture", 0);
-        }
-        auto normalTex = d.materialInstance ? d.materialInstance->GetTexture("u_NormalTexture") : material->GetTexture("u_NormalTexture");
-        if (normalTex && normalTex->IsValid()) {
-            normalTex->Bind(kNormalTextureUnit);
-            sh->SetInt("u_NormalTexture", kNormalTextureUnit);
-            sh->SetInt("u_UseNormalTexture", 1);
-        } else {
-            sh->SetInt("u_UseNormalTexture", 0);
-        }
-        auto mrTex = d.materialInstance ? d.materialInstance->GetTexture("u_MetallicRoughnessTexture") : material->GetTexture("u_MetallicRoughnessTexture");
-        if (mrTex && mrTex->IsValid()) {
-            mrTex->Bind(kMetallicRoughnessTextureUnit);
-            sh->SetInt("u_MetallicRoughnessTexture", kMetallicRoughnessTextureUnit);
-            sh->SetInt("u_UseMetallicRoughnessTexture", 1);
-        } else {
-            sh->SetInt("u_UseMetallicRoughnessTexture", 0);
-        }
-        auto aoTex = d.materialInstance ? d.materialInstance->GetTexture("u_AOTexture") : material->GetTexture("u_AOTexture");
-        if (aoTex && aoTex->IsValid()) {
-            aoTex->Bind(kAOTextureUnit);
-            sh->SetInt("u_AOTexture", kAOTextureUnit);
-            sh->SetInt("u_UseAOTexture", 1);
-        } else {
-            sh->SetInt("u_UseAOTexture", 0);
-        }
-        auto emissiveTex = d.materialInstance ? d.materialInstance->GetTexture("u_EmissiveTexture") : material->GetTexture("u_EmissiveTexture");
-        if (emissiveTex && emissiveTex->IsValid()) {
-            emissiveTex->Bind(kEmissiveTextureUnit);
-            sh->SetInt("u_EmissiveTexture", kEmissiveTextureUnit);
-            sh->SetInt("u_UseEmissiveTexture", 1);
-        } else {
-            sh->SetInt("u_UseEmissiveTexture", 0);
-        }
-
         d.mesh->Bind(m_device);
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
         d.mesh->Unbind();
-    });
+    };
 
-    m_forwardPlusShader->Unbind();
-    if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Unbind();
-    if (light.castShadows && m_cascadeShadowMap && cmdFwd) cmdFwd->UnbindTexture(kShadowMapUnit);
-    m_scratchTransparent.clear();
-    view.ForEachTransparentDrawable([this](const Drawable& d) { m_scratchTransparent.push_back(d); });
-    RenderContext ctxFwd = RenderContext::FromDevice(m_device);
-    TransparencyPass::Render(ctxFwd, m_scratchTransparent, cam.view, cam.projection, cam.viewPos);
-    if (cmdFwd) { cmdFwd->SetCullFace(true); cmdFwd->SetRenderTarget(nullptr); }
+    std::vector<DrawBatch> batches = BuildBatches(frameData.visibleOpaque);
+    bool commonSetInstanced = false;
+    bool commonSetNonSkinned = false;
+    bool commonSetSkinned = false;
+
+    for (DrawBatch& batch : batches) {
+        if (batch.IsInstanced() && m_instanceMatrixBuffer && batch.transforms.size() <= kMaxInstanceBatchSize && batch.material) {
+            ShaderKey key{ PipelineStage::ForwardPlus, InstanceType::Instanced, batch.material->GetMaterialShaderId() };
+            auto shader = m_shaderCache->getOrCompile(m_device, key, batch.material.get());
+            if (shader && shader->IsValid()) {
+                Shader* sh = shader.get();
+                sh->Bind(m_device);
+                if (!commonSetInstanced) { setCommonForwardPlusUniforms(sh); commonSetInstanced = true; }
+                if (cmd) {
+                    if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
+                    else if (iblPtr && iblPtr->IsValid()) iblPtr->BindForLighting(cmd, 11, 12, 13);
+                    sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
+                } else { sh->SetInt("u_UseIBL", 0); }
+                if (batch.materialInstance)
+                    batch.materialInstance->ApplyToShader(m_device, sh, cmd);
+                else
+                    batch.material->ApplyToShader(m_device, sh, cmd);
+                const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
+                m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
+                if (cmd) cmd->BindStorageBuffer(m_instanceMatrixBuffer, kForwardPlusInstanceBinding, 0, static_cast<uint32_t>(batch.transforms.size() * 64u));
+                batch.mesh->Bind(m_device);
+                { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.DrawInstanced(m_device, batch.submeshIndex, static_cast<uint32_t>(batch.transforms.size())); }
+                batch.mesh->Unbind();
+                sh->Unbind();
+            }
+        } else {
+            for (size_t i = 0; i < batch.transforms.size(); ++i) {
+                Drawable single = batch.ToDrawable(i);
+                const bool useSkinned = (single.bones != nullptr && single.boneCount > 0);
+                const Material* baseMat = single.materialInstance ? single.materialInstance->GetMaterial().get() : single.material.get();
+                if (!baseMat) continue;
+                ShaderKey key{ PipelineStage::ForwardPlus, useSkinned ? InstanceType::Skinned : InstanceType::Static, baseMat->GetMaterialShaderId() };
+                auto shader = m_shaderCache->getOrCompile(m_device, key, baseMat);
+                if (!shader || !shader->IsValid()) continue;
+                Shader* sh = shader.get();
+                sh->Bind(m_device);
+                if (useSkinned) { if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; } } else { if (!commonSetNonSkinned) { setCommonForwardPlusUniforms(sh); commonSetNonSkinned = true; } }
+                if (cmd) {
+                    if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
+                    else if (iblPtr && iblPtr->IsValid()) iblPtr->BindForLighting(cmd, 11, 12, 13);
+                    sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
+                } else { sh->SetInt("u_UseIBL", 0); }
+                drawOneForwardPlus(sh, single);
+                sh->Unbind();
+            }
+        }
+    }
+    if (light.castShadows && m_cascadeShadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
+}
+
+void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
+    if (!m_clusteredLightGrid) {
+        RenderForward(view);
+        return;
+    }
+    BuildAndExecuteForwardPlusFrameGraph(view);
 }
 
 void RenderPipeline::Render(const RenderScene& scene) {
@@ -1212,10 +1425,10 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
     m_rendering = true;
 #endif
     cmd->Begin();
-    // STEP — Prove async GL 1282: flush so any pending error from previous frame is reported here.
-    if (m_device) m_device->Finish();
+    // Intentionally do not force GPU sync here; explicit sync is handled by Finish()/fences when needed.
 
     const CameraView cam = view.GetCamera();
+    // Single path: all modes go through frame graph (Deferred/Forward/ForwardPlus use BuildAndExecute*FrameGraph).
     switch (m_mode) {
     case PipelineMode::Deferred:
         BuildAndExecuteFrameGraph(view);
@@ -1224,7 +1437,10 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         BuildAndExecuteForwardFrameGraph(view);
         break;
     case PipelineMode::ForwardPlus:
-        RenderForwardPlus(view);
+        if (m_clusteredLightGrid)
+            BuildAndExecuteForwardPlusFrameGraph(view);
+        else
+            RenderForward(view);
         break;
     }
 
@@ -1266,6 +1482,13 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
 
     // Post runs exactly once, after all scene and debug passes. One path for all modes.
     if (m_postProcessor) {
+        IBL* ibl = EnsureIBLFromFrameData(m_frameData);
+        if (ibl && ibl->IsValid())
+            m_reflectionProbeManager->SetGlobalProbeFromPrefiltered(ibl->GetPrefilterTextureRHI(), ibl->GetIrradianceTextureRHI());
+        rhi::ITexture* probeTex = nullptr;
+        const ReflectionProbe* probe = m_reflectionProbeManager->FindClosestProbe(cam.viewPos);
+        if (!probe) probe = m_reflectionProbeManager->GetGlobalProbe();
+        if (probe && probe->IsValid()) probeTex = probe->GetCubemapTexture();
         PostProcessor::Settings settings;
         math::Mat4 invView = glm::inverse(cam.view);
         math::Mat4 invProj = glm::inverse(cam.projection);
@@ -1278,7 +1501,7 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         rhi::ITexture* finalTexture = m_postProcessor->ApplyPostProcessing(
             hdrTex, *m_gbuffer, settings,
             cam.view, cam.projection,
-            invView, invProj, cam.viewPos, skyboxTex, time);
+            invView, invProj, cam.viewPos, skyboxTex, time, probeTex);
         (void)finalTexture;
     }
     
@@ -1393,13 +1616,14 @@ void RenderPipeline::EnsureProceduralSkyboxShader() {
     }
 }
 
-void RenderPipeline::AddSkyboxPassToFrameGraph(const IRenderSceneView& view, FGTextureHandle hdrColor, bool useGbufferDepth) {
+void RenderPipeline::AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool useGbufferDepth) {
     m_frameGraph->AddPass("Skybox",
-        [this, &view, useGbufferDepth](const FGPassResources&) {
-            if (view.GetSkybox() && view.GetSkybox()->IsValid())
-                RenderSkybox(view, useGbufferDepth);
+        [this, useGbufferDepth](const FGPassResources&) {
+            if (!m_currentFrameData) return;
+            if (m_currentFrameData->skybox && m_currentFrameData->skybox->IsValid())
+                RenderSkyboxImpl(m_currentFrameData->camera, m_currentFrameData->skybox, useGbufferDepth);
             else
-                RenderProceduralSkyboxImpl(view.GetCamera(), useGbufferDepth);
+                RenderProceduralSkyboxImpl(m_currentFrameData->camera, useGbufferDepth);
         },
         {}, { hdrColor }, true);
 }
@@ -1418,10 +1642,12 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     }
 
     rhi::IRenderTarget* rt = targetOverride ? targetOverride : m_hdrRenderTarget;
+    const uint32_t vpW = rt ? rt->GetWidth() : m_width;
+    const uint32_t vpH = rt ? rt->GetHeight() : m_height;
     rhi::ICommandList* cmdSky = GetRHICommandList();
     if (cmdSky && rt) {
         cmdSky->SetRenderTarget(rt);
-        cmdSky->SetViewport(0, 0, m_width, m_height);
+        cmdSky->SetViewport(0, 0, vpW, vpH);
     }
     if (rt == m_hdrRenderTarget && useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
         m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
@@ -1456,10 +1682,12 @@ void RenderPipeline::RenderProceduralSkyboxImpl(const CameraView& camera, bool u
     if (!m_proceduralSkyboxShader || !m_proceduralSkyboxShader->IsValid()) return;
 
     rhi::IRenderTarget* rt = targetOverride ? targetOverride : m_hdrRenderTarget;
+    const uint32_t vpW = rt ? rt->GetWidth() : m_width;
+    const uint32_t vpH = rt ? rt->GetHeight() : m_height;
     rhi::ICommandList* cmdSky = GetRHICommandList();
     if (cmdSky && rt) {
         cmdSky->SetRenderTarget(rt);
-        cmdSky->SetViewport(0, 0, m_width, m_height);
+        cmdSky->SetViewport(0, 0, vpW, vpH);
     }
     if (rt == m_hdrRenderTarget && useGbufferDepth && m_gbuffer && m_device && m_hdrRenderTarget)
         m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
@@ -1492,6 +1720,26 @@ void RenderPipeline::RenderSkybox(const IRenderSceneView& view, bool useGbufferD
         RenderSkyboxImpl(view.GetCamera(), view.GetSkybox(), useGbufferDepth, targetOverride);
     else
         RenderProceduralSkyboxImpl(view.GetCamera(), useGbufferDepth, targetOverride);
+}
+
+void RenderPipeline::RenderSceneToTarget(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, rhi::IRenderTarget* rt) {
+    if (!cmd || !rt) return;
+    const uint32_t w = rt->GetWidth();
+    const uint32_t h = rt->GetHeight();
+    rhi::ClearValue clear{};
+    clear.color[0] = 0.f; clear.color[1] = 0.f; clear.color[2] = 0.f; clear.color[3] = 1.f;
+    rhi::ClearAndSetRenderTargetWithViewport(cmd, rt, 0, 0, w, h, clear);
+    cmd->SetDepthTest(true);
+    cmd->SetCullFace(false);
+    RenderFrameData captureFrame = frameData;
+    captureFrame.camera = cam;
+    RenderForwardOpaque(cmd, captureFrame);
+    if (frameData.skybox && frameData.skybox->IsValid())
+        RenderSkyboxImpl(cam, frameData.skybox, false, rt);
+    else
+        RenderProceduralSkyboxImpl(cam, false, rt);
+    cmd->SetCullFace(true);
+    cmd->SetRenderTarget(nullptr);
 }
 
 void RenderPipeline::EnsureOutlinePostShader() {
@@ -1678,8 +1926,6 @@ void RenderPipeline::ReloadShaders() {
     if (m_proceduralSkyboxShader) m_proceduralSkyboxShader->Reload();
     if (m_outlinePostShader) m_outlinePostShader->Reload();
     if (m_entityIdShader) m_entityIdShader->Reload();
-    if (m_forwardPlusShader) m_forwardPlusShader->Reload();
-    if (m_forwardPlusSkinnedShader) m_forwardPlusSkinnedShader->Reload();
     if (m_stereoForwardShader) m_stereoForwardShader->Reload();
     if (m_gbufferPass) m_gbufferPass->ReloadShaders();
     if (m_shadowPass) m_shadowPass->ReloadShaders();

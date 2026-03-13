@@ -2,6 +2,7 @@
 
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/materials/Material.h"
+#include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
 #include <cstddef>
@@ -11,6 +12,8 @@
 
 namespace eyelib {
 namespace render {
+
+class ShaderCache;
 
 struct InstanceData {
     math::Mat4 modelMatrix;
@@ -30,6 +33,10 @@ public:
     InstancedRenderer& operator=(InstancedRenderer&& other) noexcept;
 
     void SetDevice(rhi::IDevice* device) { m_device = device; }
+    /** Optional: when set, material UBO is bound for Forward/Forward+ shaders. */
+    void SetCommandList(rhi::ICommandList* cmd) { m_cmd = cmd; }
+    /** Required for draw: shader variant from cache. */
+    void SetShaderCache(ShaderCache* cache, PipelineStage stage);
     void Clear();
 
     bool AddInstance(std::shared_ptr<Mesh> mesh, std::shared_ptr<Material> material, const math::Mat4& transform);
@@ -63,7 +70,9 @@ private:
     std::unordered_map<BatchKey, InstanceBatch, BatchKeyHash> m_batches;
     size_t m_totalInstances = 0;
     rhi::IDevice* m_device = nullptr;
-
+    ShaderCache* m_shaderCache = nullptr;
+    PipelineStage m_pipelineStage = PipelineStage::Forward;
+    rhi::ICommandList* m_cmd = nullptr;
 };
 
 } // namespace render

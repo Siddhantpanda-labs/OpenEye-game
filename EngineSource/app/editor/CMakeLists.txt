@@ -18,6 +18,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/SceneViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/GameViewPanel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/ProfilerPanel.cpp
 )
 if(WIN32)
     list(APPEND EDITOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/OpenEyeEditor.rc)
@@ -39,6 +40,7 @@ target_include_directories(OpenEyeEditor
 target_link_libraries(OpenEyeEditor
     PRIVATE
         EyelibCoreAPI
+        EyelibDebugAPI
         EyelibGeometryAPI
         EyelibPlatformAPI
         EyelibWorldAPI

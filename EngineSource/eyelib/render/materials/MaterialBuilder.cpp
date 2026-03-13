@@ -105,7 +105,7 @@ MaterialBuilder& MaterialBuilder::Name(std::string name) {
 
 std::shared_ptr<Material> MaterialBuilder::build() const {
     auto mat = std::make_shared<Material>();
-    if (m_shader) mat->SetShader(m_shader);
+    mat->SetMaterialShaderId(m_shaderIndex);
     mat->SetAlbedo(m_albedo);
     mat->SetMetallic(m_metallic);
     mat->SetRoughness(m_roughness);

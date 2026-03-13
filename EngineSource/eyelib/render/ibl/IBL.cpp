@@ -335,17 +335,119 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
     return true;
 }
 
+bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* environmentCubemap,
+                                         uint32_t irradianceRes, uint32_t prefilterRes,
+                                         rhi::ITexture*& outIrradiance, rhi::ITexture*& outPrefilter) {
+    outIrradiance = nullptr;
+    outPrefilter = nullptr;
+    if (!device || !environmentCubemap) return false;
+
+    auto cubeMesh = CreateCubeMesh(device);
+    auto irradianceShader = CreateIrradianceShader(device);
+    auto prefilterShader = CreatePrefilterShader(device);
+    if (!cubeMesh || !cubeMesh->IsValid() || !irradianceShader || !irradianceShader->IsValid() ||
+        !prefilterShader || !prefilterShader->IsValid())
+        return false;
+
+    rhi::TextureDesc irradianceDesc;
+    irradianceDesc.type = rhi::TextureType::TextureCube;
+    irradianceDesc.width = irradianceRes;
+    irradianceDesc.height = irradianceRes;
+    irradianceDesc.format = rhi::RHITextureFormat::RGB16F;
+    irradianceDesc.usage = rhi::TextureUsage::ShaderResource | rhi::TextureUsage::RenderTarget;
+    irradianceDesc.mipLevels = 1;
+    outIrradiance = device->CreateTexture(irradianceDesc, nullptr);
+
+    uint32_t maxMipLevels = 1;
+    uint32_t size = prefilterRes;
+    while (size > 1 && maxMipLevels < 5) { size >>= 1; ++maxMipLevels; }
+    rhi::TextureDesc prefilterDesc;
+    prefilterDesc.type = rhi::TextureType::TextureCube;
+    prefilterDesc.width = prefilterRes;
+    prefilterDesc.height = prefilterRes;
+    prefilterDesc.format = rhi::RHITextureFormat::RGB16F;
+    prefilterDesc.usage = rhi::TextureUsage::ShaderResource | rhi::TextureUsage::RenderTarget;
+    prefilterDesc.mipLevels = maxMipLevels;
+    outPrefilter = device->CreateTexture(prefilterDesc, nullptr);
+
+    if (!outIrradiance || !outPrefilter) {
+        if (outIrradiance) { device->DestroyTexture(outIrradiance); outIrradiance = nullptr; }
+        if (outPrefilter) { device->DestroyTexture(outPrefilter); outPrefilter = nullptr; }
+        return false;
+    }
+
+    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    if (!cmd) return false;
+
+    const math::Mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
+    const math::Mat4 captureViews[] = {
+        glm::lookAt(math::Vec3(0.0f), math::Vec3( 1.0f,  0.0f,  0.0f), math::Vec3(0.0f, -1.0f,  0.0f)),
+        glm::lookAt(math::Vec3(0.0f), math::Vec3(-1.0f,  0.0f,  0.0f), math::Vec3(0.0f, -1.0f,  0.0f)),
+        glm::lookAt(math::Vec3(0.0f), math::Vec3( 0.0f,  1.0f,  0.0f), math::Vec3(0.0f,  0.0f,  1.0f)),
+        glm::lookAt(math::Vec3(0.0f), math::Vec3( 0.0f, -1.0f,  0.0f), math::Vec3(0.0f,  0.0f, -1.0f)),
+        glm::lookAt(math::Vec3(0.0f), math::Vec3( 0.0f,  0.0f,  1.0f), math::Vec3(0.0f, -1.0f,  0.0f)),
+        glm::lookAt(math::Vec3(0.0f), math::Vec3( 0.0f,  0.0f, -1.0f), math::Vec3(0.0f, -1.0f,  0.0f))
+    };
+
+    for (uint32_t face = 0; face < 6; ++face) {
+        rhi::IRenderTarget* rt = device->CreateRenderTargetFromTexture(outIrradiance, face, 0);
+        if (!rt) continue;
+        cmd->SetRenderTarget(rt);
+        cmd->SetViewport(0, 0, irradianceRes, irradianceRes);
+        rhi::ClearValue clear{};
+        cmd->ClearRenderTarget(rt, clear);
+        cmd->SetDepthTest(false);
+        cmd->SetDepthWrite(false);
+        cmd->SetCullFace(false);
+        irradianceShader->Bind(device);
+        irradianceShader->SetInt("u_EnvironmentMap", 0);
+        irradianceShader->SetMat4("u_View", captureViews[face]);
+        irradianceShader->SetMat4("u_Projection", captureProjection);
+        cmd->BindTexture(environmentCubemap, 0);
+        cubeMesh->Draw(device);
+        irradianceShader->Unbind();
+        device->DestroyRenderTarget(rt);
+    }
+
+    for (uint32_t mip = 0; mip < maxMipLevels; ++mip) {
+        uint32_t mipWidth = std::max<uint32_t>(1u, prefilterRes >> mip);
+        uint32_t mipHeight = mipWidth;
+        float roughness = (maxMipLevels > 1) ? static_cast<float>(mip) / static_cast<float>(maxMipLevels - 1) : 0.0f;
+        for (uint32_t face = 0; face < 6; ++face) {
+            rhi::IRenderTarget* rt = device->CreateRenderTargetFromTexture(outPrefilter, face, mip);
+            if (!rt) continue;
+            cmd->SetRenderTarget(rt);
+            cmd->SetViewport(0, 0, mipWidth, mipHeight);
+            rhi::ClearValue clear{};
+            cmd->ClearRenderTarget(rt, clear);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            prefilterShader->Bind(device);
+            prefilterShader->SetInt("u_EnvironmentMap", 0);
+            prefilterShader->SetFloat("u_Roughness", roughness);
+            prefilterShader->SetMat4("u_View", captureViews[face]);
+            prefilterShader->SetMat4("u_Projection", captureProjection);
+            cmd->BindTexture(environmentCubemap, 0);
+            cubeMesh->Draw(device);
+            prefilterShader->Unbind();
+            device->DestroyRenderTarget(rt);
+        }
+    }
+
+    return true;
+}
+
 unsigned int IBL::GetIrradianceMap() const { return NativeId(m_irradianceRHI); }
 unsigned int IBL::GetPrefilterMap() const { return NativeId(m_prefilterRHI); }
 unsigned int IBL::GetBRDFLUT() const { return NativeId(m_brdfLUTRHI); }
 
-void IBL::BindForLighting(unsigned int irradianceUnit, unsigned int prefilterUnit, unsigned int brdfLUTUnit) const {
-    if (!m_deviceRHI) return;
-    rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
-    if (!cmd) return;
-    if (m_irradianceRHI) cmd->BindTexture(m_irradianceRHI, irradianceUnit);
-    if (m_prefilterRHI) cmd->BindTexture(m_prefilterRHI, prefilterUnit);
-    if (m_brdfLUTRHI) cmd->BindTexture(m_brdfLUTRHI, brdfLUTUnit);
+void IBL::BindForLighting(rhi::ICommandList* cmd, unsigned int irradianceUnit, unsigned int prefilterUnit, unsigned int brdfLUTUnit) const {
+    rhi::ICommandList* list = cmd ? cmd : (m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr);
+    if (!list) return;
+    if (m_irradianceRHI) list->BindTexture(m_irradianceRHI, irradianceUnit);
+    if (m_prefilterRHI) list->BindTexture(m_prefilterRHI, prefilterUnit);
+    if (m_brdfLUTRHI) list->BindTexture(m_brdfLUTRHI, brdfLUTUnit);
 }
 
 } // namespace render

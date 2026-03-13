@@ -1,5 +1,6 @@
 #include "eyelib/render/passes/LightingPass.h"
 #include "eyelib/render/shadows/CascadeShadowMap.h"
+#include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
@@ -55,8 +56,9 @@ void LightingPass::Render(GBuffer& gbuffer,
                           CascadeShadowMap* cascadeMap,
                           const std::vector<PointLight>* pointLights,
                           const std::vector<SpotLight>* spotLights,
-                          rhi::IBuffer* sceneLightingBuffer) {
-    Render(gbuffer, ctx.device, ctx.cmd, light, view, projection, viewPos, cascadeMap, pointLights, spotLights, sceneLightingBuffer);
+                          rhi::IBuffer* sceneLightingBuffer,
+                          IBL* ibl) {
+    Render(gbuffer, ctx.device, ctx.cmd, light, view, projection, viewPos, cascadeMap, pointLights, spotLights, sceneLightingBuffer, ibl);
 }
 
 void LightingPass::Render(GBuffer& gbuffer,
@@ -69,7 +71,8 @@ void LightingPass::Render(GBuffer& gbuffer,
                           CascadeShadowMap* cascadeMap,
                           const std::vector<PointLight>* pointLights,
                           const std::vector<SpotLight>* spotLights,
-                          rhi::IBuffer* sceneLightingBuffer) {
+                          rhi::IBuffer* sceneLightingBuffer,
+                          IBL* ibl) {
     (void)view;
     (void)projection;
     (void)light;
@@ -87,6 +90,12 @@ void LightingPass::Render(GBuffer& gbuffer,
     m_lightingShader->SetInt("u_Normal", 1);
     m_lightingShader->SetInt("u_Albedo", 2);
     m_lightingShader->SetInt("u_PBR", 3);
+    if (ibl && ibl->IsValid() && cmd) {
+        ibl->BindForLighting(cmd, 11, 12, 13);
+        m_lightingShader->SetInt("u_UseIBL", 1);
+    } else {
+        m_lightingShader->SetInt("u_UseIBL", 0);
+    }
     if (cascadeMap && cmd) {
         rhi::ITexture* shadowTex = cascadeMap->GetDepthTextureRHI();
         if (shadowTex) cmd->BindTexture(shadowTex, 6);

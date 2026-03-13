@@ -26,9 +26,8 @@ void Material::SetTexture(const std::string& name, std::shared_ptr<Texture> text
     m_impl->material->SetTexture(name, texImpl);
 }
 
-void Material::SetShader(std::shared_ptr<Shader> shader) {
-    if (!shader) return;
-    m_impl->material->SetShader(shader->GetInternal());
+void Material::SetMaterialShaderId(uint64_t id) {
+    m_impl->material->SetMaterialShaderId(static_cast<::eyelib::render::MaterialTypeId>(id));
 }
 
 void Material::SetAlbedo(const math::Vec3& color) {

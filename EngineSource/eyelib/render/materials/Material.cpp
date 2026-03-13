@@ -1,8 +1,10 @@
 #include "eyelib/render/materials/Material.h"
+#include "eyelib/render/materials/MaterialShader.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/materials/MaterialDescriptor.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include <functional>
 #include <cstring>
@@ -11,13 +13,6 @@ namespace eyelib {
 namespace render {
 
 Material::Material() = default;
-
-Material::Material(std::shared_ptr<Shader> shader) : m_shader(std::move(shader)) {}
-
-void Material::SetShader(std::shared_ptr<Shader> shader) {
-    m_shader = std::move(shader);
-    m_hashDirty = true;
-}
 
 void Material::SetTexture(const std::string& name, std::shared_ptr<Texture2D> texture) {
     m_textures[name] = std::move(texture);
@@ -93,34 +88,32 @@ bool Material::IsKeywordEnabled(const std::string& keyword) const {
     return it != m_keywords.end() && it->second;
 }
 
-void Material::Bind(rhi::IDevice* device) const {
-    if (!device || !m_shader || !m_shader->IsValid()) return;
+void Material::ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd) const {
+    if (!device || !shader) return;
 
-    m_shader->Bind(device);
+    if (cmd) {
+        rhi::IBuffer* buf = GetMaterialBufferRHI(device);
+        if (buf)
+            cmd->BindUniformBuffer(buf, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+    }
 
     int unit = 0;
     for (const auto& p : m_textures) {
         if (p.second && p.second->IsValid()) {
             p.second->Bind(unit);
-            m_shader->SetInt(p.first, unit);
+            shader->SetInt(p.first, unit);
             ++unit;
         }
     }
 
-    m_shader->SetVec3("u_Albedo", m_albedo);
-    m_shader->SetVec3("u_Emission", m_emission);
-    m_shader->SetFloat("u_Metallic", m_metallic);
-    m_shader->SetFloat("u_Roughness", m_roughness);
-    m_shader->SetFloat("u_AO", m_ao);
-    m_shader->SetFloat("u_Alpha", m_alpha);
+    // PBR params (albedo, metallic, roughness, ao, emission, alpha, reflective) come from MaterialBlock UBO (binding 2); pipeline binds it before draw.
 
-    for (const auto& p : m_floats) m_shader->SetFloat(p.first, p.second);
-    for (const auto& p : m_vec3s) m_shader->SetVec3(p.first, p.second);
-    for (const auto& p : m_vec4s) m_shader->SetVec4(p.first, p.second);
+    for (const auto& p : m_floats) shader->SetFloat(p.first, p.second);
+    for (const auto& p : m_vec3s) shader->SetVec3(p.first, p.second);
+    for (const auto& p : m_vec4s) shader->SetVec4(p.first, p.second);
     for (const auto& p : m_mat4Arrays) {
-        if (!p.second.empty()) {
-            m_shader->SetMat4Array(p.first, p.second.data(), p.second.size());
-        }
+        if (!p.second.empty())
+            shader->SetMat4Array(p.first, p.second.data(), p.second.size());
     }
 }
 
@@ -138,7 +131,7 @@ void Material::UpdateHash() const {
     std::hash<void*> ph;
 
     size_t h = 0;
-    h ^= ph(m_shader.get()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= (size_t)m_shaderIndex + 0x9e3779b9 + (h << 6) + (h >> 2);
     for (const auto& p : m_textures) {
         h ^= sh(p.first) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= ph(p.second.get()) + 0x9e3779b9 + (h << 6) + (h >> 2);
@@ -228,10 +221,8 @@ std::shared_ptr<Material> CreateMaterialFromDescriptor(
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
     std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
     auto mat = std::make_shared<Material>();
-    if (!desc.shaderName.empty()) {
-        auto sh = resolveShader(desc.shaderName);
-        if (sh) mat->SetShader(sh);
-    }
+    if (!desc.shaderName.empty())
+        mat->SetMaterialShaderId(MaterialShaderIds::PBR);
     for (const auto& p : desc.texturePaths) {
         auto tex = resolveTexture(p.second);
         if (tex) mat->SetTexture(p.first, tex);

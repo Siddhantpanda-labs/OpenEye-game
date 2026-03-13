@@ -15,16 +15,18 @@ namespace {
 } // namespace
 
 void TransparencyPass::Render(::eyelib::render::rhi::ICommandList* cmd,
+                              ::eyelib::render::rhi::IDevice* device,
                               const std::vector<Drawable>& transparent,
                               const math::Mat4& view,
                               const math::Mat4& projection,
-                              const math::Vec3& viewPos) {
+                              const math::Vec3& viewPos,
+                              ::eyelib::render::ShaderCache* shaderCache) {
     std::vector<::eyelib::render::Drawable> internal;
     internal.reserve(transparent.size());
     for (const auto& d : transparent) {
         internal.push_back(ToInternal(d));
     }
-    ::eyelib::render::TransparencyPass::Render(cmd, nullptr, internal, view, projection, viewPos);
+    ::eyelib::render::TransparencyPass::Render(cmd, device, internal, view, projection, viewPos, shaderCache);
 }
 
 } // namespace api

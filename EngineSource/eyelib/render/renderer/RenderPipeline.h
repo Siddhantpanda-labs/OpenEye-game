@@ -25,6 +25,8 @@ class ShadowPass;
 class LightingPass;
 class ClusteredLightGrid;
 class PostProcessor;
+class IBL;
+class ReflectionProbeManager;
 class GpuProfilerRHI;
 class Mesh;
 class Shader;
@@ -36,7 +38,7 @@ enum class PipelineMode { Forward, Deferred, ForwardPlus };
 
 /**
  * Orchestrates render passes via a frame graph for Forward and Deferred.
- * Render(view) dispatches by mode: Deferred -> BuildAndExecuteFrameGraph; Forward -> BuildAndExecuteForwardFrameGraph; ForwardPlus -> RenderForwardPlus (legacy).
+ * Render(view) dispatches by mode: Deferred/Forward/ForwardPlus each use BuildAndExecute*FrameGraph (single path).
  */
 class RenderPipeline {
 public:
@@ -93,6 +95,7 @@ public:
     GBuffer* GetGBuffer();
     CascadeShadowMap* GetCascadeShadowMap();
     PostProcessor* GetPostProcessor();
+    ReflectionProbeManager* GetReflectionProbeManager() { return m_reflectionProbeManager.get(); }
     FrameGraph* GetFrameGraph() { return m_frameGraph.get(); }
     const std::vector<FrameGraph::PassInfo>& GetFrameGraphPasses() const;
 
@@ -121,24 +124,45 @@ public:
     /** Streaming: run compute pass to convert source RT (RGBA) to NV12 in the given buffer. Uses GL_SHADER_STORAGE_BARRIER_BIT only after dispatch. */
     void RunStreamingNV12Pass(rhi::IRenderTarget* sourceRT, void* nv12BufferHandle, size_t nv12Size, uint32_t width, uint32_t height, uint32_t pitch);
 
+    /** Render scene (forward opaque + skybox) to an arbitrary render target. Used for reflection probe cubemap capture. */
+    void RenderSceneToTarget(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, rhi::IRenderTarget* rt);
+
 private:
     /** Shared init after m_device is set (owned or shared). */
     bool InitializeDeviceResources(uint32_t width, uint32_t height);
     void EnsureResources(uint32_t width, uint32_t height);
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
+    /** Frame-graph coordination: compile only when needed (size/mode/stereo change), then execute. */
+    void CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo);
+    /** Build deferred recipe and add passes (GBuffer, Lighting, etc.). Called from CompileFrameGraphIfNeeded. */
+    void BuildDeferredGraph();
+    /** Build forward recipe and add passes. Called from CompileFrameGraphIfNeeded. */
+    void BuildForwardGraph();
+    /** Build forward-stereo recipe and add passes (SkyboxLeft/Right). Called from CompileFrameGraphIfNeeded. */
+    void BuildForwardStereoGraph();
+    /** Build Forward+ recipe (Shadow, Forward+ Opaque batched, Transparency, Skybox). Called from CompileFrameGraphIfNeeded. */
+    void BuildForwardPlusGraph();
+
     void BuildAndExecuteFrameGraph(const IRenderSceneView& view);
     /** Forward mode: frame graph with GPU Cull, Shadow, Forward Opaque, Transparency, Post. */
     void BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view);
+    /** Forward+ mode: frame graph with Shadow, Forward+ Opaque (batched), Transparency, Skybox. */
+    void BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView& view);
     void RenderForward(const IRenderSceneView& view);
     /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
-    void RenderForwardOpaque(rhi::ICommandList* cmd, const IRenderSceneView& view);
+    void RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Single-pass stereo opaque: two viewports, stereo shader, DrawInstanced(..., 2). */
-    void RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
+    void RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& leftCam, const CameraView& rightCam);
     void BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
     void RenderForwardPlus(const IRenderSceneView& view);
+    /** Forward+ opaque with batching: instanced draw for multi-instance batches, per-draw for singles/skinned. */
+    void RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData);
+    /** Setup for Forward+ opaque pass: light grid, buffers, clear HDR, bind shadow/scene lighting/light index. */
+    void PrepareForwardPlusFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Skybox as a frame-graph pass: writes to HDR so post reads it. Used by Deferred and Forward. */
-    void AddSkyboxPassToFrameGraph(const IRenderSceneView& view, FGTextureHandle hdrColor, bool useGbufferDepth);
+    /** Adds Skybox pass; executor uses m_currentView (set before Execute). */
+    void AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool useGbufferDepth);
     void RenderSkybox(const IRenderSceneView& view, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void RenderSkyboxImpl(const CameraView& camera, const std::shared_ptr<TextureCube>& skybox, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     /** Default when no cubemap: procedural gradient (sky / ground / horizon). Same depth/RT setup as cubemap skybox. */
@@ -151,10 +175,18 @@ private:
     void EnsureStreamingNV12Pass();
     void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque);
     /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
-    void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const IRenderSceneView& view, const CameraView& cam, uint32_t gpuCullDrawListCount);
+    void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, uint32_t gpuCullDrawListCount);
+    /** Phase D: Run shadow pass with mesh+material batching (instanced + singles). */
+    void RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView);
 
     /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
     uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
+    /** Fill frame data from view (camera, lights, visible/all opaque, transparent). Call once per frame before graph execute. */
+    void PrepareFrameData(const IRenderSceneView& view);
+    /** Build GPU cull draw list from frame data visible opaque. Call after PrepareFrameData. */
+    uint32_t PrepareGpuCullFromFrameData(const RenderFrameData& frameData, const CameraView& cam);
+    /** Ensure IBL is built from frameData.skybox; returns m_ibl.get() when valid, else nullptr. Used by Deferred Lighting, Forward, Forward+. */
+    IBL* EnsureIBLFromFrameData(const RenderFrameData& frameData);
 
     rhi::IDevice* m_device = nullptr;
     std::unique_ptr<rhi::IDevice> m_ownedDevice;
@@ -169,9 +201,10 @@ private:
     std::unique_ptr<FrameGraph> m_frameGraph;
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
+    std::unique_ptr<IBL> m_ibl;
+    rhi::ITexture* m_iblEnvironmentTexture = nullptr;
+    std::unique_ptr<ReflectionProbeManager> m_reflectionProbeManager;
     std::unique_ptr<GpuProfilerRHI> m_gpuProfilerRHI;
-    std::shared_ptr<Shader> m_forwardPlusShader;
-    std::shared_ptr<Shader> m_forwardPlusSkinnedShader;
     std::shared_ptr<Shader> m_stereoForwardShader;
     std::shared_ptr<Shader> m_skyboxShader;
     std::shared_ptr<Shader> m_proceduralSkyboxShader;
@@ -199,6 +232,10 @@ private:
     bool m_gpuCullSingleMesh = false;
     /** Representative mesh when single-mesh; kept alive for GBuffer pass. */
     std::shared_ptr<Mesh> m_gpuCullRepresentativeMesh;
+
+    /** Phase D: instance matrix buffer for batched/instanced GBuffer and shadow (mesh+material batching). */
+    rhi::IBuffer* m_instanceMatrixBuffer = nullptr;
+    static constexpr uint32_t kMaxInstanceBatchSize = 4096u;
 
     /** Previous frame depth RT for GPU occlusion culling (same size as GBuffer). */
     rhi::IRenderTarget* m_prevFrameDepthRT = nullptr;
@@ -238,6 +275,24 @@ private:
     std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>> m_pendingDebugLinesColored;
     math::Mat4 m_pendingDebugView{1.0f};
     math::Mat4 m_pendingDebugProj{1.0f};
+
+    /** Phase 1: current scene view (for GetSceneForCallback etc.). Set before Execute. */
+    const IRenderSceneView* m_currentView = nullptr;
+    /** Phase B: current frame data for executors (camera, lights, visibleOpaque, etc.). Set before Execute. */
+    const RenderFrameData* m_currentFrameData = nullptr;
+    /** Phase B: per-frame snapshot filled by PrepareFrameData. */
+    RenderFrameData m_frameData;
+    /** Phase 1: compile frame graph only when true (initial, after Resize, or mode/size change). */
+    bool m_frameGraphNeedsCompile = true;
+    uint32_t m_frameGraphLastWidth = 0;
+    uint32_t m_frameGraphLastHeight = 0;
+    PipelineMode m_frameGraphLastMode = PipelineMode::Deferred;
+    bool m_frameGraphLastStereo = false;
+    /** Set each frame by PrepareGpuCullFromView; used by frame-graph GBuffer executor. */
+    uint32_t m_lastGpuCullDrawListCount = 0;
+    /** Phase 1: stereo path only; set before Execute when building stereo graph. */
+    CameraView m_currentLeftCam{};
+    CameraView m_currentRightCam{};
 
 #ifndef NDEBUG
     /** Debug guard: set during Render() to catch invalid Resize() mid-frame. */
