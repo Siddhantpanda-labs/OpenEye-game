@@ -13,20 +13,10 @@ namespace render {
 namespace rhi {
 
 void DeviceVK::Present() {
-    if (!m_immediateCommandList || !m_graphicsQueue) return;
-    CommandListVK* imm = m_immediateCommandList.get();
-    if (imm->IsRecording())
-        imm->End();
+    if (!m_graphicsQueue) return;
     VkDevice device = static_cast<VkDevice>(m_device);
     VkQueue queue = static_cast<VkQueue>(m_graphicsQueue);
-    VkCommandBuffer buf = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-    if (buf != VK_NULL_HANDLE) {
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &buf;
-        vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    }
+    vkQueueWaitIdle(queue);
     VkSwapchainKHR swapchain = static_cast<VkSwapchainKHR>(m_swapchain);
     if (swapchain != VK_NULL_HANDLE && m_currentSwapchainImageIndex != 0xFFFFFFFFu) {
         VkPresentInfoKHR presentInfo = {};
@@ -38,7 +28,6 @@ void DeviceVK::Present() {
         if (pfnPresent) pfnPresent(queue, &presentInfo);
         m_currentSwapchainImageIndex = 0xFFFFFFFFu;
     }
-    vkQueueWaitIdle(queue);
 }
 
 void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {

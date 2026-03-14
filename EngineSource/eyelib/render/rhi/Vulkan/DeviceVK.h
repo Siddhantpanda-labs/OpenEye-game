@@ -94,6 +94,8 @@ struct DeviceVK : IDevice {
 
     int GetMaxSamples(int requestedSamples) override;
 
+    void BeginFrame() override;
+    void EndFrame() override;
     void Present() override;
     void OnWindowResized(uint32_t width, uint32_t height) override;
     void Finish() override;
@@ -167,6 +169,8 @@ struct DeviceVK : IDevice {
     IBuffer* GetFullscreenQuadVBO() const { return m_fullscreenQuadVBO; }
     IBuffer* GetFullscreenQuadIBO() const { return m_fullscreenQuadIBO; }
     void EnsureFullscreenQuad();
+    /** True between BeginFrame() and EndFrame(). CommandListVK uses this to avoid resetting the immediate buffer mid-frame. */
+    bool IsFrameOpen() const { return m_frameOpen; }
 
 private:
     void QueryCapabilities();
@@ -211,6 +215,7 @@ private:
     IBuffer* m_fullscreenQuadIBO = nullptr;
     void* m_allocator = nullptr;  // VmaAllocator
     std::function<void(void*)> m_postBlitCallback;
+    bool m_frameOpen = false;               // true between BeginFrame() and EndFrame()
     void* m_swapchainRenderPass = nullptr;   // VkRenderPass (color load/store for ImGui overlay)
     std::vector<void*> m_swapchainFramebuffers;  // VkFramebuffer per swapchain image
     void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui

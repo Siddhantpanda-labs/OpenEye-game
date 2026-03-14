@@ -34,6 +34,8 @@ void CommandListVK::SetCommandBuffer(void* commandBuffer, bool isImmediate) {
 }
 
 void CommandListVK::Begin() {
+    if (m_isImmediate && m_device && m_device->IsFrameOpen())
+        return;
     m_isRecording = false;
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(m_commandBuffer);
     if (buf == VK_NULL_HANDLE) return;
@@ -46,6 +48,8 @@ void CommandListVK::Begin() {
 }
 
 void CommandListVK::End() {
+    if (m_isImmediate && m_device && m_device->IsFrameOpen())
+        return;
     EndRenderingIfActive();
     if (!m_isRecording) return;
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(m_commandBuffer);
@@ -239,9 +243,15 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
     if (!pVK->m_isCompute) {
         VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
-        VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-        if (defaultLayout != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE)
-            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, defaultLayout, 1, 1, &emptyBindless, 0, nullptr);
+        if (defaultLayout != VK_NULL_HANDLE) {
+            m_device->UpdateLegacySet0(this);
+            VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
+            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+            if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
+                VkDescriptorSet sets[2] = { set0, emptyBindless };
+                vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, defaultLayout, 0, 2, sets, 0, nullptr);
+            }
+        }
     }
 }
 void CommandListVK::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
@@ -278,9 +288,12 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
     if (layout != VK_NULL_HANDLE) {
         m_device->UpdateLegacySet0(this);
         VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
-        if (set0 != VK_NULL_HANDLE)
-            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &set0, 0, nullptr);
-        vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 68, m_pushConstants);
+        VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+        if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
+            VkDescriptorSet sets[2] = { set0, emptyBindless };
+            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 2, sets, 0, nullptr);
+        }
+        vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
     }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
 }
@@ -410,12 +423,17 @@ void CommandListVK::SetUniformVec3(const char* name, const float* data) { (void)
 void CommandListVK::SetUniformVec4(const char* name, const float* data) { (void)name; (void)data; }
 void CommandListVK::SetUniformMat4(const char* name, const float* data) {
     if (!name || !data) return;
+    const size_t mat4Bytes = 16 * sizeof(float);
     if (std::strcmp(name, "u_ViewProj") == 0)
-        std::memcpy(m_pushConstants + 16, data, 16 * sizeof(float));
+        std::memcpy(m_pushConstants + 16, data, mat4Bytes);
+    else if (std::strcmp(name, "u_InverseViewMatrix") == 0)
+        std::memcpy(m_pushConstants + 0, data, mat4Bytes);
+    else if (std::strcmp(name, "u_InverseProjectionMatrix") == 0)
+        std::memcpy(m_pushConstants + 64, data, mat4Bytes);
     else if (std::strcmp(name, "u_View") == 0)
-        std::memcpy(m_computeParamsData + kOffsetView, data, 16 * sizeof(float));
+        std::memcpy(m_computeParamsData + kOffsetView, data, mat4Bytes);
     else if (std::strcmp(name, "u_Projection") == 0)
-        std::memcpy(m_computeParamsData + kOffsetProjection, data, 16 * sizeof(float));
+        std::memcpy(m_computeParamsData + kOffsetProjection, data, mat4Bytes);
 }
 void CommandListVK::SetUniformMat4Array(const char* name, const float* data, size_t count) { (void)name; (void)data; (void)count; }
 void CommandListVK::SetUniformHandle64(const char* name, uint64_t handle) { (void)name; (void)handle; }

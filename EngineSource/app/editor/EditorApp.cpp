@@ -424,8 +424,9 @@ int RunEditor(int argc, char** argv) {
 
         eyelib::api::debug::Profiler::BeginFrame();
 
-        if (imgui.IsVulkan()) {
+        if (imgui.IsVulkan() && editorDevice) {
 #ifdef OPENEYE_IMGUI_VULKAN
+            static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get())->BeginFrame();
             ImGui_ImplVulkan_NewFrame();
 #endif
         } else {
@@ -451,6 +452,7 @@ int RunEditor(int argc, char** argv) {
         if (imgui.IsVulkan() && editorDevice) {
             auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
             rhiDevice->BlitToDefaultFramebuffer(nullptr);
+            rhiDevice->EndFrame();
             rhiDevice->Present();
         } else {
             if (ctx.sceneViewPipeline)

@@ -1563,7 +1563,11 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
             invView, invProj, cam.viewPos, skyboxTex, time, probeTex);
         (void)finalTexture;
     }
-    
+
+    rhi::ITexture* outputTex = GetCurrentFrameOutputColorTextureRHI();
+    if (cmd && outputTex)
+        rhi::BarrierTextureForShaderRead(cmd, outputTex);
+
     m_prevView = cam.view;
     m_prevProjection = cam.projection;
 

@@ -117,6 +117,8 @@ struct CommandListVK : ICommandList {
     void ClearPendingTimelineValue() { m_pendingTimelineValue = 0; }
 
     void EndRenderingIfActive();
+    /** Called by DeviceVK::BeginFrame() after reset+begin so the list is marked recording. Do not call from application code. */
+    void SetRecordingState(bool recording) { m_isRecording = recording; }
 
 private:
     DeviceVK* m_device = nullptr;

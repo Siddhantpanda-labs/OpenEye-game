@@ -909,6 +909,30 @@ void DeviceVK::DestroyCommandList(ICommandList* list) {
 
 ICommandList* DeviceVK::GetImmediateCommandList() { return m_immediateCommandList.get(); }
 
+void DeviceVK::BeginFrame() {
+    // m_frameOpen = true;
+    if (!m_immediateCommandList) return;
+    CommandListVK* imm = m_immediateCommandList.get();
+    imm->EndRenderingIfActive();
+    VkCommandBuffer buf = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
+    if (buf == VK_NULL_HANDLE) return;
+    vkResetCommandBuffer(buf, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(buf, &beginInfo) == VK_SUCCESS)
+        imm->SetRecordingState(true);
+        m_frameOpen = true;
+}
+
+void DeviceVK::EndFrame() {
+    m_frameOpen = false;
+    if (!m_immediateCommandList || !m_graphicsQueue) return;
+    CommandListVK* imm = m_immediateCommandList.get();
+    imm->End();
+    SubmitCommandList(imm);
+}
+
 void DeviceVK::SubmitCommandList(ICommandList* list) {
     if (!list || !m_graphicsQueue) return;
     CommandListVK* cl = static_cast<CommandListVK*>(list);

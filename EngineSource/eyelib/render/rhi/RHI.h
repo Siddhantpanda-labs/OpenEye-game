@@ -145,6 +145,10 @@ struct IDevice {
     /** Wrap an existing backend texture (e.g. GL id as void*) for use with BindTexture. Caller owns the GL texture; wrapper is not destroyed with glDelete. */
     virtual ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) = 0;
 
+    /** Start frame: device owns command buffer lifetime. Vulkan: reset and begin immediate command buffer. Call once per frame before any recording. Other backends: no-op. */
+    virtual void BeginFrame() {}
+    /** End frame: end recording and submit. Vulkan: end immediate command buffer and submit. Call after all recording (scene, blit, UI) and before Present(). Other backends: no-op. */
+    virtual void EndFrame() {}
     virtual void Present() = 0;
     /** Notify backend that output window framebuffer size changed; backend may recreate swapchain/default backbuffer resources. */
     virtual void OnWindowResized(uint32_t width, uint32_t height) { (void)width; (void)height; }
