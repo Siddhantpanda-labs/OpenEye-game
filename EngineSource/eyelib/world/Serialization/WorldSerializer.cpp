@@ -16,6 +16,12 @@ namespace eyelib {
 namespace world {
 
 namespace {
+static std::string NormalizeRenderPipelineMode(const std::string& mode) {
+    if (mode == "Forward" || mode == "Deferred" || mode == "ForwardPlus")
+        return mode;
+    return "Forward";
+}
+
 static nlohmann::json SerializeEntityId(const EntityId& id) {
     nlohmann::json j;
     j["index"] = id.index;
@@ -101,6 +107,7 @@ nlohmann::json WorldSerializer::Serialize(const WorldState& state) const {
     if (!state.GetSkyboxAssetId().empty()) {
         root["skybox"] = state.GetSkyboxAssetId();
     }
+    root["renderPipelineMode"] = NormalizeRenderPipelineMode(state.GetRenderPipelineMode());
 
     return root;
 }
@@ -188,6 +195,11 @@ bool WorldSerializer::Deserialize(WorldState& state, const nlohmann::json& root)
 
     if (root.contains("skybox") && root["skybox"].is_string()) {
         state.SetSkyboxAssetId(root["skybox"].get<std::string>());
+    }
+    if (root.contains("renderPipelineMode") && root["renderPipelineMode"].is_string()) {
+        state.SetRenderPipelineMode(NormalizeRenderPipelineMode(root["renderPipelineMode"].get<std::string>()));
+    } else {
+        state.SetRenderPipelineMode("Forward");
     }
 
     return true;

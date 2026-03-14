@@ -1,5 +1,6 @@
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/core/GLDrawDebugLabel.h"
 #include <algorithm>
 #include <queue>
 
@@ -363,6 +364,7 @@ void FrameGraph::Execute(rhi::ICommandList* cmd) {
         auto& p = m_passes[i];
         if (p.culled) continue;
         TransitionPassResources(i, cmd);
+        core::SetGLDrawDebugLabel(p.name.c_str());
         const bool skipTimestamp = (p.name == "GPU Cull");  // Avoid GL 1282 with query + compute on some drivers
         if (cmd && p.queryPool && !skipTimestamp)
             cmd->BeginQuery(p.queryPool, 0);

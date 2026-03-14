@@ -20,7 +20,8 @@ ClusteredLightGrid::ClusteredLightGrid(ClusteredLightGrid&& other) noexcept
       m_nearPlane(other.m_nearPlane), m_farPlane(other.m_farPlane),
       m_logNear(other.m_logNear), m_logFar(other.m_logFar),
       m_clusterLightIndices(std::move(other.m_clusterLightIndices)),
-      m_lightGridFlat(std::move(other.m_lightGridFlat)),
+      m_lightGridHeaders(std::move(other.m_lightGridHeaders)),
+      m_lightGridPacked(std::move(other.m_lightGridPacked)),
       m_clusterAABBs(std::move(other.m_clusterAABBs)) {
     other.m_screenWidth = other.m_screenHeight = 0;
     other.m_tileCountX = other.m_tileCountY = 0;
@@ -37,7 +38,8 @@ ClusteredLightGrid& ClusteredLightGrid::operator=(ClusteredLightGrid&& other) no
         m_logNear = other.m_logNear;
         m_logFar = other.m_logFar;
         m_clusterLightIndices = std::move(other.m_clusterLightIndices);
-        m_lightGridFlat = std::move(other.m_lightGridFlat);
+        m_lightGridHeaders = std::move(other.m_lightGridHeaders);
+        m_lightGridPacked = std::move(other.m_lightGridPacked);
         m_clusterAABBs = std::move(other.m_clusterAABBs);
         other.m_screenWidth = other.m_screenHeight = 0;
         other.m_tileCountX = other.m_tileCountY = 0;
@@ -58,14 +60,16 @@ void ClusteredLightGrid::Initialize(uint32_t screenWidth, uint32_t screenHeight,
     m_clusterLightIndices.resize(m_tileCountX * m_tileCountY * DEPTH_SLICES);
     m_clusterAABBs.clear();
     m_clusterAABBs.resize(m_tileCountX * m_tileCountY * DEPTH_SLICES);
-    m_lightGridFlat.clear();
+    m_lightGridHeaders.clear();
+    m_lightGridPacked.clear();
 }
 
 void ClusteredLightGrid::Clear() {
     for (auto& cluster : m_clusterLightIndices) {
         cluster.clear();
     }
-    m_lightGridFlat.clear();
+    m_lightGridHeaders.clear();
+    m_lightGridPacked.clear();
 }
 
 void ClusteredLightGrid::BuildClusterAABBs(const math::Mat4& view, const math::Mat4& projection) {
@@ -221,14 +225,26 @@ void ClusteredLightGrid::BuildLightGrid(const std::vector<PointLight>& pointLigh
     }
 
     uint32_t totalClusters = m_tileCountX * m_tileCountY * DEPTH_SLICES;
-    m_lightGridFlat.resize(totalClusters * MAX_LIGHTS_PER_CLUSTER, 0xFF);
-    for (uint32_t i = 0; i < m_clusterLightIndices.size(); ++i) {
+    m_lightGridHeaders.resize(totalClusters * 2u);
+    m_lightGridPacked.clear();
+    uint32_t runningOffset = 0u;
+    for (uint32_t i = 0; i < totalClusters && i < m_clusterLightIndices.size(); ++i) {
         const auto& cluster = m_clusterLightIndices[i];
-        size_t offset = i * MAX_LIGHTS_PER_CLUSTER;
-        for (size_t j = 0; j < cluster.size() && j < MAX_LIGHTS_PER_CLUSTER; ++j) {
-            m_lightGridFlat[offset + j] = static_cast<uint8_t>(cluster[j]);
-        }
+        uint32_t count = static_cast<uint32_t>(std::min(cluster.size(), static_cast<size_t>(MAX_LIGHTS_PER_CLUSTER)));
+        m_lightGridHeaders[i * 2u] = runningOffset;
+        m_lightGridHeaders[i * 2u + 1u] = count;
+        for (uint32_t j = 0; j < count; ++j)
+            m_lightGridPacked.push_back(cluster[j]);
+        runningOffset += count;
     }
+}
+
+size_t ClusteredLightGrid::GetLightIndexDataSize() const {
+    uint32_t totalClusters = m_tileCountX * m_tileCountY * DEPTH_SLICES;
+    if (totalClusters == 0) return 0u;
+    const size_t headerUints = 1u + totalClusters * 2u;
+    const size_t indexUints = totalClusters * MAX_LIGHTS_PER_CLUSTER;
+    return (headerUints + indexUints) * sizeof(uint32_t);
 }
 
 const std::vector<uint32_t>& ClusteredLightGrid::GetClusterLights(uint32_t tileX, uint32_t tileY, uint32_t sliceZ) const {
@@ -240,17 +256,27 @@ const std::vector<uint32_t>& ClusteredLightGrid::GetClusterLights(uint32_t tileX
 }
 
 void ClusteredLightGrid::UploadToGPU(rhi::IBuffer* lightIndexBuffer) {
-    if (!lightIndexBuffer || m_lightGridFlat.empty()) return;
-    std::vector<unsigned int> lightIndicesUint;
-    lightIndicesUint.reserve(m_lightGridFlat.size());
-    for (uint8_t idx : m_lightGridFlat) {
-        lightIndicesUint.push_back(static_cast<unsigned int>(idx));
+    if (!lightIndexBuffer) return;
+    const size_t required = GetLightIndexDataSize();
+    if (required == 0 || required > lightIndexBuffer->GetSize()) return;
+
+    uint32_t totalClusters = m_tileCountX * m_tileCountY * DEPTH_SLICES;
+    const size_t headerBytes = (1u + totalClusters * 2u) * sizeof(uint32_t);
+    std::vector<uint32_t> staging(1u + totalClusters * 2u + totalClusters * MAX_LIGHTS_PER_CLUSTER, 0u);
+    staging[0] = 0u;
+    for (uint32_t i = 0; i < totalClusters && i * 2u + 1u < m_lightGridHeaders.size(); ++i) {
+        staging[1u + i * 2u] = m_lightGridHeaders[i * 2u];
+        staging[1u + i * 2u + 1u] = m_lightGridHeaders[i * 2u + 1u];
     }
-    const size_t size = lightIndicesUint.size() * sizeof(unsigned int);
-    if (size > lightIndexBuffer->GetSize()) return;
-    void* ptr = lightIndexBuffer->Map(0, size);
+    const size_t packedBytes = m_lightGridPacked.size() * sizeof(uint32_t);
+    if (packedBytes > 0 && headerBytes + packedBytes <= required) {
+        std::memcpy(staging.data() + 1u + totalClusters * 2u, m_lightGridPacked.data(), packedBytes);
+    }
+    void* ptr = lightIndexBuffer->Map(0, required);
     if (ptr) {
-        std::memcpy(ptr, lightIndicesUint.data(), size);
+        std::memcpy(ptr, staging.data(), headerBytes);
+        if (packedBytes > 0)
+            std::memcpy(static_cast<char*>(ptr) + headerBytes, m_lightGridPacked.data(), packedBytes);
         lightIndexBuffer->Unmap();
     }
 }

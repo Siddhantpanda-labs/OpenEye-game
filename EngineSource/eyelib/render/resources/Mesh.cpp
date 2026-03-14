@@ -158,11 +158,13 @@ rhi::VertexLayout Mesh::GetVertexLayoutRHI() {
 
 rhi::VertexLayout Mesh::GetFullscreenQuadVertexLayoutRHI() {
     using namespace rhi;
+    // Must match DeviceGL fullscreen quad VBO: 4 floats per vertex (pos.xy, uv.xy), stride 16.
+    constexpr uint32_t stride = 4u * sizeof(float);
     VertexLayout layout;
-    layout.strideInBytes = static_cast<uint32_t>(sizeof(Vertex));
+    layout.strideInBytes = stride;
     layout.attributes = {
-        {0, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, position))},
-        {1, VertexAttributeType::Float2, static_cast<uint32_t>(offsetof(Vertex, uv))},
+        {0, VertexAttributeType::Float2, 0u},
+        {1, VertexAttributeType::Float2, 2u * sizeof(float)},
     };
     return layout;
 }

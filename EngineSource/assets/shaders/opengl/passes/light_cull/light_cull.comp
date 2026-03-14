@@ -1,15 +1,15 @@
 #version 430 core
-// Compute-based light culling: one thread per cluster; writes light indices to output buffer.
-// Layout matches ClusteredLightGrid: clusterIdx * MAX_LIGHTS_PER_CLUSTER + offset = uint (255 = end).
+// Compute-based light culling: one thread per cluster; writes compact (offset+count) layout.
+// Layout: [counter (1)][headers: offset,count per cluster (2*totalClusters)][packed indices].
+// Counter must be cleared to 0 before dispatch.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 const uint TILE_SIZE = 16u;
-const uint DEPTH_SLICES = 24u;
-const uint MAX_LIGHTS_PER_CLUSTER = 255u;
-const uint END_MARKER = 255u;
+const uint DEPTH_SLICES = 32u;
+const uint MAX_LIGHTS_PER_CLUSTER = 64u;
 
-layout(std430, binding = 0) writeonly buffer LightIndexOut {
+layout(std430, binding = 0) buffer LightIndexOut {
     uint lightIndices[];
 };
 
@@ -127,7 +127,7 @@ void main() {
 
     ClusterAABB aabb = computeClusterAABB(tileX, tileY, sliceZ);
 
-    uint outBase = clusterIdx * MAX_LIGHTS_PER_CLUSTER;
+    uint localList[MAX_LIGHTS_PER_CLUSTER];
     uint count = 0u;
 
     mat4 viewMat = u_View;
@@ -135,7 +135,7 @@ void main() {
         vec4 worldPos = vec4(pointLights[i].position, 1.0);
         vec3 viewPos = (viewMat * worldPos).xyz;
         if (sphereIntersectsAABB(viewPos, pointLights[i].radius, aabb)) {
-            lightIndices[outBase + count] = i;
+            localList[count] = i;
             count++;
         }
     }
@@ -147,11 +147,16 @@ void main() {
         vec3 viewPos = (viewMat * worldPos).xyz;
         vec3 viewDir = viewMat3 * spotLights[i].direction;
         if (coneIntersectsAABB(viewPos, viewDir, spotLights[i].range, spotLights[i].outerConeCos, aabb)) {
-            lightIndices[outBase + count] = spotBase + i;
+            localList[count] = spotBase + i;
             count++;
         }
     }
 
-    for (uint i = count; i < MAX_LIGHTS_PER_CLUSTER; i++)
-        lightIndices[outBase + i] = END_MARKER;
+    uint myOffset = atomicAdd(lightIndices[0], count);
+    uint baseHeaders = 1u;
+    lightIndices[baseHeaders + clusterIdx * 2u] = myOffset;
+    lightIndices[baseHeaders + clusterIdx * 2u + 1u] = count;
+    uint baseIndices = baseHeaders + totalClusters * 2u;
+    for (uint i = 0u; i < count; i++)
+        lightIndices[baseIndices + myOffset + i] = localList[i];
 }

@@ -9,7 +9,7 @@ namespace eyelib {
 namespace render {
 
 /**
- * One batch of instances: same mesh + material (and submesh).
+ * One batch of instances: same mesh + submesh + effective material payload.
  * Used by the submission layer to reduce draw calls via instancing.
  * Skinned drawables are not grouped; they form single-instance batches.
  */
@@ -29,7 +29,7 @@ struct DrawBatch {
 };
 
 /**
- * Build batches from drawables: group by (mesh, material, submeshIndex).
+ * Build batches from drawables: group by (mesh, base material, material-instance payload, submeshIndex).
  * Skinned drawables (bones) are not grouped; each becomes a single-instance batch.
  * Returns batches in stable order; each batch has at least one transform.
  */

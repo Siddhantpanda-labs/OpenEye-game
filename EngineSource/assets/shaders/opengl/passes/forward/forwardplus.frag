@@ -7,15 +7,7 @@ in vec3 v_WorldNormal;
 in vec2 v_TexCoord;
 in mat3 v_TBN;
 
-layout(std140, binding = 2) uniform MaterialBlock {
-    vec3 albedo;
-    float metallic;
-    float roughness;
-    float ao;
-    float alpha;
-    vec3 emission;
-    float reflective;
-};
+#include "../../common/material_block.glsl"
 uniform sampler2D u_AlbedoTexture;
 uniform int u_UseAlbedoTexture;
 uniform sampler2D u_NormalTexture;
@@ -200,11 +192,14 @@ void main() {
     uint tileX = uint(gl_FragCoord.x) / 16u;
     uint tileY = uint(gl_FragCoord.y) / 16u;
     uint clusterIdx = (sliceZ * uint(u_TileCountY) + tileY) * uint(u_TileCountX) + tileX;
-    uint offset = clusterIdx * 255u;
+    uint totalClusters = uint(u_TileCountX) * uint(u_TileCountY) * uint(u_SliceCount);
+    uint baseHeaders = 1u;
+    uint clusterOffset = lightIndices[baseHeaders + clusterIdx * 2u];
+    uint clusterCount = lightIndices[baseHeaders + clusterIdx * 2u + 1u];
+    uint baseIndices = baseHeaders + totalClusters * 2u;
 
-    for (uint i = 0u; i < 255u; i++) {
-        uint lidx = lightIndices[offset + i];
-        if (lidx >= 255u) break;
+    for (uint i = 0u; i < clusterCount; i++) {
+        uint lidx = lightIndices[baseIndices + clusterOffset + i];
         int idx = int(lidx);
         if (idx < u_PointLightCount) {
             result += calc_point_light(

@@ -13,16 +13,7 @@ layout(location = 2) out vec4 g_Albedo;
 layout(location = 3) out vec3 g_PBRParams;
 layout(location = 4) out vec2 g_Velocity;
 
-// Refractor Phase 2: material props from UBO (binding 2 = PerMaterial)
-layout(std140, binding = 2) uniform MaterialBlock {
-    vec3 albedo;
-    float metallic;
-    float roughness;
-    float ao;
-    float alpha;
-    vec3 emission;
-    float reflective;
-};
+#include "../../common/material_block.glsl"
 
 #ifdef HAS_ALBEDO_TEXTURE
 uniform sampler2D u_AlbedoTexture;
@@ -120,7 +111,7 @@ void main() {
     MaterialSurface surf;
     EvaluateMaterialSurface(
         v_TexCoord, v_TBN, v_WorldNormal,
-        albedo, metallic, roughness, ao, emission, alpha, reflective,
+        MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
         u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
         u_MetallicTexture, u_RoughnessTexture, u_AOTexture, u_EmissiveTexture,
         useAlbedo, useNormal, useMR, useMetallic, useRoughness, useAO, useEmissive,

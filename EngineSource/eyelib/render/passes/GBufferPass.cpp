@@ -410,6 +410,7 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
                                    rhi::ICommandList* cmd,
                                    const Mesh* mesh,
                                    const Material* material,
+                                   const MaterialInstance* materialInstance,
                                    rhi::IBuffer* instanceMatrixBuffer,
                                    uint32_t instanceCount,
                                    const math::Mat4& view,
@@ -418,6 +419,8 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
                                    const math::Mat4& prevProjection,
                                    int32_t submeshIndex) {
     if (!device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0 || !m_shaderCache) return;
+    const Material* baseMaterial = materialInstance ? materialInstance->GetMaterial().get() : material;
+    if (!baseMaterial) return;
 
     m_currentGBuffer = &gbuffer;
     gbuffer.BindForGeometryPass(cmd);
@@ -429,10 +432,10 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
     if (m_bindlessHeap && m_bindlessGetHandle && device->GetCapabilities().supportsBindless && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
-    applyMaterialBlendAndCull(cmd, material);
+    applyMaterialBlendAndCull(cmd, baseMaterial);
 
-    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Instanced, material->GetShaderIndex() };
-    auto shader = m_shaderCache->getOrCompile(device, key, material);
+    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Instanced, baseMaterial->GetShaderIndex() };
+    auto shader = m_shaderCache->getOrCompile(device, key, baseMaterial);
     if (!shader || !shader->IsValid()) {
         gbuffer.Unbind(cmd);
         m_currentGBuffer = nullptr;
@@ -447,17 +450,36 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
         return;
     }
 
-    rhi::IBuffer* materialBuffer = material->GetMaterialBufferRHI(device);
+    rhi::IBuffer* materialBuffer = materialInstance
+        ? materialInstance->GetMaterialBufferRHI(device)
+        : baseMaterial->GetMaterialBufferRHI(device);
     if (materialBuffer) cmd->BindUniformBuffer(materialBuffer, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
 
+    shader->Bind(device);
     shader->SetMat4("u_View", view);
     shader->SetMat4("u_Projection", projection);
     shader->SetMat4("u_PrevView", prevView);
     shader->SetMat4("u_PrevProjection", prevProjection);
-    shader->SetVec4("u_UVTransform", material->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
-    shader->SetFloat("u_UVRotation", material->GetFloat("u_UVRotation", 0.0f));
-    shader->SetFloat("u_TexCoordIndex", material->GetFloat("u_TexCoordIndex", 0.0f));
-    shader->SetFloat("u_FlipV", material->GetFloat("u_FlipV", 1.0f));
+    auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
+        return materialInstance ? materialInstance->GetVec4(name, def) : baseMaterial->GetVec4(name, def);
+    };
+    auto getFloat = [&](const std::string& name, float def) {
+        return materialInstance ? materialInstance->GetFloat(name, def) : baseMaterial->GetFloat(name, def);
+    };
+    auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
+        return materialInstance ? materialInstance->GetTextureRHI(name) : baseMaterial->GetTextureRHI(name);
+    };
+    auto bindTextureToSlot = [&](const std::string& name, int unit) -> bool {
+        return materialInstance ? materialInstance->BindTextureToSlot(name, unit) : baseMaterial->BindTextureToSlot(name, unit);
+    };
+    auto hasTex = [&](const std::string& name) {
+        return getTextureRHI(name) ? 1.0f : 0.0f;
+    };
+
+    shader->SetVec4("u_UVTransform", getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
+    shader->SetFloat("u_UVRotation", getFloat("u_UVRotation", 0.0f));
+    shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
+    shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
 
     const char* textureOrder[] = {
         "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
@@ -466,20 +488,19 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
     bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device->GetCapabilities().supportsBindless);
     if (useBindless) {
         for (const char* texName : textureOrder) {
-            rhi::ITexture* rhiTex = material->GetTextureRHI(texName);
+            rhi::ITexture* rhiTex = getTextureRHI(texName);
             rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
             shader->SetHandle64(texName, static_cast<uint64_t>(h));
         }
     } else {
         int unit = 0;
         for (const char* texName : textureOrder) {
-            if (material->BindTextureToSlot(texName, unit)) {
+            if (bindTextureToSlot(texName, unit)) {
                 shader->SetInt(texName, unit);
                 ++unit;
             }
         }
     }
-    auto hasTex = [&](const std::string& name) { return material->GetTexture(name) && material->GetTexture(name)->IsValid() ? 1.0f : 0.0f; };
     shader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
     shader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
     shader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
@@ -488,7 +509,6 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
     shader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
 
     cmd->BindStorageBuffer(instanceMatrixBuffer, rhi::StorageBinding::InstanceMatrix, 0, instanceCount * 64u);
-    shader->Bind(device);
     mesh->Bind(device);
     MeshHandle h = mesh->GetHandle();
     if (h.IsValid()) h.DrawInstanced(device, submeshIndex, instanceCount);

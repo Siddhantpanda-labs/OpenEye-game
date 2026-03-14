@@ -3,11 +3,31 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/OpenGL/CommandListGL.h"
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+struct PipelineGL;
+struct BufferGL;
+
+/** VAO cache key: (pipeline, vbo, ibo). ibo may be null for non-indexed draws. */
+struct VAOCacheKey {
+    PipelineGL* pipeline = nullptr;
+    BufferGL* vbo = nullptr;
+    BufferGL* ibo = nullptr;
+    bool operator==(const VAOCacheKey& o) const {
+        return pipeline == o.pipeline && vbo == o.vbo && ibo == o.ibo;
+    }
+};
+
+struct VAOCacheKeyHash {
+    size_t operator()(const VAOCacheKey& k) const {
+        return std::hash<void*>()(k.pipeline) ^ (std::hash<void*>()(k.vbo) * 31u) ^ (std::hash<void*>()(k.ibo) * 31u * 31u);
+    }
+};
 
 struct DeviceGL : IDevice {
     DeviceGL();
@@ -101,12 +121,24 @@ struct DeviceGL : IDevice {
     IBuffer* GetFullscreenQuadVBO() const { return m_fullscreenQuadVBO; }
     IBuffer* GetFullscreenQuadIBO() const { return m_fullscreenQuadIBO; }
 
+    /**
+     * Get or create a VAO for (pipeline, vbo, ibo). VAO is created once and cached.
+     * pipeline must be a graphics pipeline with non-empty vertex layout; vbo must be non-null.
+     * ibo may be null for non-indexed draws. Returns 0 if pipeline is compute or vbo is null.
+     */
+    unsigned int GetOrCreateVAO(PipelineGL* pipeline, BufferGL* vbo, BufferGL* ibo);
+
+private:
+    void InvalidateVAOCacheForPipeline(PipelineGL* pipeline);
+    void InvalidateVAOCacheForBuffer(BufferGL* buffer);
+
 private:
     void QueryCapabilities();
     RHICapabilities m_caps;
     std::unique_ptr<CommandListGL> m_immediateCommandList;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;
+    std::unordered_map<VAOCacheKey, unsigned int, VAOCacheKeyHash> m_vaoCache;
 };
 
 } // namespace rhi

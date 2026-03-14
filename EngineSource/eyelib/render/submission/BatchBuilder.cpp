@@ -1,4 +1,5 @@
 #include "eyelib/render/submission/DrawBatch.h"
+#include "eyelib/render/materials/MaterialInstance.h"
 #include <unordered_map>
 #include <cstdint>
 
@@ -23,9 +24,19 @@ namespace {
 struct BatchKey {
     Mesh* mesh = nullptr;
     Material* material = nullptr;
+    MaterialInstance* materialInstance = nullptr;
+    size_t materialInstanceHash = 0u;
     int32_t submeshIndex = -1;
     bool operator==(const BatchKey& o) const {
-        return mesh == o.mesh && material == o.material && submeshIndex == o.submeshIndex;
+        if (mesh != o.mesh || material != o.material || submeshIndex != o.submeshIndex)
+            return false;
+        if (materialInstance == nullptr || o.materialInstance == nullptr)
+            return materialInstance == o.materialInstance;
+        if (materialInstanceHash != o.materialInstanceHash)
+            return false;
+        if (materialInstance == o.materialInstance)
+            return true;
+        return materialInstance->IsBatchEquivalent(*o.materialInstance);
     }
 };
 
@@ -33,7 +44,8 @@ struct BatchKeyHash {
     size_t operator()(const BatchKey& k) const {
         size_t h = std::hash<Mesh*>()(k.mesh);
         h ^= std::hash<Material*>()(k.material) << 1;
-        h ^= std::hash<int32_t>()(k.submeshIndex) << 2;
+        h ^= std::hash<size_t>()(k.materialInstanceHash) << 2;
+        h ^= std::hash<int32_t>()(k.submeshIndex) << 3;
         return h;
     }
 };
@@ -59,7 +71,9 @@ std::vector<DrawBatch> BuildBatches(const std::vector<Drawable>& drawables) {
             continue;
         }
 
-        BatchKey key{ d.mesh.get(), d.material.get(), d.submeshIndex };
+        MaterialInstance* mi = d.materialInstance.get();
+        size_t miHash = mi ? mi->GetBatchHash() : 0u;
+        BatchKey key{ d.mesh.get(), d.material.get(), mi, miHash, d.submeshIndex };
         auto it = map.find(key);
         if (it == map.end()) {
             DrawBatch b;

@@ -562,7 +562,7 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
                 const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
                 m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
                 m_gbufferPass->RenderInstanced(*m_gbuffer, m_device, cmd,
-                    batch.mesh.get(), batch.material.get(), m_instanceMatrixBuffer,
+                    batch.mesh.get(), batch.material.get(), batch.materialInstance.get(), m_instanceMatrixBuffer,
                     static_cast<uint32_t>(batch.transforms.size()),
                     cam.view, cam.projection, m_prevView, m_prevProjection, batch.submeshIndex);
             } else {
@@ -1206,7 +1206,7 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
 
     const size_t kMaxPointLights = 256;
     const size_t kMaxSpotLights = 64;
-    const size_t kMaxLightIndices = 4 * 1024 * 1024;
+    const size_t requiredLightIndexBytes = m_clusteredLightGrid->GetLightIndexDataSize();
     if (!pointLights.empty() && m_device) {
         if (!m_pointLightBuffer) {
             rhi::BufferDesc bd;
@@ -1233,14 +1233,21 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
             m_spotLightBuffer->Update(spotLights.data(), 0, sz);
         }
     }
-    if (m_device && !m_lightIndexBuffer) {
-        rhi::BufferDesc bd;
-        bd.sizeInBytes = kMaxLightIndices;
-        bd.usage = rhi::BufferUsage::Storage;
-        bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
+    if (m_device && requiredLightIndexBytes > 0) {
+        if (!m_lightIndexBuffer || m_lightIndexBuffer->GetSize() < requiredLightIndexBytes) {
+            if (m_lightIndexBuffer) {
+                m_device->DestroyBuffer(m_lightIndexBuffer);
+                m_lightIndexBuffer = nullptr;
+            }
+            rhi::BufferDesc bd;
+            bd.sizeInBytes = requiredLightIndexBytes;
+            bd.usage = rhi::BufferUsage::Storage;
+            bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_lightIndexBuffer = m_device->CreateBuffer(bd, nullptr);
+        }
     }
 
+    // Prefer GPU light culling when supported (zero CPU cost); CPU path is fallback.
     if (m_lightCullPass && m_lightCullPass->IsSupported(m_device) && m_lightIndexBuffer) {
         m_lightCullPass->SetPointLights(m_pointLightBuffer, static_cast<uint32_t>(pointLights.size()));
         m_lightCullPass->SetSpotLights(m_spotLightBuffer, static_cast<uint32_t>(spotLights.size()));
@@ -1255,6 +1262,8 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
             m_clusteredLightGrid->GetNearPlane(),
             m_clusteredLightGrid->GetFarPlane(),
             m_width, m_height);
+        uint32_t zero = 0u;
+        m_lightIndexBuffer->Update(&zero, 0, sizeof(zero));
         RenderContext lightCullCtx = RenderContext::FromDevice(m_device);
         m_lightCullPass->Execute(lightCullCtx);
     } else {
@@ -1262,7 +1271,9 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
                                              cam.view, cam.projection, cam.viewPos);
         m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
     }
-    if (cmd && m_lightIndexBuffer) cmd->BindStorageBuffer(m_lightIndexBuffer, 2);
+    if (cmd && m_lightIndexBuffer) {
+        cmd->BindStorageBuffer(m_lightIndexBuffer, 2);
+    }
 
     if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
@@ -1280,8 +1291,9 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
         light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-    if (cmd && m_sceneLightingBuffer)
+    if (cmd && m_sceneLightingBuffer) {
         cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
+    }
 }
 
 void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
@@ -1370,7 +1382,9 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                     batch.material->ApplyToShader(m_device, sh, cmd);
                 const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
                 m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
-                if (cmd) cmd->BindStorageBuffer(m_instanceMatrixBuffer, kForwardPlusInstanceBinding, 0, static_cast<uint32_t>(batch.transforms.size() * 64u));
+                if (cmd) {
+                    cmd->BindStorageBuffer(m_instanceMatrixBuffer, kForwardPlusInstanceBinding, 0, static_cast<uint32_t>(batch.transforms.size() * 64u));
+                }
                 batch.mesh->Bind(m_device);
                 { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.DrawInstanced(m_device, batch.submeshIndex, static_cast<uint32_t>(batch.transforms.size())); }
                 batch.mesh->Unbind();

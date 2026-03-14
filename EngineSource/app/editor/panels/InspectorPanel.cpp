@@ -1,5 +1,6 @@
 #include "InspectorPanel.h"
 #include "EditorContext.h"
+#include "ScenePipelineMode.h"
 #include "PanelCommon.h"
 #include "ui/PhysicsColliderIcons.h"
 
@@ -589,6 +590,18 @@ void ShowInspectorPanel(EditorContext* ctx) {
         } else if (ctx->sceneSelected) {
             ImGui::TextUnformatted("Scene");
             ImGui::Separator();
+            const char* modeItems[] = { "Forward", "Deferred", "ForwardPlus" };
+            std::string sceneMode = ctx->world.GetRenderPipelineMode();
+            int modeIndex = 0;
+            if (sceneMode == "Deferred") modeIndex = 1;
+            else if (sceneMode == "ForwardPlus") modeIndex = 2;
+            if (ImGui::Combo("Render Pipeline", &modeIndex, modeItems, IM_ARRAYSIZE(modeItems))) {
+                const eyelib::api::RenderPipeline::Mode mode =
+                    (modeIndex == 1) ? eyelib::api::RenderPipeline::Mode::Deferred :
+                    (modeIndex == 2) ? eyelib::api::RenderPipeline::Mode::ForwardPlus :
+                    eyelib::api::RenderPipeline::Mode::Forward;
+                openeye::editor::SetScenePipelineMode(*ctx, mode);
+            }
             char skyboxBuf[256];
             std::string skyboxId = ctx->world.GetSkyboxAssetId();
             std::snprintf(skyboxBuf, sizeof(skyboxBuf), "%.255s", skyboxId.c_str());

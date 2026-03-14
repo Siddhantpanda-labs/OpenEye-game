@@ -3,6 +3,7 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/math/Types.h"
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -19,8 +20,9 @@ struct ClusterAABB {
 class ClusteredLightGrid {
 public:
     static constexpr uint32_t TILE_SIZE = 16;  // 16x16 pixels per tile
-    static constexpr uint32_t DEPTH_SLICES = 24;  // Depth slices (3D clusters)
-    static constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 255;  // uint8_t limit
+    static constexpr uint32_t DEPTH_SLICES = 32;  // Depth slices (3D clusters); AAA typical
+    /** Max lights per cluster (cap to avoid stalls). Indices stored as uint. */
+    static constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 64u;
 
     ClusteredLightGrid();
     ~ClusteredLightGrid();
@@ -46,7 +48,9 @@ public:
     /** Get light indices for a cluster (tileX, tileY, sliceZ) */
     const std::vector<uint32_t>& GetClusterLights(uint32_t tileX, uint32_t tileY, uint32_t sliceZ) const;
 
-    /** RHI path: upload light indices to the given buffer (Map/copy/Unmap). Buffer must be at least GetLightIndexDataSize() bytes. */
+    /** Required byte size for compact light index buffer: 1 (counter) + totalClusters*2 (headers) + totalClusters*MAX_LIGHTS_PER_CLUSTER (indices), in uints. */
+    size_t GetLightIndexDataSize() const;
+    /** RHI path: upload compact (offset+count) light indices. Buffer must be at least GetLightIndexDataSize() bytes. */
     void UploadToGPU(rhi::IBuffer* lightIndexBuffer);
 
     uint32_t GetTileCountX() const { return m_tileCountX; }
@@ -64,11 +68,12 @@ private:
     float m_nearPlane = 0.1f, m_farPlane = 1000.0f;
     float m_logNear = 0.0f, m_logFar = 0.0f;
 
-    /** Per-cluster light indices: [clusterIndex] = vector of light indices */
+    /** Per-cluster light indices: [clusterIndex] = vector of light indices (capped at MAX_LIGHTS_PER_CLUSTER) */
     std::vector<std::vector<uint32_t>> m_clusterLightIndices;
 
-    /** Flattened light grid: [clusterIndex * MAX_LIGHTS_PER_CLUSTER + offset] = lightIndex (or 0xFF = end) */
-    std::vector<uint8_t> m_lightGridFlat;
+    /** Compact layout: headers (offset, count) per cluster, then packed indices. Filled in BuildLightGrid for UploadToGPU. */
+    std::vector<uint32_t> m_lightGridHeaders;
+    std::vector<uint32_t> m_lightGridPacked;
 
     /** Cluster AABBs in view space: [clusterIndex] = AABB */
     std::vector<ClusterAABB> m_clusterAABBs;

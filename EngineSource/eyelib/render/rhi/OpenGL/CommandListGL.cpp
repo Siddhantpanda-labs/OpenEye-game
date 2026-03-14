@@ -9,6 +9,7 @@
 #include "eyelib/render/rhi/OpenGL/FenceGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/debug/Validation.h"
 #include <glad/glad.h>
 #include <cstring>
 
@@ -17,12 +18,9 @@ namespace render {
 namespace rhi {
 
 CommandListGL::CommandListGL(DeviceGL* device) : m_device(device), m_blendSrc(GL_SRC_ALPHA), m_blendDst(GL_ONE_MINUS_SRC_ALPHA) {
-    glGenVertexArrays(1, reinterpret_cast<GLuint*>(&m_vao));
 }
 
 CommandListGL::~CommandListGL() {
-    if (m_vao)
-        glDeleteVertexArrays(1, reinterpret_cast<GLuint*>(&m_vao));
     if (m_bonesUBO && m_device) {
         m_device->DestroyBuffer(m_bonesUBO);
         m_bonesUBO = nullptr;
@@ -31,19 +29,18 @@ CommandListGL::~CommandListGL() {
 }
 
 void CommandListGL::Begin() {
-    glBindVertexArray(m_vao);
-    // Reset VAO to a known state so no stale vertex attribs leak into compute or the next draw.
-    constexpr uint32_t kMaxVertexAttribs = 16;
-    for (uint32_t loc = 0; loc < kMaxVertexAttribs; ++loc)
-        glDisableVertexAttribArray(loc);
     m_currentPipeline = nullptr;
     m_currentRT = nullptr;
     m_currentVBO = nullptr;
+    m_currentVBOOffset = 0;
     m_currentIBO = nullptr;
+    m_boundProgram = 0;
+    m_boundVAO = 0;
 }
 
 void CommandListGL::End() {
     glBindVertexArray(0);
+    m_boundVAO = 0;
 }
 
 void CommandListGL::SetRenderTarget(IRenderTarget* rt) {
@@ -70,12 +67,14 @@ void CommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     if (!rt) return;
     SetRenderTarget(rt);
     auto* r = static_cast<RenderTargetGL*>(rt);
-    ITexture* color0 = r->GetColorTexture(0);
-    if (color0) {
-        if (color0->GetFormat() == RHITextureFormat::R32UI)
-            glClearBufferuiv(GL_COLOR, 0, &clear.colorUint);
+    // Clear all attached color targets (MRT), not just COLOR0.
+    for (uint32_t i = 0;; ++i) {
+        ITexture* color = r->GetColorTexture(i);
+        if (!color) break;
+        if (color->GetFormat() == RHITextureFormat::R32UI)
+            glClearBufferuiv(GL_COLOR, static_cast<GLint>(i), &clear.colorUint);
         else
-            glClearBufferfv(GL_COLOR, 0, clear.color);
+            glClearBufferfv(GL_COLOR, static_cast<GLint>(i), clear.color);
     }
     if (r->GetDepthTexture()) {
         glDepthMask(GL_TRUE);
@@ -293,17 +292,18 @@ static void ApplyRaster(const RasterState& r) {
 void CommandListGL::BindPipeline(IPipeline* pipeline) {
     m_currentPipeline = static_cast<PipelineGL*>(pipeline);
     if (!m_currentPipeline) return;
-    // Compute: unbind VAO to avoid GL 1282 "Wrong component type or count" when binding SSBOs (driver validates vertex state). Graphics: bind VAO and disable all attribs.
     const bool isCompute = m_currentPipeline->m_vertexLayout.attributes.empty();
     if (isCompute) {
-        glBindVertexArray(0);
-    } else {
-        glBindVertexArray(m_vao);
-        constexpr uint32_t kMaxVertexAttribs = 16;
-        for (uint32_t loc = 0; loc < kMaxVertexAttribs; ++loc)
-            glDisableVertexAttribArray(loc);
+        if (m_boundVAO != 0) {
+            glBindVertexArray(0);
+            m_boundVAO = 0;
+        }
     }
-    glUseProgram(m_currentPipeline->m_program);
+    GLuint program = m_currentPipeline->m_program;
+    if (program != m_boundProgram) {
+        glUseProgram(program);
+        m_boundProgram = program;
+    }
     if (m_currentPipeline->m_hasTessellation)
         glPatchParameteri(GL_PATCH_VERTICES, static_cast<GLint>(m_currentPipeline->m_patchVertexCount));
     ApplyBlend(m_currentPipeline->m_blend);
@@ -318,60 +318,22 @@ void CommandListGL::DrawFullscreenQuad(IPipeline* pipeline) {
     IBuffer* ibo = m_device->GetFullscreenQuadIBO();
     if (!vbo || !ibo) return;
     BindPipeline(pipeline);
-    auto* b = static_cast<BufferGL*>(vbo);
-    auto* i = static_cast<BufferGL*>(ibo);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, b->m_handle);
-    constexpr uint32_t kMaxVertexAttribs = 16;
-    for (uint32_t loc = 2; loc < kMaxVertexAttribs; ++loc)
-        glDisableVertexAttribArray(loc);
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    constexpr GLsizei stride = 4 * sizeof(float);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(2 * sizeof(float)));
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, i->m_handle);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
+    m_currentVBO = static_cast<BufferGL*>(vbo);
+    m_currentVBOOffset = 0;
+    m_currentIBO = static_cast<BufferGL*>(ibo);
+    m_currentIndexType = IndexType::UInt16;
+    DrawIndexed(6, 0, 0);
 }
 
 void CommandListGL::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
+    (void)binding;
     m_currentVBO = static_cast<BufferGL*>(buffer);
-    if (!m_currentVBO || !m_currentPipeline) return;
-    glBindVertexArray(m_vao);  // Re-bind in case legacy GL code (e.g. fluid renderer) changed it
-    glBindBuffer(GL_ARRAY_BUFFER, m_currentVBO->m_handle);
-    const VertexLayout& layout = m_currentPipeline->m_vertexLayout;
-    constexpr uint32_t kMaxVertexAttribs = 16;
-    for (uint32_t loc = 0; loc < kMaxVertexAttribs; ++loc) {
-        bool inLayout = false;
-        for (const auto& att : layout.attributes) {
-            if (att.location == loc) { inLayout = true; break; }
-        }
-        if (!inLayout)
-            glDisableVertexAttribArray(loc);
-    }
-    for (const auto& att : layout.attributes) {
-        glEnableVertexAttribArray(att.location);
-        GLenum glType = GLEnums::VertexAttributeTypeToGL(att.type);
-        int count = GLEnums::VertexAttributeTypeCount(att.type);
-        bool normalized = (glType == GL_FLOAT);
-        if (glType == GL_INT || glType == GL_UNSIGNED_INT)
-            glVertexAttribIPointer(att.location, count, glType,
-                                  static_cast<GLsizei>(layout.strideInBytes),
-                                  reinterpret_cast<void*>(static_cast<uintptr_t>(att.offsetInBytes + offset)));
-        else
-            glVertexAttribPointer(att.location, count, glType, normalized,
-                                  static_cast<GLsizei>(layout.strideInBytes),
-                                  reinterpret_cast<void*>(static_cast<uintptr_t>(att.offsetInBytes + offset)));
-    }
+    m_currentVBOOffset = offset;
 }
 
 void CommandListGL::BindIndexBuffer(IBuffer* buffer, IndexType indexType, uint32_t offset) {
     m_currentIBO = static_cast<BufferGL*>(buffer);
     m_currentIndexType = indexType;
-    if (m_currentIBO) {
-        glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_currentIBO->m_handle);
-    }
     (void)offset;
 }
 
@@ -389,6 +351,12 @@ void CommandListGL::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_
     const GLsizeiptr fullSize = static_cast<GLsizeiptr>(b->GetSize());
     const GLsizeiptr rangeSize = size > 0 ? static_cast<GLsizeiptr>(size) : fullSize;
     if (rangeSize <= 0) return;  // glBindBufferRange with size <= 0 is GL_INVALID_VALUE; skip to avoid validation error.
+    // Some drivers validate stale vertex-input state when rebinding SSBOs between passes.
+    // Keep storage binds independent from previous draw VAO state.
+    if (m_boundVAO != 0) {
+        glBindVertexArray(0);
+        m_boundVAO = 0;
+    }
     // Ensure no buffer is bound as draw-indirect when we bind as SSBO (same buffer dual-bound can trigger GL 1282).
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
     glBindBufferRange(GL_SHADER_STORAGE_BUFFER, binding, b->m_handle,
@@ -509,6 +477,21 @@ void CommandListGL::SetUniformHandle64(const char* name, uint64_t handle) {
         glProgramUniformHandleui64ARB(m_currentPipeline->m_program, loc, static_cast<GLuint64>(handle));
 }
 
+unsigned int CommandListGL::ResolveAndBindVAO(bool indexed) {
+    if (!m_device || !m_currentPipeline) return 0;
+    if (m_currentPipeline->m_vertexLayout.attributes.empty()) return 0;  // compute: do not draw
+    if (!m_currentVBO) return 0;
+    if (indexed && !m_currentIBO) return 0;
+    BufferGL* ibo = indexed ? m_currentIBO : nullptr;
+    unsigned int vao = m_device->GetOrCreateVAO(m_currentPipeline, m_currentVBO, ibo);
+    if (vao == 0) return 0;
+    if (vao != m_boundVAO) {
+        glBindVertexArray(vao);
+        m_boundVAO = vao;
+    }
+    return vao;
+}
+
 void CommandListGL::SetUniformMat4Array(const char* name, const float* data, size_t count) {
     if (!data) return;
     // Standard: u_Bones always in UBO at binding Bones (3). Try block first.
@@ -544,19 +527,27 @@ void CommandListGL::SetUniformMat4Array(const char* name, const float* data, siz
 }
 
 void CommandListGL::Draw(uint32_t vertexCount, uint32_t firstVertex) {
-    glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
-    glDrawArrays(GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList),
-                 static_cast<GLint>(firstVertex), static_cast<GLsizei>(vertexCount));
+    if (!ResolveAndBindVAO(false)) return;
+    uint32_t stride = m_currentPipeline->m_vertexLayout.strideInBytes;
+    if (stride == 0) stride = 1;
+    EYELIB_ASSERT(m_currentVBOOffset % stride == 0);
+    GLint baseVertex = static_cast<GLint>(m_currentVBOOffset / stride);
+    glDrawArrays(GLEnums::PrimitiveTopologyToGL(m_currentPipeline->m_topology),
+                 static_cast<GLint>(firstVertex) + baseVertex, static_cast<GLsizei>(vertexCount));
 }
 
 void CommandListGL::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
-    glBindVertexArray(m_vao);  // Re-bind in case legacy GL changed it
+    if (!ResolveAndBindVAO(true)) return;
+    uint32_t stride = m_currentPipeline->m_vertexLayout.strideInBytes;
+    if (stride == 0) stride = 1;
+    EYELIB_ASSERT(m_currentVBOOffset % stride == 0);
+    GLint baseVertex = static_cast<GLint>(vertexOffset + static_cast<int32_t>(m_currentVBOOffset / stride));
     GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
     size_t indexSize = (m_currentIndexType == IndexType::UInt16) ? 2 : 4;
     const void* offsetPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(firstIndex * indexSize));
     glDrawElementsBaseVertex(
-        GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList),
-        static_cast<GLsizei>(indexCount), idxType, offsetPtr, vertexOffset);
+        GLEnums::PrimitiveTopologyToGL(m_currentPipeline->m_topology),
+        static_cast<GLsizei>(indexCount), idxType, offsetPtr, baseVertex);
 }
 
 void CommandListGL::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
@@ -564,19 +555,21 @@ void CommandListGL::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex,
 }
 
 void CommandListGL::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
-    if (instanceCount == 0) return;
-    glBindVertexArray(m_vao);
+    if (instanceCount == 0 || !ResolveAndBindVAO(true)) return;
+    uint32_t stride = m_currentPipeline->m_vertexLayout.strideInBytes;
+    if (stride == 0) stride = 1;
+    EYELIB_ASSERT(m_currentVBOOffset % stride == 0);
+    GLint baseVertex = static_cast<GLint>(vertexOffset + static_cast<int32_t>(m_currentVBOOffset / stride));
     GLenum idxType = GLEnums::IndexTypeToGL(m_currentIndexType);
     size_t indexSize = (m_currentIndexType == IndexType::UInt16) ? 2 : 4;
     const void* offsetPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(firstIndex * indexSize));
     glDrawElementsInstancedBaseVertex(
-        GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList),
-        static_cast<GLsizei>(indexCount), idxType, offsetPtr, static_cast<GLsizei>(instanceCount), vertexOffset);
+        GLEnums::PrimitiveTopologyToGL(m_currentPipeline->m_topology),
+        static_cast<GLsizei>(indexCount), idxType, offsetPtr, static_cast<GLsizei>(instanceCount), baseVertex);
 }
 
 void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
-    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(false)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -585,8 +578,7 @@ void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
 }
 
 void CommandListGL::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) {
-    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(true)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -596,8 +588,7 @@ void CommandListGL::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) 
 }
 
 void CommandListGL::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
-    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(false)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -606,8 +597,7 @@ void CommandListGL::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offs
 }
 
 void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
-    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(true)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -617,8 +607,7 @@ void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t off
 }
 
 void CommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
-    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount || !ResolveAndBindVAO(false)) return;
     auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
     auto* cntBuf = static_cast<BufferGL*>(countBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);
@@ -630,8 +619,7 @@ void CommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t
 }
 
 void CommandListGL::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
-    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount) return;
-    glBindVertexArray(m_vao);
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount || !ResolveAndBindVAO(true)) return;
     auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
     auto* cntBuf = static_cast<BufferGL*>(countBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);

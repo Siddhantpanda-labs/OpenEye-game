@@ -158,8 +158,73 @@ IBuffer* DeviceGL::CreateBuffer(const BufferDesc& desc, const void* initialData)
     return buf;
 }
 
+void DeviceGL::InvalidateVAOCacheForPipeline(PipelineGL* pipeline) {
+    if (!pipeline) return;
+    for (auto it = m_vaoCache.begin(); it != m_vaoCache.end(); ) {
+        if (it->first.pipeline == pipeline) {
+            if (it->second) glDeleteVertexArrays(1, &it->second);
+            it = m_vaoCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void DeviceGL::InvalidateVAOCacheForBuffer(BufferGL* buffer) {
+    if (!buffer) return;
+    for (auto it = m_vaoCache.begin(); it != m_vaoCache.end(); ) {
+        if (it->first.vbo == buffer || it->first.ibo == buffer) {
+            if (it->second) glDeleteVertexArrays(1, &it->second);
+            it = m_vaoCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+unsigned int DeviceGL::GetOrCreateVAO(PipelineGL* pipeline, BufferGL* vbo, BufferGL* ibo) {
+    if (!pipeline || !vbo) return 0;
+    if (pipeline->m_vertexLayout.attributes.empty()) return 0;  // compute pipeline
+    VAOCacheKey key{ pipeline, vbo, ibo };
+    auto it = m_vaoCache.find(key);
+    if (it != m_vaoCache.end()) return it->second;
+    GLuint vao = 0;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo->m_handle);
+    const VertexLayout& layout = pipeline->m_vertexLayout;
+    constexpr uint32_t kMaxVertexAttribs = 16;
+    for (uint32_t loc = 0; loc < kMaxVertexAttribs; ++loc) {
+        bool inLayout = false;
+        for (const auto& att : layout.attributes) {
+            if (att.location == loc) { inLayout = true; break; }
+        }
+        if (!inLayout)
+            glDisableVertexAttribArray(loc);
+    }
+    for (const auto& att : layout.attributes) {
+        glEnableVertexAttribArray(att.location);
+        GLenum glType = GLEnums::VertexAttributeTypeToGL(att.type);
+        int count = GLEnums::VertexAttributeTypeCount(att.type);
+        if (glType == GL_INT || glType == GL_UNSIGNED_INT)
+            glVertexAttribIPointer(att.location, count, glType,
+                                  static_cast<GLsizei>(layout.strideInBytes),
+                                  reinterpret_cast<void*>(static_cast<uintptr_t>(att.offsetInBytes)));
+        else
+            glVertexAttribPointer(att.location, count, glType, GL_FALSE,
+                                  static_cast<GLsizei>(layout.strideInBytes),
+                                  reinterpret_cast<void*>(static_cast<uintptr_t>(att.offsetInBytes)));
+    }
+    if (ibo)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo->m_handle);
+    glBindVertexArray(0);
+    m_vaoCache[key] = vao;
+    return vao;
+}
+
 void DeviceGL::DestroyBuffer(IBuffer* buffer) {
     auto* b = static_cast<BufferGL*>(buffer);
+    if (b) InvalidateVAOCacheForBuffer(b);
     if (b && b->m_handle) {
         b->UnmapPersistent();
         glDeleteBuffers(1, &b->m_handle);
@@ -538,18 +603,17 @@ IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
         return nullptr;
     }
 
-    // Explicitly set SSBO block bindings so driver interface matches.
+    // GpuCull compute only: set SSBO block bindings. Skip warnings when both blocks are missing (non-GpuCull compute, e.g. light_cull).
     GLuint idx0 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockIndirectOut);
-    if (idx0 == GL_INVALID_INDEX) {
-        core::Log::WarnF("RHI OpenGL: compute program has no SSBO block '%s' (optimized out or missing).", kGpuCullBlockIndirectOut);
-    } else {
-        glShaderStorageBlockBinding(program, idx0, 0);
-    }
     GLuint idx1 = glGetProgramResourceIndex(program, GL_SHADER_STORAGE_BLOCK, kGpuCullBlockDrawListIn);
-    if (idx1 == GL_INVALID_INDEX) {
-        core::Log::WarnF("RHI OpenGL: compute program has no SSBO block '%s' (optimized out or missing); do not bind slot 1.", kGpuCullBlockDrawListIn);
-    } else {
-        glShaderStorageBlockBinding(program, idx1, 1);
+    const bool isGpuCullPipeline = (idx0 != GL_INVALID_INDEX || idx1 != GL_INVALID_INDEX);
+    if (isGpuCullPipeline) {
+        if (idx0 == GL_INVALID_INDEX)
+            core::Log::WarnF("RHI OpenGL: compute program has no SSBO block '%s' (optimized out or missing).", kGpuCullBlockIndirectOut);
+        else
+            glShaderStorageBlockBinding(program, idx0, 0);
+        if (idx1 != GL_INVALID_INDEX)
+            glShaderStorageBlockBinding(program, idx1, 1);
     }
 
     auto* p = new PipelineGL();
@@ -561,6 +625,7 @@ IPipeline* DeviceGL::CreateComputePipeline(void* computeShader) {
 
 void DeviceGL::DestroyPipeline(IPipeline* pipeline) {
     auto* p = static_cast<PipelineGL*>(pipeline);
+    if (p) InvalidateVAOCacheForPipeline(p);
     if (p && p->m_program) {
         glDeleteProgram(p->m_program);
         p->m_program = 0;

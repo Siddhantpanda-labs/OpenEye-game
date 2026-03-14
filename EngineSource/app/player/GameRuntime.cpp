@@ -177,6 +177,7 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
 
     ResetScene();
     m_render->BuildScene(*m_world, m_options, m_animation.get(), m_assetRegistry, m_scene, &m_frameAlloc);
+    m_render->ApplySceneRenderPipelineMode(m_world->GetRenderPipelineMode());
     m_render->RenderSceneOnly(m_scene, m_width, m_height);
 
 #ifdef OPENEYE_BUILD_STREAMING

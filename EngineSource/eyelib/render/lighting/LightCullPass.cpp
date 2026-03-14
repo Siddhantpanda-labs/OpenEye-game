@@ -1,6 +1,7 @@
 #include "eyelib/render/lighting/LightCullPass.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <cstring>
 
 namespace eyelib {
@@ -21,8 +22,14 @@ bool LightCullPass::IsSupported(rhi::IDevice* device) const {
 void LightCullPass::EnsureResources() {
     if (!m_device || m_initialized || !IsSupported(m_device)) return;
 
+    std::string path = platform::filesystem::GetEngineAssetsRoot();
+    if (!path.empty())
+        path = platform::filesystem::NormalizePath(path + "/" + kLightCullCompPath);
+    else
+        path = kLightCullCompPath;
+
     std::string compSrc;
-    if (!LoadShaderSource(kLightCullCompPath, compSrc)) {
+    if (!LoadShaderSource(path, compSrc)) {
         core::Log::ErrorF("LightCullPass: failed to load %s", kLightCullCompPath);
         return;
     }
@@ -103,15 +110,15 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
 
     cmd->SetUniformMat4("u_View", m_view);
     cmd->SetUniformMat4("u_Projection", m_proj);
-    cmd->SetUniformInt("u_TileCountX", static_cast<int>(m_tileCountX));
-    cmd->SetUniformInt("u_TileCountY", static_cast<int>(m_tileCountY));
-    cmd->SetUniformInt("u_SliceCount", static_cast<int>(m_sliceCount));
+    cmd->SetUniformUint("u_TileCountX", m_tileCountX);
+    cmd->SetUniformUint("u_TileCountY", m_tileCountY);
+    cmd->SetUniformUint("u_SliceCount", m_sliceCount);
     cmd->SetUniformFloat("u_LogNear", m_logNear);
     cmd->SetUniformFloat("u_LogFar", m_logFar);
     cmd->SetUniformFloat("u_NearPlane", m_nearPlane);
     cmd->SetUniformFloat("u_FarPlane", m_farPlane);
-    cmd->SetUniformInt("u_ScreenWidth", static_cast<int>(m_screenWidth));
-    cmd->SetUniformInt("u_ScreenHeight", static_cast<int>(m_screenHeight));
+    cmd->SetUniformFloat("u_ScreenWidth", static_cast<float>(m_screenWidth));
+    cmd->SetUniformFloat("u_ScreenHeight", static_cast<float>(m_screenHeight));
     cmd->SetUniformInt("u_PointLightCount", static_cast<int>(m_pointLightCount));
     cmd->SetUniformInt("u_SpotLightCount", static_cast<int>(m_spotLightCount));
 

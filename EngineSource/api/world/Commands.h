@@ -44,6 +44,8 @@ CommandPtr SetTransform(::eyelib::world::EntityId entity, const ::eyelib::world:
 CommandPtr SetWorldTransform(::eyelib::world::EntityId entity, const ::eyelib::world::components::Transform& worldValue);
 /** Scene-level: set skybox asset id. Goes through command/mutation layer. */
 CommandPtr SetSkyboxAssetId(const std::string& assetId);
+/** Scene-level: set render pipeline mode string (Forward | Deferred | ForwardPlus). */
+CommandPtr SetRenderPipelineMode(const std::string& mode);
 
 template<typename T>
 CommandPtr SetComponentData(::eyelib::world::EntityId entity, const T& value) {

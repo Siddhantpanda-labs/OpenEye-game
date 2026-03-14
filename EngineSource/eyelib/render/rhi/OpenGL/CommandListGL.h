@@ -105,17 +105,21 @@ private:
     TFBinding m_tfBuffers[kMaxTransformFeedbackBuffers];
     bool m_inConditionalRender = false;
     DeviceGL* m_device = nullptr;
-    unsigned int m_vao = 0;  // VAO required in core profile for vertex attribs and draw
+    /** Resolves VAO from cache for (m_currentPipeline, m_currentVBO, m_currentIBO). Binds it and returns handle; 0 if draw should be skipped (compute or no VAO). */
+    unsigned int ResolveAndBindVAO(bool indexed);
     IBuffer* m_bonesUBO = nullptr;
     size_t m_bonesUBOSize = 0;
     PipelineGL* m_currentPipeline = nullptr;
     IRenderTarget* m_currentRT = nullptr;
     BufferGL* m_currentVBO = nullptr;
+    uint32_t m_currentVBOOffset = 0;  // applied as base vertex (offset/stride); VAO stays at 0
     BufferGL* m_currentIBO = nullptr;
     IndexType m_currentIndexType = IndexType::UInt32;
     bool m_cullFrontFace = false;
     unsigned int m_blendSrc;
     unsigned int m_blendDst;
+    unsigned int m_boundProgram = 0;
+    unsigned int m_boundVAO = 0;
 };
 
 } // namespace rhi

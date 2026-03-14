@@ -12,6 +12,7 @@ namespace eyelib {
 namespace render {
 
 class Mesh;
+class MaterialInstance;
 class Shader;
 class ShaderCache;
 
@@ -148,6 +149,7 @@ public:
                          rhi::ICommandList* cmd,
                          const Mesh* mesh,
                          const Material* material,
+                         const MaterialInstance* materialInstance,
                          rhi::IBuffer* instanceMatrixBuffer,
                          uint32_t instanceCount,
                          const math::Mat4& view,

@@ -122,6 +122,7 @@ void WorldState::Clear() {
     m_registry.clear();
     m_componentStores.clear();
     m_skyboxAssetId.clear();
+    m_renderPipelineMode = "Forward";
     if (m_entities) {
         m_entities->Clear();
     }

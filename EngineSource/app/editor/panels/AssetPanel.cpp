@@ -1,6 +1,7 @@
 #include "AssetPanel.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "ScenePipelineMode.h"
 #include "InstantiateOmesh.h"
 #include "RunImporter.h"
 #include "api/platform/All.h"
@@ -58,7 +59,7 @@ static constexpr const char* kMaterialPayloadType = "OpenEyeMaterial";
 
 /** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty). */
 static const char* GetEmptySceneJson() {
-    return "{\"version\":1}";
+    return "{\"version\":1,\"renderPipelineMode\":\"Forward\"}";
 }
 
 /** Close the current window. Docked panels are child windows and must use EndChild(). */
@@ -161,6 +162,7 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             if (ctx->world.LoadScene(fullPath)) {
                 ctx->scenePath = fullPath;
                 EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
+                openeye::editor::ApplyScenePipelineModeToEditorPipelines(*ctx);
             }
         }
     }

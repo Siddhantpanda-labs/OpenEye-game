@@ -22,16 +22,7 @@ uniform int u_UseRoughnessTexture = 0;
 uniform int u_UseAOTexture = 0;
 uniform int u_UseEmissiveTexture = 0;
 
-// Material params from UBO (binding 2 = PerMaterial); single upload, much faster than per-uniform.
-layout(std140, binding = 2) uniform MaterialBlock {
-    vec3 albedo;
-    float metallic;
-    float roughness;
-    float ao;
-    float alpha;
-    vec3 emission;
-    float reflective;
-};
+#include "../../common/material_block.glsl"
 
 // Enhancement 6.1: scene lighting from SSBO (binding 5); shadow at 6
 #define MAX_POINT_LIGHTS 8

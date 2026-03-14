@@ -44,6 +44,10 @@ CommandPtr SetSkyboxAssetId(const std::string& assetId) {
     return std::make_unique<::eyelib::world::SetSkyboxAssetIdCommand>(assetId);
 }
 
+CommandPtr SetRenderPipelineMode(const std::string& mode) {
+    return std::make_unique<::eyelib::world::SetRenderPipelineModeCommand>(mode);
+}
+
 CommandPtr ClearMetadata(::eyelib::world::EntityId entity) {
     return std::make_unique<::eyelib::world::ClearMetadataCommand>(entity);
 }

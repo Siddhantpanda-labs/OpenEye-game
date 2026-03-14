@@ -12,16 +12,7 @@ in vec3 v_WorldNormal;
 in vec2 v_TexCoord;
 in vec2 v_Velocity;
 
-// Refractor: material props from UBO (binding 2 = PerMaterial), same layout as gbuffer_skinned
-layout(std140, binding = 2) uniform MaterialBlock {
-    vec3 albedo;
-    float metallic;
-    float roughness;
-    float ao;
-    float alpha;
-    vec3 emission;
-    float reflective;
-};
+#include "../../common/material_block.glsl"
 
 #ifdef HAS_ALBEDO_TEXTURE
 uniform sampler2D u_AlbedoTexture;
@@ -84,7 +75,7 @@ void main() {
     MaterialSurface surf;
     EvaluateMaterialSurface(
         v_TexCoord, tbn, v_WorldNormal,
-        albedo, metallic, roughness, ao, emission, alpha, reflective,
+        MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
         u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
         u_MetallicTexture, u_RoughnessTexture, u_AOTexture, u_EmissiveTexture,
         useAlbedo, false, false, false, false, false, false,

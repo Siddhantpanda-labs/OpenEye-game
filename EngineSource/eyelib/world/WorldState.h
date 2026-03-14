@@ -82,6 +82,9 @@ public:
     /** Scene-level: skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
     const std::string& GetSkyboxAssetId() const { return m_skyboxAssetId; }
     void SetSkyboxAssetId(std::string id) { m_skyboxAssetId = std::move(id); }
+    /** Scene-level: render pipeline mode. Values: Forward | Deferred | ForwardPlus. Serialized in scene file. */
+    const std::string& GetRenderPipelineMode() const { return m_renderPipelineMode; }
+    void SetRenderPipelineMode(std::string mode) { m_renderPipelineMode = std::move(mode); }
 
     /** Internal only: EnTT registry for component storage. Only Command::Apply and world internals may use this. Never expose in api::world. */
     entt::registry& GetRegistry() { return m_registry; }
@@ -106,6 +109,7 @@ private:
 
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
     std::string m_skyboxAssetId;
+    std::string m_renderPipelineMode = "Forward";
     entt::registry m_registry;
     std::unordered_map<EntityId, entt::entity, EntityIdHash> m_entityToEnTT;
     std::unordered_map<entt::entity, EntityId> m_enttToEntity;

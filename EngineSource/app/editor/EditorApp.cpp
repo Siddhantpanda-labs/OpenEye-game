@@ -3,6 +3,7 @@
 #include "EditorContext.h"
 #include "EditorProject.h"
 #include "EditorSceneBuilder.h"
+#include "ScenePipelineMode.h"
 #include "MenuBar.h"
 #include "panels/StatusPanel.h"
 #include "panels/HierarchyPanel.h"
@@ -255,13 +256,9 @@ int RunEditor(int argc, char** argv) {
     } else {
         if (!sceneViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
             std::fprintf(stderr, "Editor: Scene view pipeline init failed (scene view will show placeholder).\n");
-        } else {
-            sceneViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
         }
         if (!gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
             std::fprintf(stderr, "Editor: Game view pipeline init failed (debug camera preview disabled).\n");
-        } else {
-            gameViewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
         }
     }
 
@@ -292,6 +289,7 @@ int RunEditor(int argc, char** argv) {
     ctx.assetRoots = { engineAssets };
     ctx.engineAssetsPath = engineAssets;
     ctx.window = &window;
+    openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
 
     if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
         eyelib::api::core::Log::InfoF("Editor: opened project '%s' at %s", ctx.projectName.c_str(), ctx.projectPath.c_str());
@@ -322,6 +320,7 @@ int RunEditor(int argc, char** argv) {
                     if (ctx.assetRegistry) {
                         EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
                     }
+                    openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
                     ctx.selectedEntity = ::eyelib::world::InvalidEntity;
                     ctx.sceneSelected = false;
                 }

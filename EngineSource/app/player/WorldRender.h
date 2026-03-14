@@ -113,6 +113,8 @@ public:
 
     /** Reload pipeline shaders (e.g. after ShaderWatcher copy). */
     void ReloadShaders();
+    /** Apply scene-level render mode string (Forward | Deferred | ForwardPlus). */
+    void ApplySceneRenderPipelineMode(const std::string& mode);
 
 private:
     struct ModelEntry {

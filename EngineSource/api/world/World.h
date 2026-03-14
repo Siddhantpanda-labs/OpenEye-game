@@ -316,6 +316,10 @@ public:
     std::string GetSkyboxAssetId() const;
     /** Set skybox asset id via command (mutation layer). Returns false if command application failed. */
     bool SetSkyboxAssetId(const std::string& assetId);
+    /** Scene-level render pipeline mode. Values: "Forward", "Deferred", "ForwardPlus". */
+    std::string GetRenderPipelineMode() const;
+    /** Set scene-level render pipeline mode via command (mutation layer). Invalid values are normalized to "Forward". */
+    bool SetRenderPipelineMode(const std::string& mode);
 
     Observation GetObservation() const;
 

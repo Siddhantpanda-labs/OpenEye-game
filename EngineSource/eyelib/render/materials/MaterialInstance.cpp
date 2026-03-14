@@ -5,9 +5,44 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include <algorithm>
+#include <vector>
 
 namespace eyelib {
 namespace render {
+
+namespace {
+template<typename T>
+inline void HashCombine(size_t& seed, const T& v) {
+    seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+template<typename T>
+bool CompareScalarMap(const std::unordered_map<std::string, T>& a, const std::unordered_map<std::string, T>& b) {
+    if (a.size() != b.size()) return false;
+    for (const auto& kv : a) {
+        auto it = b.find(kv.first);
+        if (it == b.end()) return false;
+        if (!(it->second == kv.second)) return false;
+    }
+    return true;
+}
+
+void AppendMat4Hash(size_t& h, const math::Mat4& m) {
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c)
+            HashCombine(h, m[r][c]);
+}
+
+bool Mat4Equal(const math::Mat4& a, const math::Mat4& b) {
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            if (a[r][c] != b[r][c]) return false;
+        }
+    }
+    return true;
+}
+} // namespace
 
 MaterialInstance::MaterialInstance(std::shared_ptr<Material> material) : m_base(std::move(material)) {}
 
@@ -166,6 +201,115 @@ void MaterialInstance::EnsureMaterialBuffer(rhi::IDevice* device) const {
 rhi::IBuffer* MaterialInstance::GetMaterialBufferRHI(rhi::IDevice* device) const {
     EnsureMaterialBuffer(device);
     return m_materialBuffer.get();
+}
+
+size_t MaterialInstance::GetBatchHash() const {
+    size_t h = m_base ? m_base->GetHash() : 0u;
+
+    HashCombine(h, m_albedoOverride.has_value());
+    if (m_albedoOverride) {
+        HashCombine(h, m_albedoOverride->x);
+        HashCombine(h, m_albedoOverride->y);
+        HashCombine(h, m_albedoOverride->z);
+    }
+    HashCombine(h, m_metallicOverride.has_value());
+    if (m_metallicOverride) HashCombine(h, *m_metallicOverride);
+    HashCombine(h, m_roughnessOverride.has_value());
+    if (m_roughnessOverride) HashCombine(h, *m_roughnessOverride);
+    HashCombine(h, m_emissionOverride.has_value());
+    if (m_emissionOverride) {
+        HashCombine(h, m_emissionOverride->x);
+        HashCombine(h, m_emissionOverride->y);
+        HashCombine(h, m_emissionOverride->z);
+    }
+    HashCombine(h, m_alphaOverride.has_value());
+    if (m_alphaOverride) HashCombine(h, *m_alphaOverride);
+
+    std::vector<std::string> keys;
+    keys.reserve(m_textureOverrides.size());
+    for (const auto& kv : m_textureOverrides) keys.push_back(kv.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& k : keys) {
+        HashCombine(h, k);
+        auto it = m_textureOverrides.find(k);
+        const Texture2D* t = (it != m_textureOverrides.end() && it->second) ? it->second.get() : nullptr;
+        HashCombine(h, reinterpret_cast<uintptr_t>(t));
+    }
+
+    keys.clear();
+    keys.reserve(m_floatOverrides.size());
+    for (const auto& kv : m_floatOverrides) keys.push_back(kv.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& k : keys) {
+        HashCombine(h, k);
+        HashCombine(h, m_floatOverrides.at(k));
+    }
+
+    keys.clear();
+    keys.reserve(m_vec3Overrides.size());
+    for (const auto& kv : m_vec3Overrides) keys.push_back(kv.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& k : keys) {
+        HashCombine(h, k);
+        const math::Vec3& v = m_vec3Overrides.at(k);
+        HashCombine(h, v.x); HashCombine(h, v.y); HashCombine(h, v.z);
+    }
+
+    keys.clear();
+    keys.reserve(m_vec4Overrides.size());
+    for (const auto& kv : m_vec4Overrides) keys.push_back(kv.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& k : keys) {
+        HashCombine(h, k);
+        const math::Vec4& v = m_vec4Overrides.at(k);
+        HashCombine(h, v.x); HashCombine(h, v.y); HashCombine(h, v.z); HashCombine(h, v.w);
+    }
+
+    keys.clear();
+    keys.reserve(m_mat4ArrayOverrides.size());
+    for (const auto& kv : m_mat4ArrayOverrides) keys.push_back(kv.first);
+    std::sort(keys.begin(), keys.end());
+    for (const std::string& k : keys) {
+        HashCombine(h, k);
+        const auto& arr = m_mat4ArrayOverrides.at(k);
+        HashCombine(h, arr.size());
+        for (const math::Mat4& m : arr) AppendMat4Hash(h, m);
+    }
+
+    return h;
+}
+
+bool MaterialInstance::IsBatchEquivalent(const MaterialInstance& other) const {
+    if (m_base.get() != other.m_base.get()) return false;
+    if (m_albedoOverride != other.m_albedoOverride) return false;
+    if (m_metallicOverride != other.m_metallicOverride) return false;
+    if (m_roughnessOverride != other.m_roughnessOverride) return false;
+    if (m_emissionOverride != other.m_emissionOverride) return false;
+    if (m_alphaOverride != other.m_alphaOverride) return false;
+
+    if (m_textureOverrides.size() != other.m_textureOverrides.size()) return false;
+    for (const auto& kv : m_textureOverrides) {
+        auto it = other.m_textureOverrides.find(kv.first);
+        if (it == other.m_textureOverrides.end()) return false;
+        if (kv.second.get() != it->second.get()) return false;
+    }
+
+    if (!CompareScalarMap(m_floatOverrides, other.m_floatOverrides)) return false;
+    if (!CompareScalarMap(m_vec3Overrides, other.m_vec3Overrides)) return false;
+    if (!CompareScalarMap(m_vec4Overrides, other.m_vec4Overrides)) return false;
+
+    if (m_mat4ArrayOverrides.size() != other.m_mat4ArrayOverrides.size()) return false;
+    for (const auto& kv : m_mat4ArrayOverrides) {
+        auto it = other.m_mat4ArrayOverrides.find(kv.first);
+        if (it == other.m_mat4ArrayOverrides.end()) return false;
+        const auto& a = kv.second;
+        const auto& b = it->second;
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (!Mat4Equal(a[i], b[i])) return false;
+        }
+    }
+    return true;
 }
 
 void MaterialInstance::ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd) const {

@@ -3,6 +3,7 @@
 #include "EditorFolderPicker.h"
 #include "EditorProject.h"
 #include "EditorSceneBuilder.h"
+#include "ScenePipelineMode.h"
 #include "GameRuntime.h"
 #include "api/platform/All.h"
 #include "api/core/All.h"
@@ -64,6 +65,7 @@ static void RunOpenModal(EditorContext& ctx) {
                 if (ctx.assetRegistry) {
                     EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
                 }
+                ApplyScenePipelineModeToEditorPipelines(ctx);
                 ImGui::CloseCurrentPopup();
             }
         }

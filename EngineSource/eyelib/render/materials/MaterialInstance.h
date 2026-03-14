@@ -61,6 +61,13 @@ public:
     /** Refractor Phase 2: GPU buffer with effective PBR props (base + overrides). Returns null if device is null. */
     rhi::IBuffer* GetMaterialBufferRHI(rhi::IDevice* device) const;
 
+    /**
+     * Submission-layer payload identity for safe instancing:
+     * two instances with same batch hash and IsBatchEquivalent() can share one instanced draw.
+     */
+    size_t GetBatchHash() const;
+    bool IsBatchEquivalent(const MaterialInstance& other) const;
+
 private:
     void EnsureMaterialBuffer(rhi::IDevice* device) const;
     std::shared_ptr<Material> m_base;

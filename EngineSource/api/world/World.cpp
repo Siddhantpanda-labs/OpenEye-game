@@ -1174,6 +1174,21 @@ bool World::SetSkyboxAssetId(const std::string& assetId) {
     return ApplyCommandSync(eyelib::api::world::SetSkyboxAssetId(assetId)).success;
 }
 
+std::string World::GetRenderPipelineMode() const {
+    if (!m_impl) return "Forward";
+    const std::string& mode = m_impl->world.GetState().GetRenderPipelineMode();
+    if (mode == "Forward" || mode == "Deferred" || mode == "ForwardPlus")
+        return mode;
+    return "Forward";
+}
+
+bool World::SetRenderPipelineMode(const std::string& mode) {
+    if (!m_impl) {
+        return false;
+    }
+    return ApplyCommandSync(eyelib::api::world::SetRenderPipelineMode(mode)).success;
+}
+
 void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.renderables.clear();
     out.meshRenderers.clear();

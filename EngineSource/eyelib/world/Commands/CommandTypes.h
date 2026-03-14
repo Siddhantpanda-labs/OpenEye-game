@@ -980,5 +980,32 @@ private:
     std::string m_prev;
 };
 
+/** Scene-level: set render pipeline mode (Forward | Deferred | ForwardPlus). */
+class SetRenderPipelineModeCommand final : public Command {
+public:
+    explicit SetRenderPipelineModeCommand(std::string mode)
+        : m_mode(std::move(mode)) {}
+
+    bool Apply(WorldState& state) override {
+        m_prev = state.GetRenderPipelineMode();
+        if (m_mode != "Forward" && m_mode != "Deferred" && m_mode != "ForwardPlus")
+            m_mode = "Forward";
+        state.SetRenderPipelineMode(m_mode);
+        return true;
+    }
+
+    bool Revert(WorldState& state) override {
+        state.SetRenderPipelineMode(m_prev);
+        return true;
+    }
+
+    std::string GetName() const override { return "SetRenderPipelineMode"; }
+    const std::string& GetMode() const { return m_mode; }
+
+private:
+    std::string m_mode;
+    std::string m_prev;
+};
+
 } // namespace world
 } // namespace eyelib

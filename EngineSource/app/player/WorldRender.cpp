@@ -35,6 +35,12 @@ static std::string JoinPath(const std::string& base, const std::string& leaf) {
     return base + "/" + leaf;
 }
 
+static eyelib::api::RenderPipeline::Mode SceneModeToPipelineMode(const std::string& mode) {
+    if (mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Deferred;
+    if (mode == "ForwardPlus") return eyelib::api::RenderPipeline::Mode::ForwardPlus;
+    return eyelib::api::RenderPipeline::Mode::Forward;
+}
+
 static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots,
                                     eyelib::api::AssetRegistry* registry = nullptr) {
     using eyelib::api::platform::filesystem::FileExists;
@@ -316,6 +322,10 @@ void WorldRenderBridge::InitializeDefaultResources() {
 
 void WorldRenderBridge::ReloadShaders() {
     m_pipeline.ReloadShaders();
+}
+
+void WorldRenderBridge::ApplySceneRenderPipelineMode(const std::string& mode) {
+    m_pipeline.SetMode(SceneModeToPipelineMode(mode));
 }
 
 void WorldRenderBridge::EnsureDefaultMaterial() {
@@ -874,6 +884,7 @@ void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world
     if (!m_ready) {
         return;
     }
+    m_pipeline.SetMode(SceneModeToPipelineMode(world.GetRenderPipelineMode()));
     eyelib::api::RenderScene scene;
     BuildScene(world, options, animationBridge, assetRegistry, scene, nullptr);
 
