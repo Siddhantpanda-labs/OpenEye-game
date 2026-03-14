@@ -3,6 +3,7 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -10,6 +11,20 @@
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+/** Opaque init info for ImGui Vulkan backend. Cast void* fields to VkInstance, VkDevice, etc. when calling ImGui_ImplVulkan_Init. */
+struct ImGuiVulkanInitInfo {
+    void* instance = nullptr;
+    void* physical_device = nullptr;
+    void* device = nullptr;
+    uint32_t queue_family = 0;
+    void* queue = nullptr;
+    void* pipeline_cache = nullptr;
+    void* descriptor_pool = nullptr;
+    uint32_t min_image_count = 2;
+    uint32_t image_count = 0;
+    void* render_pass = nullptr;
+};
 
 // Forward declarations
 struct IDevice;
@@ -131,10 +146,16 @@ struct IDevice {
     virtual ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) = 0;
 
     virtual void Present() = 0;
+    /** Notify backend that output window framebuffer size changed; backend may recreate swapchain/default backbuffer resources. */
+    virtual void OnWindowResized(uint32_t width, uint32_t height) { (void)width; (void)height; }
     /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */
     virtual void Finish() {}
     /** Blit color from given render target to the default framebuffer (e.g. for present). */
     virtual void BlitToDefaultFramebuffer(IRenderTarget* src) = 0;
+    /** Optional: call after blit, before present (e.g. to record ImGui). Vulkan: receives current VkCommandBuffer. No-op on other backends. */
+    virtual void SetPostBlitCallback(std::function<void(void*)> cb) { (void)cb; }
+    /** Fill init info for ImGui Vulkan backend. Returns false if backend is not Vulkan or not ready. */
+    virtual bool GetImGuiVulkanInitInfo(ImGuiVulkanInitInfo* out) { (void)out; return false; }
     /** Blit from backend-native framebuffer (e.g. GL FBO id as void*) to default framebuffer. */
     virtual void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) = 0;
     /** Blit full contents of src into a subregion of the default framebuffer (e.g. for stereo split: left/right halves). dstX,dstY,dstW,dstH in window coordinates. */

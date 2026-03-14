@@ -2,6 +2,7 @@
 
 #include "api/world/All.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -73,6 +74,8 @@ struct EditorContext {
 
     /** Set by EditorApp; used for Game view (Play mode). */
     eyelib::api::Window* window = nullptr;
+    /** Backend-specific ImGui texture id resolver (e.g. Vulkan descriptor set registration). */
+    std::function<void*(void*)> resolveImGuiTextureId;
 
     /** Play mode: game runtime drives Game view. Null when not playing. */
     bool isPlaying = false;

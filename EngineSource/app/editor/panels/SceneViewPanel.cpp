@@ -298,6 +298,8 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
                 ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);
             void* texId = ctx->sceneViewPipeline->GetOutputColorTextureNativeHandle();
+            if (ctx->resolveImGuiTextureId)
+                texId = ctx->resolveImGuiTextureId(texId);
             if (texId && ctx->sceneViewPipeline->HasValidOutput()) {
                 ImGui::GetWindowDrawList()->AddImage(texId, pos, ImVec2(pos.x + size.x, pos.y + size.y),
                     ImVec2(0, 1), ImVec2(1, 0));

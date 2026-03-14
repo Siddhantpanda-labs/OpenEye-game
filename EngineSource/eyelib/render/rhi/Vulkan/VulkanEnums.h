@@ -25,11 +25,12 @@ inline VkFormat ToVkFormat(RHITextureFormat format) {
     switch (format) {
         case RHITextureFormat::R8: return VK_FORMAT_R8_UNORM;
         case RHITextureFormat::RG8: return VK_FORMAT_R8G8_UNORM;
-        case RHITextureFormat::RGB8: return VK_FORMAT_R8G8B8_UNORM;
+        // Prefer widely supported 4-channel formats on Vulkan for robust allocation/path handling.
+        case RHITextureFormat::RGB8: return VK_FORMAT_R8G8B8A8_UNORM;
         case RHITextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
-        case RHITextureFormat::RGB8_SRGB: return VK_FORMAT_R8G8B8_SRGB;
+        case RHITextureFormat::RGB8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
         case RHITextureFormat::RGBA8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
-        case RHITextureFormat::RGB16F: return VK_FORMAT_R16G16B16_SFLOAT;
+        case RHITextureFormat::RGB16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::RGBA16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::R32UI: return VK_FORMAT_R32_UINT;
         case RHITextureFormat::Depth24: return VK_FORMAT_D32_SFLOAT;
@@ -50,10 +51,16 @@ inline VkImageUsageFlags ToVkImageUsage(TextureUsage usage) {
 }
 
 inline VkImageUsageFlags ToVkImageUsageForFormat(RHITextureFormat format, TextureUsage usage) {
-    VkImageUsageFlags f = ToVkImageUsage(usage);
-    if (format == RHITextureFormat::Depth24 || format == RHITextureFormat::Depth24Stencil8)
-        f |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    return f;
+    const bool isDepth = (format == RHITextureFormat::Depth24 || format == RHITextureFormat::Depth24Stencil8);
+    VkImageUsageFlags f = 0;
+    if (HasUsage(usage, TextureUsage::ShaderResource)) f |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (HasUsage(usage, TextureUsage::TransferSrc)) f |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (HasUsage(usage, TextureUsage::TransferDst)) f |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (HasUsage(usage, TextureUsage::RenderTarget)) {
+        if (isDepth) f |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        else f |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    }
+    return f ? f : (isDepth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
 // ---- Resource state → Vulkan (barriers) ----

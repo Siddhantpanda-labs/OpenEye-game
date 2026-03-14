@@ -39,6 +39,10 @@ struct RenderTargetVK : IRenderTarget {
     std::unique_ptr<TextureVK> m_depthTexture;
     std::vector<TextureVK*> m_externalColorTextures;
     TextureVK* m_externalDepthTexture = nullptr;
+    // Optional per-attachment views owned by this render target (used for array layer/mip views).
+    std::vector<void*> m_colorAttachmentViews;
+    void* m_depthAttachmentView = nullptr;
+    std::vector<void*> m_depthLayerViews;
     // VkFramebuffer or dynamic rendering (filled when implemented)
     void* m_framebuffer = nullptr;
 };

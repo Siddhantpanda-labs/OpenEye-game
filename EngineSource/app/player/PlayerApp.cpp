@@ -308,11 +308,6 @@ int RunPlayer(int argc, char** argv) {
     }
 
     RuntimeOverlay overlay;
-    if (!options.headless && options.overlay) {
-        overlay.Initialize(window);
-    }
-    ScopedOverlay overlayGuard(overlay);
-
     eyelib::api::AssetRegistry assetRegistry;
     openeye::player::GameRuntime gameRuntime;
     const uint32_t initWidth = options.headless ? 0u : static_cast<uint32_t>(window.Width());
@@ -330,6 +325,11 @@ int RunPlayer(int argc, char** argv) {
         eyelib::api::core::Log::Error("Failed to initialize renderer or game runtime.");
         return static_cast<int>(ExitCode::RenderInitFailed);
     }
+
+    if (!options.headless && options.overlay) {
+        overlay.Initialize(window, options.renderBackend, gameRuntime.GetDevice().Get());
+    }
+    ScopedOverlay overlayGuard(overlay);
 
     const auto assetStats = gameRuntime.GetAssetBindingStats();
     if (assetStats.referenced > 0) {
@@ -416,9 +416,8 @@ int RunPlayer(int argc, char** argv) {
                 window.ApplyVsync();
                 const uint32_t rw = static_cast<uint32_t>(w);
                 const uint32_t rh = static_cast<uint32_t>(h);
-                (void)gameRuntime.Render(rw, rh);
+                OverlaySnapshot snap;
                 if (options.overlay && overlay.IsReady()) {
-                    OverlaySnapshot snap;
                     snap.fps = eyelib::api::core::Time::FPS();
                     snap.frameTimeMs = eyelib::api::core::Time::SmoothedDeltaTime() * 1000.0f;
                     snap.entityCount = world.GetEntityCount();
@@ -433,6 +432,12 @@ int RunPlayer(int argc, char** argv) {
                             snap.streamingServerAddress = ip + ":27016";
                     }
 #endif
+                }
+                if (overlay.IsVulkan() && options.overlay && overlay.IsReady()) {
+                    overlay.Render(snap);
+                }
+                (void)gameRuntime.Render(rw, rh);
+                if (!overlay.IsVulkan() && options.overlay && overlay.IsReady()) {
                     overlay.Render(snap);
                 }
                 window.SwapBuffers();

@@ -76,6 +76,9 @@ public:
     /** Pipeline output texture handle (ImTextureID). Valid after Render(); null when headless or not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** RHI device (for overlay Vulkan init). Valid when not headless after Initialize(). */
+    eyelib::api::RenderDevice GetDevice() const;
+
     /** Reload shaders (e.g. after ShaderWatcher copy). No-op when headless. */
     void ReloadShaders();
 

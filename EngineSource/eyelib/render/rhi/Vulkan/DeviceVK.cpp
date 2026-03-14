@@ -25,20 +25,8 @@
 #include <fstream>
 #include <vector>
 #include <set>
-#if defined(_WIN32)
-#include <Windows.h>
-#undef min
-#undef max
-// Local declarations so we don't rely on vulkan.h include order for VK_USE_PLATFORM_WIN32_KHR
-typedef struct VkWin32SurfaceCreateInfoKHR_ {
-    VkStructureType sType;
-    const void* pNext;
-    VkFlags flags;
-    void* hinstance;
-    void* hwnd;
-} VkWin32SurfaceCreateInfoKHR_local;
-typedef VkResult (VKAPI_PTR *PFN_vkCreateWin32SurfaceKHR_local)(VkInstance, const VkWin32SurfaceCreateInfoKHR_local*, const VkAllocationCallbacks*, VkSurfaceKHR*);
-#endif
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 namespace eyelib {
 namespace render {
@@ -107,6 +95,20 @@ DeviceVK::~DeviceVK() {
         m_timelineSemaphore = nullptr;
     }
     if (device != VK_NULL_HANDLE) {
+        for (void* fb : m_swapchainFramebuffers) {
+            if (fb) vkDestroyFramebuffer(device, static_cast<VkFramebuffer>(fb), nullptr);
+        }
+        m_swapchainFramebuffers.clear();
+        VkRenderPass rp = static_cast<VkRenderPass>(m_swapchainRenderPass);
+        if (rp != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(device, rp, nullptr);
+            m_swapchainRenderPass = nullptr;
+        }
+        VkDescriptorPool imguiPool = static_cast<VkDescriptorPool>(m_imGuiDescriptorPool);
+        if (imguiPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, imguiPool, nullptr);
+            m_imGuiDescriptorPool = nullptr;
+        }
         for (void* p : m_swapchainImageViews) {
             if (p) vkDestroyImageView(device, static_cast<VkImageView>(p), nullptr);
         }
@@ -146,6 +148,7 @@ DeviceVK::~DeviceVK() {
 bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     m_swapchainWidth = width;
     m_swapchainHeight = height;
+    core::Log::Info("DeviceVK::Initialize: begin");
 
     VkApplicationInfo appInfo = {};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -167,39 +170,36 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
 
     VkInstance instance = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vkCreateInstance");
     VkResult res = vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkCreateInstance failed (0x%x)", res);
         return false;
     }
+    core::Log::Info("DeviceVK::Initialize: vkCreateInstance success");
     m_instance = instance;
 
-#if defined(_WIN32)
     if (windowHandle && width > 0 && height > 0) {
-        auto pfnCreateWin32Surface = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR_local>(
-            vkGetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR"));
-        if (pfnCreateWin32Surface) {
-            VkWin32SurfaceCreateInfoKHR_local surfaceInfo = {};
-            surfaceInfo.sType = static_cast<VkStructureType>(1000069000); // VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR
-            surfaceInfo.hinstance = GetModuleHandleW(nullptr);
-            surfaceInfo.hwnd = windowHandle;
-            VkSurfaceKHR surface = VK_NULL_HANDLE;
-            VkResult surfRes = pfnCreateWin32Surface(instance, &surfaceInfo, nullptr, &surface);
-            if (surfRes == VK_SUCCESS)
-                m_surface = surface;
-            else
-                core::Log::ErrorF("DeviceVK::Initialize: vkCreateWin32SurfaceKHR failed (0x%x)", surfRes);
-        }
+        auto* glfwWindow = static_cast<GLFWwindow*>(windowHandle);
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        core::Log::Info("DeviceVK::Initialize: calling glfwCreateWindowSurface");
+        VkResult surfRes = glfwCreateWindowSurface(instance, glfwWindow, nullptr, &surface);
+        if (surfRes == VK_SUCCESS)
+            m_surface = surface;
+        else
+            core::Log::ErrorF("DeviceVK::Initialize: glfwCreateWindowSurface failed (0x%x)", surfRes);
+        if (surfRes == VK_SUCCESS) core::Log::Info("DeviceVK::Initialize: glfwCreateWindowSurface success");
     }
-#endif
 
     uint32_t physicalDeviceCount = 0;
+    core::Log::Info("DeviceVK::Initialize: calling vkEnumeratePhysicalDevices(count)");
     res = vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, nullptr);
     if (res != VK_SUCCESS || physicalDeviceCount == 0) {
         core::Log::ErrorF("DeviceVK::Initialize: no physical devices (0x%x)", res);
         return false;
     }
     std::vector<VkPhysicalDevice> physicalDevices(physicalDeviceCount);
+    core::Log::Info("DeviceVK::Initialize: calling vkEnumeratePhysicalDevices(list)");
     res = vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices.data());
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkEnumeratePhysicalDevices failed (0x%x)", res);
@@ -249,21 +249,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
 
     const char* deviceExtensions[] = {
         "VK_KHR_swapchain",
-        "VK_KHR_dynamic_rendering",
-        "VK_EXT_descriptor_indexing",
     };
     uint32_t deviceExtensionCount = static_cast<uint32_t>(sizeof(deviceExtensions) / sizeof(deviceExtensions[0]));
-
-    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures = {};
-    timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-    timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
-
-    VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures = {};
-    indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
-    indexingFeatures.pNext = &timelineSemaphoreFeatures;
-    indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
-    indexingFeatures.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
-    indexingFeatures.runtimeDescriptorArray = VK_TRUE;
 
     float queuePriority = 1.0f;
     std::set<uint32_t> uniqueFamilies = { graphicsFamily, computeFamily, transferFamily };
@@ -279,13 +266,14 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.pNext = &indexingFeatures;
+    deviceCreateInfo.pNext = nullptr;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.enabledExtensionCount = deviceExtensionCount;
     deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions;
 
     VkDevice device = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vkCreateDevice");
     res = vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &device);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkCreateDevice failed (0x%x)", res);
@@ -294,14 +282,17 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_physicalDevice = nullptr;
         return false;
     }
+    core::Log::Info("DeviceVK::Initialize: vkCreateDevice success");
     m_device = device;
 
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkQueue computeQueue = VK_NULL_HANDLE;
     VkQueue transferQueue = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vkGetDeviceQueue");
     vkGetDeviceQueue(device, graphicsFamily, 0, &graphicsQueue);
     vkGetDeviceQueue(device, computeFamily, 0, &computeQueue);
     vkGetDeviceQueue(device, transferFamily, 0, &transferQueue);
+    core::Log::Info("DeviceVK::Initialize: vkGetDeviceQueue success");
     m_graphicsQueue = graphicsQueue;
     m_computeQueue = computeQueue;
     m_transferQueue = transferQueue;
@@ -312,6 +303,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     allocatorInfo.instance = instance;
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
     VmaAllocator allocator = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vmaCreateAllocator");
     res = vmaCreateAllocator(&allocatorInfo, &allocator);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vmaCreateAllocator failed (0x%x)", res);
@@ -322,6 +314,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_physicalDevice = nullptr;
         return false;
     }
+    core::Log::Info("DeviceVK::Initialize: vmaCreateAllocator success");
     m_allocator = allocator;
 
     VkCommandPoolCreateInfo poolInfo = {};
@@ -329,6 +322,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     poolInfo.queueFamilyIndex = m_graphicsQueueFamily;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     VkCommandPool commandPool = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vkCreateCommandPool");
     res = vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkCreateCommandPool failed (0x%x)", res);
@@ -341,6 +335,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_physicalDevice = nullptr;
         return false;
     }
+    core::Log::Info("DeviceVK::Initialize: vkCreateCommandPool success");
     m_commandPool = commandPool;
 
     VkCommandBuffer immBuf = VK_NULL_HANDLE;
@@ -349,6 +344,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     allocInfo.commandPool = commandPool;
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = 1;
+    core::Log::Info("DeviceVK::Initialize: calling vkAllocateCommandBuffers");
     res = vkAllocateCommandBuffers(device, &allocInfo, &immBuf);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkAllocateCommandBuffers (immediate) failed (0x%x)", res);
@@ -363,6 +359,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_physicalDevice = nullptr;
         return false;
     }
+    core::Log::Info("DeviceVK::Initialize: vkAllocateCommandBuffers success");
     m_immediateCommandList->SetCommandBuffer(immBuf, true);
 
     VkDescriptorPoolSize poolSizes[] = {
@@ -377,6 +374,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     poolCreateInfo.poolSizeCount = static_cast<uint32_t>(sizeof(poolSizes) / sizeof(poolSizes[0]));
     poolCreateInfo.pPoolSizes = poolSizes;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::Initialize: calling vkCreateDescriptorPool(main)");
     res = vkCreateDescriptorPool(device, &poolCreateInfo, nullptr, &descriptorPool);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkCreateDescriptorPool failed (0x%x)", res);
@@ -795,6 +793,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
                     if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) == VK_SUCCESS)
                         m_swapchainImageViews[i] = imageView;
                 }
+                EnsureSwapchainRenderPassAndFramebuffers();
             }
         }
     }
@@ -1029,6 +1028,8 @@ ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialDa
     VmaAllocator allocator = static_cast<VmaAllocator>(m_allocator);
     VkDevice device = static_cast<VkDevice>(m_device);
     if (!allocator || !device || desc.width == 0 || desc.height == 0) return nullptr;
+    core::Log::InfoF("DeviceVK::CreateTexture: %ux%u fmt=%u usage=0x%x samples=%u",
+        desc.width, desc.height, static_cast<unsigned>(desc.format), static_cast<unsigned>(desc.usage), desc.samples);
 
     VkImageType imageType = VK_IMAGE_TYPE_2D;
     if (desc.type == TextureType::Texture3D) imageType = VK_IMAGE_TYPE_3D;
@@ -1058,11 +1059,13 @@ ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialDa
 
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
+    core::Log::Info("DeviceVK::CreateTexture: calling vmaCreateImage");
     VkResult res = vmaCreateImage(allocator, &imgInfo, &allocCreateInfo, &image, &allocation, nullptr);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::CreateTexture: vmaCreateImage failed (0x%x)", res);
         return nullptr;
     }
+    core::Log::Info("DeviceVK::CreateTexture: vmaCreateImage success");
 
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1300,6 +1303,8 @@ IRenderTarget* DeviceVK::CreateRenderTarget(uint32_t width, uint32_t height,
                                             uint32_t samples,
                                             bool transient) {
     if (width == 0 || height == 0) return nullptr;
+    core::Log::InfoF("DeviceVK::CreateRenderTarget: %ux%u colors=%u depth=%u samples=%u",
+        width, height, static_cast<unsigned>(colorFormats.size()), static_cast<unsigned>(depthFormat), samples);
     auto* rt = new RenderTargetVK(this);
     rt->m_width = width;
     rt->m_height = height;
@@ -1312,6 +1317,7 @@ IRenderTarget* DeviceVK::CreateRenderTarget(uint32_t width, uint32_t height,
     texDesc.transient = transient;
     for (RHITextureFormat fmt : colorFormats) {
         texDesc.format = fmt;
+        core::Log::InfoF("DeviceVK::CreateRenderTarget: creating color texture fmt=%u", static_cast<unsigned>(fmt));
         ITexture* tex = CreateTexture(texDesc, nullptr);
         if (!tex) { DestroyRenderTarget(rt); return nullptr; }
         rt->m_colorTextures.push_back(std::unique_ptr<TextureVK>(static_cast<TextureVK*>(tex)));
@@ -1320,6 +1326,7 @@ IRenderTarget* DeviceVK::CreateRenderTarget(uint32_t width, uint32_t height,
         texDesc.format = depthFormat;
         texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget);
         texDesc.transient = transient;
+        core::Log::InfoF("DeviceVK::CreateRenderTarget: creating depth texture fmt=%u", static_cast<unsigned>(depthFormat));
         ITexture* depthTex = CreateTexture(texDesc, nullptr);
         if (!depthTex) { DestroyRenderTarget(rt); return nullptr; }
         rt->m_depthTexture = std::unique_ptr<TextureVK>(static_cast<TextureVK*>(depthTex));
@@ -1328,31 +1335,155 @@ IRenderTarget* DeviceVK::CreateRenderTarget(uint32_t width, uint32_t height,
 }
 
 IRenderTarget* DeviceVK::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) {
-    (void)width; (void)height; (void)arrayLayers;
-    return nullptr;
+    if (width == 0 || height == 0 || arrayLayers == 0) return nullptr;
+    auto* rt = new RenderTargetVK(this);
+    rt->m_width = width;
+    rt->m_height = height;
+
+    TextureDesc td;
+    td.type = TextureType::Texture2DArray;
+    td.width = width;
+    td.height = height;
+    td.depthOrArrayLayers = arrayLayers;
+    td.format = RHITextureFormat::Depth24;
+    td.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+    td.mipLevels = 1;
+    td.samples = 1;
+
+    ITexture* depth = CreateTexture(td, nullptr);
+    if (!depth) {
+        delete rt;
+        return nullptr;
+    }
+    rt->m_depthTexture = std::unique_ptr<TextureVK>(static_cast<TextureVK*>(depth));
+    rt->m_depthLayerViews.resize(arrayLayers, nullptr);
+
+    TextureVK* depthTex = rt->m_depthTexture.get();
+    VkDevice device = static_cast<VkDevice>(m_device);
+    VkImage image = static_cast<VkImage>(depthTex->m_image);
+    VkFormat format = ToVkFormat(depthTex->m_format);
+    for (uint32_t layer = 0; layer < arrayLayers; ++layer) {
+        VkImageViewCreateInfo viewInfo = {};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange.aspectMask = ToVkImageAspect(depthTex->m_format);
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = layer;
+        viewInfo.subresourceRange.layerCount = 1;
+        VkImageView layerView = VK_NULL_HANDLE;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &layerView) != VK_SUCCESS) {
+            DestroyRenderTarget(rt);
+            return nullptr;
+        }
+        rt->m_depthLayerViews[layer] = layerView;
+    }
+    return rt;
 }
 
 IRenderTarget* DeviceVK::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                            const std::vector<RHITextureFormat>& colorFormats,
                                                            ITexture* sharedDepthTexture,
                                                            uint32_t samples) {
-    (void)width; (void)height; (void)colorFormats; (void)sharedDepthTexture; (void)samples;
-    return nullptr;
+    if (width == 0 || height == 0 || colorFormats.empty() || !sharedDepthTexture) return nullptr;
+    auto* sharedDepth = static_cast<TextureVK*>(sharedDepthTexture);
+    if (!sharedDepth->m_image || !sharedDepth->m_imageView) return nullptr;
+
+    auto* rt = new RenderTargetVK(this);
+    rt->m_width = width;
+    rt->m_height = height;
+    rt->m_externalDepthTexture = sharedDepth;
+
+    TextureDesc texDesc;
+    texDesc.type = TextureType::Texture2D;
+    texDesc.width = width;
+    texDesc.height = height;
+    texDesc.mipLevels = 1;
+    texDesc.samples = (samples > 0) ? samples : 1u;
+    texDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+    for (RHITextureFormat fmt : colorFormats) {
+        texDesc.format = fmt;
+        ITexture* tex = CreateTexture(texDesc, nullptr);
+        if (!tex) {
+            DestroyRenderTarget(rt);
+            return nullptr;
+        }
+        rt->m_colorTextures.push_back(std::unique_ptr<TextureVK>(static_cast<TextureVK*>(tex)));
+    }
+    return rt;
 }
 
 IRenderTarget* DeviceVK::CreateRenderTargetFromTexture(ITexture* colorTexture, uint32_t face, uint32_t mipLevel) {
-    (void)colorTexture; (void)face; (void)mipLevel;
-    return nullptr;
+    auto* color = static_cast<TextureVK*>(colorTexture);
+    if (!color || !color->m_image) return nullptr;
+    auto* rt = new RenderTargetVK(this);
+    uint32_t mipWidth = std::max<uint32_t>(1u, color->m_width >> mipLevel);
+    uint32_t mipHeight = std::max<uint32_t>(1u, color->m_height >> mipLevel);
+    rt->m_width = mipWidth;
+    rt->m_height = mipHeight;
+    rt->m_ownsTextures = false;
+    rt->m_externalColorTextures.push_back(color);
+
+    VkImageViewCreateInfo viewInfo = {};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = static_cast<VkImage>(color->m_image);
+    viewInfo.format = ToVkFormat(color->m_format);
+    viewInfo.subresourceRange.aspectMask = ToVkImageAspect(color->m_format);
+    viewInfo.subresourceRange.baseMipLevel = mipLevel;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    if (color->m_type == TextureType::TextureCube || color->m_type == TextureType::Texture2DArray) {
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.subresourceRange.baseArrayLayer = face;
+    } else if (color->m_type == TextureType::Texture2D) {
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    } else {
+        delete rt;
+        return nullptr;
+    }
+
+    VkImageView colorView = VK_NULL_HANDLE;
+    if (vkCreateImageView(static_cast<VkDevice>(m_device), &viewInfo, nullptr, &colorView) != VK_SUCCESS) {
+        delete rt;
+        return nullptr;
+    }
+    rt->m_colorAttachmentViews.push_back(colorView);
+    return rt;
 }
 
 IRenderTarget* DeviceVK::CreateRenderTargetFromTextureWithDepth(ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture) {
-    (void)colorTexture; (void)face; (void)mipLevel; (void)depthTexture;
-    return nullptr;
+    auto* color = static_cast<TextureVK*>(colorTexture);
+    auto* depth = static_cast<TextureVK*>(depthTexture);
+    if (!color || !depth || !color->m_image || !depth->m_image) return nullptr;
+
+    IRenderTarget* baseRt = CreateRenderTargetFromTexture(colorTexture, face, mipLevel);
+    if (!baseRt) return nullptr;
+    auto* rt = static_cast<RenderTargetVK*>(baseRt);
+    rt->m_externalDepthTexture = depth;
+    return rt;
 }
 
 void DeviceVK::DestroyRenderTarget(IRenderTarget* rt) {
     if (!rt) return;
     RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
+    VkDevice device = static_cast<VkDevice>(m_device);
+    if (device != VK_NULL_HANDLE) {
+        for (void* v : rtVK->m_colorAttachmentViews) {
+            if (v) vkDestroyImageView(device, static_cast<VkImageView>(v), nullptr);
+        }
+        rtVK->m_colorAttachmentViews.clear();
+        if (rtVK->m_depthAttachmentView) {
+            vkDestroyImageView(device, static_cast<VkImageView>(rtVK->m_depthAttachmentView), nullptr);
+            rtVK->m_depthAttachmentView = nullptr;
+        }
+        for (void* v : rtVK->m_depthLayerViews) {
+            if (v) vkDestroyImageView(device, static_cast<VkImageView>(v), nullptr);
+        }
+        rtVK->m_depthLayerViews.clear();
+    }
     for (auto& t : rtVK->m_colorTextures) {
         DestroyTexture(t.release());
     }
@@ -1503,13 +1634,257 @@ void DeviceVK::Present() {
     vkQueueWaitIdle(queue);
 }
 
+void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
+    width = std::max<uint32_t>(1u, width);
+    height = std::max<uint32_t>(1u, height);
+    if (width == m_swapchainWidth && height == m_swapchainHeight)
+        return;
+    if (!m_device || !m_surface)
+        return;
+
+    VkDevice device = static_cast<VkDevice>(m_device);
+    VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(m_physicalDevice);
+    VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(m_surface);
+    vkDeviceWaitIdle(device);
+
+    for (void* fb : m_swapchainFramebuffers) {
+        if (fb) vkDestroyFramebuffer(device, static_cast<VkFramebuffer>(fb), nullptr);
+    }
+    m_swapchainFramebuffers.clear();
+    for (void* view : m_swapchainImageViews) {
+        if (view) vkDestroyImageView(device, static_cast<VkImageView>(view), nullptr);
+    }
+    m_swapchainImageViews.clear();
+    m_swapchainImages.clear();
+    if (m_swapchain != nullptr) {
+        vkDestroySwapchainKHR(device, static_cast<VkSwapchainKHR>(m_swapchain), nullptr);
+        m_swapchain = nullptr;
+    }
+
+    VkSurfaceCapabilitiesKHR caps = {};
+    VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys, surface, &caps);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("DeviceVK::OnWindowResized: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed (0x%x)", res);
+        return;
+    }
+
+    uint32_t formatCount = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &formatCount, nullptr);
+    std::vector<VkSurfaceFormatKHR> formats(formatCount);
+    if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surface, &formatCount, formats.data());
+    VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR } : formats[0];
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            chosenFormat = f;
+            break;
+        }
+    }
+
+    uint32_t presentModeCount = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &presentModeCount, nullptr);
+    std::vector<VkPresentModeKHR> presentModes(presentModeCount);
+    if (presentModeCount) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &presentModeCount, presentModes.data());
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (VkPresentModeKHR pm : presentModes) {
+        if (pm == VK_PRESENT_MODE_FIFO_KHR) { presentMode = pm; break; }
+    }
+
+    VkExtent2D extent = {};
+    extent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
+    extent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
+    uint32_t imageCount = caps.minImageCount + 1;
+    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
+
+    VkSwapchainCreateInfoKHR swapInfo = {};
+    swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapInfo.surface = surface;
+    swapInfo.minImageCount = imageCount;
+    swapInfo.imageFormat = chosenFormat.format;
+    swapInfo.imageColorSpace = chosenFormat.colorSpace;
+    swapInfo.imageExtent = extent;
+    swapInfo.imageArrayLayers = 1;
+    swapInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    swapInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapInfo.preTransform = caps.currentTransform;
+    swapInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapInfo.presentMode = presentMode;
+    swapInfo.clipped = VK_TRUE;
+
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    res = vkCreateSwapchainKHR(device, &swapInfo, nullptr, &swapchain);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("DeviceVK::OnWindowResized: vkCreateSwapchainKHR failed (0x%x)", res);
+        return;
+    }
+
+    m_swapchain = swapchain;
+    m_swapchainWidth = extent.width;
+    m_swapchainHeight = extent.height;
+    const uint32_t oldFormat = m_swapchainFormat;
+    m_swapchainFormat = static_cast<uint32_t>(chosenFormat.format);
+    m_currentSwapchainImageIndex = 0xFFFFFFFFu;
+
+    uint32_t swapchainImageCount = 0;
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, nullptr);
+    std::vector<VkImage> swapchainImages(swapchainImageCount);
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages.data());
+    m_swapchainImages.reserve(swapchainImageCount);
+    for (VkImage img : swapchainImages) m_swapchainImages.push_back(img);
+    m_swapchainImageViews.resize(swapchainImageCount);
+    for (uint32_t i = 0; i < swapchainImageCount; ++i) {
+        VkImageViewCreateInfo viewInfo = {};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = swapchainImages[i];
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = chosenFormat.format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+        VkImageView imageView = VK_NULL_HANDLE;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) == VK_SUCCESS)
+            m_swapchainImageViews[i] = imageView;
+    }
+
+    if (oldFormat != m_swapchainFormat && m_swapchainRenderPass != nullptr) {
+        vkDestroyRenderPass(device, static_cast<VkRenderPass>(m_swapchainRenderPass), nullptr);
+        m_swapchainRenderPass = nullptr;
+    }
+    EnsureSwapchainRenderPassAndFramebuffers();
+    core::Log::InfoF("DeviceVK::OnWindowResized: swapchain recreated to %ux%u", m_swapchainWidth, m_swapchainHeight);
+}
+
 void DeviceVK::Finish() {
     if (m_graphicsQueue)
         vkQueueWaitIdle(static_cast<VkQueue>(m_graphicsQueue));
 }
 
+void DeviceVK::EnsureSwapchainRenderPassAndFramebuffers() {
+    if (m_swapchainRenderPass != nullptr && !m_swapchainFramebuffers.empty()) return;
+    VkDevice device = static_cast<VkDevice>(m_device);
+    if (device == VK_NULL_HANDLE || m_swapchainImageViews.empty()) return;
+    VkFormat fmt = static_cast<VkFormat>(m_swapchainFormat);
+    VkRenderPassCreateInfo rpInfo = {};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    VkAttachmentDescription att = {};
+    att.format = fmt;
+    att.samples = VK_SAMPLE_COUNT_1_BIT;
+    att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    att.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    rpInfo.attachmentCount = 1;
+    rpInfo.pAttachments = &att;
+    VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &ref;
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+    VkRenderPass rp = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device, &rpInfo, nullptr, &rp) != VK_SUCCESS) return;
+    m_swapchainRenderPass = rp;
+    m_swapchainFramebuffers.resize(m_swapchainImageViews.size());
+    for (size_t i = 0; i < m_swapchainImageViews.size(); ++i) {
+        VkImageView view = static_cast<VkImageView>(m_swapchainImageViews[i]);
+        if (view == VK_NULL_HANDLE) continue;
+        VkFramebufferCreateInfo fbInfo = {};
+        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbInfo.renderPass = rp;
+        fbInfo.attachmentCount = 1;
+        fbInfo.pAttachments = &view;
+        fbInfo.width = m_swapchainWidth;
+        fbInfo.height = m_swapchainHeight;
+        fbInfo.layers = 1;
+        VkFramebuffer fb = VK_NULL_HANDLE;
+        if (vkCreateFramebuffer(device, &fbInfo, nullptr, &fb) == VK_SUCCESS)
+            m_swapchainFramebuffers[i] = fb;
+    }
+}
+
+void DeviceVK::EnsureImGuiDescriptorPool() {
+    if (m_imGuiDescriptorPool != nullptr) return;
+    VkDevice device = static_cast<VkDevice>(m_device);
+    if (device == VK_NULL_HANDLE) return;
+    VkDescriptorPoolSize poolSizes[] = {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+    };
+    VkDescriptorPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    poolInfo.maxSets = 1000;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = poolSizes;
+    VkDescriptorPool pool = VK_NULL_HANDLE;
+    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &pool) == VK_SUCCESS)
+        m_imGuiDescriptorPool = pool;
+}
+
+void DeviceVK::SetPostBlitCallback(std::function<void(void*)> cb) {
+    m_postBlitCallback = std::move(cb);
+}
+
+bool DeviceVK::GetImGuiVulkanInitInfo(ImGuiVulkanInitInfo* out) {
+    if (!out || !m_device || !m_swapchain) return false;
+    EnsureImGuiDescriptorPool();
+    EnsureSwapchainRenderPassAndFramebuffers();
+    if (m_imGuiDescriptorPool == nullptr || m_swapchainRenderPass == nullptr) return false;
+    out->instance = m_instance;
+    out->physical_device = m_physicalDevice;
+    out->device = m_device;
+    out->queue_family = m_graphicsQueueFamily;
+    out->queue = m_graphicsQueue;
+    out->pipeline_cache = m_pipelineCache;
+    out->descriptor_pool = m_imGuiDescriptorPool;
+    out->min_image_count = 2;
+    out->image_count = static_cast<uint32_t>(m_swapchainImages.size());
+    out->render_pass = m_swapchainRenderPass;
+    return true;
+}
+
 void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
-    if (!src || !m_swapchain || m_swapchainImages.empty() || !m_immediateCommandList) return;
+    if (!m_swapchain || m_swapchainImages.empty() || !m_immediateCommandList) return;
+    if (!src) {
+        if (!m_postBlitCallback || !m_swapchainRenderPass || m_swapchainFramebuffers.empty()) return;
+        VkDevice device = static_cast<VkDevice>(m_device);
+        VkSwapchainKHR swapchain = static_cast<VkSwapchainKHR>(m_swapchain);
+        VkResult acq = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, VK_NULL_HANDLE, VK_NULL_HANDLE, &m_currentSwapchainImageIndex);
+        if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) return;
+        if (m_currentSwapchainImageIndex >= m_swapchainFramebuffers.size() || !m_swapchainFramebuffers[m_currentSwapchainImageIndex]) return;
+        CommandListVK* imm = m_immediateCommandList.get();
+        imm->EndRenderingIfActive();
+        if (!imm->IsRecording())
+            imm->Begin();
+        VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
+        if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+        VkImage dstImage = static_cast<VkImage>(m_swapchainImages[m_currentSwapchainImageIndex]);
+        VkImageMemoryBarrier barrierDst = {};
+        barrierDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        barrierDst.image = dstImage;
+        barrierDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        VkRenderPass rp = static_cast<VkRenderPass>(m_swapchainRenderPass);
+        VkFramebuffer fb = static_cast<VkFramebuffer>(m_swapchainFramebuffers[m_currentSwapchainImageIndex]);
+        VkClearValue clearVal = {};
+        VkRenderPassBeginInfo rpBegin = {};
+        rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpBegin.renderPass = rp;
+        rpBegin.framebuffer = fb;
+        rpBegin.renderArea = { { 0, 0 }, { m_swapchainWidth, m_swapchainHeight } };
+        rpBegin.clearValueCount = 1;
+        rpBegin.pClearValues = &clearVal;
+        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+        m_postBlitCallback(cmd);
+        vkCmdEndRenderPass(cmd);
+        return;
+    }
     RenderTargetVK* rt = static_cast<RenderTargetVK*>(src);
     ITexture* color0 = rt->GetColorTexture(0);
     if (!color0) return;
@@ -1553,11 +1928,34 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
     copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     copy.extent = { w, h, 1 };
     vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrierDst.dstAccessMask = 0;
-    barrierDst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrierDst.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+
+    if (m_postBlitCallback && m_swapchainRenderPass != nullptr && m_currentSwapchainImageIndex < m_swapchainFramebuffers.size() && m_swapchainFramebuffers[m_currentSwapchainImageIndex] != nullptr) {
+        barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrierDst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        VkRenderPass rp = static_cast<VkRenderPass>(m_swapchainRenderPass);
+        VkFramebuffer fb = static_cast<VkFramebuffer>(m_swapchainFramebuffers[m_currentSwapchainImageIndex]);
+        VkClearValue clearVal = {};
+        VkRenderPassBeginInfo rpBegin = {};
+        rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpBegin.renderPass = rp;
+        rpBegin.framebuffer = fb;
+        rpBegin.renderArea = { { 0, 0 }, { m_swapchainWidth, m_swapchainHeight } };
+        rpBegin.clearValueCount = 1;
+        rpBegin.pClearValues = &clearVal;
+        vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+        m_postBlitCallback(cmd);
+        vkCmdEndRenderPass(cmd);
+        /* Image already in PRESENT_SRC_KHR via render pass finalLayout */
+    } else {
+        barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.dstAccessMask = 0;
+        barrierDst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrierDst.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+    }
 }
 
 void DeviceVK::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) { (void)nativeFbo; (void)width; (void)height; }

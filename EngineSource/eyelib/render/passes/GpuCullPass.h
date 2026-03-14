@@ -82,6 +82,7 @@ private:
     uint32_t m_occlusionDepthWidth = 0;
     uint32_t m_occlusionDepthHeight = 0;
     bool m_initialized = false;
+    bool m_initAttempted = false;
 };
 
 } // namespace render

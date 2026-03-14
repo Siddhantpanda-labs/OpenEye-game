@@ -49,11 +49,19 @@ std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
 #if OPENEYE_VULKAN_AVAILABLE
     if (backend == render::RenderBackend::Vulkan) {
         core::Log::Info("CreateGraphicsDevice: creating Vulkan device");
-        void* nwh = window->GetNativeWindowHandle();
-        if (!nwh) { core::Log::Error("CreateGraphicsDevice: GetNativeWindowHandle() returned null"); return nullptr; }
-        auto device = render::rhi::CreateVulkanDevice(nwh, width, height);
-        if (!device) core::Log::Error("CreateGraphicsDevice: Vulkan device creation failed");
-        return device;
+        void* glfwWindow = static_cast<void*>(window->NativeHandle());
+        if (!glfwWindow) { core::Log::Error("CreateGraphicsDevice: NativeHandle() returned null"); return nullptr; }
+        try {
+            auto device = render::rhi::CreateVulkanDevice(glfwWindow, width, height);
+            if (!device) core::Log::Error("CreateGraphicsDevice: Vulkan device creation failed");
+            return device;
+        } catch (const std::exception& e) {
+            core::Log::ErrorF("CreateGraphicsDevice: Vulkan threw: %s", e.what());
+            return nullptr;
+        } catch (...) {
+            core::Log::Error("CreateGraphicsDevice: Vulkan threw unknown exception");
+            return nullptr;
+        }
     }
 #else
     if (backend == render::RenderBackend::Vulkan) {

@@ -2,6 +2,9 @@
 # Paths use CMAKE_CURRENT_SOURCE_DIR = EngineSource/
 set(OPENEYE_ENGINE_SOURCE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Vulkan: ON = build Vulkan RHI and ImGui Vulkan backend when SDK is found (editor/player default backend).
+option(OPENEYE_USE_VULKAN "Build with Vulkan support (RHI + ImGui backend; requires Vulkan SDK)" ON)
+
 # --------------------------------------
 # LZ4 & Zstd (FetchContent)
 # --------------------------------------
@@ -127,6 +130,14 @@ if(OPENEYE_USE_OPENXR)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/OpenXR-SDK)
 endif()
 
+# Vulkan (for ImGui Vulkan backend; only when OPENEYE_USE_VULKAN and SDK found)
+if(OPENEYE_USE_VULKAN)
+    find_package(Vulkan QUIET)
+    if(NOT Vulkan_FOUND)
+        message(STATUS "OPENEYE_USE_VULKAN=ON but Vulkan SDK not found; ImGui Vulkan backend disabled. Set VULKAN_SDK or install SDK to enable.")
+    endif()
+endif()
+
 # ImGui library (shared across editor and game)
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui/imgui.cpp
@@ -137,6 +148,9 @@ set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_glfw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_opengl3.cpp
 )
+if(Vulkan_FOUND)
+    list(APPEND IMGUI_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui/backends/imgui_impl_vulkan.cpp)
+endif()
 
 set(IMGUIZMO_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/ImGuizmo/ImGuizmo.cpp
@@ -163,6 +177,10 @@ target_link_libraries(OpenEyeImGui
         glad
         glfw
 )
+if(Vulkan_FOUND)
+    target_link_libraries(OpenEyeImGui PUBLIC Vulkan::Vulkan)
+    target_compile_definitions(OpenEyeImGui PUBLIC OPENEYE_IMGUI_VULKAN=1)
+endif()
 
 # --------------------------------------
 # Eyelib Engine Library (New Professional Structure)

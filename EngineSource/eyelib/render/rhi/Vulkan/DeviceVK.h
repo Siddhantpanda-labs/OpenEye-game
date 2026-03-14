@@ -3,6 +3,7 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/Vulkan/CommandListVK.h"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -94,11 +95,14 @@ struct DeviceVK : IDevice {
     int GetMaxSamples(int requestedSamples) override;
 
     void Present() override;
+    void OnWindowResized(uint32_t width, uint32_t height) override;
     void Finish() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
     void BlitToDefaultFramebufferSubregion(IRenderTarget* src, int dstX, int dstY, int dstW, int dstH) override;
     void BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t windowWidth, uint32_t windowHeight) override;
+    void SetPostBlitCallback(std::function<void(void*)> cb) override;
+    bool GetImGuiVulkanInitInfo(ImGuiVulkanInitInfo* out) override;
     void Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) override;
     void BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) override;
     void BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) override;
@@ -195,6 +199,12 @@ private:
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;
     void* m_allocator = nullptr;  // VmaAllocator
+    std::function<void(void*)> m_postBlitCallback;
+    void* m_swapchainRenderPass = nullptr;   // VkRenderPass (color load/store for ImGui overlay)
+    std::vector<void*> m_swapchainFramebuffers;  // VkFramebuffer per swapchain image
+    void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui
+    void EnsureSwapchainRenderPassAndFramebuffers();
+    void EnsureImGuiDescriptorPool();
 };
 
 } // namespace rhi

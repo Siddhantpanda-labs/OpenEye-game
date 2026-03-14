@@ -232,6 +232,10 @@ void* GameRuntime::GetOutputColorTextureNativeHandle() const {
     return m_render ? m_render->GetOutputColorTextureNativeHandle() : nullptr;
 }
 
+eyelib::api::RenderDevice GameRuntime::GetDevice() const {
+    return m_render ? m_render->GetDevice() : eyelib::api::RenderDevice();
+}
+
 void GameRuntime::ReloadShaders() {
     if (m_render) {
         m_render->ReloadShaders();

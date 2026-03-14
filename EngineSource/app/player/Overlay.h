@@ -3,6 +3,7 @@
 #include "PlayerConfig.h"
 #include "api/platform/Window.h"
 #include "api/world/All.h"
+#include "eyelib/render/RenderBackend.h"
 
 #include <string>
 #include <cstddef>
@@ -27,14 +28,18 @@ struct OverlaySnapshot {
 
 class RuntimeOverlay {
 public:
-    bool Initialize(eyelib::api::Window& window);
+    /** Initialize for OpenGL or Vulkan. For Vulkan, device must be rhi::IDevice* (from pipeline). */
+    bool Initialize(eyelib::api::Window& window, eyelib::render::RenderBackend backend, void* device);
     /** Render using snapshot only (render-thread safe; no World access). */
     void Render(const OverlaySnapshot& snapshot);
     void Shutdown();
     bool IsReady() const { return m_ready; }
+    /** True when using Vulkan (overlay draw is recorded in post-blit callback). */
+    bool IsVulkan() const { return m_vulkan; }
 
 private:
     bool m_ready = false;
+    bool m_vulkan = false;
     // QR code texture for VR server panel (only used when OPENEYE_BUILD_STREAMING)
     void* m_qrTextureId = nullptr;
     int m_qrTextureWidth = 0;

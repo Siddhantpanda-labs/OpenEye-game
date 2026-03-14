@@ -18,9 +18,11 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
 )
 
-# Vulkan RHI backend (see documentation/vulkan/vulkan_plan.md). Built when Vulkan SDK is found.
-find_package(Vulkan QUIET)
-if(Vulkan_FOUND)
+# Vulkan RHI backend (see documentation/vulkan/vulkan_plan.md). Built when OPENEYE_USE_VULKAN and Vulkan SDK found.
+if(OPENEYE_USE_VULKAN)
+    find_package(Vulkan QUIET)
+endif()
+if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
     list(APPEND RENDER_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BufferVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/TextureVK.cpp
@@ -38,7 +40,9 @@ if(Vulkan_FOUND)
     )
     set(OPENEYE_VULKAN_AVAILABLE 1)
 else()
-    message(STATUS "Vulkan not found; Vulkan RHI backend disabled. Install Vulkan SDK to enable.")
+    if(OPENEYE_USE_VULKAN)
+        message(STATUS "Vulkan not found; Vulkan RHI backend disabled. Install Vulkan SDK to enable.")
+    endif()
     set(OPENEYE_VULKAN_AVAILABLE 0)
 endif()
 
@@ -160,6 +164,7 @@ target_include_directories(EyelibRender
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/glad/include
+        ${OPENEYE_ENGINE_SOURCE}/thirdparty/glfw/include
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/glm
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/stb
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/assimp/include
@@ -173,6 +178,7 @@ target_link_libraries(EyelibRender
         EyelibDebug
     PRIVATE
         glad
+        glfw
 )
 
 if(Vulkan_FOUND)

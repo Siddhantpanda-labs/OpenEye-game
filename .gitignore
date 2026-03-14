@@ -60,6 +60,9 @@ _deps
 *.dylib
 *.so
 
+# Shaders
+*.spv
+
 # Logs
 *.log
 

@@ -17,7 +17,7 @@ TextureType TextureVK::GetType() const { return m_type; }
 
 RHITextureFormat TextureVK::GetFormat() const { return m_format; }
 
-void* TextureVK::GetNativeTexture() { return m_image; }
+void* TextureVK::GetNativeTexture() { return m_imageView; }
 
 } // namespace rhi
 } // namespace render

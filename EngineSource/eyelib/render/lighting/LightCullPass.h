@@ -59,6 +59,7 @@ private:
     float m_logNear = 0.0f, m_logFar = 0.0f, m_nearPlane = 0.1f, m_farPlane = 1000.0f;
     uint32_t m_screenWidth = 0, m_screenHeight = 0;
     bool m_initialized = false;
+    bool m_initAttempted = false;
 };
 
 } // namespace render

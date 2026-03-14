@@ -41,10 +41,10 @@ bool GBuffer::Initialize(rhi::IDevice* device, uint32_t width, uint32_t height) 
     m_deviceRHI = device;
 
     std::vector<rhi::RHITextureFormat> colors = {
-        rhi::RHITextureFormat::RGB16F,   // position
-        rhi::RHITextureFormat::RGB16F,   // normal
-        rhi::RHITextureFormat::RGB8,     // albedo
-        rhi::RHITextureFormat::RGB8,     // PBR params (metallic, roughness, reflective)
+        rhi::RHITextureFormat::RGBA16F,  // position (alpha unused)
+        rhi::RHITextureFormat::RGBA16F,  // normal (alpha unused)
+        rhi::RHITextureFormat::RGBA8,    // albedo
+        rhi::RHITextureFormat::RGBA8,    // PBR params (metallic, roughness, reflective, unused)
         rhi::RHITextureFormat::RGBA16F   // velocity (RG16F not in RHI)
     };
     m_renderTargetRHI = device->CreateRenderTarget(width, height, colors, rhi::RHITextureFormat::Depth24, 1);

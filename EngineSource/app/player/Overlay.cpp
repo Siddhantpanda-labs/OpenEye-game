@@ -1,6 +1,7 @@
 #include "Overlay.h"
 
 #include "api/core/All.h"
+#include "eyelib/render/rhi/RHI.h"
 
 #ifdef OPENEYE_BUILD_STREAMING
 #include <glad/glad.h>
@@ -9,6 +10,10 @@
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
+#ifdef OPENEYE_IMGUI_VULKAN
+#include <vulkan/vulkan.h>
+#include <backends/imgui_impl_vulkan.h>
+#endif
 
 #ifdef OPENEYE_BUILD_STREAMING
 #include <qrcodegen.hpp>
@@ -17,12 +22,52 @@
 
 namespace openeye::player {
 
-bool RuntimeOverlay::Initialize(eyelib::api::Window& window) {
+bool RuntimeOverlay::Initialize(eyelib::api::Window& window, eyelib::render::RenderBackend backend, void* device) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+
+#ifdef OPENEYE_IMGUI_VULKAN
+    if (backend == eyelib::render::RenderBackend::Vulkan && device) {
+        auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(device);
+        eyelib::render::rhi::ImGuiVulkanInitInfo info = {};
+        if (!rhiDevice->GetImGuiVulkanInitInfo(&info)) {
+            ImGui::DestroyContext();
+            return false;
+        }
+        ImGui_ImplGlfw_InitForVulkan(static_cast<GLFWwindow*>(window.GetNativeHandle()), true);
+        ImGui_ImplVulkan_InitInfo vkInfo = {};
+        vkInfo.ApiVersion = VK_API_VERSION_1_0;
+        vkInfo.Instance = static_cast<VkInstance>(info.instance);
+        vkInfo.PhysicalDevice = static_cast<VkPhysicalDevice>(info.physical_device);
+        vkInfo.Device = static_cast<VkDevice>(info.device);
+        vkInfo.QueueFamily = info.queue_family;
+        vkInfo.Queue = static_cast<VkQueue>(info.queue);
+        vkInfo.DescriptorPool = static_cast<VkDescriptorPool>(info.descriptor_pool);
+        vkInfo.RenderPass = static_cast<VkRenderPass>(info.render_pass);
+        vkInfo.MinImageCount = info.min_image_count;
+        vkInfo.ImageCount = info.image_count;
+        vkInfo.PipelineCache = static_cast<VkPipelineCache>(info.pipeline_cache);
+        if (!ImGui_ImplVulkan_Init(&vkInfo)) {
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            return false;
+        }
+        rhiDevice->SetPostBlitCallback([](void* cmd) {
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd));
+        });
+        m_vulkan = true;
+        m_ready = true;
+        return true;
+    }
+#endif
+    if (backend == eyelib::render::RenderBackend::Vulkan) {
+        ImGui::DestroyContext();
+        return false;
+    }
+    (void)device;
     ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(window.GetNativeHandle()), true);
     ImGui_ImplOpenGL3_Init("#version 450");
     m_ready = true;
@@ -33,8 +78,11 @@ void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {
     if (!m_ready) {
         return;
     }
-
-    ImGui_ImplOpenGL3_NewFrame();
+    if (m_vulkan) {
+        ImGui_ImplVulkan_NewFrame();
+    } else {
+        ImGui_ImplOpenGL3_NewFrame();
+    }
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
@@ -145,7 +193,10 @@ void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {
     }
 
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    if (!m_vulkan) {
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    }
+    /* Vulkan: draw data is recorded in device post-blit callback during BlitToScreen. */
 }
 
 void RuntimeOverlay::Shutdown() {
@@ -161,10 +212,17 @@ void RuntimeOverlay::Shutdown() {
         m_lastQRAddress.clear();
     }
 #endif
-    ImGui_ImplOpenGL3_Shutdown();
+    if (m_vulkan) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        ImGui_ImplVulkan_Shutdown();
+#endif
+    } else {
+        ImGui_ImplOpenGL3_Shutdown();
+    }
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
     m_ready = false;
+    m_vulkan = false;
 }
 
 } // namespace openeye::player

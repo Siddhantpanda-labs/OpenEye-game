@@ -29,6 +29,12 @@
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
+#ifdef OPENEYE_IMGUI_VULKAN
+#include <vulkan/vulkan.h>
+#include <backends/imgui_impl_vulkan.h>
+#include "eyelib/render/rhi/Vulkan/DeviceVK.h"
+#endif
+#include "eyelib/render/rhi/RHI.h"
 #include <ImGuizmo.h>
 #include <GLFW/glfw3.h>
 
@@ -163,7 +169,7 @@ private:
 
 class ScopedImGui {
 public:
-    bool Initialize(eyelib::api::Window& window) {
+    bool Initialize(eyelib::api::Window& window, void* device) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -171,26 +177,91 @@ public:
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         ImGui::StyleColorsDark();
         auto* glfwWindow = static_cast<GLFWwindow*>(window.GetNativeHandle());
-        if (!ImGui_ImplGlfw_InitForOpenGL(glfwWindow, true)) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        if (device) {
+            auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(device);
+            eyelib::render::rhi::ImGuiVulkanInitInfo info = {};
+            if (rhiDevice->GetImGuiVulkanInitInfo(&info)) {
+                ImGui_ImplGlfw_InitForVulkan(glfwWindow, true);
+                ImGui_ImplVulkan_InitInfo vkInfo = {};
+                vkInfo.ApiVersion = VK_API_VERSION_1_0;
+                vkInfo.Instance = static_cast<VkInstance>(info.instance);
+                vkInfo.PhysicalDevice = static_cast<VkPhysicalDevice>(info.physical_device);
+                vkInfo.Device = static_cast<VkDevice>(info.device);
+                vkInfo.QueueFamily = info.queue_family;
+                vkInfo.Queue = static_cast<VkQueue>(info.queue);
+                vkInfo.DescriptorPool = static_cast<VkDescriptorPool>(info.descriptor_pool);
+                vkInfo.RenderPass = static_cast<VkRenderPass>(info.render_pass);
+                vkInfo.MinImageCount = info.min_image_count;
+                vkInfo.ImageCount = info.image_count;
+                vkInfo.PipelineCache = static_cast<VkPipelineCache>(info.pipeline_cache);
+                if (ImGui_ImplVulkan_Init(&vkInfo)) {
+                    auto* vkDevice = static_cast<eyelib::render::rhi::DeviceVK*>(rhiDevice);
+                    m_vulkanSampler = static_cast<VkSampler>(vkDevice->GetDefaultSampler());
+                    rhiDevice->SetPostBlitCallback([](void* cmd) {
+                        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd));
+                    });
+                    m_vulkan = true;
+                    m_ready = true;
+                    return true;
+                }
+                ImGui_ImplGlfw_Shutdown();
+            }
             ImGui::DestroyContext();
             return false;
         }
-        if (!ImGui_ImplOpenGL3_Init("#version 450")) {
-            ImGui_ImplGlfw_Shutdown();
-            ImGui::DestroyContext();
-            return false;
-        }
-        m_ready = true;
-        return true;
+        ImGui::DestroyContext();
+        return false;
+#else
+        (void)glfwWindow;
+        (void)device;
+        ImGui::DestroyContext();
+        return false;
+#endif
     }
     ~ScopedImGui() {
         if (!m_ready) return;
-        ImGui_ImplOpenGL3_Shutdown();
+        if (m_vulkan) {
+#ifdef OPENEYE_IMGUI_VULKAN
+            for (const auto& it : m_vulkanTextureSets) {
+                if (it.second != VK_NULL_HANDLE)
+                    ImGui_ImplVulkan_RemoveTexture(it.second);
+            }
+            m_vulkanTextureSets.clear();
+            ImGui_ImplVulkan_Shutdown();
+#endif
+        } else {
+            ImGui_ImplOpenGL3_Shutdown();
+        }
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
     }
+    bool IsVulkan() const { return m_vulkan; }
+    void* ResolveTextureId(void* nativeTexture) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        if (!m_vulkan) return nativeTexture;
+        if (!nativeTexture || m_vulkanSampler == VK_NULL_HANDLE) return nullptr;
+        auto it = m_vulkanTextureSets.find(nativeTexture);
+        if (it != m_vulkanTextureSets.end())
+            return reinterpret_cast<void*>(it->second);
+        VkDescriptorSet set = ImGui_ImplVulkan_AddTexture(
+            m_vulkanSampler,
+            static_cast<VkImageView>(nativeTexture),
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (set == VK_NULL_HANDLE) return nullptr;
+        m_vulkanTextureSets[nativeTexture] = set;
+        return reinterpret_cast<void*>(set);
+#else
+        return nativeTexture;
+#endif
+    }
 private:
     bool m_ready = false;
+    bool m_vulkan = false;
+#ifdef OPENEYE_IMGUI_VULKAN
+    VkSampler m_vulkanSampler = VK_NULL_HANDLE;
+    std::unordered_map<void*, VkDescriptorSet> m_vulkanTextureSets;
+#endif
 };
 
 } // namespace
@@ -223,6 +294,7 @@ int RunEditor(int argc, char** argv) {
     windowConfig.height = 720;
     windowConfig.vsync = true;
     windowConfig.resizable = true;
+    windowConfig.useNativeApiOnly = true;
 
     ScopedWindow windowGuard;
     if (!windowGuard.Initialize(window, windowConfig)) {
@@ -230,20 +302,27 @@ int RunEditor(int argc, char** argv) {
         return 2;
     }
 
+    // One RHI device per window; pipelines are view configs only (no pipeline-owned device).
+    // Prefer Vulkan; fall back to OpenGL if Vulkan init fails so the editor always starts.
+    void* platformWindow = window.GetPlatformWindow();
+    const uint32_t deviceInitWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+    const uint32_t deviceInitHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+    auto editorDevice = platformWindow
+        ? eyelib::platform::CreateGraphicsDevice(
+              static_cast<eyelib::platform::Window*>(platformWindow), deviceInitWidth, deviceInitHeight,
+              eyelib::render::RenderBackend::Vulkan)
+        : nullptr;
+    if (!editorDevice) {
+        std::fprintf(stderr, "Editor: Vulkan device init failed.\n");
+        return 3;
+    }
+    eyelib::api::RenderDevice editorRenderDevice(editorDevice.get());
+
     ScopedImGui imgui;
-    if (!imgui.Initialize(window)) {
+    if (!imgui.Initialize(window, editorDevice.get())) {
         std::fprintf(stderr, "Editor: ImGui init failed.\n");
         return 3;
     }
-
-    // One RHI device per window; pipelines are view configs only (no pipeline-owned device).
-    void* platformWindow = window.GetPlatformWindow();
-    auto editorDevice = platformWindow
-        ? eyelib::platform::CreateGraphicsDevice(
-              static_cast<eyelib::platform::Window*>(platformWindow), 256, 256,
-              eyelib::render::RenderBackend::OpenGL)
-        : nullptr;
-    eyelib::api::RenderDevice editorRenderDevice(editorDevice.get());
 
     eyelib::api::Renderer sceneViewRenderer;
     eyelib::api::RenderPipeline sceneViewPipeline;
@@ -289,6 +368,9 @@ int RunEditor(int argc, char** argv) {
     ctx.assetRoots = { engineAssets };
     ctx.engineAssetsPath = engineAssets;
     ctx.window = &window;
+    ctx.resolveImGuiTextureId = [&imgui](void* nativeTexture) -> void* {
+        return imgui.ResolveTextureId(nativeTexture);
+    };
     openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
 
     if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
@@ -301,10 +383,20 @@ int RunEditor(int argc, char** argv) {
         ctx.defaultMaterial = std::move(defaultMat);
     }
 
+    uint32_t lastFramebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+    uint32_t lastFramebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
     while (!window.ShouldClose()) {
         window.PollEvents();
         window.MakeContextCurrent();
         window.RefreshFramebufferSize();
+        const uint32_t framebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+        const uint32_t framebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+        if (editorDevice && (framebufferWidth != lastFramebufferWidth || framebufferHeight != lastFramebufferHeight)) {
+            auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
+            rhiDevice->OnWindowResized(framebufferWidth, framebufferHeight);
+            lastFramebufferWidth = framebufferWidth;
+            lastFramebufferHeight = framebufferHeight;
+        }
         if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
             ctx.world.SetFrameSnapshot(nullptr);
             ctx.world.SetCaptureSnapshotCallback(nullptr);
@@ -333,7 +425,13 @@ int RunEditor(int argc, char** argv) {
 
         eyelib::api::debug::Profiler::BeginFrame();
 
-        ImGui_ImplOpenGL3_NewFrame();
+        if (imgui.IsVulkan()) {
+#ifdef OPENEYE_IMGUI_VULKAN
+            ImGui_ImplVulkan_NewFrame();
+#endif
+        } else {
+            ImGui_ImplOpenGL3_NewFrame();
+        }
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
@@ -351,19 +449,22 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowProfilerPanel(&ctx);
 
         ImGui::Render();
-        // Restore default framebuffer and full-window viewport so ImGui draws to the window.
-        // The scene view and game view pipelines leave their FBO bound after Render().
-        if (ctx.sceneViewPipeline)
-            ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(
-                static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
-        if (ctx.gameViewPipeline)
-            ctx.gameViewPipeline->RestoreDefaultFramebufferAndViewport(
-                static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (imgui.IsVulkan() && editorDevice) {
+            auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
+            rhiDevice->BlitToDefaultFramebuffer(nullptr);
+            rhiDevice->Present();
+        } else {
+            if (ctx.sceneViewPipeline)
+                ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(
+                    static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
+            if (ctx.gameViewPipeline)
+                ctx.gameViewPipeline->RestoreDefaultFramebufferAndViewport(
+                    static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
+            ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+            window.SwapBuffers();
+        }
 
         eyelib::api::debug::Profiler::EndFrame();
-
-        window.SwapBuffers();
     }
 
     // Teardown: pipelines release FBOs; then static GPU resources; device is destroyed when editorDevice goes out of scope.

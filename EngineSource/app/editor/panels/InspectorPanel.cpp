@@ -16,6 +16,7 @@
 #include <json.hpp>
 #include <string>
 #include <unordered_map>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -496,8 +497,11 @@ void ShowAddComponentPopup(EditorContext* ctx) {
             ImGui::PushID(static_cast<int>(type));
             if (iconsOk) {
                 uint64_t texId = s_icons.GetTexture(iconShape);
-                if (texId)
-                    ImGui::Image(static_cast<ImTextureID>(texId), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
+                void* resolvedTex = reinterpret_cast<void*>(static_cast<uintptr_t>(texId));
+                if (ctx->resolveImGuiTextureId)
+                    resolvedTex = ctx->resolveImGuiTextureId(resolvedTex);
+                if (resolvedTex)
+                    ImGui::Image(reinterpret_cast<ImTextureID>(resolvedTex), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
                 ImGui::SameLine();
             }
             if (ImGui::Selectable(label)) {
@@ -514,8 +518,13 @@ void ShowAddComponentPopup(EditorContext* ctx) {
         addCollider(Collider::Type::Sphere, "Sphere", ColliderIconShape::Sphere);
         addCollider(Collider::Type::Capsule, "Capsule", ColliderIconShape::Capsule);
         ImGui::PushID(-1);
-        if (iconsOk && s_icons.GetTexture(ColliderIconShape::Mesh))
-            ImGui::Image(static_cast<ImTextureID>(s_icons.GetTexture(ColliderIconShape::Mesh)), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
+        if (iconsOk && s_icons.GetTexture(ColliderIconShape::Mesh)) {
+            void* resolvedTex = reinterpret_cast<void*>(static_cast<uintptr_t>(s_icons.GetTexture(ColliderIconShape::Mesh)));
+            if (ctx->resolveImGuiTextureId)
+                resolvedTex = ctx->resolveImGuiTextureId(resolvedTex);
+            if (resolvedTex)
+                ImGui::Image(reinterpret_cast<ImTextureID>(resolvedTex), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
+        }
         ImGui::SameLine();
         ImGui::Selectable("Convex Hull (disabled)", false);
         ImGui::Selectable("Mesh (disabled)", false);
@@ -526,8 +535,11 @@ void ShowAddComponentPopup(EditorContext* ctx) {
         ImGui::PushID("RigidBody");
         if (iconsOk) {
             uint64_t texId = s_icons.GetRigidBodyTexture();
-            if (texId)
-                ImGui::Image(static_cast<ImTextureID>(texId), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
+            void* resolvedTex = reinterpret_cast<void*>(static_cast<uintptr_t>(texId));
+            if (ctx->resolveImGuiTextureId)
+                resolvedTex = ctx->resolveImGuiTextureId(resolvedTex);
+            if (resolvedTex)
+                ImGui::Image(reinterpret_cast<ImTextureID>(resolvedTex), ImVec2(iconSize, iconSize), ImVec2(0, 1), ImVec2(1, 0));
             ImGui::SameLine();
         }
         if (ImGui::Selectable("Rigidbody")) {

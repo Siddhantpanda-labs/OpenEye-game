@@ -20,7 +20,8 @@ bool LightCullPass::IsSupported(rhi::IDevice* device) const {
 }
 
 void LightCullPass::EnsureResources() {
-    if (!m_device || m_initialized || !IsSupported(m_device)) return;
+    if (!m_device || m_initialized || m_initAttempted || !IsSupported(m_device)) return;
+    m_initAttempted = true;
 
     std::string path = platform::filesystem::GetEngineAssetsRoot();
     if (!path.empty())
@@ -72,6 +73,7 @@ void LightCullPass::Shutdown() {
     m_spotLightBuffer = nullptr;
     m_outputBuffer = nullptr;
     m_initialized = false;
+    m_initAttempted = false;
 }
 
 void LightCullPass::SetViewProj(const float* view16, const float* proj16) {

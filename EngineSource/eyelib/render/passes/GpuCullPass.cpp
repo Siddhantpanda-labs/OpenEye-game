@@ -26,7 +26,8 @@ bool GpuCullPass::IsSupported(rhi::IDevice* device) const {
 }
 
 void GpuCullPass::EnsureResources() {
-    if (!m_device || m_initialized || !IsSupported(m_device)) return;
+    if (!m_device || m_initialized || m_initAttempted || !IsSupported(m_device)) return;
+    m_initAttempted = true;
 
     const size_t combinedSize = kIndirectRegionSize + kDrawListRegionSize;
     rhi::BufferDesc bd;
@@ -176,6 +177,7 @@ void GpuCullPass::Shutdown() {
         m_viewProjUBO = nullptr;
     }
     m_initialized = false;
+    m_initAttempted = false;
 }
 
 void GpuCullPass::SetDrawList(const GpuCullDrawEntry* entries, uint32_t numDraws) {

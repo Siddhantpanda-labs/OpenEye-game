@@ -139,6 +139,8 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 eyelib::api::debug::Profiler::EndSample();
 
                 void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
+                if (ctx->resolveImGuiTextureId)
+                    texId = ctx->resolveImGuiTextureId(texId);
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {
                     ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
                 } else {
@@ -180,6 +182,8 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 eyelib::api::debug::Profiler::EndSample();
 
                 void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
+                if (ctx->resolveImGuiTextureId)
+                    texId = ctx->resolveImGuiTextureId(texId);
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {
                     ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
                 } else {

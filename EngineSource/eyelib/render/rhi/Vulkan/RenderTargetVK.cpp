@@ -32,6 +32,8 @@ void RenderTargetVK::SetDepthLayer(uint32_t layer) { m_depthArrayLayer = layer; 
 uint32_t RenderTargetVK::GetDepthLayer() const { return m_depthArrayLayer; }
 
 void* RenderTargetVK::GetColorImageView(uint32_t index) const {
+    if (index < m_colorAttachmentViews.size() && m_colorAttachmentViews[index] != nullptr)
+        return m_colorAttachmentViews[index];
     if (index < m_colorTextures.size() && m_colorTextures[index])
         return m_colorTextures[index]->m_imageView;
     if (index < m_externalColorTextures.size() && m_externalColorTextures[index])
@@ -40,6 +42,10 @@ void* RenderTargetVK::GetColorImageView(uint32_t index) const {
 }
 
 void* RenderTargetVK::GetDepthImageView() const {
+    if (!m_depthLayerViews.empty() && m_depthArrayLayer < m_depthLayerViews.size() && m_depthLayerViews[m_depthArrayLayer] != nullptr)
+        return m_depthLayerViews[m_depthArrayLayer];
+    if (m_depthAttachmentView != nullptr)
+        return m_depthAttachmentView;
     if (m_depthTexture) return m_depthTexture->m_imageView;
     if (m_externalDepthTexture) return m_externalDepthTexture->m_imageView;
     return nullptr;
