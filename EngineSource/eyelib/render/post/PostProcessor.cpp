@@ -63,10 +63,7 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
         core::Log::Error("PostProcessor::Initialize: no RHI device");
         return false;
     }
-    core::Log::Info("PostProcessor::Initialize: loading shaders");
     LoadShaders();
-    core::Log::Info("PostProcessor::Initialize: creating fullscreen quad");
-    core::Log::Info("PostProcessor::Initialize: creating framebuffers");
     CreateFramebuffers();
     // Pipeline layout + descriptor set for single-texture passes (Phase 3)
     {

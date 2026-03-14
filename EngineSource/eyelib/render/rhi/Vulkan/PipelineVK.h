@@ -10,6 +10,11 @@ struct DeviceVK;
 
 /** Build VkGraphicsPipeline from desc (dynamic rendering). Returns VkPipeline or nullptr. Used by DeviceVK. */
 void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void* pipelineLayout, void* pipelineCache);
+/** Build VkComputePipeline from a shader module. Returns VkPipeline or nullptr. */
+void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipelineCache, void* shaderModule);
+IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc);
+IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride);
+IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader);
 
 struct PipelineVK : IPipeline {
     explicit PipelineVK(DeviceVK* device);

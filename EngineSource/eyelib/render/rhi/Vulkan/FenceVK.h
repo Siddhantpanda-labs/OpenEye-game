@@ -18,6 +18,9 @@ struct FenceVK : IFence {
     uint64_t m_timelineValue = 0;  // wait until semaphore >= this value
 };
 
+bool WaitFenceVK(DeviceVK* device, IFence* fence, uint64_t timeoutMs);
+void DestroyFenceVK(IFence* fence);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

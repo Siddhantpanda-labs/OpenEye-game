@@ -24,6 +24,11 @@ struct DescriptorSetVK : IDescriptorSet {
     void* m_descriptorSet = nullptr;
 };
 
+IPipelineLayout* CreatePipelineLayoutVK(DeviceVK* device, const PipelineLayoutDesc& desc);
+void DestroyPipelineLayoutVK(DeviceVK* device, IPipelineLayout* layout);
+IDescriptorSet* CreateDescriptorSetVK(DeviceVK* device, IPipelineLayout* layout);
+void DestroyDescriptorSetVK(DeviceVK* device, IDescriptorSet* set);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

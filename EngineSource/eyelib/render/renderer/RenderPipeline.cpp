@@ -143,14 +143,12 @@ bool RenderPipeline::Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint
 
 bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) {
     Primitives::SetStaticDevice(m_device);
-    core::Log::Info("RenderPipeline::Initialize: initializing GBuffer");
     m_gbuffer = std::make_unique<GBuffer>();
     if (!m_gbuffer->Initialize(m_device, width, height)) {
         core::Log::Error("RenderPipeline::Initialize: GBuffer::Initialize failed");
         return false;
     }
 
-    core::Log::Info("RenderPipeline::Initialize: initializing CascadeShadowMap");
     m_cascadeShadowMap = std::make_unique<CascadeShadowMap>();
     if (!m_cascadeShadowMap->Initialize(m_device, kDefaultDirectionalShadowResolution, kDefaultDirectionalShadowCascades)) {
         core::Log::Error("RenderPipeline::Initialize: CascadeShadowMap::Initialize failed");
@@ -237,7 +235,6 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     m_clusteredLightGrid = std::make_unique<ClusteredLightGrid>();
     m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Default, will be updated per-frame
 
-    core::Log::Info("RenderPipeline::Initialize: initializing PostProcessor");
     m_postProcessor = std::make_unique<PostProcessor>();
     if (!m_postProcessor->Initialize(width, height, m_device)) {
         core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
@@ -245,7 +242,6 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     }
     m_reflectionProbeManager = std::make_unique<ReflectionProbeManager>();
 
-    core::Log::Info("RenderPipeline::Initialize: creating HDR framebuffer");
     CreateHDRFramebuffer();
     if (m_hdrRenderTarget == nullptr) {
         core::Log::Error("RenderPipeline::Initialize: CreateHDRFramebuffer failed (m_hdrRenderTarget is null)");
@@ -263,7 +259,6 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     m_gpuProfilerRHI = std::make_unique<GpuProfilerRHI>(m_device);
     debug::Profiler::SetGpuProfiler(m_gpuProfilerRHI.get());
 
-    core::Log::Info("RenderPipeline::Initialize: pipeline init success");
     return true;
 }
 

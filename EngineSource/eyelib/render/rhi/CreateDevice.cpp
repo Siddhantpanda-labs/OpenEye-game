@@ -48,7 +48,6 @@ std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
 
 #if OPENEYE_VULKAN_AVAILABLE
     if (backend == render::RenderBackend::Vulkan) {
-        core::Log::Info("CreateGraphicsDevice: creating Vulkan device");
         void* glfwWindow = static_cast<void*>(window->NativeHandle());
         if (!glfwWindow) { core::Log::Error("CreateGraphicsDevice: NativeHandle() returned null"); return nullptr; }
         try {
@@ -80,7 +79,6 @@ std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
     }
 #endif
 
-    core::Log::Info("CreateGraphicsDevice: creating OpenGL device");
     (void)width;
     (void)height;
     window->MakeContextCurrent();

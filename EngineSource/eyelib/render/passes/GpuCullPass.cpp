@@ -2,7 +2,9 @@
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <string>
+#include <vector>
 
 namespace eyelib {
 namespace render {
@@ -47,14 +49,27 @@ void GpuCullPass::EnsureResources() {
         m_indirectBuffer = nullptr;
         return;
     }
-    std::string compSrc;
-    if (!LoadShaderSource(compPath, compSrc)) {
-        core::Log::ErrorF("GpuCullPass: failed to load %s", kCullCompWithDrawList);
-        m_device->DestroyBuffer(m_indirectBuffer);
-        m_indirectBuffer = nullptr;
-        return;
+    if (!platform::filesystem::GetEngineAssetsRoot().empty())
+        compPath = platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + compPath);
+    const bool trySpv = (compPath.find("vulkan") != std::string::npos);
+    if (trySpv) {
+        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(compPath + ".spv");
+        const uint32_t spirvMagic = 0x07230203u;
+        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic)
+            m_computeShaderWithDrawList = m_device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
     }
-    m_computeShaderWithDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compSrc.c_str(), compSrc.size());
+    if (!m_computeShaderWithDrawList || !m_computeShaderWithDrawList->IsValid()) {
+        std::string compSrc;
+        if (!LoadShaderSource(compPath, compSrc)) {
+            core::Log::ErrorF("GpuCullPass: failed to load %s", compPath.c_str());
+            if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
+            m_device->DestroyBuffer(m_indirectBuffer);
+            m_indirectBuffer = nullptr;
+            return;
+        }
+        if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
+        m_computeShaderWithDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compSrc.c_str(), compSrc.size());
+    }
     if (!m_computeShaderWithDrawList || !m_computeShaderWithDrawList->IsValid()) {
         core::Log::Error("GpuCullPass: failed to create compute shader (with draw list)");
         if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
@@ -83,18 +98,31 @@ void GpuCullPass::EnsureResources() {
         m_indirectBuffer = nullptr;
         return;
     }
-    std::string compNoDrawListSrc;
-    if (!LoadShaderSource(compNoDrawListPath, compNoDrawListSrc)) {
-        core::Log::ErrorF("GpuCullPass: failed to load %s", kCullCompNoDrawList);
-        m_device->DestroyPipeline(m_computePipelineWithDrawList);
-        m_device->DestroyShader(m_computeShaderWithDrawList);
-        m_device->DestroyBuffer(m_indirectBuffer);
-        m_computePipelineWithDrawList = nullptr;
-        m_computeShaderWithDrawList = nullptr;
-        m_indirectBuffer = nullptr;
-        return;
+    if (!platform::filesystem::GetEngineAssetsRoot().empty())
+        compNoDrawListPath = platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + compNoDrawListPath);
+    const bool trySpvNoDrawList = (compNoDrawListPath.find("vulkan") != std::string::npos);
+    if (trySpvNoDrawList) {
+        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(compNoDrawListPath + ".spv");
+        const uint32_t spirvMagic = 0x07230203u;
+        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic)
+            m_computeShaderNoDrawList = m_device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
     }
-    m_computeShaderNoDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compNoDrawListSrc.c_str(), compNoDrawListSrc.size());
+    if (!m_computeShaderNoDrawList || !m_computeShaderNoDrawList->IsValid()) {
+        std::string compNoDrawListSrc;
+        if (!LoadShaderSource(compNoDrawListPath, compNoDrawListSrc)) {
+            core::Log::ErrorF("GpuCullPass: failed to load %s", compNoDrawListPath.c_str());
+            if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
+            m_device->DestroyPipeline(m_computePipelineWithDrawList);
+            m_device->DestroyShader(m_computeShaderWithDrawList);
+            m_device->DestroyBuffer(m_indirectBuffer);
+            m_computePipelineWithDrawList = nullptr;
+            m_computeShaderWithDrawList = nullptr;
+            m_indirectBuffer = nullptr;
+            return;
+        }
+        if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
+        m_computeShaderNoDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compNoDrawListSrc.c_str(), compNoDrawListSrc.size());
+    }
     if (!m_computeShaderNoDrawList || !m_computeShaderNoDrawList->IsValid()) {
         core::Log::Error("GpuCullPass: failed to create compute shader (no draw list)");
         if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
@@ -225,8 +253,8 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
     if (m_device)
         m_device->EnsureComputePipelineStorageBlockBindings(pipeline);
     cmd->BindStorageBuffer(m_indirectBuffer, 0, 0, kIndirectRegionSize);
-    if (m_viewProjUBO)
-        cmd->BindUniformBuffer(m_viewProjUBO, 3, 0, static_cast<uint32_t>(16 * sizeof(float)));
+    if (m_viewProjUBO && useWithDrawListPipeline)
+        cmd->BindUniformBuffer(m_viewProjUBO, 5, 0, static_cast<uint32_t>(16 * sizeof(float)));
 
     if (useWithDrawListPipeline) {
         const uint32_t drawListBytes = effectiveCount * static_cast<uint32_t>(sizeof(GpuCullDrawEntry));
@@ -235,7 +263,7 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
         const bool useOcclusion = (m_occlusionDepthTex != nullptr && m_occlusionDepthWidth > 0 && m_occlusionDepthHeight > 0);
         cmd->SetUniformInt("u_UseOcclusionCull", useOcclusion ? 1 : 0);
         if (useOcclusion) {
-            cmd->BindTexture(m_occlusionDepthTex, 2);
+            cmd->BindTexture(m_occlusionDepthTex, 4);
             float depthSize[2] = { static_cast<float>(m_occlusionDepthWidth), static_cast<float>(m_occlusionDepthHeight) };
             cmd->SetUniformVec2("u_DepthSize", depthSize);
         }

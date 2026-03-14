@@ -31,6 +31,9 @@ struct TextureVK : ITexture {
     void* m_allocation = nullptr;
 };
 
+ITexture* CreateTextureVK(DeviceVK* device, const TextureDesc& desc, const void* initialData);
+void DestroyTextureVK(DeviceVK* device, ITexture* texture);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

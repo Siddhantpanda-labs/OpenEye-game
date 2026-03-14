@@ -1,6 +1,5 @@
 #include "eyelib/fluids/FluidFoamRenderer.h"
 #include "eyelib/render/MeshDescriptor.h"
-#include "eyelib/render/resources/Shader.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,10 +18,9 @@ void FluidFoamRenderer::SetMaterial(const std::shared_ptr<render::Material>& mat
 void FluidFoamRenderer::EnsureMaterial(render::rhi::IDevice* device) {
     if (m_material) return;
     if (!device) return;
-    auto shader = std::make_shared<render::Shader>();
-    if (!shader->LoadFromFile(device, "assets/shaders/fluids/foam/foam.vert",
-                              "assets/shaders/fluids/foam/foam.frag", render::Mesh::GetVertexLayoutRHI())) return;
-    m_material = std::make_shared<render::Material>(shader);
+    m_material = std::make_shared<render::Material>();
+    m_material->SetBlending(render::Blending::Translucent);
+    m_material->SetShadingModel(render::ShadingModel::Unlit);
     m_material->SetAlpha(0.8f);
 }
 

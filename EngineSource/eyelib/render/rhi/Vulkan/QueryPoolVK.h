@@ -24,6 +24,9 @@ struct QueryPoolVK : IQueryPool {
     void* m_queryPool = nullptr;
 };
 
+IQueryPool* CreateQueryPoolVK(DeviceVK* device, QueryType type, uint32_t count);
+void DestroyQueryPoolVK(IQueryPool* pool);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

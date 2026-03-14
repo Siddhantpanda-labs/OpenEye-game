@@ -231,15 +231,18 @@ void CommandListVK::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, si
 
 void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (!pipeline || !m_isRecording || !m_commandBuffer || !m_device) return;
+    m_currentPipeline = pipeline;
     PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
     VkPipeline vkPipe = static_cast<VkPipeline>(pVK->m_pipeline);
     if (vkPipe == VK_NULL_HANDLE) return;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
-    VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
-    VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-    if (defaultLayout != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE)
-        vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, defaultLayout, 1, 1, &emptyBindless, 0, nullptr);
+    if (!pVK->m_isCompute) {
+        VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+        VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+        if (defaultLayout != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE)
+            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, defaultLayout, 1, 1, &emptyBindless, 0, nullptr);
+    }
 }
 void CommandListVK::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
     if (!m_isRecording || !m_commandBuffer) return;
@@ -281,7 +284,12 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
     }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
 }
-void CommandListVK::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) { (void)buffer; (void)binding; (void)offset; (void)size; }
+void CommandListVK::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {
+    if (binding >= kMaxLegacyBindings) return;
+    m_boundUniformBuffers[binding] = buffer;
+    m_boundUniformOffsets[binding] = offset;
+    m_boundUniformSizes[binding] = size;
+}
 void CommandListVK::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {
     if (binding >= kMaxLegacyBindings) return;
     m_boundStorageBuffers[binding] = buffer;
@@ -304,6 +312,12 @@ void CommandListVK::GetBoundStorageBuffer(uint32_t binding, IBuffer** outBuffer,
     if (outBuffer) *outBuffer = m_boundStorageBuffers[binding];
     if (outOffset) *outOffset = m_boundStorageOffsets[binding];
     if (outSize) *outSize = m_boundStorageSizes[binding];
+}
+void CommandListVK::GetBoundUniformBuffer(uint32_t binding, IBuffer** outBuffer, uint32_t* outOffset, uint32_t* outSize) const {
+    if (binding >= kMaxLegacyBindings) { if (outBuffer) *outBuffer = nullptr; return; }
+    if (outBuffer) *outBuffer = m_boundUniformBuffers[binding];
+    if (outOffset) *outOffset = m_boundUniformOffsets[binding];
+    if (outSize) *outSize = m_boundUniformSizes[binding];
 }
 void CommandListVK::BindDescriptorSet(IDescriptorSet* set) {
     if (!set || !m_isRecording || !m_commandBuffer) return;
@@ -335,22 +349,73 @@ void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void*
         std::memcpy(m_pushConstants + offset, data, size);
 }
 
+// ParamsBlock (light_cull) offsets in m_computeParamsData
+static constexpr uint32_t kOffsetView = 0;
+static constexpr uint32_t kOffsetProjection = 64;
+static constexpr uint32_t kOffsetTileCountX = 128;
+static constexpr uint32_t kOffsetTileCountY = 132;
+static constexpr uint32_t kOffsetSliceCount = 136;
+static constexpr uint32_t kOffsetLogNear = 140;
+static constexpr uint32_t kOffsetLogFar = 144;
+static constexpr uint32_t kOffsetNearPlane = 148;
+static constexpr uint32_t kOffsetFarPlane = 152;
+static constexpr uint32_t kOffsetScreenWidth = 156;
+static constexpr uint32_t kOffsetScreenHeight = 160;
+static constexpr uint32_t kOffsetPointLightCount = 164;
+static constexpr uint32_t kOffsetSpotLightCount = 168;
+
 void CommandListVK::SetUniformInt(const char* name, int value) {
     if (!name) return;
-    if (std::strcmp(name, "u_UseIBL") == 0) {
+    if (std::strcmp(name, "u_UseIBL") == 0)
         *reinterpret_cast<int*>(m_pushConstants + 0) = value;
-    }
+    else if (std::strcmp(name, "u_UseOcclusionCull") == 0)
+        *reinterpret_cast<int*>(m_pushConstants + 4) = value;
+    else if (std::strcmp(name, "u_PointLightCount") == 0)
+        *reinterpret_cast<int*>(m_computeParamsData + kOffsetPointLightCount) = value;
+    else if (std::strcmp(name, "u_SpotLightCount") == 0)
+        *reinterpret_cast<int*>(m_computeParamsData + kOffsetSpotLightCount) = value;
 }
-void CommandListVK::SetUniformUint(const char* name, uint32_t value) { (void)name; (void)value; }
-void CommandListVK::SetUniformFloat(const char* name, float value) { (void)name; (void)value; }
-void CommandListVK::SetUniformVec2(const char* name, const float* data) { (void)name; (void)data; }
+void CommandListVK::SetUniformUint(const char* name, uint32_t value) {
+    if (!name) return;
+    if (std::strcmp(name, "u_NumDraws") == 0)
+        *reinterpret_cast<uint32_t*>(m_pushConstants + 0) = value;
+    else if (std::strcmp(name, "u_TileCountX") == 0)
+        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetTileCountX) = value;
+    else if (std::strcmp(name, "u_TileCountY") == 0)
+        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetTileCountY) = value;
+    else if (std::strcmp(name, "u_SliceCount") == 0)
+        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetSliceCount) = value;
+}
+void CommandListVK::SetUniformFloat(const char* name, float value) {
+    if (!name) return;
+    if (std::strcmp(name, "u_LogNear") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetLogNear) = value;
+    else if (std::strcmp(name, "u_LogFar") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetLogFar) = value;
+    else if (std::strcmp(name, "u_NearPlane") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetNearPlane) = value;
+    else if (std::strcmp(name, "u_FarPlane") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetFarPlane) = value;
+    else if (std::strcmp(name, "u_ScreenWidth") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetScreenWidth) = value;
+    else if (std::strcmp(name, "u_ScreenHeight") == 0)
+        *reinterpret_cast<float*>(m_computeParamsData + kOffsetScreenHeight) = value;
+}
+void CommandListVK::SetUniformVec2(const char* name, const float* data) {
+    if (!name || !data) return;
+    if (std::strcmp(name, "u_DepthSize") == 0)
+        std::memcpy(m_pushConstants + 8, data, 8);
+}
 void CommandListVK::SetUniformVec3(const char* name, const float* data) { (void)name; (void)data; }
 void CommandListVK::SetUniformVec4(const char* name, const float* data) { (void)name; (void)data; }
 void CommandListVK::SetUniformMat4(const char* name, const float* data) {
     if (!name || !data) return;
-    if (std::strcmp(name, "u_ViewProj") == 0) {
+    if (std::strcmp(name, "u_ViewProj") == 0)
         std::memcpy(m_pushConstants + 16, data, 16 * sizeof(float));
-    }
+    else if (std::strcmp(name, "u_View") == 0)
+        std::memcpy(m_computeParamsData + kOffsetView, data, 16 * sizeof(float));
+    else if (std::strcmp(name, "u_Projection") == 0)
+        std::memcpy(m_computeParamsData + kOffsetProjection, data, 16 * sizeof(float));
 }
 void CommandListVK::SetUniformMat4Array(const char* name, const float* data, size_t count) { (void)name; (void)data; (void)count; }
 void CommandListVK::SetUniformHandle64(const char* name, uint64_t handle) { (void)name; (void)handle; }
@@ -377,7 +442,25 @@ void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offs
 void CommandListVK::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
 void CommandListVK::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) { (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride; }
 void CommandListVK::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) { (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride; }
-void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) { (void)groupCountX; (void)groupCountY; (void)groupCountZ; }
+void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+    if (!m_isRecording || !m_commandBuffer || !m_device) return;
+    PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
+    if (pVK && pVK->m_isCompute && pVK->m_pipeline != VK_NULL_HANDLE) {
+        VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(m_device->GetComputePipelineLayout());
+        if (computeLayout != VK_NULL_HANDLE) {
+            m_device->UpdateComputeSet0(this);
+            VkDescriptorSet computeSet0 = static_cast<VkDescriptorSet>(m_device->GetComputeSet0());
+            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+            VkDescriptorSet sets[2] = { computeSet0, emptyBindless };
+            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 2, sets, 0, nullptr);
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 16, m_pushConstants);
+        }
+        uint32_t x = (groupCountX > 0) ? groupCountX : 1u;
+        uint32_t y = (groupCountY > 0) ? groupCountY : 1u;
+        uint32_t z = (groupCountZ > 0) ? groupCountZ : 1u;
+        vkCmdDispatch(static_cast<VkCommandBuffer>(m_commandBuffer), x, y, z);
+    }
+}
 void CommandListVK::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
 
 void CommandListVK::BeginQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }

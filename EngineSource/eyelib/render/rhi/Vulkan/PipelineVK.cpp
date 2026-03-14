@@ -2,6 +2,9 @@
 #include "eyelib/render/rhi/Vulkan/DeviceVK.h"
 #include "eyelib/render/rhi/Vulkan/ShaderVK.h"
 #include "eyelib/render/rhi/Vulkan/VulkanEnums.h"
+#include "eyelib/render/rhi/Vulkan/VulkanPipelineHash.h"
+#include "eyelib/render/ShaderPathResolve.h"
+#include "eyelib/platform/filesystem/FileSystem.h"
 #include <vulkan/vulkan.h>
 #include <vector>
 
@@ -11,7 +14,12 @@ namespace rhi {
 
 PipelineVK::PipelineVK(DeviceVK* device) : m_device(device) {}
 
-PipelineVK::~PipelineVK() = default;
+PipelineVK::~PipelineVK() {
+    if (m_pipeline && m_device && m_device->GetDevice()) {
+        vkDestroyPipeline(static_cast<VkDevice>(m_device->GetDevice()), static_cast<VkPipeline>(m_pipeline), nullptr);
+        m_pipeline = nullptr;
+    }
+}
 
 void PipelineVK::GetComputeBlockPresence(ComputeBlockPresence& out) const { out = m_computeBlockPresence; }
 
@@ -148,6 +156,99 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(vkDevice, cache, 1, &gpInfo, nullptr, &pipeline);
     return (res == VK_SUCCESS && pipeline) ? pipeline : nullptr;
+}
+
+void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipelineCache, void* shaderModule) {
+    if (!device || !pipelineLayout || !pipelineCache || !shaderModule) return nullptr;
+    VkDevice vkDevice = static_cast<VkDevice>(device->GetDevice());
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pipelineLayout);
+    VkPipelineCache cache = static_cast<VkPipelineCache>(pipelineCache);
+    VkShaderModule module = static_cast<VkShaderModule>(shaderModule);
+    if (vkDevice == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || cache == VK_NULL_HANDLE || module == VK_NULL_HANDLE)
+        return nullptr;
+
+    VkPipelineShaderStageCreateInfo stageInfo = {};
+    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stageInfo.module = module;
+    stageInfo.pName = "main";
+
+    VkComputePipelineCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    createInfo.stage = stageInfo;
+    createInfo.layout = layout;
+
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    VkResult res = vkCreateComputePipelines(vkDevice, cache, 1, &createInfo, nullptr, &pipeline);
+    return (res == VK_SUCCESS && pipeline) ? pipeline : nullptr;
+}
+
+IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) {
+    if (!device) return nullptr;
+    const uint64_t hash = HashPipelineDesc(desc);
+    void* pipeline = device->GetCachedGraphicsPipeline(hash);
+    if (!pipeline && desc.vertexShader && desc.fragmentShader && device->GetDefaultPipelineLayout() && device->GetPipelineCache()) {
+        void* created = CreateVkGraphicsPipeline(device, desc, device->GetDefaultPipelineLayout(), device->GetPipelineCache());
+        if (created) {
+            device->RegisterGraphicsPipeline(hash, created);
+            pipeline = created;
+        }
+    }
+    auto* p = new PipelineVK(device);
+    p->m_vertexLayout = desc.vertexLayout;
+    p->m_topology = desc.topology;
+    p->m_patchVertexCount = desc.patchVertexCount;
+    p->m_blend = desc.blend;
+    p->m_depthStencil = desc.depthStencil;
+    p->m_raster = desc.raster;
+    p->m_pipeline = pipeline;
+    return p;
+}
+
+IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
+    if (!device || !shaderName || !shaderName[0]) return nullptr;
+    const std::string logicalName = ShaderPathToLogicalName(shaderName);
+    if (logicalName.empty()) return nullptr;
+    std::string root = platform::filesystem::GetEngineAssetsRoot();
+    std::string baseDir = root.empty()
+        ? std::string("assets/shaders/vulkan/")
+        : platform::filesystem::NormalizePath(root + "/assets/shaders/vulkan/");
+    std::string vertPath = baseDir + logicalName + ".vert.spv";
+    std::string fragPath = baseDir + logicalName + ".frag.spv";
+
+    rhi::IShader* vs = nullptr;
+    rhi::IShader* fs = nullptr;
+    if (!TryLoadShaderPairVK(device, vertPath.c_str(), fragPath.c_str(), vs, fs) || !vs || !fs) {
+        if (vs) DestroyShaderVK(device, vs);
+        if (fs) DestroyShaderVK(device, fs);
+        return nullptr;
+    }
+    PipelineDesc desc;
+    desc.vertexShader = vs;
+    desc.fragmentShader = fs;
+    desc.vertexLayout = layout;
+    desc.topology = topology;
+    if (depthStencilOverride)
+        desc.depthStencil = *depthStencilOverride;
+    else {
+        desc.depthStencil.depthTest = true;
+        desc.depthStencil.depthWrite = true;
+    }
+    IPipeline* pipe = CreateGraphicsPipelineVK(device, desc);
+    DestroyShaderVK(device, vs);
+    DestroyShaderVK(device, fs);
+    return pipe;
+}
+
+IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader) {
+    if (!device) return nullptr;
+    auto* p = new PipelineVK(device);
+    p->m_isCompute = true;
+    if (!computeShader || !device->GetComputePipelineLayout() || !device->GetPipelineCache()) return p;
+    ShaderVK* shader = static_cast<ShaderVK*>(computeShader);
+    if (!shader->m_module) return p;
+    p->m_pipeline = CreateVkComputePipeline(device, device->GetComputePipelineLayout(), device->GetPipelineCache(), shader->m_module);
+    return p;
 }
 
 } // namespace rhi

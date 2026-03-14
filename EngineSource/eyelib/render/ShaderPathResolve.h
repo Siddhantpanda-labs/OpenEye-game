@@ -33,6 +33,8 @@ inline std::string ShaderPathToLogicalName(const std::string& nameOrPath) {
         name = name.substr(7);
     else if (name.size() > 8 && name.compare(0, 8, "diligent/") == 0)
         name = name.substr(8);
+    else if (name.size() > 7 && name.compare(0, 7, "vulkan/") == 0)
+        name = name.substr(7);
     return name;
 }
 

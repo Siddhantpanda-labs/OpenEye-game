@@ -3,12 +3,14 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <cstring>
+#include <vector>
 
 namespace eyelib {
 namespace render {
 
 namespace {
-constexpr const char* kLightCullCompPath = "assets/shaders/opengl/passes/light_cull/light_cull.comp";
+constexpr const char* kLightCullLogicalName = "passes/light_cull/light_cull";
+constexpr const char* kLightCullCompPathFallback = "assets/shaders/opengl/passes/light_cull/light_cull.comp";
 } // namespace
 
 LightCullPass::~LightCullPass() {
@@ -23,15 +25,28 @@ void LightCullPass::EnsureResources() {
     if (!m_device || m_initialized || m_initAttempted || !IsSupported(m_device)) return;
     m_initAttempted = true;
 
-    std::string path = platform::filesystem::GetEngineAssetsRoot();
-    if (!path.empty())
-        path = platform::filesystem::NormalizePath(path + "/" + kLightCullCompPath);
-    else
-        path = kLightCullCompPath;
+    std::string path;
+    if (m_device->ResolveShaderPath(kLightCullLogicalName, rhi::ShaderStage::Compute, path))
+        path = platform::filesystem::GetEngineAssetsRoot().empty() ? path : platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + path);
+    if (path.empty()) {
+        path = platform::filesystem::GetEngineAssetsRoot().empty() ? kLightCullCompPathFallback : platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + kLightCullCompPathFallback);
+    }
 
     std::string compSrc;
+    const bool trySpv = (path.find("vulkan") != std::string::npos);
+    if (trySpv) {
+        std::string spvPath = path + ".spv";
+        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(spvPath);
+        const uint32_t spirvMagic = 0x07230203u;
+        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic) {
+            m_computeShader = m_device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
+            if (m_computeShader && m_computeShader->IsValid())
+                goto create_pipeline;
+            if (m_computeShader) { m_device->DestroyShader(m_computeShader); m_computeShader = nullptr; }
+        }
+    }
     if (!LoadShaderSource(path, compSrc)) {
-        core::Log::ErrorF("LightCullPass: failed to load %s", kLightCullCompPath);
+        core::Log::ErrorF("LightCullPass: failed to load %s", path.c_str());
         return;
     }
     m_computeShader = m_device->CreateShader(rhi::ShaderStage::Compute, compSrc.c_str(), compSrc.size());
@@ -41,6 +56,7 @@ void LightCullPass::EnsureResources() {
         m_computeShader = nullptr;
         return;
     }
+create_pipeline:
     m_computePipeline = m_device->CreateComputePipeline(m_computeShader);
     if (!m_computePipeline) {
         core::Log::Error("LightCullPass: failed to create compute pipeline");
@@ -106,9 +122,9 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
     cmd->BindPipeline(m_computePipeline);
     cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);
     if (m_pointLightBuffer)
-        cmd->BindStorageBuffer(m_pointLightBuffer, 3, 0, 0);
+        cmd->BindStorageBuffer(m_pointLightBuffer, 2, 0, 0);
     if (m_spotLightBuffer)
-        cmd->BindStorageBuffer(m_spotLightBuffer, 4, 0, 0);
+        cmd->BindStorageBuffer(m_spotLightBuffer, 3, 0, 0);
 
     cmd->SetUniformMat4("u_View", m_view);
     cmd->SetUniformMat4("u_Projection", m_proj);

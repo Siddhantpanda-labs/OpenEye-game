@@ -25,6 +25,9 @@ struct BufferVK : IBuffer {
     void* m_allocation = nullptr;
 };
 
+IBuffer* CreateBufferVK(DeviceVK* device, const BufferDesc& desc, const void* initialData);
+void DestroyBufferVK(DeviceVK* device, IBuffer* buffer);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

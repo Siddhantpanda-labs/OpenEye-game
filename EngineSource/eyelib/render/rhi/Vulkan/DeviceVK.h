@@ -148,6 +148,13 @@ struct DeviceVK : IDevice {
     void* GetLegacySet0() const { return m_legacySet0; }
     /** Update legacy set 0 from command list bound textures/buffers. Call before binding set 0 and drawing. */
     void UpdateLegacySet0(CommandListVK* cmd);
+    /** Compute set 0 (bindings 0,2,3 storage; 1,5 UBO; 4 image). Updated by UpdateComputeSet0(cmd). */
+    void* GetComputeSet0() const { return m_computeSet0; }
+    void* GetComputePipelineLayout() const { return m_computePipelineLayout; }
+    /** Update compute set 0 from command list bound buffers/textures/UBOs. Call before compute dispatch. */
+    void UpdateComputeSet0(CommandListVK* cmd);
+    /** Legacy compute params UBO (binding 1; ParamsBlock for light_cull). Host-visible; update before dispatch. */
+    IBuffer* GetLegacyComputeParamsUBO() const { return m_legacyComputeParamsUBO; }
     /** Timeline semaphore for GPU completion (set 1 = graphics). Used by InsertFence/Submit/WaitFence. */
     void* GetTimelineSemaphore() const { return m_timelineSemaphore; }
     /** Reserve next timeline value for a fence; signal at submit. Thread-safe only if single-threaded submit. */
@@ -184,6 +191,10 @@ private:
     void* m_emptyBindlessPool = nullptr;     // VkDescriptorPool for m_emptyBindlessSet
     void* m_legacySet0Layout = nullptr;      // VkDescriptorSetLayout (set 0: image 0,1,2,3,6,11,12,13; storage 5,7)
     void* m_legacySet0 = nullptr;            // VkDescriptorSet (updated by UpdateLegacySet0)
+    void* m_computeSet0Layout = nullptr;     // VkDescriptorSetLayout (set 0 compute: 0,2,3 storage; 1,5 UBO; 4 image)
+    void* m_computeSet0 = nullptr;           // VkDescriptorSet (updated by UpdateComputeSet0)
+    void* m_computePipelineLayout = nullptr; // VkPipelineLayout (compute set0 + bindless set1 + push 16 bytes)
+    rhi::IBuffer* m_legacyComputeParamsUBO = nullptr; // 256 bytes, binding 1 (ParamsBlock for light_cull)
     void* m_timelineSemaphore = nullptr;     // VkSemaphore (timeline, for fence sync)
     uint64_t m_timelineValue = 0;           // next value to signal on submit
     void* m_surface = nullptr;              // VkSurfaceKHR

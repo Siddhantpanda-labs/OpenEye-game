@@ -348,7 +348,6 @@ int RunEditor(int argc, char** argv) {
         engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets");
         eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
     }
-    eyelib::api::core::Log::InfoF("Editor engine assets: %s", engineAssets.c_str());
 
     eyelib::api::AssetRegistry assetRegistry;
     assetRegistry.SetAssetRoot(engineAssets);

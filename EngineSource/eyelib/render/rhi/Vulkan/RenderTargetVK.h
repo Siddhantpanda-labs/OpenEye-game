@@ -47,6 +47,17 @@ struct RenderTargetVK : IRenderTarget {
     void* m_framebuffer = nullptr;
 };
 
+IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t height,
+                                    const std::vector<RHITextureFormat>& colorFormats,
+                                    RHITextureFormat depthFormat, uint32_t samples, bool transient);
+IRenderTarget* CreateDepthOnlyRenderTargetArrayVK(DeviceVK* device, uint32_t width, uint32_t height, uint32_t arrayLayers);
+IRenderTarget* CreateRenderTargetWithSharedDepthVK(DeviceVK* device, uint32_t width, uint32_t height,
+                                                   const std::vector<RHITextureFormat>& colorFormats,
+                                                   ITexture* sharedDepthTexture, uint32_t samples);
+IRenderTarget* CreateRenderTargetFromTextureVK(DeviceVK* device, ITexture* colorTexture, uint32_t face, uint32_t mipLevel);
+IRenderTarget* CreateRenderTargetFromTextureWithDepthVK(DeviceVK* device, ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture);
+void DestroyRenderTargetVK(DeviceVK* device, IRenderTarget* rt);
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

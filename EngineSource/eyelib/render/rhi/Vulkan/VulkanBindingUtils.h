@@ -1,0 +1,33 @@
+#pragma once
+
+#include <vulkan/vulkan.h>
+
+namespace eyelib {
+namespace render {
+namespace rhi {
+
+struct DeviceVK;
+struct CommandListVK;
+
+namespace vkhelpers {
+
+bool CreateLegacySet0(VkDevice device, VkDescriptorPool descriptorPool,
+                      VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet);
+
+bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
+                       VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet);
+
+bool CreateDefaultPipelineLayout(VkDevice device, VkDescriptorSetLayout legacySet0Layout, VkDescriptorSetLayout bindlessSetLayout,
+                                 VkPipelineLayout* outPipelineLayout);
+
+bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeSet0Layout, VkDescriptorSetLayout bindlessSetLayout,
+                                 VkPipelineLayout* outPipelineLayout);
+
+void UpdateLegacySet0(DeviceVK* device, CommandListVK* cmd);
+void UpdateComputeSet0(DeviceVK* device, CommandListVK* cmd);
+
+} // namespace vkhelpers
+
+} // namespace rhi
+} // namespace render
+} // namespace eyelib

@@ -29,6 +29,7 @@ if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/ShaderVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/PipelineVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VulkanPipelineHash.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VulkanBindingUtils.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DescriptorSetVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/RenderTargetVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/QueryPoolVK.cpp
@@ -36,6 +37,7 @@ if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BindlessHeapVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CommandListVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVKPresentation.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CreateDeviceVulkan.cpp
     )
     set(OPENEYE_VULKAN_AVAILABLE 1)

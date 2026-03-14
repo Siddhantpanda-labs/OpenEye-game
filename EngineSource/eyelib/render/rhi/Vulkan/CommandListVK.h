@@ -108,6 +108,10 @@ struct CommandListVK : ICommandList {
     rhi::ITexture* GetBoundTexture(uint32_t binding) const;
     /** For DeviceVK::UpdateLegacySet0: current bound storage buffer at binding. */
     void GetBoundStorageBuffer(uint32_t binding, rhi::IBuffer** outBuffer, uint32_t* outOffset, uint32_t* outSize) const;
+    /** For DeviceVK::UpdateComputeSet0: current bound uniform buffer at binding. */
+    void GetBoundUniformBuffer(uint32_t binding, rhi::IBuffer** outBuffer, uint32_t* outOffset, uint32_t* outSize) const;
+    /** ParamsBlock data for compute binding 1 (light_cull). Device reads and uploads to UBO before dispatch. */
+    const uint8_t* GetComputeParamsData() const { return m_computeParamsData; }
     /** Timeline value to signal on next submit (0 = none). Set by InsertFence; read/cleared by DeviceVK::SubmitCommandList. */
     uint64_t GetPendingTimelineValue() const { return m_pendingTimelineValue; }
     void ClearPendingTimelineValue() { m_pendingTimelineValue = 0; }
@@ -126,12 +130,18 @@ private:
     void* m_currentIndexBuffer = nullptr;  // VkBuffer
     uint32_t m_currentIndexOffset = 0;
     IndexType m_currentIndexType = IndexType::UInt16;
+    rhi::IPipeline* m_currentPipeline = nullptr;
     uint8_t m_pushConstants[128] = {};  // fragment push constants (e.g. u_UseIBL, u_ViewProj for lighting)
     static constexpr uint32_t kMaxLegacyBindings = 16;
     rhi::ITexture* m_boundTextures[kMaxLegacyBindings] = {};
     rhi::IBuffer* m_boundStorageBuffers[kMaxLegacyBindings] = {};
     uint32_t m_boundStorageOffsets[kMaxLegacyBindings] = {};
     uint32_t m_boundStorageSizes[kMaxLegacyBindings] = {};
+    rhi::IBuffer* m_boundUniformBuffers[kMaxLegacyBindings] = {};
+    uint32_t m_boundUniformOffsets[kMaxLegacyBindings] = {};
+    uint32_t m_boundUniformSizes[kMaxLegacyBindings] = {};
+    /** ParamsBlock for light_cull (binding 1). Written by SetUniform*; flushed before compute dispatch. */
+    uint8_t m_computeParamsData[256] = {};
 };
 
 } // namespace rhi

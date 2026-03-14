@@ -1,0 +1,161 @@
+#version 450
+// Vulkan: compute-based light culling; one thread per cluster. Layout matches OpenGL.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint TILE_SIZE = 16u;
+const uint DEPTH_SLICES = 32u;
+const uint MAX_LIGHTS_PER_CLUSTER = 64u;
+
+layout(set = 0, binding = 0) buffer LightIndexOut {
+    uint lightIndices[];
+};
+
+struct PointLight {
+    vec3 position;
+    float _p0;
+    vec3 color;
+    float intensity;
+    float radius;
+    float _p1, _p2, _p3;
+};
+struct SpotLight {
+    vec3 position;
+    float _p0;
+    vec3 direction;
+    float _p1;
+    vec3 color;
+    float intensity;
+    float range;
+    float innerConeCos;
+    float outerConeCos;
+    float _p2, _p3;
+    float _p4, _p5, _p6;
+};
+
+layout(set = 0, binding = 2) readonly buffer PointLightBuffer { PointLight pointLights[]; };
+layout(set = 0, binding = 3) readonly buffer SpotLightBuffer { SpotLight spotLights[]; };
+
+layout(set = 0, binding = 1) uniform ParamsBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    uint u_TileCountX;
+    uint u_TileCountY;
+    uint u_SliceCount;
+    float u_LogNear;
+    float u_LogFar;
+    float u_NearPlane;
+    float u_FarPlane;
+    float u_ScreenWidth;
+    float u_ScreenHeight;
+    int u_PointLightCount;
+    int u_SpotLightCount;
+};
+
+struct ClusterAABB {
+    vec3 min;
+    vec3 max;
+};
+
+ClusterAABB computeClusterAABB(uint tileX, uint tileY, uint sliceZ) {
+    float sliceNear = exp(u_LogNear + (u_LogFar - u_LogNear) * float(sliceZ) / float(u_SliceCount));
+    float sliceFar  = exp(u_LogNear + (u_LogFar - u_LogNear) * float(sliceZ + 1u) / float(u_SliceCount));
+
+    float tileMinX = float(tileX * TILE_SIZE) / u_ScreenWidth * 2.0 - 1.0;
+    float tileMaxX = float((tileX + 1u) * TILE_SIZE) / u_ScreenWidth * 2.0 - 1.0;
+    float tileMinY = 1.0 - float((tileY + 1u) * TILE_SIZE) / u_ScreenHeight * 2.0;
+    float tileMaxY = 1.0 - float(tileY * TILE_SIZE) / u_ScreenHeight * 2.0;
+
+    mat4 invProj = inverse(u_Projection);
+    float A = (u_FarPlane + u_NearPlane) / (u_FarPlane - u_NearPlane);
+    float B = -2.0 * u_FarPlane * u_NearPlane / (u_FarPlane - u_NearPlane);
+    float zNearNDC = clamp((A * sliceNear + B) / sliceNear, -1.0, 1.0);
+    float zFarNDC  = clamp((A * sliceFar + B) / sliceFar, -1.0, 1.0);
+
+    vec4 nearCorners[4];
+    nearCorners[0] = invProj * vec4(tileMinX, tileMinY, zNearNDC, 1.0);
+    nearCorners[1] = invProj * vec4(tileMaxX, tileMinY, zNearNDC, 1.0);
+    nearCorners[2] = invProj * vec4(tileMaxX, tileMaxY, zNearNDC, 1.0);
+    nearCorners[3] = invProj * vec4(tileMinX, tileMaxY, zNearNDC, 1.0);
+    vec4 farCorners[4];
+    farCorners[0] = invProj * vec4(tileMinX, tileMinY, zFarNDC, 1.0);
+    farCorners[1] = invProj * vec4(tileMaxX, tileMinY, zFarNDC, 1.0);
+    farCorners[2] = invProj * vec4(tileMaxX, tileMaxY, zFarNDC, 1.0);
+    farCorners[3] = invProj * vec4(tileMinX, tileMaxY, zFarNDC, 1.0);
+
+    vec3 aabbMin = vec3(1e10);
+    vec3 aabbMax = vec3(-1e10);
+    for (int i = 0; i < 4; i++) {
+        vec3 n = (nearCorners[i] / nearCorners[i].w).xyz;
+        vec3 f = (farCorners[i] / farCorners[i].w).xyz;
+        aabbMin = min(aabbMin, min(n, f));
+        aabbMax = max(aabbMax, max(n, f));
+    }
+    ClusterAABB aabb;
+    aabb.min = aabbMin;
+    aabb.max = aabbMax;
+    return aabb;
+}
+
+bool sphereIntersectsAABB(vec3 sphereCenter, float sphereRadius, ClusterAABB aabb) {
+    vec3 closest = clamp(sphereCenter, aabb.min, aabb.max);
+    vec3 diff = sphereCenter - closest;
+    float distSq = dot(diff, diff);
+    return distSq <= sphereRadius * sphereRadius;
+}
+
+bool coneIntersectsAABB(vec3 conePos, vec3 coneDir, float coneRange, float outerCos, ClusterAABB aabb) {
+    vec3 aabbCenter = (aabb.min + aabb.max) * 0.5;
+    vec3 toAABB = aabbCenter - conePos;
+    float dist = length(toAABB);
+    if (dist > coneRange) return false;
+    vec3 dirNorm = normalize(coneDir);
+    float cosAngle = dot(toAABB, dirNorm) / max(dist, 1e-6);
+    return cosAngle >= outerCos;
+}
+
+void main() {
+    uint clusterIdx = gl_GlobalInvocationID.x;
+    uint totalClusters = u_TileCountX * u_TileCountY * u_SliceCount;
+    if (clusterIdx >= totalClusters) return;
+
+    uint sliceZ = clusterIdx / (u_TileCountX * u_TileCountY);
+    uint remainder = clusterIdx % (u_TileCountX * u_TileCountY);
+    uint tileY = remainder / u_TileCountX;
+    uint tileX = remainder % u_TileCountX;
+
+    ClusterAABB aabb = computeClusterAABB(tileX, tileY, sliceZ);
+
+    uint localList[MAX_LIGHTS_PER_CLUSTER];
+    uint count = 0u;
+
+    mat4 viewMat = u_View;
+    for (uint i = 0u; i < uint(max(0, u_PointLightCount)) && count < MAX_LIGHTS_PER_CLUSTER; i++) {
+        vec4 worldPos = vec4(pointLights[i].position, 1.0);
+        vec3 viewPos = (viewMat * worldPos).xyz;
+        if (sphereIntersectsAABB(viewPos, pointLights[i].radius, aabb)) {
+            localList[count] = i;
+            count++;
+        }
+    }
+
+    uint spotBase = uint(max(0, u_PointLightCount));
+    mat3 viewMat3 = mat3(u_View);
+    for (uint i = 0u; i < uint(max(0, u_SpotLightCount)) && count < MAX_LIGHTS_PER_CLUSTER; i++) {
+        vec4 worldPos = vec4(spotLights[i].position, 1.0);
+        vec3 viewPos = (viewMat * worldPos).xyz;
+        vec3 viewDir = viewMat3 * spotLights[i].direction;
+        if (coneIntersectsAABB(viewPos, viewDir, spotLights[i].range, spotLights[i].outerConeCos, aabb)) {
+            localList[count] = spotBase + i;
+            count++;
+        }
+    }
+
+    uint myOffset = atomicAdd(lightIndices[0], count);
+    uint baseHeaders = 1u;
+    lightIndices[baseHeaders + clusterIdx * 2u] = myOffset;
+    lightIndices[baseHeaders + clusterIdx * 2u + 1u] = count;
+    uint baseIndices = baseHeaders + totalClusters * 2u;
+    for (uint i = 0u; i < count; i++)
+        lightIndices[baseIndices + myOffset + i] = localList[i];
+}

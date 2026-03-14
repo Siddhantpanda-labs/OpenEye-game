@@ -1,7 +1,5 @@
 #include "eyelib/render/Renderer.h"
 
-#include "eyelib/core/Log.h"
-
 namespace eyelib {
 namespace render {
 
@@ -9,14 +7,12 @@ bool Renderer::Initialize() {
     if (m_initialized) return true;
     // Assumes a valid OpenGL context is already current (created by EyelibPlatform::Window).
     m_initialized = true;
-    core::Log::Info("Renderer initialized");
     return true;
 }
 
 void Renderer::Shutdown() {
     if (!m_initialized) return;
     m_initialized = false;
-    core::Log::Info("Renderer shutdown");
 }
 
 void Renderer::Clear(float r, float g, float b, float a) {
