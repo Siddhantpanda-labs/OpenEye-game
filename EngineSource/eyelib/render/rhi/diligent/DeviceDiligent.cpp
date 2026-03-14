@@ -669,8 +669,10 @@ static Diligent::TEXTURE_FORMAT ToDiligentFormat(RHITextureFormat fmt) {
 IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t height,
                                                    const std::vector<RHITextureFormat>& colorFormats,
                                                    RHITextureFormat depthFormat,
-                                                   uint32_t samples) {
+                                                   uint32_t samples,
+                                                   bool transient) {
     (void)samples;
+    (void)transient;
     auto* rt = new RenderTargetDiligent();
     rt->m_width = width;
     rt->m_height = height;

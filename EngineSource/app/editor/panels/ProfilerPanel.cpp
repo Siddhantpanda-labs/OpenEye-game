@@ -80,6 +80,29 @@ void ShowProfilerPanel(EditorContext* ctx) {
     ImGui::EndChild();
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Frame counters");
+    std::unordered_map<std::string, uint64_t> counters = eyelib::api::debug::Profiler::GetLastFrameCounters();
+    ImGui::BeginChild("Counters", ImVec2(-1, 80), true, ImGuiWindowFlags_None);
+    if (counters.empty()) {
+        ImGui::TextUnformatted("(no counters - render a frame with Scene view)");
+    } else {
+        if (ImGui::BeginTable("Counters", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 80.f);
+            ImGui::TableHeadersRow();
+            for (const auto& [name, value] : counters) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%llu", static_cast<unsigned long long>(value));
+            }
+            ImGui::EndTable();
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
     ImGui::TextUnformatted("GPU (frame graph)");
     eyelib::api::RenderPipeline* pipeline = ctx ? ctx->sceneViewPipeline : nullptr;
     if (!pipeline) {

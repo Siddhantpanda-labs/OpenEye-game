@@ -8,6 +8,7 @@ enum class RenderBackend {
     /** Use default (OpenGL). */
     Default,
     OpenGL,
+    Vulkan,
     Diligent
 };
 

@@ -92,7 +92,8 @@ struct IDevice {
     virtual IRenderTarget* CreateRenderTarget(uint32_t width, uint32_t height,
                                               const std::vector<RHITextureFormat>& colorFormats,
                                               RHITextureFormat depthFormat,
-                                              uint32_t samples = 1) = 0;
+                                              uint32_t samples = 1,
+                                              bool transient = false) = 0;
     /** Depth-only render target with 2D array depth texture (for cascade shadow maps). Use SetDepthLayer then SetRenderTarget to render to each layer. */
     virtual IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) { (void)width; (void)height; (void)arrayLayers; return nullptr; }
     /** Create render target with color attachment(s) and shared depth (e.g. entity ID pass reusing main depth). sharedDepthTexture must outlive the RT. */

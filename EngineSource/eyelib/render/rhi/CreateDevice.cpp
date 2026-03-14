@@ -1,5 +1,8 @@
 #include "eyelib/render/rhi/CreateDevice.h"
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
+#if OPENEYE_VULKAN_AVAILABLE
+#include "eyelib/render/rhi/Vulkan/CreateDeviceVulkan.h"
+#endif
 #if OPENEYE_USE_DILIGENT
 #include "eyelib/render/rhi/diligent/CreateDeviceDiligent.h"
 #endif
@@ -34,6 +37,7 @@ std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
     uint32_t height,
     render::RenderBackend backend) {
     const char* backendName = (backend == render::RenderBackend::Diligent) ? "Diligent" :
+                              (backend == render::RenderBackend::Vulkan) ? "Vulkan" :
                               (backend == render::RenderBackend::OpenGL) ? "OpenGL" : "Default";
     core::Log::InfoF("CreateGraphicsDevice: requested backend=%s width=%u height=%u", backendName, width, height);
 
@@ -41,6 +45,22 @@ std::unique_ptr<render::rhi::IDevice> CreateGraphicsDevice(
         core::Log::Error("CreateGraphicsDevice: window is null");
         return nullptr;
     }
+
+#if OPENEYE_VULKAN_AVAILABLE
+    if (backend == render::RenderBackend::Vulkan) {
+        core::Log::Info("CreateGraphicsDevice: creating Vulkan device");
+        void* nwh = window->GetNativeWindowHandle();
+        if (!nwh) { core::Log::Error("CreateGraphicsDevice: GetNativeWindowHandle() returned null"); return nullptr; }
+        auto device = render::rhi::CreateVulkanDevice(nwh, width, height);
+        if (!device) core::Log::Error("CreateGraphicsDevice: Vulkan device creation failed");
+        return device;
+    }
+#else
+    if (backend == render::RenderBackend::Vulkan) {
+        core::Log::Error("CreateGraphicsDevice: Vulkan requested but Vulkan SDK not available (build without Vulkan)");
+        return nullptr;
+    }
+#endif
 
 #if OPENEYE_USE_DILIGENT
     const bool useDiligent = (backend == render::RenderBackend::Diligent);

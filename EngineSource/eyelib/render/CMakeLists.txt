@@ -18,6 +18,30 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
 )
 
+# Vulkan RHI backend (see documentation/vulkan/vulkan_plan.md). Built when Vulkan SDK is found.
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    list(APPEND RENDER_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BufferVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/TextureVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/ShaderVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/PipelineVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VulkanPipelineHash.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DescriptorSetVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/RenderTargetVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/QueryPoolVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/FenceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BindlessHeapVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CommandListVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CreateDeviceVulkan.cpp
+    )
+    set(OPENEYE_VULKAN_AVAILABLE 1)
+else()
+    message(STATUS "Vulkan not found; Vulkan RHI backend disabled. Install Vulkan SDK to enable.")
+    set(OPENEYE_VULKAN_AVAILABLE 0)
+endif()
+
 # Diligent Engine RHI backend (only built when Diligent is available; see documentation/plans/RHI_Diligent_Integration_Plan.md)
 if(OPENEYE_DILIGENT_AVAILABLE)
 list(APPEND RENDER_SOURCES
@@ -150,6 +174,12 @@ target_link_libraries(EyelibRender
     PRIVATE
         glad
 )
+
+if(Vulkan_FOUND)
+    target_include_directories(EyelibRender PRIVATE ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(EyelibRender PRIVATE Vulkan::Vulkan)
+    target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_AVAILABLE=1)
+endif()
 
 if(OPENEYE_DILIGENT_AVAILABLE)
     target_compile_definitions(EyelibRender PRIVATE OPENEYE_USE_DILIGENT=1)

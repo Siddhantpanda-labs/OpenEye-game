@@ -192,6 +192,7 @@ bool LoadConfig(const std::string& path, RuntimeOptions& options, std::string& e
     if (j.contains("renderer") && j.at("renderer").is_string()) {
         const std::string r = j.at("renderer").get<std::string>();
         if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
+        else if (r == "vulkan") options.renderBackend = eyelib::render::RenderBackend::Vulkan;
         else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
         else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
     }
@@ -343,10 +344,11 @@ bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& erro
         if (arg == "--renderer" && i + 1 < argc) {
             const std::string r = argv[++i];
             if (r == "opengl") options.renderBackend = eyelib::render::RenderBackend::OpenGL;
+            else if (r == "vulkan") options.renderBackend = eyelib::render::RenderBackend::Vulkan;
             else if (r == "diligent") options.renderBackend = eyelib::render::RenderBackend::Diligent;
             else if (r == "default") options.renderBackend = eyelib::render::RenderBackend::Default;
             else {
-                error = "Invalid --renderer value; use opengl, diligent, or default.";
+                error = "Invalid --renderer value; use opengl, vulkan, diligent, or default.";
                 return false;
             }
             continue;

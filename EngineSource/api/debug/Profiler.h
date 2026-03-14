@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace eyelib {
@@ -28,6 +30,9 @@ public:
     static size_t GetCallCount(const std::string& name);
     static void Reset();
     static bool ExportReport(const std::string& path);
+
+    /** Per-frame counters (drawCalls, visibleMeshes, triangles, stateChanges, etc.). */
+    static std::unordered_map<std::string, uint64_t> GetLastFrameCounters();
 };
 
 } // namespace debug

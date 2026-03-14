@@ -20,6 +20,8 @@ std::vector<ProfileSample> g_currentSamples;
 std::unordered_map<std::string, ProfileStats> g_stats;
 std::vector<std::pair<std::string, uint64_t>> g_stack;
 IGpuProfiler* g_gpuProfiler = nullptr;
+std::unordered_map<std::string, uint64_t> g_frameCounters;
+std::unordered_map<std::string, uint64_t> g_lastFrameCounters;
 
 static uint64_t NowTicks() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
@@ -51,6 +53,7 @@ void Profiler::BeginFrame() {
     g_frameStart = Clock::now();
     g_currentSamples.clear();
     g_stack.clear();
+    g_frameCounters.clear();
 }
 
 void Profiler::EndFrame() {
@@ -58,6 +61,7 @@ void Profiler::EndFrame() {
     const auto end = Clock::now();
     g_lastFrameMs = std::chrono::duration<double, std::milli>(end - g_frameStart).count();
     g_lastSamples = g_currentSamples;
+    g_lastFrameCounters = g_frameCounters;
 }
 
 void Profiler::AddSample(const char* name, double milliseconds) {
@@ -138,6 +142,32 @@ void Profiler::Reset() {
     g_lastSamples.clear();
     g_stack.clear();
     g_lastFrameMs = 0.0;
+    g_frameCounters.clear();
+    g_lastFrameCounters.clear();
+}
+
+void Profiler::SetFrameCounter(const char* name, uint64_t value) {
+    if (!name) return;
+    std::scoped_lock lock(g_profMutex);
+    g_frameCounters[std::string(name)] = value;
+}
+
+void Profiler::AddFrameCounter(const char* name, uint64_t delta) {
+    if (!name) return;
+    std::scoped_lock lock(g_profMutex);
+    g_frameCounters[std::string(name)] += delta;
+}
+
+uint64_t Profiler::GetFrameCounter(const char* name) {
+    if (!name) return 0;
+    std::scoped_lock lock(g_profMutex);
+    auto it = g_frameCounters.find(std::string(name));
+    return it == g_frameCounters.end() ? 0u : it->second;
+}
+
+std::unordered_map<std::string, uint64_t> Profiler::GetLastFrameCounters() {
+    std::scoped_lock lock(g_profMutex);
+    return g_lastFrameCounters;
 }
 
 bool Profiler::ExportReport(const std::string& path) {

@@ -49,6 +49,12 @@ public:
     static size_t GetCallCount(const std::string& name);
     static void Reset();
     static bool ExportReport(const std::string& path);
+
+    /** Per-frame integer counters (e.g. drawCalls, visibleMeshes, triangles, stateChanges). Cleared in BeginFrame, snapshot in EndFrame. */
+    static void SetFrameCounter(const char* name, uint64_t value);
+    static void AddFrameCounter(const char* name, uint64_t delta);
+    static uint64_t GetFrameCounter(const char* name);
+    static std::unordered_map<std::string, uint64_t> GetLastFrameCounters();
 };
 
 class ScopeTimer {

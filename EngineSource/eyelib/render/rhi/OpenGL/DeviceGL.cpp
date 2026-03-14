@@ -657,7 +657,9 @@ bool DeviceGL::ComputePipelineHasStorageBlock(IPipeline* pipeline, const char* b
 IRenderTarget* DeviceGL::CreateRenderTarget(uint32_t width, uint32_t height,
                                             const std::vector<RHITextureFormat>& colorFormats,
                                             RHITextureFormat depthFormat,
-                                            uint32_t samples) {
+                                            uint32_t samples,
+                                            bool transient) {
+    (void)transient;
     auto* rt = new RenderTargetGL();
     rt->m_width = width;
     rt->m_height = height;

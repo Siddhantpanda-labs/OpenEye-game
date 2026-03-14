@@ -7,6 +7,7 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/math/TransformUtils.h"
+#include "eyelib/debug/Profiler.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -112,6 +113,16 @@ void TransparencyPass::Render(rhi::ICommandList* cmd,
             const size_t boneCount = std::min(d.boneCount, kMaxBones);
             sh->SetMat4Array("u_Bones", d.bones, boneCount);
         }
+        uint32_t indexCount = 0;
+        if (d.mesh && d.mesh->IsValid()) {
+            if (d.submeshIndex >= 0 && static_cast<size_t>(d.submeshIndex) < d.mesh->GetSubmeshCount())
+                indexCount = static_cast<uint32_t>(d.mesh->GetSubmesh(static_cast<size_t>(d.submeshIndex)).indexCount);
+            else
+                indexCount = static_cast<uint32_t>(d.mesh->GetIndexCount());
+        }
+        debug::Profiler::AddFrameCounter("drawCalls", 1);
+        debug::Profiler::AddFrameCounter("triangles", indexCount / 3u);
+        debug::Profiler::AddFrameCounter("stateChanges", 1);
         d.mesh->Bind(device);
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
         d.mesh->Unbind();

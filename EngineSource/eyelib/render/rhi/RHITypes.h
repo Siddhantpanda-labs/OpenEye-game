@@ -93,6 +93,8 @@ struct TextureDesc {
     uint32_t samples = 1;  // 1 = no MSAA
     /** If true and backend supports sparse (ARB_sparse_texture), create as sparse/virtual. */
     bool sparse = false;
+    /** If true, backend may use transient attachment (e.g. Vulkan VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT + lazily allocated memory). Attachment-only; not for sampling. */
+    bool transient = false;
 };
 
 // ---- Resource states (for barriers) ----

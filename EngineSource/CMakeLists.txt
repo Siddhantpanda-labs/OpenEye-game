@@ -208,6 +208,8 @@ endif()
 # Editor: use root option (default ON). Game: still OFF by default.
 set(OPENEYE_BUILD_GAME OFF CACHE BOOL "Build final game")
 
+# Vulkan shaders: compile with EngineSource/tools/compile_vulkan_shaders.py (glslc); .spv live next to sources.
+
 # --------------------------------------
 # Copy engine assets (shaders, default materials, etc.) to Engine/assets for runtime
 # --------------------------------------

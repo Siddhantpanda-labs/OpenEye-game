@@ -38,6 +38,10 @@ size_t Profiler::GetCallCount(const std::string& name) { return eyelib::debug::P
 void Profiler::Reset() { eyelib::debug::Profiler::Reset(); }
 bool Profiler::ExportReport(const std::string& path) { return eyelib::debug::Profiler::ExportReport(path); }
 
+std::unordered_map<std::string, uint64_t> Profiler::GetLastFrameCounters() {
+    return eyelib::debug::Profiler::GetLastFrameCounters();
+}
+
 } // namespace debug
 } // namespace api
 } // namespace eyelib

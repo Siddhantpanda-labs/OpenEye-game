@@ -375,6 +375,15 @@ rhi::BindlessHandle RenderPipeline::GetOrAllocateBindlessHandle(rhi::ITexture* t
     return h;
 }
 
+namespace {
+uint32_t GetIndexCountForDraw(const Mesh* mesh, int32_t submeshIndex) {
+    if (!mesh || !mesh->IsValid()) return 0;
+    if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < mesh->GetSubmeshCount())
+        return static_cast<uint32_t>(mesh->GetSubmesh(static_cast<size_t>(submeshIndex)).indexCount);
+    return static_cast<uint32_t>(mesh->GetIndexCount());
+}
+} // namespace
+
 void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
     m_frameData.camera = view.GetCamera();
     m_frameData.light = view.GetLight();
@@ -544,6 +553,9 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
             m_gpuCullPass->GetIndirectStride(),
             m_gpuDrivenQuad.get(),
             cam.view, cam.projection, &m_prevView, &m_prevProjection);
+        debug::Profiler::AddFrameCounter("drawCalls", 1);
+        debug::Profiler::AddFrameCounter("triangles", 2);
+        debug::Profiler::AddFrameCounter("stateChanges", 1);
     } else if (useIndirectScene) {
         m_gbufferPass->RenderIndirectWithPerDrawData(*m_gbuffer, ctx,
             m_gpuCullPass->GetIndirectBuffer(),
@@ -553,6 +565,10 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
             m_gpuCullTransformBuffer,
             gpuCullDrawListCount,
             cam.view, cam.projection, &m_prevView, &m_prevProjection);
+        debug::Profiler::AddFrameCounter("drawCalls", gpuCullDrawListCount);
+        const uint32_t idxCount = GetIndexCountForDraw(m_gpuCullRepresentativeMesh.get(), -1);
+        debug::Profiler::AddFrameCounter("triangles", (idxCount / 3u) * gpuCullDrawListCount);
+        debug::Profiler::AddFrameCounter("stateChanges", 1);
     } else {
         // Phase D: batch by (mesh, material); instanced draw for multi-instance batches, single draws for the rest.
         std::vector<DrawBatch> batches = BuildBatches(frameData.visibleOpaque);
@@ -565,12 +581,20 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
                     batch.mesh.get(), batch.material.get(), batch.materialInstance.get(), m_instanceMatrixBuffer,
                     static_cast<uint32_t>(batch.transforms.size()),
                     cam.view, cam.projection, m_prevView, m_prevProjection, batch.submeshIndex);
+                debug::Profiler::AddFrameCounter("drawCalls", 1);
+                debug::Profiler::AddFrameCounter("triangles", (GetIndexCountForDraw(batch.mesh.get(), batch.submeshIndex) / 3u) * static_cast<uint32_t>(batch.transforms.size()));
+                debug::Profiler::AddFrameCounter("stateChanges", 1);
             } else {
                 for (size_t i = 0; i < batch.transforms.size(); ++i)
                     singles.push_back(batch.ToDrawable(i));
             }
         }
         if (!singles.empty()) {
+            for (const Drawable& d : singles) {
+                debug::Profiler::AddFrameCounter("drawCalls", 1);
+                debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
+                debug::Profiler::AddFrameCounter("stateChanges", 1);
+            }
             m_gbufferPass->Render(*m_gbuffer, ctx, singles, cam.view, cam.projection, m_prevView, m_prevProjection);
         }
     }
@@ -591,12 +615,20 @@ void RenderPipeline::RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFr
                 static_cast<uint32_t>(batch.transforms.size()),
                 frameData.light.direction, camView.view, camView.projection, camView.viewPos,
                 camView.nearPlane, shadowFar, aspect, batch.submeshIndex);
+            debug::Profiler::AddFrameCounter("drawCalls", 1);
+            debug::Profiler::AddFrameCounter("triangles", (GetIndexCountForDraw(batch.mesh.get(), batch.submeshIndex) / 3u) * static_cast<uint32_t>(batch.transforms.size()));
+            debug::Profiler::AddFrameCounter("stateChanges", 1);
         } else {
             for (size_t i = 0; i < batch.transforms.size(); ++i)
                 singles.push_back(batch.ToDrawable(i));
         }
     }
     if (!singles.empty()) {
+        for (const Drawable& d : singles) {
+            debug::Profiler::AddFrameCounter("drawCalls", 1);
+            debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
+            debug::Profiler::AddFrameCounter("stateChanges", 1);
+        }
         RenderContext c = RenderContext::FromDevice(m_device);
         m_shadowPass->Render(*m_cascadeShadowMap, c.device, c.cmd,
             [&singles](std::function<void(const Drawable&)> cb) { for (const auto& d : singles) cb(d); },
@@ -693,6 +725,9 @@ void RenderPipeline::BuildDeferredGraph() {
                     IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
                     m_lightingPass->Render(*m_gbuffer, c, lightParams, camView.view, camView.projection, camView.viewPos, cascadeForLighting,
                         &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, m_sceneLightingBuffer, iblPtr);
+                    debug::Profiler::AddFrameCounter("drawCalls", 1);
+                    debug::Profiler::AddFrameCounter("triangles", 2);
+                    debug::Profiler::AddFrameCounter("stateChanges", 1);
                 };
             if (name == "Transparency")
                 return [this](const FGPassResources&) {
@@ -718,6 +753,8 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
 
     m_currentView = &view;
     PrepareFrameData(view);
+    debug::Profiler::SetFrameCounter("visibleMeshes",
+        static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
     m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
     m_currentFrameData = &m_frameData;
@@ -831,6 +868,8 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
 
     m_currentView = &view;
     PrepareFrameData(view);
+    debug::Profiler::SetFrameCounter("visibleMeshes",
+        static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
     m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
     m_currentFrameData = &m_frameData;
@@ -844,6 +883,8 @@ void RenderPipeline::BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView
 
     m_currentView = &view;
     PrepareFrameData(view);
+    debug::Profiler::SetFrameCounter("visibleMeshes",
+        static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
     m_currentFrameData = &m_frameData;
 
@@ -894,6 +935,7 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         if (!shader || !shader->IsValid()) continue;
         Shader* sh = shader.get();
         sh->Bind(m_device);
+        debug::Profiler::AddFrameCounter("stateChanges", 1);
         sh->SetMat4("u_View", cam.view);
         sh->SetMat4("u_Projection", cam.projection);
         if (cmd) {
@@ -927,6 +969,8 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
                 boneCount = std::min(boneCount, kMaxBones);
                 sh->SetMat4Array("u_Bones", bonePtr, boneCount);
             }
+            debug::Profiler::AddFrameCounter("drawCalls", 1);
+            debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
             d.mesh->Bind(m_device);
             { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
             d.mesh->Unbind();
@@ -1370,6 +1414,7 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
             if (shader && shader->IsValid()) {
                 Shader* sh = shader.get();
                 sh->Bind(m_device);
+                debug::Profiler::AddFrameCounter("stateChanges", 1);
                 if (!commonSetInstanced) { setCommonForwardPlusUniforms(sh); commonSetInstanced = true; }
                 if (cmd) {
                     if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
@@ -1385,6 +1430,8 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                 if (cmd) {
                     cmd->BindStorageBuffer(m_instanceMatrixBuffer, kForwardPlusInstanceBinding, 0, static_cast<uint32_t>(batch.transforms.size() * 64u));
                 }
+                debug::Profiler::AddFrameCounter("drawCalls", 1);
+                debug::Profiler::AddFrameCounter("triangles", (GetIndexCountForDraw(batch.mesh.get(), batch.submeshIndex) / 3u) * static_cast<uint32_t>(batch.transforms.size()));
                 batch.mesh->Bind(m_device);
                 { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.DrawInstanced(m_device, batch.submeshIndex, static_cast<uint32_t>(batch.transforms.size())); }
                 batch.mesh->Unbind();
@@ -1401,12 +1448,15 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                 if (!shader || !shader->IsValid()) continue;
                 Shader* sh = shader.get();
                 sh->Bind(m_device);
+                debug::Profiler::AddFrameCounter("stateChanges", 1);
                 if (useSkinned) { if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; } } else { if (!commonSetNonSkinned) { setCommonForwardPlusUniforms(sh); commonSetNonSkinned = true; } }
                 if (cmd) {
                     if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
                     else if (iblPtr && iblPtr->IsValid()) iblPtr->BindForLighting(cmd, 11, 12, 13);
                     sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
                 } else { sh->SetInt("u_UseIBL", 0); }
+                debug::Profiler::AddFrameCounter("drawCalls", 1);
+                debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(single.mesh.get(), single.submeshIndex) / 3u);
                 drawOneForwardPlus(sh, single);
                 sh->Unbind();
             }
@@ -1638,6 +1688,9 @@ void RenderPipeline::AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool us
                 RenderSkyboxImpl(m_currentFrameData->camera, m_currentFrameData->skybox, useGbufferDepth);
             else
                 RenderProceduralSkyboxImpl(m_currentFrameData->camera, useGbufferDepth);
+            debug::Profiler::AddFrameCounter("drawCalls", 1);
+            debug::Profiler::AddFrameCounter("triangles", 2);
+            debug::Profiler::AddFrameCounter("stateChanges", 1);
         },
         {}, { hdrColor }, true);
 }

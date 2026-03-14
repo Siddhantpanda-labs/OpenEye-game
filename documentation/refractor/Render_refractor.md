@@ -22,7 +22,23 @@ This document is the **single source of truth** for refactoring the OpenEye rend
 
 - **Strengths:** RHI abstraction, `IRenderSceneView` zero-copy, frame graph DAG, CPU/GPU mesh split, explicit device passing.
 - **Debt:** `RenderPipeline` is a monolith (~1793 lines); forward/deferred/stereo/forward+ duplicate logic; submission is per-draw with high bind/uniform churn; no clear frame-data vs world-cache split.
+- **Current Benchmark:**
+```
+so scene had 1 mesh, 3 drawcall, triangles - 26, statechange - 3
+then fps - 320, 3 ms
+scene build - 0.04
+scene render - 1.2
 
+then scene has 147 mesh, drawcalls - 297, triangles - 102956, statechange - 152
+then fps - 45, 21ms total
+render scene - 11 ms
+scene build - 3 ms
+
+and when scene has 272 mesh, 577 drawcall, 109322 traingles, 306 statechange
+then fps - 17, 53 ms total, 
+render scene - 16 ms
+scene build - 6 ms
+```
 ---
 
 ## 3. Target Architecture (Principles)
