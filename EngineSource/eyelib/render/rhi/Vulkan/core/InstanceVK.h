@@ -9,6 +9,7 @@ namespace rhi {
 /** Thin wrapper over VkInstance. Handles creation with standard app/engine info and surface extensions. */
 struct InstanceVK {
     void* handle = nullptr;  // VkInstance
+    uint32_t apiVersion = 0; // Negotiated VkInstance API version
 
     /** Create instance with OpenEye app/engine info and VK_KHR_surface + platform surface extension. Returns true on success. */
     static bool Create(InstanceVK* out,
@@ -16,7 +17,7 @@ struct InstanceVK {
                       uint32_t appVersion = 0,
                       const char* engineName = "OpenEye",
                       uint32_t engineVersion = 0,
-                      uint32_t apiVersion = 0x402000u /* VK_API_VERSION_1_2 */);
+                      uint32_t apiVersion = 0 /* auto-negotiate */);
     /** Destroy instance. */
     static void Destroy(InstanceVK* inst);
 

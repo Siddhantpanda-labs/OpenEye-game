@@ -114,12 +114,26 @@ Push constants: `u_Projection` (offset 0), `u_View` (offset 64). Size 128 bytes.
 
 ---
 
+## OutlinePost (standalone layout)
+
+Used by outline post-process (fullscreen quad over scene + entity ID buffer). One set, two bindings.
+
+| Binding | Type   | Content        |
+|---------|--------|----------------|
+| 0       | Image  | Scene color (combined image sampler) |
+| 1       | Image  | Entity ID (R32UI, combined image sampler) |
+
+Push constants: `u_SelectedID`, `u_OutlineColor`, `u_InvSize`. Size ≤ 256 bytes.
+
+---
+
 ## Pipeline layout kinds (which sets each uses)
 
 | Kind              | Sets used        |
 |-------------------|------------------|
 | PushOnly / Legacy | 0 sets. Push constants only (128 bytes). Used by BRDF LUT, fullscreen quads. Legacy is an alias for PushOnly; legacy descriptor path removed. |
 | IBL               | IBLPass (set 0: binding 0 = env cube) + push constants. |
+| OutlinePost       | OutlinePost (set 0: binding 0 = scene color, 1 = entity ID) + push constants. |
 | Forward           | 0, 1, 2, 3, 4   |
 | Post              | 0, 1            |
 | Shadow            | 0, 1, 4         |
@@ -132,6 +146,6 @@ Push constants: `u_Projection` (offset 0), `u_View` (offset 64). Size 128 bytes.
 
 ## Push constants
 
-- **Size:** ≤ 128 bytes for all new pipelines.
+- **Size:** ≤ 256 bytes for all new pipelines (VulkanResourceSpaces kPushConstantSize).
 - **Use for:** draw ID, material index, pass flags.
 - **Everything else:** use buffers in Frame / Pass / Material / SceneBuffers.

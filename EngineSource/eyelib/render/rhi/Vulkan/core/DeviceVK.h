@@ -106,6 +106,7 @@ struct DeviceVK : IDevice {
     IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) override;
     void DestroyDescriptorSet(IDescriptorSet* set) override;
     IPipelineLayout* GetResourceSetLayout(ResourceSetType type) override;
+    IDescriptorSet* GetEmptyResourceSet() override { return m_emptyResourceSet; }
 
     IBindlessHeap* CreateBindlessHeap() override;
     void DestroyBindlessHeap(IBindlessHeap* heap) override;
@@ -243,8 +244,13 @@ private:
     void* m_deferredLightingPipelineLayout = nullptr;
     void* m_computeLightCullPipelineLayout = nullptr;
     void* m_computeGpuCullPipelineLayout = nullptr;
+    void* m_outlinePostSetLayout = nullptr;
+    void* m_outlinePostPipelineLayout = nullptr;
     /** Wrappers for GetResourceSetLayout (single-set IPipelineLayout per type); do not own set layouts. */
-    IPipelineLayout* m_resourceSetLayouts[9] = {};  // Frame, PostPass, ..., DeferredLightingPass, IBLPass
+    IPipelineLayout* m_resourceSetLayouts[10] = {};  // Frame, PostPass, ..., IBLPass, OutlinePost
+    void* m_emptyResourceSetLayout = nullptr;       // VkDescriptorSetLayout (0 bindings, placeholder for compute sets 1–3)
+    IPipelineLayout* m_emptyResourceSetLayoutWrapper = nullptr;
+    IDescriptorSet* m_emptyResourceSet = nullptr;   // one set from m_emptyResourceSetLayout, for BindDescriptorSets placeholder
     rhi::IBuffer* m_legacyComputeParamsUBO = nullptr; // 256 bytes, binding 1 (ParamsBlock for light_cull)
     void* m_timelineSemaphore = nullptr;     // VkSemaphore (timeline, for fence sync)
     uint64_t m_timelineValue = 0;           // next value to signal on submit

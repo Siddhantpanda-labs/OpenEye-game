@@ -212,7 +212,10 @@ private:
     std::shared_ptr<Shader> m_stereoForwardShader;
     std::shared_ptr<Shader> m_skyboxShader;
     std::shared_ptr<Shader> m_proceduralSkyboxShader;
+    rhi::IDescriptorSet* m_skyboxPostSet = nullptr;
+    rhi::ITexture* m_cachedSkyboxTexture = nullptr;
     std::shared_ptr<Shader> m_outlinePostShader;
+    rhi::IDescriptorSet* m_outlinePostSet = nullptr;
     std::shared_ptr<Shader> m_entityIdShader;
     rhi::IPipeline* m_streamingNV12Pipeline = nullptr;
     rhi::IShader* m_streamingNV12Shader = nullptr;

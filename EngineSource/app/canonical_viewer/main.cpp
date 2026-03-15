@@ -414,7 +414,7 @@ int main(int argc, char** argv) {
     }
 
     auto litShader = std::make_shared<eyelib::api::Shader>();
-    if (!litShader->Load(device, "passes/forward/forward")) {
+    if (!litShader->Load(device, "passes/forward/forward", eyelib::render::rhi::PipelineLayoutKind::Forward)) {
         std::cerr << "CanonicalViewer: passes/forward/forward shader not found. Run from Engine/bin/Debug or set cwd.\n";
         pipeline.Shutdown();
         window.Shutdown();

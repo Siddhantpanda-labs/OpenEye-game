@@ -33,6 +33,14 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
 
     VkImageType imageType = VK_IMAGE_TYPE_2D;
     if (desc.type == TextureType::Texture3D) imageType = VK_IMAGE_TYPE_3D;
+    const bool isArrayLike = (desc.type == TextureType::Texture2DArray || desc.type == TextureType::TextureCube);
+    uint32_t layerCount = isArrayLike ? desc.depthOrArrayLayers : 1u;
+    if (desc.type == TextureType::TextureCube) {
+        // Vulkan cubemaps require at least 6 layers and layer count must be a multiple of 6.
+        if (layerCount < 6u) layerCount = 6u;
+        if ((layerCount % 6u) != 0u) layerCount += (6u - (layerCount % 6u));
+    }
+
     VkImageCreateInfo imgInfo = {};
     imgInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imgInfo.imageType = imageType;
@@ -41,7 +49,7 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     imgInfo.extent.height = desc.height;
     imgInfo.extent.depth = (desc.type == TextureType::Texture3D) ? desc.depthOrArrayLayers : 1;
     imgInfo.mipLevels = desc.mipLevels;
-    imgInfo.arrayLayers = (desc.type == TextureType::Texture2DArray || desc.type == TextureType::TextureCube) ? desc.depthOrArrayLayers : 1;
+    imgInfo.arrayLayers = layerCount;
     imgInfo.samples = static_cast<VkSampleCountFlagBits>(desc.samples);
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imgInfo.usage = ToVkImageUsageForFormat(desc.format, desc.usage);
@@ -90,7 +98,7 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     auto* t = new TextureVK(deviceObj);
     t->m_width = desc.width;
     t->m_height = desc.height;
-    t->m_depthOrArray = desc.depthOrArrayLayers;
+    t->m_depthOrArray = layerCount;
     t->m_type = desc.type;
     t->m_format = desc.format;
     t->m_image = image;

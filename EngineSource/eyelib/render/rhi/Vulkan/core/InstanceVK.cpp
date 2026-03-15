@@ -16,7 +16,11 @@ bool InstanceVK::Create(InstanceVK* out, const char* appName, uint32_t appVersio
     if (!out) return false;
     if (appVersion == 0) appVersion = VK_MAKE_VERSION(1, 0, 0);
     if (engineVersion == 0) engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    if (apiVersion == 0) apiVersion = VK_API_VERSION_1_2;
+    uint32_t loaderApiVersion = VK_API_VERSION_1_0;
+    if (vkEnumerateInstanceVersion(&loaderApiVersion) != VK_SUCCESS)
+        loaderApiVersion = VK_API_VERSION_1_0;
+    if (apiVersion == 0) apiVersion = VK_API_VERSION_1_3;
+    if (apiVersion > loaderApiVersion) apiVersion = loaderApiVersion;
 
     VkApplicationInfo appInfo = {};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -69,6 +73,7 @@ bool InstanceVK::Create(InstanceVK* out, const char* appName, uint32_t appVersio
         return false;
     }
     out->handle = instance;
+    out->apiVersion = apiVersion;
     return true;
 }
 
@@ -76,6 +81,7 @@ void InstanceVK::Destroy(InstanceVK* inst) {
     if (!inst || !inst->handle) return;
     vkDestroyInstance(static_cast<VkInstance>(inst->handle), nullptr);
     inst->handle = nullptr;
+    inst->apiVersion = 0;
 }
 
 } // namespace rhi

@@ -20,6 +20,8 @@ struct SwapchainVK {
     uint32_t height = 0;
     uint32_t format = 0;                // VkFormat (opaque)
     uint32_t currentImageIndex = 0xFFFFFFFFu;  // set by Acquire(), used by Present()
+    /** Per-image semaphores signaled by submit, waited by present. Avoids reusing a semaphore still in use by present (validation 00067). */
+    std::vector<void*> renderFinishedSemaphores;
 
     void* device = nullptr;              // VkDevice (for Resize/Destroy)
     void* physicalDevice = nullptr;       // VkPhysicalDevice (for Resize)
@@ -51,6 +53,8 @@ struct SwapchainVK {
     void GetExtent(uint32_t* outWidth, uint32_t* outHeight) const { if (outWidth) *outWidth = width; if (outHeight) *outHeight = height; }
     uint32_t GetFormat() const { return format; }
     uint32_t GetCurrentImageIndex() const { return currentImageIndex; }
+    /** Semaphore for this image index (signal on submit, wait on present). Valid after Create/Resize. */
+    void* GetRenderFinishedSemaphore(uint32_t imageIndex) const;
 };
 
 } // namespace rhi

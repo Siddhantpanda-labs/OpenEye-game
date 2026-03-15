@@ -31,6 +31,13 @@ bool Shader::Load(RenderDevice device, const std::string& logicalName) {
     return m_impl->shader->Load(rhiDevice, logicalName, ::eyelib::render::Mesh::GetVertexLayoutRHI());
 }
 
+bool Shader::Load(RenderDevice device, const std::string& logicalName, ::eyelib::render::rhi::PipelineLayoutKind layoutKind) {
+    if (!device || logicalName.empty()) return false;
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    return m_impl->shader->Load(rhiDevice, logicalName, ::eyelib::render::Mesh::GetVertexLayoutRHI(),
+                                ::eyelib::render::rhi::PrimitiveTopology::TriangleList, layoutKind);
+}
+
 bool Shader::LoadFromFile(RenderDevice device, const std::string& vertexPath, const std::string& fragmentPath) {
     if (!device) return false;
     return m_impl->shader->LoadFromFile(

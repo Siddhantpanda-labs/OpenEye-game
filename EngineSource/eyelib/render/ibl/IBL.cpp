@@ -2,6 +2,7 @@
 #include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
+#include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -256,9 +257,13 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
     rhi::IPipelineLayout* iblPassLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::IBLPass);
     if (iblPassLayout)
         m_iblPassSet = m_deviceRHI->CreateDescriptorSet(iblPassLayout);
+    if (m_iblPassSet)
+        m_iblPassSet->UpdateTexture(0, m_environmentRHI);
 
     rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
     if (!cmd) return false;
+
+    rhi::BarrierTextureForShaderRead(cmd, environmentCubemap);
 
     const math::Mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
     const math::Mat4 captureViews[] = {
@@ -284,7 +289,6 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
 
         irradianceShader->Bind(m_deviceRHI);
         if (m_iblPassSet) {
-            m_iblPassSet->UpdateTexture(0, m_environmentRHI);
             rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
             cmd->BindDescriptorSets(0, 1, sets);
         } else {
@@ -315,7 +319,6 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
 
             prefilterShader->Bind(m_deviceRHI);
             if (m_iblPassSet) {
-                m_iblPassSet->UpdateTexture(0, m_environmentRHI);
                 rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
                 cmd->BindDescriptorSets(0, 1, sets);
             } else {

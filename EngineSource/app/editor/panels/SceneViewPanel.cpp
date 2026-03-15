@@ -4,6 +4,7 @@
 #include "ui/LightGizmoIcons.h"
 #include "PanelCommon.h"
 
+#include "api/core/Log.h"
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"

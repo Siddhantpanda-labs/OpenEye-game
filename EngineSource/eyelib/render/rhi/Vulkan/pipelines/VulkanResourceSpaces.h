@@ -11,6 +11,9 @@ namespace rhi {
 
 namespace vkres {
 
+/** Empty set layout (0 bindings). Placeholder for set indices 1–3 in compute layouts so set 4 = SceneBuffers. */
+VkDescriptorSetLayout CreateEmptySetLayout(VkDevice device);
+
 /** Set 0 — Frame: binding 0 Camera UBO, binding 1 Time/global UBO (optional). */
 VkDescriptorSetLayout CreateFrameSetLayout(VkDevice device);
 
@@ -69,19 +72,26 @@ VkPipelineLayout CreateDeferredLightingPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout deferredLightingPassLayout);
 
-/** ComputeLightCull: set0 Frame, set1 LightCullPass, set4 SceneBuffers. Push constants 128 bytes compute. */
+/** ComputeLightCull: set0 Frame, set1 LightCullPass, set2–3 empty, set4 SceneBuffers. Push constants 256 bytes compute. */
 VkPipelineLayout CreateComputeLightCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout lightCullPassLayout,
-    VkDescriptorSetLayout sceneLayout);
+    VkDescriptorSetLayout sceneLayout,
+    VkDescriptorSetLayout emptyLayout);
 
-/** ComputeGpuCull: set0 Frame, set4 SceneBuffers. Push constants 128 bytes compute. */
+/** ComputeGpuCull: set0 Frame, set1–3 empty, set4 SceneBuffers. Push constants 256 bytes compute. */
 VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
-    VkDescriptorSetLayout sceneLayout);
+    VkDescriptorSetLayout sceneLayout,
+    VkDescriptorSetLayout emptyLayout);
 
 /** IBL: set0 IBLPass (env cube). Push constants 128 bytes (view, projection). */
 VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout);
+
+/** Set 0 — OutlinePost: 0 scene color, 1 entity ID (combined image sampler). */
+VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device);
+/** OutlinePost: set0 OutlinePost. Push constants 256 bytes (selectedID, outlineColor, invSize). */
+VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSetLayout outlinePostLayout);
 
 /** PushOnly: 0 descriptor sets; push constants 128 bytes. Used for BRDF LUT, etc. */
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device);
@@ -90,7 +100,7 @@ VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device);
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
-    VkPipelineLayout ibl, VkPipelineLayout pushOnly, PipelineLayoutKind kind);
+    VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout pushOnly, PipelineLayoutKind kind);
 
 /** Number of descriptor sets the pipeline layout expects. PushOnly/Legacy = 0. */
 uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind);

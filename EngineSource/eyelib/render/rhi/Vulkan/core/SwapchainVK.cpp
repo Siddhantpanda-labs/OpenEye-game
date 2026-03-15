@@ -8,6 +8,31 @@ namespace eyelib {
 namespace render {
 namespace rhi {
 
+/** Create one binary semaphore per swapchain image for render-finished (submit signals, present waits). */
+static bool CreateRenderFinishedSemaphores(SwapchainVK* sw) {
+    if (!sw || !sw->device || sw->images.empty()) return false;
+    VkDevice dev = static_cast<VkDevice>(sw->device);
+    sw->renderFinishedSemaphores.resize(sw->images.size(), nullptr);
+    VkSemaphoreCreateInfo semInfo = {};
+    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    for (size_t i = 0; i < sw->images.size(); ++i) {
+        VkSemaphore sem = VK_NULL_HANDLE;
+        if (vkCreateSemaphore(dev, &semInfo, nullptr, &sem) != VK_SUCCESS)
+            return false;
+        sw->renderFinishedSemaphores[i] = sem;
+    }
+    return true;
+}
+
+static void DestroyRenderFinishedSemaphores(SwapchainVK* sw) {
+    if (!sw || !sw->device) return;
+    VkDevice dev = static_cast<VkDevice>(sw->device);
+    for (void* p : sw->renderFinishedSemaphores) {
+        if (p) vkDestroySemaphore(dev, static_cast<VkSemaphore>(p), nullptr);
+    }
+    sw->renderFinishedSemaphores.clear();
+}
+
 static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
     if (!sw || !sw->device || sw->imageViews.empty()) return;
     if (sw->renderPass != nullptr && !sw->framebuffers.empty()) return;
@@ -174,11 +199,17 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
             out->imageViews[i] = imageView;
     }
     EnsureRenderPassAndFramebuffers(out);
+    if (!CreateRenderFinishedSemaphores(out)) {
+        DestroyRenderFinishedSemaphores(out);
+        Destroy(out, device);
+        return false;
+    }
     return true;
 }
 
 void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
     if (!sw || !device) return;
+    DestroyRenderFinishedSemaphores(sw);
     VkDevice dev = static_cast<VkDevice>(device);
     for (void* fb : sw->framebuffersOverlayClear) {
         if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
@@ -223,6 +254,7 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
     VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(physicalDevice);
     VkSurfaceKHR surf = static_cast<VkSurfaceKHR>(surface);
     vkDeviceWaitIdle(dev);
+    DestroyRenderFinishedSemaphores(this);
 
     for (void* fb : framebuffersOverlayClear) {
         if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
@@ -334,6 +366,7 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
             imageViews[i] = imageView;
     }
     EnsureRenderPassAndFramebuffers(this);
+    CreateRenderFinishedSemaphores(this);
 }
 
 bool SwapchainVK::Acquire(void* semaphoreToSignal, uint64_t timeoutMs) {
@@ -366,6 +399,10 @@ bool SwapchainVK::Present(void* queue, void* waitSemaphore) {
     VkResult res = pfnPresent(q, &presentInfo);
     currentImageIndex = 0xFFFFFFFFu;
     return (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR);
+}
+
+void* SwapchainVK::GetRenderFinishedSemaphore(uint32_t imageIndex) const {
+    return imageIndex < renderFinishedSemaphores.size() ? renderFinishedSemaphores[imageIndex] : nullptr;
 }
 
 } // namespace rhi

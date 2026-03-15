@@ -172,8 +172,14 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
         m_lightCullPassSet->UpdateStorageBuffer(1, m_outputBuffer, 0, 0);
         if (m_pointLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(2, m_pointLightBuffer, 0, 0);
         if (m_spotLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(3, m_spotLightBuffer, 0, 0);
-        rhi::IDescriptorSet* sets[3] = { m_frameSet, m_lightCullPassSet, m_sceneBuffersSet };
-        cmd->BindDescriptorSets(0, 3, sets);
+        rhi::IDescriptorSet* emptySet = m_device->GetEmptyResourceSet();
+        if (emptySet) {
+            rhi::IDescriptorSet* sets[5] = { m_frameSet, m_lightCullPassSet, emptySet, emptySet, m_sceneBuffersSet };
+            cmd->BindDescriptorSets(0, 5, sets);
+        } else {
+            rhi::IDescriptorSet* sets[3] = { m_frameSet, m_lightCullPassSet, m_sceneBuffersSet };
+            cmd->BindDescriptorSets(0, 3, sets);
+        }
     } else {
         cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);
         if (m_pointLightBuffer) cmd->BindStorageBuffer(m_pointLightBuffer, 2, 0, 0);

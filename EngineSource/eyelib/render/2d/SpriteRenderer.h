@@ -57,6 +57,7 @@ private:
     void EnsureBuffers(size_t vertexBytes, size_t indexBytes);
 
     std::shared_ptr<Shader> m_shader;
+    rhi::IDescriptorSet* m_spriteSet = nullptr;
     std::vector<Sprite> m_sprites;
     std::vector<Vertex> m_vertices;
     std::vector<unsigned int> m_indices;

@@ -9,6 +9,7 @@
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <string>
 
 namespace eyelib {
 namespace render {
@@ -24,6 +25,85 @@ PipelineVK::~PipelineVK() {
 }
 
 void PipelineVK::GetComputeBlockPresence(ComputeBlockPresence& out) const { out = m_computeBlockPresence; }
+
+namespace {
+
+struct RenderingFormatSelection {
+    std::vector<VkFormat> colorFormats;
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+    VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
+};
+
+static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc) {
+    RenderingFormatSelection out;
+
+    // Conservative default for legacy/test paths.
+    out.colorFormats = { VK_FORMAT_B8G8R8A8_UNORM };
+
+    switch (desc.layoutKind) {
+    case PipelineLayoutKind::Shadow:
+        out.colorFormats.clear();
+        out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        break;
+    case PipelineLayoutKind::Forward:
+        out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+        out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        break;
+    case PipelineLayoutKind::GBuffer:
+        out.colorFormats = {
+            VK_FORMAT_R16G16B16A16_SFLOAT, // position
+            VK_FORMAT_R16G16B16A16_SFLOAT, // normal
+            VK_FORMAT_R8G8B8A8_UNORM,      // albedo
+            VK_FORMAT_R8G8B8A8_UNORM,      // pbr params
+            VK_FORMAT_R16G16B16A16_SFLOAT  // velocity
+        };
+        out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        break;
+    case PipelineLayoutKind::DeferredLighting:
+        out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+        out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        break;
+    case PipelineLayoutKind::IBL:
+        out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+        break;
+    case PipelineLayoutKind::Post:
+        out.colorFormats = { VK_FORMAT_R8G8B8A8_UNORM };
+        break;
+    case PipelineLayoutKind::OutlinePost:
+        out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+        break;
+    default:
+        break;
+    }
+
+    // Shader-name specialization for post passes that target non-default offscreen formats.
+    if (desc.debugName) {
+        const std::string shaderName(desc.debugName);
+        if (desc.layoutKind == PipelineLayoutKind::Post) {
+            if (shaderName == "passes/post/bloom_extract" || shaderName == "passes/post/bloom_blur" ||
+                shaderName == "passes/post/ssr" || shaderName == "passes/post/depth_pyramid")
+                out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+            else if (shaderName == "passes/post/ssao" || shaderName == "passes/post/ssao_blur")
+                out.colorFormats = { VK_FORMAT_R8_UNORM };
+            else if (shaderName == "passes/post/copy")
+                out.colorFormats = { VK_FORMAT_B8G8R8A8_UNORM };
+            else if (shaderName == "passes/sky/skybox" || shaderName == "passes/sky/skybox_procedural") {
+                out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+                out.depthFormat = VK_FORMAT_D32_SFLOAT;
+            }
+        }
+        if (shaderName == "debug/lines") {
+            out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+            out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        }
+        if (shaderName == "passes/ibl/irradiance_convolution" || shaderName == "passes/ibl/prefilter")
+            out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+    }
+
+    return out;
+}
+
+} // namespace
 
 void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void* pipelineLayout, void* pipelineCache) {
     if (!device || !desc.vertexShader || !desc.fragmentShader || !pipelineLayout || !pipelineCache)
@@ -122,13 +202,13 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     depthStencil.stencilTestEnable = desc.depthStencil.stencilTest ? VK_TRUE : VK_FALSE;
     depthStencil.front = depthStencil.back = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 0, 0, 0 };
 
-    VkFormat colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
+    const RenderingFormatSelection selectedFormats = SelectRenderingFormats(desc);
     VkPipelineRenderingCreateInfo renderingInfo = {};
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachmentFormats = &colorFormat;
-    renderingInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
-    renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+    renderingInfo.colorAttachmentCount = static_cast<uint32_t>(selectedFormats.colorFormats.size());
+    renderingInfo.pColorAttachmentFormats = selectedFormats.colorFormats.empty() ? nullptr : selectedFormats.colorFormats.data();
+    renderingInfo.depthAttachmentFormat = selectedFormats.depthFormat;
+    renderingInfo.stencilAttachmentFormat = selectedFormats.stencilFormat;
 
     VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicState = {};
@@ -240,6 +320,7 @@ IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shader
     PipelineDesc desc;
     desc.vertexShader = vs;
     desc.fragmentShader = fs;
+    desc.debugName = shaderName;
     desc.vertexLayout = layout;
     desc.topology = topology;
     desc.layoutKind = layoutKind;

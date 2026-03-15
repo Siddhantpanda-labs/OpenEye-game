@@ -220,6 +220,7 @@ enum class PipelineLayoutKind : uint32_t {
     ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set2 SceneBuffers
     ComputeGpuCull,       ///< set0 Frame, set1 SceneBuffers
     IBL,                  ///< set0 IBLPass (binding 0 = environment cube); push: view, projection [, roughness]
+    OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
 };
 
 struct PipelineDesc {

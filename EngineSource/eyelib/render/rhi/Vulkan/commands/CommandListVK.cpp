@@ -9,6 +9,7 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/PipelineVK.h"
 #include "eyelib/render/rhi/Vulkan/utils/VulkanEnums.h"
 #include <vulkan/vulkan.h>
+#include "eyelib/core/Log.h"
 #include <vector>
 #include <cstring>
 #include <cassert>
@@ -93,6 +94,7 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
     std::vector<VkRenderingAttachmentInfo> colorAttachments(colorCount);
     for (uint32_t i = 0; i < colorCount; ++i) {
         VkImageView view = static_cast<VkImageView>(rtVK->GetColorImageView(i));
+        if (view == VK_NULL_HANDLE) return;
         colorAttachments[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         colorAttachments[i].imageView = view;
         colorAttachments[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -101,16 +103,30 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
         colorAttachments[i].clearValue.color = { 0.f, 0.f, 0.f, 1.f };
     }
     VkImageView depthView = static_cast<VkImageView>(rtVK->GetDepthImageView());
+
+    // Ensure color and depth images are in the layouts declared for vkCmdBeginRendering.
+    for (uint32_t i = 0; i < colorCount; ++i) {
+        ITexture* tex = rtVK->GetColorTexture(i);
+        if (tex) m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
+    }
+    ITexture* depthTex = rtVK->GetDepthTexture();
+    if (depthTex) m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
+    m_device->FlushBarrierTracker(this);
+
+    const uint32_t rtWidth = rtVK->GetWidth();
+    const uint32_t rtHeight = rtVK->GetHeight();
+    if (rtWidth == 0 || rtHeight == 0) return;
+
     VkRenderingInfo renderingInfo = {};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea = { { 0, 0 }, { rtVK->GetWidth(), rtVK->GetHeight() } };
+    renderingInfo.renderArea = { { 0, 0 }, { rtWidth, rtHeight } };
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = colorCount;
     renderingInfo.pColorAttachments = colorAttachments.data();
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
+    VkRenderingAttachmentInfo depthAttachment = {};
     if (depthView != VK_NULL_HANDLE) {
-        VkRenderingAttachmentInfo depthAttachment = {};
         depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         depthAttachment.imageView = depthView;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -200,6 +216,8 @@ void CommandListVK::SetPolygonOffsetLine(bool enable, float factor, float units)
 
 void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
     if (!buffer || !m_isRecording || !m_commandBuffer) return;
+    // Dynamic rendering disallows vkCmdPipelineBarrier inside an active rendering scope.
+    EndRenderingIfActive();
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
@@ -219,30 +237,18 @@ void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, Reso
 
 void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
     if (!texture || !m_isRecording || !m_commandBuffer) return;
-    TextureVK* texVK = static_cast<TextureVK*>(texture);
-    VkImage image = static_cast<VkImage>(texVK->m_image);
-    if (image == VK_NULL_HANDLE) return;
-    VkImageMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask = ToVkAccessFlags(fromState);
-    barrier.dstAccessMask = ToVkAccessFlags(toState);
-    barrier.oldLayout = ToVkImageLayout(fromState);
-    barrier.newLayout = ToVkImageLayout(toState);
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = ToVkImageAspect(texVK->GetFormat());
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
-    VkPipelineStageFlags srcStage = ToVkPipelineStage(fromState);
-    VkPipelineStageFlags dstStage = ToVkPipelineStage(toState);
-    vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    (void)fromState;
+    // Vulkan transitions must be derived from tracked state, not caller assumptions.
+    EndRenderingIfActive();
+    if (!m_device) return;
+    m_device->TransitionTextureToState(texture, toState);
+    m_device->FlushBarrierTracker(this);
 }
 
 void CommandListVK::MemoryBarrierStorage() {
     if (!m_isRecording || !m_commandBuffer) return;
+    // Keep storage synchronization outside active dynamic-rendering instances.
+    EndRenderingIfActive();
     VkMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -265,7 +271,7 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if ((pVK->m_layoutKind == PipelineLayoutKind::Legacy || pVK->m_layoutKind == PipelineLayoutKind::PushOnly) && !pVK->m_isCompute) {
         VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
         if (layout != VK_NULL_HANDLE)
-            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
     }
 }
 void CommandListVK::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
@@ -296,12 +302,14 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
     IBuffer* vbo = m_device->GetFullscreenQuadVBO();
     IBuffer* ibo = m_device->GetFullscreenQuadIBO();
     if (!vbo || !ibo) return;
+    // Keep backend behavior consistent: fullscreen draws always bind the provided pipeline.
+    BindPipeline(pipeline);
     BindVertexBuffer(vbo, 0, 0);
     BindIndexBuffer(ibo, IndexType::UInt16, 0);
     PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
     VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout ? pVK->m_nativePipelineLayout : m_device->GetDefaultPipelineLayout());
     if (layout != VK_NULL_HANDLE) {
-        uint32_t pushSize = (pVK->m_layoutKind == PipelineLayoutKind::Legacy || pVK->m_layoutKind == PipelineLayoutKind::PushOnly) ? 128u : 128u;
+        uint32_t pushSize = 256u;  // matches VulkanResourceSpaces kPushConstantSize
         vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushSize, m_pushConstants);
     }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
@@ -373,16 +381,30 @@ void CommandListVK::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescr
 }
 void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
-    VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
-    if (defaultLayout == VK_NULL_HANDLE) return;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (m_currentPipeline) {
+        PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
+        layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+    }
+    if (layout == VK_NULL_HANDLE)
+        layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    if (layout == VK_NULL_HANDLE) return;
+
+    // Only bind set=1 for layouts that actually contain at least two descriptor sets.
+    if (m_currentPipeline) {
+        PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
+        if (pVK->m_requiredSetCount < 2)
+            return;
+    }
+
     VkDescriptorSet set1 = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
     if (heap) {
         BindlessHeapVK* heapVK = static_cast<BindlessHeapVK*>(heap);
         if (heapVK->m_descriptorSet != nullptr)
             set1 = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
     }
-    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, defaultLayout, 1, 1, &set1, 0, nullptr);
-    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, defaultLayout, 1, 1, &set1, 0, nullptr);
+    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &set1, 0, nullptr);
+    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, layout, 1, 1, &set1, 0, nullptr);
 }
 
 void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
@@ -505,7 +527,7 @@ void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
                 vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 2, sets, 0, nullptr);
                 vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 16, m_pushConstants);
             } else {
-                vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 128, m_pushConstants);
+                vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 256, m_pushConstants);
             }
         }
         uint32_t x = (groupCountX > 0) ? groupCountX : 1u;

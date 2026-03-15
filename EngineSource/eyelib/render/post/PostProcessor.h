@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <array>
 #include "eyelib/math/Types.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
@@ -143,10 +144,16 @@ public:
     void ReloadShaders();
 
 private:
+    static constexpr uint32_t kMaxFramesInFlight = 3;
     void CreateFramebuffers();
     void DestroyFramebuffers();
     rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
+    /** For LDR passes only: returns an LDR RT (m_outputRT or m_ldrPingPong) different from input. */
+    rhi::IRenderTarget* SelectPostTargetLDR(rhi::ITexture* inputTexture) const;
+    rhi::IRenderTarget* SelectPostTarget(rhi::ITexture* inputTexture) const;
     void LoadShaders();
+    void RecycleTransientPostSetsIfNeeded();
+    rhi::IDescriptorSet* CreateTransientPostSet(const std::vector<std::pair<uint32_t, rhi::ITexture*>>& bindings);
     /** Build Hi-Z depth pyramid from GBuffer depth; call before ApplySSR when pyramid is used. */
     void BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane);
 
@@ -158,7 +165,11 @@ private:
     // Resource-space Post path (set 0 Frame, set 1 PostPass). When non-null, use BindDescriptorSets instead of legacy.
     rhi::IDescriptorSet* m_frameSet = nullptr;
     rhi::IDescriptorSet* m_postPassSet = nullptr;
+    rhi::IPipelineLayout* m_postPassLayout = nullptr;
     rhi::IBuffer* m_frameUBO = nullptr;
+    std::array<std::vector<rhi::IDescriptorSet*>, kMaxFramesInFlight> m_transientPostSetsByFrame;
+    uint32_t m_transientPostFrameIndex = 0xFFFFFFFFu;
+    bool m_useVulkanTransientPostSets = false;
 
     // Ping-pong render targets for multi-pass effects
     rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};
@@ -167,8 +178,10 @@ private:
     rhi::IRenderTarget* m_ssrPrevRT = nullptr;
     bool m_ssrHasPrevFrame = false;
 
-    // Output render target (final result)
+    // Output render target (final result); LDR (R8G8B8A8)
     rhi::IRenderTarget* m_outputRT = nullptr;
+    // LDR ping-pong for LDR-only passes (tone map, bloom composite, FXAA, etc.); R8G8B8A8
+    rhi::IRenderTarget* m_ldrPingPong = nullptr;
 
     // Bloom extraction render target
     rhi::IRenderTarget* m_bloomExtractRT = nullptr;
@@ -180,6 +193,7 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_lastOutputValid = false;
+    rhi::ITexture* m_lastOutputTexture = nullptr;
 
     // Shaders
     std::shared_ptr<Shader> m_toneMappingShader;

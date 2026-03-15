@@ -339,6 +339,7 @@ int RunEditor(int argc, char** argv) {
         if (!gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
             std::fprintf(stderr, "Editor: Game view pipeline init failed (debug camera preview disabled).\n");
         }
+        eyelib::api::core::Log::Info("Editor: both pipelines initialized, before AssetRegistry.Scan");
     }
 
     // Engine assets (shaders, etc.) load directly from Engine/assets — no copy to exe dir
@@ -352,6 +353,7 @@ int RunEditor(int argc, char** argv) {
     eyelib::api::AssetRegistry assetRegistry;
     assetRegistry.SetAssetRoot(engineAssets);
     assetRegistry.Scan();
+    eyelib::api::core::Log::Info("Editor: AssetRegistry.Scan done");
     if (editorDevice)
         assetRegistry.SetRenderDevice(editorRenderDevice);
     std::unique_ptr<EditorGPUResourceCache> editorGpuResourceCache;
@@ -371,6 +373,7 @@ int RunEditor(int argc, char** argv) {
         return imgui.ResolveTextureId(nativeTexture);
     };
     openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
+    eyelib::api::core::Log::Info("Editor: ApplyScenePipelineModeToEditorPipelines done");
 
     if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
         eyelib::api::core::Log::InfoF("Editor: opened project '%s' at %s", ctx.projectName.c_str(), ctx.projectPath.c_str());
@@ -384,6 +387,7 @@ int RunEditor(int argc, char** argv) {
 
     uint32_t lastFramebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
     uint32_t lastFramebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+    eyelib::api::core::Log::Info("Editor: init complete, entering main loop");
     while (!window.ShouldClose()) {
         window.PollEvents();
         window.MakeContextCurrent();
@@ -453,15 +457,6 @@ int RunEditor(int argc, char** argv) {
 
         ImGui::Render();
         if (imgui.IsVulkan() && editorDevice) {
-            static int s_vulkanFrameCount = 0;
-            if (++s_vulkanFrameCount <= 3) {
-                const ImDrawData* dd = ImGui::GetDrawData();
-                const bool hasDrawData = dd != nullptr;
-                const int totalIdx = hasDrawData ? dd->TotalIdxCount : 0;
-                const int totalVtx = hasDrawData ? dd->TotalVtxCount : 0;
-                eyelib::api::core::Log::InfoF("Editor Vulkan frame %d: BlitToDefaultFramebuffer(nullptr) -> EndFrame -> Present. ImGui draw data: %s, TotalIdx=%d, TotalVtx=%d.",
-                    s_vulkanFrameCount, hasDrawData ? "yes" : "no", totalIdx, totalVtx);
-            }
             auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
             rhiDevice->BlitToDefaultFramebuffer(nullptr);
             rhiDevice->EndFrame();

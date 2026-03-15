@@ -20,6 +20,7 @@ SpriteRenderer::~SpriteRenderer() {
 }
 
 void SpriteRenderer::Shutdown() {
+    if (m_deviceRHI && m_spriteSet) { m_deviceRHI->DestroyDescriptorSet(m_spriteSet); m_spriteSet = nullptr; }
     if (m_deviceRHI && m_vertexBufferRHI) { m_deviceRHI->DestroyBuffer(m_vertexBufferRHI); m_vertexBufferRHI = nullptr; }
     if (m_deviceRHI && m_indexBufferRHI) { m_deviceRHI->DestroyBuffer(m_indexBufferRHI); m_indexBufferRHI = nullptr; }
     m_vertexCapacity = 0;
@@ -50,7 +51,11 @@ void SpriteRenderer::EnsureShader() {
     m_shader = std::make_shared<Shader>();
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : m_deviceRHI;
     if (!device) return;
-    m_shader->Load(device, "passes/2d/sprite", GetVertexLayout());
+    m_shader->Load(device, "passes/2d/sprite", GetVertexLayout(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Post);
+    if (!m_spriteSet) {
+        rhi::IPipelineLayout* postPassLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+        if (postPassLayout) m_spriteSet = device->CreateDescriptorSet(postPassLayout);
+    }
 }
 
 void SpriteRenderer::SetShader(std::shared_ptr<Shader> shader) {
@@ -150,7 +155,7 @@ void SpriteRenderer::Render(const math::Mat4& view, const math::Mat4& projection
     m_shader->Bind(device);
     m_shader->SetMat4("u_View", view);
     m_shader->SetMat4("u_Projection", projection);
-    m_shader->SetInt("u_Texture", 0);
+    if (!m_spriteSet) m_shader->SetInt("u_Texture", 0);
     cmd->BindVertexBuffer(m_vertexBufferRHI, 0);
     cmd->BindIndexBuffer(m_indexBufferRHI, rhi::IndexType::UInt32);
     cmd->SetBlend(true);
@@ -160,7 +165,13 @@ void SpriteRenderer::Render(const math::Mat4& view, const math::Mat4& projection
 
     for (const auto& batch : m_batches) {
         if (!batch.texture || !batch.texture->IsValid()) continue;
-        batch.texture->Bind(0);
+        if (m_spriteSet && batch.texture->GetTextureRHI()) {
+            m_spriteSet->UpdateTexture(0, batch.texture->GetTextureRHI());
+            rhi::IDescriptorSet* sets[2] = { device->GetEmptyResourceSet(), m_spriteSet };
+            cmd->BindDescriptorSets(0, 2, sets);
+        } else {
+            batch.texture->Bind(0);
+        }
         cmd->DrawIndexed(static_cast<uint32_t>(batch.indexCount), static_cast<uint32_t>(batch.indexOffset), 0);
     }
 

@@ -105,6 +105,9 @@ void RenderPipeline::Shutdown() {
         if (m_forwardMaterialSet) { m_device->DestroyDescriptorSet(m_forwardMaterialSet); m_forwardMaterialSet = nullptr; }
         if (m_forwardSceneBuffersSet) { m_device->DestroyDescriptorSet(m_forwardSceneBuffersSet); m_forwardSceneBuffersSet = nullptr; }
         if (m_deferredLightingPassSet) { m_device->DestroyDescriptorSet(m_deferredLightingPassSet); m_deferredLightingPassSet = nullptr; }
+        if (m_skyboxPostSet) { m_device->DestroyDescriptorSet(m_skyboxPostSet); m_skyboxPostSet = nullptr; }
+        m_cachedSkyboxTexture = nullptr;
+        if (m_outlinePostSet) { m_device->DestroyDescriptorSet(m_outlinePostSet); m_outlinePostSet = nullptr; }
         if (m_forwardFrameUBO) { m_device->DestroyBuffer(m_forwardFrameUBO); m_forwardFrameUBO = nullptr; }
     }
     m_gpuCullPass.reset();
@@ -219,20 +222,7 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     if (m_shadowPass && m_shaderCache)
         m_shadowPass->SetShaderCache(m_shaderCache.get());
     m_lightingPass = std::make_unique<LightingPass>();
-
-    // Create pass default shaders once at init (no lazy creation during render).
-    // GBuffer shaders come from ShaderCache + MaterialCompiler only; no standalone load.
-    {
-        rhi::VertexLayout fullscreenLayout;
-        fullscreenLayout.strideInBytes = 4u * sizeof(float);
-        fullscreenLayout.attributes = {
-            {0, rhi::VertexAttributeType::Float2, 0},
-            {1, rhi::VertexAttributeType::Float2, 2u * sizeof(float)},
-        };
-        auto lightingShader = std::make_shared<Shader>();
-        if (lightingShader->Load(m_device, "passes/deferred/lighting", fullscreenLayout))
-            m_lightingPass->SetLightingShader(std::move(lightingShader));
-    }
+    // Lighting pass owns its shader: created on first Render() via EnsureDefaultShader(device) with correct layout kind.
     {
         rhi::BufferDesc bd;
         bd.sizeInBytes = kSceneLightingBufferSize;
@@ -762,6 +752,12 @@ void RenderPipeline::BuildDeferredGraph() {
                     RenderContext c = RenderContext::FromDevice(m_device);
                     const CameraView& camView = m_currentFrameData->camera;
                     const LightParams& lightParams = m_currentFrameData->light;
+                    IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
+                    if (c.cmd && iblPtr && iblPtr->IsValid()) {
+                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
+                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
+                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
+                    }
                     const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
                     if (c.cmd && m_hdrRenderTarget)
                         rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
@@ -771,7 +767,6 @@ void RenderPipeline::BuildDeferredGraph() {
                         lightSpaceMatrix = cascadeForLighting->GetLightSpaceMatrix(0);
                     FillSceneLightingBuffer(m_sceneLightingBuffer, lightParams, camView.viewPos, lightSpaceMatrix, 0.005f,
                         lightParams.castShadows, &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, cascadeForLighting);
-                    IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
                     if (m_forwardFrameUBO) {
                         math::Mat4 viewProj = camView.projection * camView.view;
                         float frameUbo[5 * 16];
@@ -859,7 +854,9 @@ void RenderPipeline::BuildForwardGraph() {
 
     auto getExecutor = [this](const std::string& name) -> FrameGraph::ExecuteFunc {
         if (name == "GPU Cull")
-            return [this](const FGPassResources&) { RenderContext c = RenderContext::FromDevice(m_device); if (m_gpuCullPass) m_gpuCullPass->Execute(c); };
+            return [this](const FGPassResources&) {
+                RenderContext c = RenderContext::FromDevice(m_device); if (m_gpuCullPass) m_gpuCullPass->Execute(c);
+            };
         if (name == "Shadow")
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
@@ -870,6 +867,20 @@ void RenderPipeline::BuildForwardGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
+                IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
+                const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(m_currentFrameData->camera.viewPos) : nullptr;
+                if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+                if (c.cmd) {
+                    if (iblPtr && iblPtr->IsValid()) {
+                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
+                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
+                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
+                    }
+                    if (envProbe && envProbe->IsValid()) {
+                        if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
+                        if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
+                    }
+                }
                 const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
@@ -1089,6 +1100,7 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         sh->Bind(m_device);
         debug::Profiler::AddFrameCounter("stateChanges", 1);
         if (useForwardResourceSets) {
+            core::Log::Info("RenderForwardOpaque: BindDescriptorSets(0, 5)");
             rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
             cmd->BindDescriptorSets(0, 5, sets);
         } else {
@@ -1103,6 +1115,8 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         }
         sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
         for (const Drawable& d : drawables) {
+            static bool s_firstDrawLogged = false;
+            if (!s_firstDrawLogged) { core::Log::Info("RenderForwardOpaque: first draw iteration"); s_firstDrawLogged = true; }
             const math::Mat4* bonePtr = d.bones;
             size_t boneCount = d.boneCount;
             if ((!bonePtr || boneCount == 0) && d.materialInstance) {
@@ -1263,6 +1277,20 @@ void RenderPipeline::BuildForwardStereoGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
+                IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
+                const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(m_currentFrameData->camera.viewPos) : nullptr;
+                if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+                if (c.cmd) {
+                    if (iblPtr && iblPtr->IsValid()) {
+                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
+                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
+                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
+                    }
+                    if (envProbe && envProbe->IsValid()) {
+                        if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
+                        if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
+                    }
+                }
                 const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
@@ -1407,6 +1435,21 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
     const LightParams& light = frameData.light;
     const std::vector<PointLight>& pointLights = frameData.pointLights;
     const std::vector<SpotLight>& spotLights = frameData.spotLights;
+
+    if (cmd) {
+        IBL* iblPtr = EnsureIBLFromFrameData(frameData);
+        const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
+        if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+        if (iblPtr && iblPtr->IsValid()) {
+            if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, ir);
+            if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, pf);
+            if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, brdf);
+        }
+        if (envProbe && envProbe->IsValid()) {
+            if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(cmd, ir);
+            if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(cmd, pf);
+        }
+    }
 
     if (m_clusteredLightGrid->GetNearPlane() != cam.nearPlane ||
         m_clusteredLightGrid->GetFarPlane() != cam.farPlane) {
@@ -1880,7 +1923,7 @@ void RenderPipeline::EnsureStereoForwardShader() {
     if (m_stereoForwardShader && m_stereoForwardShader->IsValid()) return;
     if (!m_device) return;
     m_stereoForwardShader = std::make_shared<Shader>();
-    if (!m_stereoForwardShader->Load(m_device, "passes/forward/forward_stereo", Mesh::GetVertexLayoutRHI())) {
+    if (!m_stereoForwardShader->Load(m_device, "passes/forward/forward_stereo", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Forward)) {
         core::Log::WarnF("Stereo forward shader failed to load (passes/forward/forward_stereo). Stereo preview will fall back to dual pass.");
         m_stereoForwardShader.reset();
     }
@@ -1894,13 +1937,19 @@ void RenderPipeline::EnsureSkyboxShader() {
     skyboxDepth.depthTest = true;
     skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
-    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth)) {
+    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
         core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
     if (!m_skyboxShader->IsValid()) {
         core::Log::Warn("Skybox shader invalid after load.");
         return;
+    }
+    if (!m_skyboxPostSet) {
+        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+        if (postLayout)
+            m_skyboxPostSet = m_device->CreateDescriptorSet(postLayout);
+        m_cachedSkyboxTexture = nullptr;
     }
 }
 
@@ -1912,7 +1961,7 @@ void RenderPipeline::EnsureProceduralSkyboxShader() {
     skyboxDepth.depthTest = true;
     skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
-    if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth)) {
+    if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
         core::Log::WarnF("Procedural skybox shader failed to load (passes/sky/skybox_procedural).");
         return;
     }
@@ -1954,6 +2003,9 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     const uint32_t vpW = rt ? rt->GetWidth() : m_width;
     const uint32_t vpH = rt ? rt->GetHeight() : m_height;
     rhi::ICommandList* cmdSky = GetRHICommandList();
+    rhi::ITexture* skyboxTex = skybox->GetTextureRHI();
+    if (cmdSky && skyboxTex)
+        rhi::BarrierTextureForShaderRead(cmdSky, skyboxTex);
     if (cmdSky && rt) {
         cmdSky->SetRenderTarget(rt);
         cmdSky->SetViewport(0, 0, vpW, vpH);
@@ -1970,9 +2022,24 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
     m_skyboxShader->SetMat4("u_InverseProjectionMatrix", glm::inverse(camera.projection));
     m_skyboxShader->SetInt("u_Skybox", 0);
-    skybox->Bind(0);
-
+    if (!m_skyboxPostSet && m_device) {
+        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+        if (postLayout)
+            m_skyboxPostSet = m_device->CreateDescriptorSet(postLayout);
+    }
     rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
+    if (cmdSky && pipe)
+        cmdSky->BindPipeline(pipe);
+    if (m_skyboxPostSet && cmdSky) {
+        if (skyboxTex && m_cachedSkyboxTexture != skyboxTex) {
+            m_skyboxPostSet->UpdateTexture(0, skyboxTex);
+            m_cachedSkyboxTexture = skyboxTex;
+        }
+        cmdSky->BindDescriptorSets(1, 1, &m_skyboxPostSet);
+    } else {
+        skybox->Bind(0);
+    }
+
     if (pipe && cmdSky)
         cmdSky->DrawFullscreenQuad(pipe);
 
@@ -2058,9 +2125,13 @@ void RenderPipeline::EnsureOutlinePostShader() {
     rhi::DepthStencilState postDepth;
     postDepth.depthTest = false;
     postDepth.depthWrite = false;
-    if (!m_outlinePostShader->Load(m_device, "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth)) {
+    if (!m_outlinePostShader->Load(m_device, "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth, rhi::PipelineLayoutKind::OutlinePost)) {
         core::Log::WarnF("Outline post shader failed to load (passes/outline_post/outline_post). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
+    }
+    if (!m_outlinePostSet) {
+        rhi::IPipelineLayout* outlineLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::OutlinePost);
+        if (outlineLayout) m_outlinePostSet = m_device->CreateDescriptorSet(outlineLayout);
     }
 }
 
@@ -2180,8 +2251,14 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     m_outlinePostShader->Bind(m_device);
     rhi::ITexture* sceneTex = m_outlineCompositeTemp->GetColorTexture(0);
     rhi::ITexture* idTex = m_entityIdRenderTarget->GetColorTexture(0);
-    if (sceneTex) cmd->BindTexture(sceneTex, 0);
-    if (idTex) cmd->BindTexture(idTex, 1);
+    if (m_outlinePostSet && sceneTex && idTex) {
+        m_outlinePostSet->UpdateTexture(0, sceneTex);
+        m_outlinePostSet->UpdateTexture(1, idTex);
+        cmd->BindDescriptorSets(0, 1, &m_outlinePostSet);
+    } else {
+        if (sceneTex) cmd->BindTexture(sceneTex, 0);
+        if (idTex) cmd->BindTexture(idTex, 1);
+    }
     m_outlinePostShader->SetUint("u_SelectedID", selectedPackedId);
     m_outlinePostShader->SetVec3("u_OutlineColor", math::Vec3(r, g, b));
     const float invW = m_width > 0 ? 1.0f / static_cast<float>(m_width) : 0.0f;

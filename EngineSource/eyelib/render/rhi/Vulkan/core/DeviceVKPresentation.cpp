@@ -24,7 +24,9 @@ void DeviceVK::Present() {
         return;
     }
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
-    m_swapchain.Present(queue, frame.renderFinished);
+    const uint32_t imageIndex = m_swapchain.GetCurrentImageIndex();
+    void* renderFinishedPerImage = m_swapchain.GetRenderFinishedSemaphore(imageIndex);
+    m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished);
     m_pendingPresent = false;
 }
 
@@ -177,12 +179,6 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         if (m_postBlitCallback)
             m_postBlitCallback(cmd);
         vkCmdEndRenderPass(cmd);
-        static int s_clearOverlayFramesLogged = 0;
-        if (s_clearOverlayFramesLogged < 3) {
-            core::Log::InfoF("Vulkan present: clear+overlay path executed (null src), overlay=%s, frame %d.",
-                m_postBlitCallback ? "yes" : "no", s_clearOverlayFramesLogged + 1);
-            ++s_clearOverlayFramesLogged;
-        }
         return;
     }
     RenderTargetVK* rt = static_cast<RenderTargetVK*>(src);

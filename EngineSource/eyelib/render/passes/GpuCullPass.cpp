@@ -258,8 +258,14 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
     cmd->BindPipeline(pipeline);
 
     if (m_useResourceSpace && m_frameSet && m_sceneBuffersSet) {
-        rhi::IDescriptorSet* sets[2] = { m_frameSet, m_sceneBuffersSet };
-        cmd->BindDescriptorSets(0, 2, sets);
+        rhi::IDescriptorSet* emptySet = m_device->GetEmptyResourceSet();
+        if (emptySet) {
+            rhi::IDescriptorSet* sets[5] = { m_frameSet, emptySet, emptySet, emptySet, m_sceneBuffersSet };
+            cmd->BindDescriptorSets(0, 5, sets);
+        } else {
+            rhi::IDescriptorSet* sets[2] = { m_frameSet, m_sceneBuffersSet };
+            cmd->BindDescriptorSets(0, 2, sets);
+        }
     } else {
         m_device->EnsureComputePipelineStorageBlockBindings(pipeline);
         cmd->BindStorageBuffer(m_indirectBuffer, 0, 0, kIndirectRegionSize);

@@ -2,6 +2,7 @@
 
 #include "api/render/RenderDevice.h"
 #include "eyelib/math/Types.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -23,6 +24,8 @@ public:
     bool BuildFromSource(RenderDevice device, const std::string& vertexSrc, const std::string& fragmentSrc);
     /** Load shader by logical name (e.g. passes/forward/forward). Single path: resolve backend and create pipeline. */
     bool Load(RenderDevice device, const std::string& logicalName);
+    /** Load with resource-space layout kind (e.g. Forward for Vulkan). Use Legacy for push-constants-only. */
+    bool Load(RenderDevice device, const std::string& logicalName, ::eyelib::render::rhi::PipelineLayoutKind layoutKind);
     bool LoadFromFile(RenderDevice device, const std::string& vertexPath, const std::string& fragmentPath);
     void Destroy();
 

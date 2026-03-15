@@ -49,6 +49,7 @@ private:
     void EnsureBuffers(size_t vertexBytes, size_t indexBytes);
 
     std::shared_ptr<Shader> m_shader;
+    rhi::IDescriptorSet* m_spriteSet = nullptr;
     std::vector<Vertex> m_vertices;
     std::vector<unsigned int> m_indices;
     rhi::IDevice* m_injectedDevice = nullptr;
