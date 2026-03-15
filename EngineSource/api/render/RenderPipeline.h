@@ -44,6 +44,8 @@ public:
     void SetMode(Mode mode);
     Mode GetMode() const;
 
+    /** Upload phase: CPU→staging→vkCmdCopy*. Call after BeginFrame, before Render. */
+    void UpdateUploads();
     /** Render scene. When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass for GPU picking. */
     void Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
     /** Single-pass stereo: one render, two viewports (left | right). Pipeline must be resized to full width (2*eyeWidth). */

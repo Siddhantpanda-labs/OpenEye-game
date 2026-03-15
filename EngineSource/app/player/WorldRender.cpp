@@ -4,7 +4,6 @@
 #include "RendererGPUResourceCache.h"
 #include "api/asset/AssetId.h"
 #include "api/asset/AssetRegistry.h"
-#include "api/asset/loaders/ModelLoader.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
 #include "api/geometry/BuiltinMeshIds.h"
@@ -191,7 +190,6 @@ void WorldRenderBridge::Shutdown() {
         m_assetRegistryForResolver->SetGPUResolver(nullptr);
     m_assetRegistryForResolver = nullptr;
     m_gpuResourceCache.reset();
-    m_modelCache.clear();
     m_builtinManager.reset();
     m_skyboxCache.clear();
     m_skinnedMaterials.clear();
@@ -365,47 +363,36 @@ std::shared_ptr<eyelib::api::MaterialInstance> WorldRenderBridge::GetSkinnedMate
 }
 
 WorldRenderBridge::ModelEntry WorldRenderBridge::LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path) {
-    auto it = m_modelCache.find(path);
-    if (it != m_modelCache.end()) {
-        return it->second;
-    }
-
     ModelEntry entry{};
-    std::shared_ptr<eyelib::api::ModelAsset> model;
+    if (!registry) return entry;
     try {
-        model = eyelib::api::ModelLoader::LoadModel(registry, path);
+        eyelib::api::AssetId meshId = registry->GetId(path);
+        if (!meshId.IsValid())
+            meshId = registry->LoadAsset(path, eyelib::api::AssetType::Mesh);
+        if (!meshId.IsValid()) return entry;
+
+        entry.mesh = registry->GetMesh(meshId);
+        if (!entry.mesh) return entry;
+
+        const std::vector<eyelib::api::AssetId> deps = registry->GetDependencies(meshId);
+        for (const auto& depId : deps) {
+            if (registry->GetAssetType(depId) == eyelib::api::AssetType::Material) {
+                entry.material = registry->GetMaterial(depId);
+                if (entry.material) break;
+            }
+        }
+        if (!entry.material) {
+            EnsureDefaultMaterial();
+            entry.material = m_defaultMaterial;
+        }
+
+        entry.skeleton = registry->GetSkeleton(meshId);
+        entry.bindPoseMatrices = BuildBindPoseMatrices(entry.skeleton);
     } catch (const std::exception& e) {
         eyelib::api::core::Log::ErrorF("Failed to load model: %s - %s", path.c_str(), e.what());
-        m_modelCache.emplace(path, entry);
-        return entry;
     } catch (...) {
         eyelib::api::core::Log::ErrorF("Failed to load model: %s (unknown exception)", path.c_str());
-        m_modelCache.emplace(path, entry);
-        return entry;
     }
-    if (!model) {
-        eyelib::api::core::Log::WarnF("Failed to load model: %s", path.c_str());
-        m_modelCache.emplace(path, entry);
-        return entry;
-    }
-
-    const auto& meshes = model->GetMeshes();
-    const auto& materials = model->GetMaterials();
-    if (!meshes.empty()) {
-        entry.mesh = meshes.front();
-    }
-    if (!materials.empty()) {
-        entry.material = materials.front();
-    }
-    entry.skeleton = model->GetSkeleton();
-    entry.bindPoseMatrices = BuildBindPoseMatrices(entry.skeleton);
-
-    if (!entry.material) {
-        EnsureDefaultMaterial();
-        entry.material = m_defaultMaterial;
-    }
-
-    m_modelCache.emplace(path, entry);
     return entry;
 }
 

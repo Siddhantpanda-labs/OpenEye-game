@@ -14,6 +14,7 @@
 #include "eyelib/math/Types.h"
 #include "eyelib/render/ShaderLoader.h"
 #include "api/render/Material.h"
+#include "api/render/Mesh.h"
 #include "api/platform/All.h"
 
 #include <algorithm>
@@ -373,6 +374,19 @@ std::shared_ptr<Material> AssetRegistry::GetMaterial(const AssetId& id) const {
 
 std::shared_ptr<Material> AssetRegistry::GetMaterial(const std::string& path) const {
     return GetMaterial(GetId(path));
+}
+
+std::shared_ptr<Mesh> AssetRegistry::GetMesh(const AssetId& id) const {
+    if (!id.IsValid()) return nullptr;
+    if (m_impl->resolver) {
+        auto internal = m_impl->resolver->GetMesh(id);
+        return internal ? Mesh::WrapInternal(internal) : nullptr;
+    }
+    return nullptr;
+}
+
+std::shared_ptr<Mesh> AssetRegistry::GetMesh(const std::string& path) const {
+    return GetMesh(GetId(path));
 }
 
 void AssetRegistry::AddDependency(const AssetId& asset, const AssetId& dependency) {

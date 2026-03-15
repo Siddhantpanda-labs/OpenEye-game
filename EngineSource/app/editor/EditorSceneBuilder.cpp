@@ -7,7 +7,6 @@
 #include "api/geometry/Primitives.h"
 #include "api/render/Light.h"
 #include "api/world/All.h"
-#include "api/asset/loaders/ModelLoader.h"
 #include "api/core/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/platform/FileSystem.h"
@@ -173,20 +172,25 @@ void EditorSceneBuilder::EnsureDefaultMaterial() {
 }
 
 EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(eyelib::api::AssetRegistry* registry, const std::string& path) {
-    auto it = m_modelCache.find(path);
-    if (it != m_modelCache.end()) return it->second;
-
     ModelEntry entry{};
+    if (!registry) return entry;
     try {
-        std::shared_ptr<eyelib::api::ModelAsset> model = registry ? eyelib::api::ModelLoader::LoadModel(registry, path) : nullptr;
-        if (!model) {
-            m_modelCache.emplace(path, entry);
-            return entry;
+        eyelib::api::AssetId meshId = registry->GetId(path);
+        if (!meshId.IsValid())
+            meshId = registry->LoadAsset(path, eyelib::api::AssetType::Mesh);
+        if (!meshId.IsValid()) return entry;
+
+        std::shared_ptr<eyelib::api::Mesh> apiMesh = registry->GetMesh(meshId);
+        if (!apiMesh) return entry;
+        entry.mesh = std::move(apiMesh);
+
+        const std::vector<eyelib::api::AssetId> deps = registry->GetDependencies(meshId);
+        for (const auto& depId : deps) {
+            if (registry->GetAssetType(depId) == eyelib::api::AssetType::Material) {
+                entry.material = registry->GetMaterial(depId);
+                if (entry.material) break;
+            }
         }
-        const auto& meshes = model->GetMeshes();
-        const auto& materials = model->GetMaterials();
-        if (!meshes.empty()) entry.mesh = meshes.front();
-        if (!materials.empty()) entry.material = materials.front();
         if (!entry.material) {
             EnsureDefaultMaterial();
             entry.material = m_defaultMaterial;
@@ -196,7 +200,6 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(eyelib::api::A
     } catch (...) {
         eyelib::api::core::Log::ErrorF("EditorSceneBuilder: failed to load model %s", path.c_str());
     }
-    m_modelCache.emplace(path, entry);
     return entry;
 }
 

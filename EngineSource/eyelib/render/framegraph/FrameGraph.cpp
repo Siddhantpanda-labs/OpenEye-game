@@ -22,28 +22,51 @@ rhi::ResourceState FrameGraph::DesiredWriteState(rhi::RHITextureFormat format) {
 }
 
 void FrameGraph::TransitionPassResources(size_t passIndex, rhi::ICommandList* cmd) {
-    if (!cmd) return;
+    if (!cmd || !m_device) return;
     const auto& p = m_passes[passIndex];
-    // First transition all reads to desired read state
-    for (FGTextureHandle h : p.reads) {
-        if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
-        auto& tex = m_textures[h];
-        if (!tex.rhiTexture) continue;
-        rhi::ResourceState desired = DesiredReadState(tex.desc.format);
-        if (tex.currentState != desired) {
-            cmd->BarrierTexture(tex.rhiTexture, tex.currentState, desired);
-            tex.currentState = desired;
+    void* tracker = m_device->GetBarrierTracker();
+    if (tracker) {
+        for (FGTextureHandle h : p.reads) {
+            if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
+            auto& tex = m_textures[h];
+            if (!tex.rhiTexture) continue;
+            rhi::ResourceState desired = DesiredReadState(tex.desc.format);
+            if (tex.currentState != desired) {
+                m_device->TransitionTextureToState(tex.rhiTexture, desired);
+                tex.currentState = desired;
+            }
         }
-    }
-    // Then transition all writes to desired write state
-    for (FGTextureHandle h : p.writes) {
-        if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
-        auto& tex = m_textures[h];
-        if (!tex.rhiTexture) continue;
-        rhi::ResourceState desired = DesiredWriteState(tex.desc.format);
-        if (tex.currentState != desired) {
-            cmd->BarrierTexture(tex.rhiTexture, tex.currentState, desired);
-            tex.currentState = desired;
+        for (FGTextureHandle h : p.writes) {
+            if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
+            auto& tex = m_textures[h];
+            if (!tex.rhiTexture) continue;
+            rhi::ResourceState desired = DesiredWriteState(tex.desc.format);
+            if (tex.currentState != desired) {
+                m_device->TransitionTextureToState(tex.rhiTexture, desired);
+                tex.currentState = desired;
+            }
+        }
+        m_device->FlushBarrierTracker(cmd);
+    } else {
+        for (FGTextureHandle h : p.reads) {
+            if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
+            auto& tex = m_textures[h];
+            if (!tex.rhiTexture) continue;
+            rhi::ResourceState desired = DesiredReadState(tex.desc.format);
+            if (tex.currentState != desired) {
+                cmd->BarrierTexture(tex.rhiTexture, tex.currentState, desired);
+                tex.currentState = desired;
+            }
+        }
+        for (FGTextureHandle h : p.writes) {
+            if (h < 0 || static_cast<size_t>(h) >= m_textures.size()) continue;
+            auto& tex = m_textures[h];
+            if (!tex.rhiTexture) continue;
+            rhi::ResourceState desired = DesiredWriteState(tex.desc.format);
+            if (tex.currentState != desired) {
+                cmd->BarrierTexture(tex.rhiTexture, tex.currentState, desired);
+                tex.currentState = desired;
+            }
         }
     }
 }

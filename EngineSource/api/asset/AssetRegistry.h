@@ -5,6 +5,7 @@
 #include "api/animation/AnimationClip.h"
 #include "api/animation/Skeleton.h"
 #include "api/render/Material.h"
+#include "api/render/Mesh.h"
 #include "api/render/RenderDevice.h"
 
 #include <cstddef>
@@ -57,6 +58,8 @@ public:
     std::shared_ptr<Skeleton> GetSkeleton(const std::string& path) const;
     std::shared_ptr<Material> GetMaterial(const AssetId& id) const;
     std::shared_ptr<Material> GetMaterial(const std::string& path) const;
+    std::shared_ptr<Mesh> GetMesh(const AssetId& id) const;
+    std::shared_ptr<Mesh> GetMesh(const std::string& path) const;
 
     void AddDependency(const AssetId& asset, const AssetId& dependency);
     void RemoveDependency(const AssetId& asset, const AssetId& dependency);

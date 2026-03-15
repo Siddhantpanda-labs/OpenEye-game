@@ -32,7 +32,7 @@
 #ifdef OPENEYE_IMGUI_VULKAN
 #include <vulkan/vulkan.h>
 #include <backends/imgui_impl_vulkan.h>
-#include "eyelib/render/rhi/Vulkan/DeviceVK.h"
+#include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #endif
 #include "eyelib/render/rhi/RHI.h"
 #include <ImGuizmo.h>
@@ -435,6 +435,9 @@ int RunEditor(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
+
+        if (ctx.sceneViewPipeline)
+            ctx.sceneViewPipeline->UpdateUploads();
 
         openeye::editor::ShowMenuBar(ctx);
 

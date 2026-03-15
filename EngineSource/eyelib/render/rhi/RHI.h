@@ -154,6 +154,12 @@ struct IDevice {
     virtual void OnWindowResized(uint32_t width, uint32_t height) { (void)width; (void)height; }
     /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */
     virtual void Finish() {}
+    /** Optional: barrier tracker for batched transitions (e.g. Vulkan BarrierTrackerVK). Returns nullptr if not supported. */
+    virtual void* GetBarrierTracker() { return nullptr; }
+    /** Optional: transition texture to state via barrier tracker. No-op if GetBarrierTracker() is null. Used by FrameGraph for batched barriers. */
+    virtual void TransitionTextureToState(ITexture* texture, ResourceState newState) { (void)texture; (void)newState; }
+    /** Optional: flush pending barrier tracker transitions into the command list. No-op if GetBarrierTracker() is null. */
+    virtual void FlushBarrierTracker(ICommandList* cmd) { (void)cmd; }
     /** Blit color from given render target to the default framebuffer (e.g. for present). */
     virtual void BlitToDefaultFramebuffer(IRenderTarget* src) = 0;
     /** Optional: call after blit, before present (e.g. to record ImGui). Vulkan: receives current VkCommandBuffer. No-op on other backends. */

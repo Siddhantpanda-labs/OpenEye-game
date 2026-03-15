@@ -41,6 +41,11 @@ struct FGPassResources {
     unsigned height = 0;
 };
 
+/**
+ * DAG-based frame graph. Authority for transient resources and barriers:
+ * - Transient textures only via CreateTexture() or ImportTextureRHI().
+ * - Pass execute callbacks must not create textures or insert barriers; use Read/Write so the graph inserts transitions.
+ */
 class FrameGraph {
 public:
     FrameGraph();

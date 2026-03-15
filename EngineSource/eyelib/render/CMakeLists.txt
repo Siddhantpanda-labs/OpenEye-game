@@ -24,21 +24,35 @@ if(OPENEYE_USE_VULKAN)
 endif()
 if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
     list(APPEND RENDER_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BufferVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/TextureVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/ShaderVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/PipelineVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VulkanPipelineHash.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/VulkanBindingUtils.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DescriptorSetVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/RenderTargetVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/QueryPoolVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/FenceVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/BindlessHeapVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CommandListVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVK.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/DeviceVKPresentation.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/CreateDeviceVulkan.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/DeviceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/DeviceVKPresentation.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/CreateDeviceVulkan.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/FrameContextVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/InstanceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/PhysicalDeviceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/QueuesVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/core/SwapchainVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/commands/CommandBufferVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/commands/CommandListVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/commands/CommandPoolVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/resources/BufferVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/resources/TextureVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/resources/RenderTargetVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/memory/AllocatorVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/memory/UploadHeapVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/memory/DeletionQueueVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/DescriptorAllocatorVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/DescriptorCacheVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/DescriptorSetVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/BindlessHeapVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/PipelineVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/ShaderVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanPipelineHash.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanBindingUtils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/sync/FenceVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/sync/QueryPoolVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/barriers/BarrierTrackerVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/utils/DebugUtilsVK.cpp
     )
     set(OPENEYE_VULKAN_AVAILABLE 1)
 else()

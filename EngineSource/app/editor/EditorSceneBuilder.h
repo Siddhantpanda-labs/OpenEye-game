@@ -90,7 +90,6 @@ private:
                                        eyelib::api::AssetRegistry* assetRegistry);
     void PruneStaleDrawableCache();
 
-    std::unordered_map<std::string, ModelEntry> m_modelCache;
     std::unordered_map<std::string, ModelEntry> m_primitiveCache;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
     std::unordered_map<std::string, std::string> m_resolvedAssetPathCache;

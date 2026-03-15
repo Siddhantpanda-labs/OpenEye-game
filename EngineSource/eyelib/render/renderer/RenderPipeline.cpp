@@ -259,6 +259,8 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     m_gpuProfilerRHI = std::make_unique<GpuProfilerRHI>(m_device);
     debug::Profiler::SetGpuProfiler(m_gpuProfilerRHI.get());
 
+    WarmupPipelines();
+
     return true;
 }
 
@@ -308,6 +310,36 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
 
 void RenderPipeline::SetFrameSize(unsigned w, unsigned h) {
     Resize(static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+}
+
+void RenderPipeline::UpdateUploads() {
+    // Dedicated upload phase: CPU asset updates → staging (UploadHeap) → vkCmdCopyBuffer / vkCmdCopyBufferToImage.
+    // All uploads must happen here so they are deterministic and before CompileFrameGraph/Execute. Currently a no-op;
+    // move texture/mesh staging uploads from creation paths into this phase as they are refactored.
+    (void)m_device;
+}
+
+void RenderPipeline::WarmupPipelines() {
+    if (!m_device || !m_shaderCache) return;
+    EnsureSkyboxShader();
+    EnsureProceduralSkyboxShader();
+    EnsureStereoForwardShader();
+    EnsureOutlinePostShader();
+    EnsureEntityIdShader();
+    ShaderKey key;
+    key.stage = PipelineStage::GBuffer;
+    key.instanceType = InstanceType::Static;
+    key.materialTypeId = kDefaultMaterialTypeId;
+    m_shaderCache->getOrCompile(m_device, key);
+    key.stage = PipelineStage::Forward;
+    m_shaderCache->getOrCompile(m_device, key);
+    key.stage = PipelineStage::ForwardPlus;
+    m_shaderCache->getOrCompile(m_device, key);
+    key.instanceType = InstanceType::Skinned;
+    key.stage = PipelineStage::GBuffer;
+    m_shaderCache->getOrCompile(m_device, key);
+    key.stage = PipelineStage::Forward;
+    m_shaderCache->getOrCompile(m_device, key);
 }
 
 void RenderPipeline::EnsureResources(uint32_t width, uint32_t height) {
@@ -1207,7 +1239,7 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
 
     m_prevView = cam.view;
     m_prevProjection = cam.projection;
-    cmd->End();
+    // Do not End(): buffer stays recording for blit then EndFrame().
 #ifndef NDEBUG
     m_rendering = false;
 #endif
@@ -1571,7 +1603,7 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
     m_prevView = cam.view;
     m_prevProjection = cam.projection;
 
-    if (cmd) cmd->End();
+    // Do not End() here: buffer must stay recording so app can record blit next, then device->EndFrame() ends and submits. One buffer per frame.
 #ifndef NDEBUG
     m_rendering = false;
 #endif
@@ -1618,14 +1650,8 @@ void RenderPipeline::BlitToScreen() {
     } else if (blitSource) {
         m_device->BlitToDefaultFramebuffer(blitSource);
     }
-#if 0
-    static uint32_t s_blitFrameCount = 0;
-    if (++s_blitFrameCount % 60 == 0 && blitSource) {
-        core::Log::InfoF("BlitToScreen: source=%s size=%ux%u pipelineSize=%ux%u",
-                         (blitSource == m_hdrRenderTarget ? "HDR" : "post"),
-                         blitSource->GetWidth(), blitSource->GetHeight(), m_width, m_height);
-    }
-#endif
+    // Recording only; device owns submission (EndFrame submits, Present presents).
+    m_device->EndFrame();
     m_device->Present();
 }
 

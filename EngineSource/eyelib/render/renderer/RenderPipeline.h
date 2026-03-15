@@ -60,6 +60,8 @@ public:
     void SetMode(PipelineMode mode) { m_mode = mode; }
     PipelineMode GetMode() const { return m_mode; }
 
+    /** Upload phase: CPU asset updates → staging → vkCmdCopy*. Call after BeginFrame, before Render. Ensures all uploads in one predictable stage. */
+    void UpdateUploads();
     /** Render scene (ECS or converted from API at the api layer). */
     void Render(const RenderScene& scene);
     /** Render from a read-only view (zero-copy when view wraps API scene). When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass (same depth as main; for editor picking). */
@@ -82,6 +84,8 @@ public:
     rhi::IRenderTarget* GetEntityIdRenderTarget() const { return m_entityIdRenderTarget; }
     /** Reload all pipeline shaders that were loaded by name (for hot-reload when shader files change). */
     void ReloadShaders();
+    /** Precompile named and default pipelines so Draw() never creates pipelines at runtime. Call once after Initialize. */
+    void WarmupPipelines();
     /** Wait for GPU to finish all submitted work (e.g. before swap to avoid flicker). */
     void Finish();
     /** Returns true when the pipeline has a valid render target to present. */

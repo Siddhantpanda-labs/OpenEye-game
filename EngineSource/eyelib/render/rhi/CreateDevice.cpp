@@ -1,7 +1,7 @@
 #include "eyelib/render/rhi/CreateDevice.h"
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
 #if OPENEYE_VULKAN_AVAILABLE
-#include "eyelib/render/rhi/Vulkan/CreateDeviceVulkan.h"
+#include "eyelib/render/rhi/Vulkan/core/CreateDeviceVulkan.h"
 #endif
 #if OPENEYE_USE_DILIGENT
 #include "eyelib/render/rhi/diligent/CreateDeviceDiligent.h"

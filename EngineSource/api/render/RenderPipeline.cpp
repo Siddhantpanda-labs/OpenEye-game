@@ -159,6 +159,10 @@ RenderPipeline::Mode RenderPipeline::GetMode() const {
            Mode::ForwardPlus;
 }
 
+void RenderPipeline::UpdateUploads() {
+    if (m_impl->pipeline) m_impl->pipeline->UpdateUploads();
+}
+
 void RenderPipeline::Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque) {
     ApiRenderSceneView view(scene);
     m_impl->pipeline->Render(view, entityIdsForOpaque);

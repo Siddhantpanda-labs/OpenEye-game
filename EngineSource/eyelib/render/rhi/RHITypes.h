@@ -42,6 +42,8 @@ struct BufferDesc {
     const VertexLayout* vertexLayout = nullptr;  // optional; set when creating mesh VBs for full layout
     /** If true and backend supports sparse buffer (ARB_sparse_buffer), create as sparse; commit pages via CommitSparseBufferPages. */
     bool sparse = false;
+    /** Optional GPU debug name (e.g. Vulkan: vkSetDebugUtilsObjectNameEXT). */
+    const char* debugName = nullptr;
 };
 
 // ---- Texture ----
@@ -95,6 +97,8 @@ struct TextureDesc {
     bool sparse = false;
     /** If true, backend may use transient attachment (e.g. Vulkan VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT + lazily allocated memory). Attachment-only; not for sampling. */
     bool transient = false;
+    /** Optional GPU debug name (e.g. Vulkan: vkSetDebugUtilsObjectNameEXT for image and image view). */
+    const char* debugName = nullptr;
 };
 
 // ---- Resource states (for barriers) ----
@@ -220,6 +224,8 @@ struct PipelineDesc {
     BlendState blend;
     DepthStencilState depthStencil;
     RasterState raster;
+    /** Optional GPU debug name (e.g. Vulkan: vkSetDebugUtilsObjectNameEXT). */
+    const char* debugName = nullptr;
 };
 
 // ---- Render target ----

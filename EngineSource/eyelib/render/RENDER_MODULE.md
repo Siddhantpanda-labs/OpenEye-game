@@ -248,8 +248,45 @@ Applications (editor, player) get the device from the pipeline, pass it to asset
 
 ---
 
-## 10. Conventions
+## 10. Architecture Rules (Explicit & Future-Proof)
 
+### 10.1 Frame lifecycle (order is fixed)
+
+`BeginFrame` → `UpdateUploads` → Compile frame graph → Execute frame graph → `EndFrame` → `Present`. All CPU→staging→copy uploads happen in `UpdateUploads()`; no uploads during pass execution.
+
+### 10.2 Recording vs submission
+
+- **Renderer** records commands only (into the command list provided by the device).
+- **Device** owns submission: `EndFrame()` or `SubmitCommandList(list)` performs `vkQueueSubmit` / equivalent. The renderer must never submit directly.
+
+### 10.3 FrameGraph is the only authority for transients
+
+- **Transient textures** (GBuffer, HDR, shadow maps, post targets): only via `FrameGraph::CreateTexture()` or `FrameGraph::ImportTextureRHI()`. Pass execute callbacks must not create textures.
+- **Barriers**: only the FrameGraph inserts transitions between passes (via Read/Write declarations and `TransitionPassResources`). Pass code must not call `BarrierTexture` / `TransitionTextureToState` for frame-graph resources; declare reads/writes so the graph inserts barriers.
+
+### 10.4 Resource lifetime domains
+
+| Domain | Examples | Rule |
+|--------|----------|------|
+| **Persistent** | Meshes, materials, textures, IBL, shadow cascade RTs | Created at load/init; live until unload. |
+| **FrameGraph transient** | GBuffer, HDR, post buffers, shadow map targets in graph | Created/aliased by FrameGraph at Compile(); released on Clear(). |
+| **Streaming** | Upload heap (staging), per-frame scratch | Per-frame or rolling; never mix with persistent or graph transients. |
+
+Do not mix domains (e.g. do not create a persistent texture inside a pass execute callback).
+
+### 10.5 Command lists are stateless across frames
+
+`Begin()` clears all tracked state (bound pipeline, RT, textures, buffers, push constants). `End()` finalizes recording. No state survives across frames; each `Begin()` starts from a clean slate.
+
+### 10.6 Descriptor binding (slot-based, backend owns layout)
+
+Renderer binds by slot only: `cmd->BindTexture(tex, slot)`, `cmd->BindBuffer(buf, slot)`. The backend decides descriptor set index, bindless vs legacy set 0, and layout. The renderer must not depend on descriptor set numbers or layout details.
+
+---
+
+## 11. Conventions
+
+- **Pipeline warmup**: Pipelines are precompiled at init (e.g. `WarmupPipelines()`). `Draw()` must never create a pipeline.
 - **Device**: Always pass `rhi::IDevice*` (or `api::RenderDevice`) into creation/load APIs; do not rely on a global or SetDevice for render resources.
 - **Scene**: Pipeline takes `IRenderSceneView`; implement it over your scene type for zero-copy.
 - **Frame graph**: Compile(device) required; execution order is DAG-derived when acyclic.
