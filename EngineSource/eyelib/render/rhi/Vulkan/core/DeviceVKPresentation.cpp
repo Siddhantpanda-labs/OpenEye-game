@@ -18,16 +18,19 @@ void DeviceVK::Present() {
     if (!m_pendingPresent) {
         static bool once = false;
         if (!once) {
-            core::Log::Warn("Vulkan Present: skipped (m_pendingPresent false — BlitToDefaultFramebuffer did not run or returned early).");
+            core::Log::Warn("Vulkan Present: skipped (no swapchain image acquired this frame).");
             once = true;
         }
         return;
     }
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
-    const uint32_t imageIndex = m_swapchain.GetCurrentImageIndex();
+    const uint32_t imageIndex = frame.swapchainImageIndex;
     void* renderFinishedPerImage = m_swapchain.GetRenderFinishedSemaphore(imageIndex);
-    m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished);
+    int presentRes = m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished, imageIndex);
     m_pendingPresent = false;
+    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR) {
+        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true);
+    }
 }
 
 void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
@@ -88,17 +91,9 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         }
         return;
     }
+    if (!m_pendingPresent) return;  // No swapchain image this frame (Acquire in BeginFrame); only record when we have one.
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
-    if (!m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX)) {
-        static bool once = false;
-        if (!once) {
-            core::Log::Warn("Vulkan present: swapchain Acquire failed.");
-            once = true;
-        }
-        return;
-    }
-    m_pendingPresent = true;
-    const uint32_t imageIndex = m_swapchain.GetCurrentImageIndex();
+    const uint32_t imageIndex = frame.swapchainImageIndex;
     if (imageIndex >= m_swapchain.GetImageCount()) {
         static bool once = false;
         if (!once) {

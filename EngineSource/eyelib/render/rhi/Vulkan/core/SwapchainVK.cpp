@@ -174,7 +174,6 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     out->width = extent.width;
     out->height = extent.height;
     out->format = static_cast<uint32_t>(chosenFormat.format);
-    out->currentImageIndex = 0xFFFFFFFFu;
 
     uint32_t swapchainImageCount = 0;
     vkGetSwapchainImagesKHR(dev, swapchain, &swapchainImageCount, nullptr);
@@ -242,13 +241,12 @@ void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
     sw->width = 0;
     sw->height = 0;
     sw->format = 0;
-    sw->currentImageIndex = 0xFFFFFFFFu;
 }
 
-void SwapchainVK::Resize(uint32_t width, uint32_t height) {
-    width = std::max(1u, width);
-    height = std::max(1u, height);
-    if (width == this->width && height == this->height) return;
+void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate) {
+    w = std::max(1u, w);
+    h = std::max(1u, h);
+    if (!forceRecreate && w == width && h == height) return;
     if (!device || !physicalDevice || !surface) return;
     VkDevice dev = static_cast<VkDevice>(device);
     VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(physicalDevice);
@@ -311,8 +309,8 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
         if (pm == VK_PRESENT_MODE_FIFO_KHR) { presentMode = pm; break; }
     }
     VkExtent2D extent = {};
-    extent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
-    extent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
+    extent.width = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
+    extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     uint32_t imageCount = caps.minImageCount + 1;
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
 
@@ -341,7 +339,6 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
     this->width = extent.width;
     this->height = extent.height;
     format = static_cast<uint32_t>(chosenFormat.format);
-    currentImageIndex = 0xFFFFFFFFu;
 
     uint32_t swapchainImageCount = 0;
     vkGetSwapchainImagesKHR(dev, newSwapchain, &swapchainImageCount, nullptr);
@@ -369,25 +366,26 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
     CreateRenderFinishedSemaphores(this);
 }
 
-bool SwapchainVK::Acquire(void* semaphoreToSignal, uint64_t timeoutMs) {
-    if (!device || !swapchain) return false;
+int SwapchainVK::Acquire(void* semaphoreToSignal, uint64_t timeoutMs, uint32_t* outImageIndex) {
+    if (!device || !swapchain || !outImageIndex) return static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
     VkDevice dev = static_cast<VkDevice>(device);
     VkSwapchainKHR sc = static_cast<VkSwapchainKHR>(swapchain);
     VkSemaphore sem = semaphoreToSignal ? static_cast<VkSemaphore>(semaphoreToSignal) : VK_NULL_HANDLE;
     uint64_t timeout = (timeoutMs == UINT64_MAX) ? UINT64_MAX : (timeoutMs * 1000000);
-    VkResult res = vkAcquireNextImageKHR(dev, sc, timeout, sem, VK_NULL_HANDLE, &currentImageIndex);
-    return (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR);
+    VkResult res = vkAcquireNextImageKHR(dev, sc, timeout, sem, VK_NULL_HANDLE, outImageIndex);
+    return static_cast<int>(res);
 }
 
-bool SwapchainVK::Present(void* queue, void* waitSemaphore) {
-    if (!swapchain || currentImageIndex == 0xFFFFFFFFu) return false;
+int SwapchainVK::Present(void* queue, void* waitSemaphore, uint32_t imageIndex) {
+    if (!swapchain) return static_cast<int>(VK_ERROR_INITIALIZATION_FAILED);
+    if (imageIndex >= images.size()) return static_cast<int>(VK_ERROR_UNKNOWN);
     VkQueue q = static_cast<VkQueue>(queue);
     VkSwapchainKHR sc = static_cast<VkSwapchainKHR>(swapchain);
     VkPresentInfoKHR presentInfo = {};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &sc;
-    presentInfo.pImageIndices = &currentImageIndex;
+    presentInfo.pImageIndices = &imageIndex;
     VkSemaphore waitSem = waitSemaphore ? static_cast<VkSemaphore>(waitSemaphore) : VK_NULL_HANDLE;
     if (waitSem != VK_NULL_HANDLE) {
         presentInfo.waitSemaphoreCount = 1;
@@ -395,10 +393,9 @@ bool SwapchainVK::Present(void* queue, void* waitSemaphore) {
     }
     VkDevice dev = static_cast<VkDevice>(device);
     PFN_vkQueuePresentKHR pfnPresent = reinterpret_cast<PFN_vkQueuePresentKHR>(vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
-    if (!pfnPresent) return false;
+    if (!pfnPresent) return static_cast<int>(VK_ERROR_EXTENSION_NOT_PRESENT);
     VkResult res = pfnPresent(q, &presentInfo);
-    currentImageIndex = 0xFFFFFFFFu;
-    return (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR);
+    return static_cast<int>(res);
 }
 
 void* SwapchainVK::GetRenderFinishedSemaphore(uint32_t imageIndex) const {

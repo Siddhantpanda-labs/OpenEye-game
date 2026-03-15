@@ -1050,6 +1050,26 @@ void DeviceVK::BeginFrame() {
     m_immediateCommandList->SetCommandBuffer(buf, true);
     m_immediateCommandList->SetRecordingState(true);
     m_frameOpen = true;
+
+    // Acquire swapchain image after command buffer is ready (allows recording while waiting in more complex setups).
+    if (m_swapchain.swapchain && m_swapchain.GetImageCount() > 0) {
+        uint32_t acquiredIndex = 0xFFFFFFFFu;
+        int acquireRes = m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX, &acquiredIndex);
+        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR) {
+            m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true);
+            m_pendingPresent = false;
+            frame.swapchainImageIndex = 0xFFFFFFFFu;
+        } else if (acquireRes == VK_SUCCESS || acquireRes == VK_SUBOPTIMAL_KHR) {
+            m_pendingPresent = true;
+            frame.swapchainImageIndex = acquiredIndex;
+        } else {
+            m_pendingPresent = false;
+            frame.swapchainImageIndex = 0xFFFFFFFFu;
+        }
+    } else {
+        m_pendingPresent = false;
+        frame.swapchainImageIndex = 0xFFFFFFFFu;
+    }
 }
 
 // Submission is device-owned: only EndFrame() / SubmitCommandList() submit to the queue. Renderer only records.
@@ -1082,7 +1102,7 @@ void DeviceVK::EndFrame() {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &buf;
     VkSemaphore waitSem = static_cast<VkSemaphore>(frame.imageAvailable);
-    const uint32_t imageIndex = m_swapchain.GetCurrentImageIndex();
+    const uint32_t imageIndex = frame.swapchainImageIndex;
     void* renderFinishedPerImage = m_swapchain.GetRenderFinishedSemaphore(imageIndex);
     VkSemaphore signalSem = renderFinishedPerImage ? static_cast<VkSemaphore>(renderFinishedPerImage) : static_cast<VkSemaphore>(frame.renderFinished);
     if (m_pendingPresent && waitSem != VK_NULL_HANDLE && signalSem != VK_NULL_HANDLE) {

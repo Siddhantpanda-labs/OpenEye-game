@@ -19,7 +19,6 @@ struct SwapchainVK {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t format = 0;                // VkFormat (opaque)
-    uint32_t currentImageIndex = 0xFFFFFFFFu;  // set by Acquire(), used by Present()
     /** Per-image semaphores signaled by submit, waited by present. Avoids reusing a semaphore still in use by present (validation 00067). */
     std::vector<void*> renderFinishedSemaphores;
 
@@ -31,13 +30,13 @@ struct SwapchainVK {
     static bool Create(SwapchainVK* out, void* device, void* physicalDevice, void* surface, uint32_t width, uint32_t height);
     /** Destroy framebuffers, render pass, views, swapchain. Does not destroy surface. */
     static void Destroy(SwapchainVK* sw, void* device);
-    /** Recreate swapchain and derived state for new size. Call when window resizes. */
-    void Resize(uint32_t width, uint32_t height);
+    /** Recreate swapchain and derived state. When forceRecreate is true, recreates even if width/height unchanged (e.g. OUT_OF_DATE). */
+    void Resize(uint32_t width, uint32_t height, bool forceRecreate = false);
 
-    /** Acquire next image; signal semaphore when available. Returns true on success/suboptimal. Sets currentImageIndex. */
-    bool Acquire(void* semaphoreToSignal, uint64_t timeoutMs = UINT64_MAX);
-    /** Present current image; wait on semaphore before presenting. No vkQueueWaitIdle. */
-    bool Present(void* queue, void* waitSemaphore);
+    /** Acquire next image; signal semaphore when available. Returns VkResult; outImageIndex valid only on VK_SUCCESS/VK_SUBOPTIMAL_KHR. */
+    int Acquire(void* semaphoreToSignal, uint64_t timeoutMs, uint32_t* outImageIndex);
+    /** Present image; wait on semaphore before presenting. Returns VkResult (handle VK_ERROR_OUT_OF_DATE_KHR). */
+    int Present(void* queue, void* waitSemaphore, uint32_t imageIndex);
 
     uint32_t GetImageCount() const { return static_cast<uint32_t>(images.size()); }
     void* GetRenderPass() const { return renderPass; }
@@ -52,7 +51,6 @@ struct SwapchainVK {
     /** Extent (width, height) for renderer. */
     void GetExtent(uint32_t* outWidth, uint32_t* outHeight) const { if (outWidth) *outWidth = width; if (outHeight) *outHeight = height; }
     uint32_t GetFormat() const { return format; }
-    uint32_t GetCurrentImageIndex() const { return currentImageIndex; }
     /** Semaphore for this image index (signal on submit, wait on present). Valid after Create/Resize. */
     void* GetRenderFinishedSemaphore(uint32_t imageIndex) const;
 };

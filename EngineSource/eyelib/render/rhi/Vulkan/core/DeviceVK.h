@@ -256,7 +256,7 @@ private:
     uint64_t m_timelineValue = 0;           // next value to signal on submit
     void* m_surface = nullptr;              // VkSurfaceKHR
     SwapchainVK m_swapchain;                 // swapchain, images, views, framebuffers, render pass
-    bool m_pendingPresent = false;           // set by BlitToDefaultFramebuffer, cleared by Present (submit uses imageAvailable/renderFinished)
+    bool m_pendingPresent = false;           // set by BeginFrame when Acquire succeeds; cleared by Present (submit uses imageAvailable/renderFinished)
     std::unordered_map<uint64_t, void*> m_graphicsPipelineCache;  // hash -> VkPipeline
     std::unique_ptr<CommandListVK> m_immediateCommandList;
     IBuffer* m_fullscreenQuadVBO = nullptr;

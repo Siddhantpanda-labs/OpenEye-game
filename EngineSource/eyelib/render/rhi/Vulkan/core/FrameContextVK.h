@@ -16,6 +16,7 @@ struct FrameContextVK {
     void* fence = nullptr;             // VkFence (signaled when frame's submit completes)
     void* imageAvailable = nullptr;   // VkSemaphore (signaled by vkAcquireNextImageKHR)
     void* renderFinished = nullptr;    // VkSemaphore (signaled by submit; waited by present)
+    uint32_t swapchainImageIndex = 0xFFFFFFFFu;  // set by Acquire in BeginFrame; frame owns image for recording/present
 
     /** Create pool, buffer, fence, and two binary semaphores. Returns true on success. */
     static bool Create(FrameContextVK* out, void* device, uint32_t queueFamilyIndex);
