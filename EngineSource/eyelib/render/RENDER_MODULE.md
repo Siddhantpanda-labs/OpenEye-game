@@ -280,7 +280,7 @@ Do not mix domains (e.g. do not create a persistent texture inside a pass execut
 
 ### 10.6 Descriptor binding (slot-based, backend owns layout)
 
-Renderer binds by slot only: `cmd->BindTexture(tex, slot)`, `cmd->BindBuffer(buf, slot)`. The backend decides descriptor set index, bindless vs legacy set 0, and layout. The renderer must not depend on descriptor set numbers or layout details.
+Renderer binds by slot only: `cmd->BindTexture(tex, slot)`, `cmd->BindBuffer(buf, slot)`. The backend decides descriptor set index and layout (binding table or PushOnly). The renderer must not depend on descriptor set numbers or layout details.
 
 ---
 

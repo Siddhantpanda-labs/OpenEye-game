@@ -33,7 +33,7 @@ struct PipelineVK : IPipeline {
     ComputeBlockPresence m_computeBlockPresence{};
     bool m_isCompute = false;
     void* m_pipeline = nullptr;           // VkPipeline
-    /** Layout kind used to create this pipeline. Legacy = use UpdateLegacySet0/UpdateComputeSet0; other = caller uses BindDescriptorSets. */
+    /** Layout kind used to create this pipeline. PushOnly/Legacy = 0 sets, push constants only; Compute may use UpdateComputeSet0; other = caller uses BindDescriptorSets. */
     PipelineLayoutKind m_layoutKind = PipelineLayoutKind::Legacy;
     /** When m_layoutKind != Legacy, this is the VkPipelineLayout (resource-space). Used for BindDescriptorSets and push constants. */
     void* m_nativePipelineLayout = nullptr;

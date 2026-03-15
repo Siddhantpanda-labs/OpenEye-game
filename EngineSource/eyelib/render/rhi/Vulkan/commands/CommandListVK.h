@@ -105,9 +105,9 @@ struct CommandListVK : ICommandList {
 
     /** Backend: VkCommandBuffer (opaque to avoid including vulkan.h in header). */
     void* GetCommandBuffer() const { return m_commandBuffer; }
-    /** For DeviceVK::UpdateLegacySet0: current bound texture at binding (null if unbound). */
+    /** For compute UpdateComputeSet0: current bound texture at binding (null if unbound). */
     rhi::ITexture* GetBoundTexture(uint32_t binding) const;
-    /** For DeviceVK::UpdateLegacySet0: current bound storage buffer at binding. */
+    /** For compute UpdateComputeSet0: current bound storage buffer at binding. */
     void GetBoundStorageBuffer(uint32_t binding, rhi::IBuffer** outBuffer, uint32_t* outOffset, uint32_t* outSize) const;
     /** For DeviceVK::UpdateComputeSet0: current bound uniform buffer at binding. */
     void GetBoundUniformBuffer(uint32_t binding, rhi::IBuffer** outBuffer, uint32_t* outOffset, uint32_t* outSize) const;

@@ -11,19 +11,12 @@ struct CommandListVK;
 
 namespace vkhelpers {
 
-bool CreateLegacySet0(VkDevice device, VkDescriptorPool descriptorPool,
-                      VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet);
-
 bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
                        VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet);
-
-bool CreateDefaultPipelineLayout(VkDevice device, VkDescriptorSetLayout legacySet0Layout, VkDescriptorSetLayout bindlessSetLayout,
-                                 VkPipelineLayout* outPipelineLayout);
 
 bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeSet0Layout, VkDescriptorSetLayout bindlessSetLayout,
                                  VkPipelineLayout* outPipelineLayout);
 
-void UpdateLegacySet0(DeviceVK* device, CommandListVK* cmd);
 void UpdateComputeSet0(DeviceVK* device, CommandListVK* cmd);
 
 } // namespace vkhelpers

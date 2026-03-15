@@ -61,7 +61,7 @@ std::shared_ptr<Mesh> CreateCubeMesh(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI())) {
+    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL)) {
         return nullptr;
     }
     return shader;
@@ -69,7 +69,7 @@ std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreatePrefilterShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI())) {
+    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL)) {
         return nullptr;
     }
     return shader;
@@ -169,7 +169,7 @@ void main() {
 }
 )";
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList))
+    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly))
         return nullptr;
     return shader;
 }
@@ -179,6 +179,7 @@ IBL::IBL() = default;
 
 IBL::~IBL() {
     if (m_deviceRHI) {
+        if (m_iblPassSet) { m_deviceRHI->DestroyDescriptorSet(m_iblPassSet); m_iblPassSet = nullptr; }
         if (m_irradianceRHI) m_deviceRHI->DestroyTexture(m_irradianceRHI);
         if (m_prefilterRHI) m_deviceRHI->DestroyTexture(m_prefilterRHI);
         if (m_brdfLUTRHI) m_deviceRHI->DestroyTexture(m_brdfLUTRHI);
@@ -252,6 +253,10 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         return false;
     }
 
+    rhi::IPipelineLayout* iblPassLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::IBLPass);
+    if (iblPassLayout)
+        m_iblPassSet = m_deviceRHI->CreateDescriptorSet(iblPassLayout);
+
     rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
     if (!cmd) return false;
 
@@ -278,10 +283,15 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         cmd->SetCullFace(false);
 
         irradianceShader->Bind(m_deviceRHI);
-        irradianceShader->SetInt("u_EnvironmentMap", 0);
+        if (m_iblPassSet) {
+            m_iblPassSet->UpdateTexture(0, m_environmentRHI);
+            rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
+            cmd->BindDescriptorSets(0, 1, sets);
+        } else {
+            cmd->BindTexture(m_environmentRHI, 0);
+        }
         irradianceShader->SetMat4("u_View", captureViews[face]);
         irradianceShader->SetMat4("u_Projection", captureProjection);
-        cmd->BindTexture(m_environmentRHI, 0);
         cubeMesh->Draw(m_deviceRHI);
         irradianceShader->Unbind();
         m_deviceRHI->DestroyRenderTarget(rt);
@@ -304,11 +314,16 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetCullFace(false);
 
             prefilterShader->Bind(m_deviceRHI);
-            prefilterShader->SetInt("u_EnvironmentMap", 0);
+            if (m_iblPassSet) {
+                m_iblPassSet->UpdateTexture(0, m_environmentRHI);
+                rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
+                cmd->BindDescriptorSets(0, 1, sets);
+            } else {
+                cmd->BindTexture(m_environmentRHI, 0);
+            }
             prefilterShader->SetFloat("u_Roughness", roughness);
             prefilterShader->SetMat4("u_View", captureViews[face]);
             prefilterShader->SetMat4("u_Projection", captureProjection);
-            cmd->BindTexture(m_environmentRHI, 0);
             cubeMesh->Draw(m_deviceRHI);
             prefilterShader->Unbind();
             m_deviceRHI->DestroyRenderTarget(rt);

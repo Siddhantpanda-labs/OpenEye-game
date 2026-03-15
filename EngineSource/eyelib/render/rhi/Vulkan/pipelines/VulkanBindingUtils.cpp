@@ -9,47 +9,6 @@ namespace render {
 namespace rhi {
 namespace vkhelpers {
 
-bool CreateLegacySet0(VkDevice device, VkDescriptorPool descriptorPool,
-                      VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet) {
-    if (!device || !descriptorPool || !outLayout || !outSet) return false;
-    *outLayout = VK_NULL_HANDLE;
-    *outSet = VK_NULL_HANDLE;
-    const uint32_t kLegacySet0ImageBindings[] = { 0, 1, 2, 3, 4, 5, 6, 11, 12, 13 };
-    const uint32_t kLegacySet0StorageBindings[] = { 7 };
-    VkDescriptorSetLayoutBinding legacyBindings[11] = {};
-    for (size_t i = 0; i < 10; i++) {
-        legacyBindings[i].binding = kLegacySet0ImageBindings[i];
-        legacyBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        legacyBindings[i].descriptorCount = 1;
-        legacyBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
-    for (size_t i = 0; i < 1; i++) {
-        legacyBindings[10 + i].binding = kLegacySet0StorageBindings[i];
-        legacyBindings[10 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        legacyBindings[10 + i].descriptorCount = 1;
-        legacyBindings[10 + i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
-    VkDescriptorSetLayoutCreateInfo legacyLayoutInfo = {};
-    legacyLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    legacyLayoutInfo.bindingCount = 11;
-    legacyLayoutInfo.pBindings = legacyBindings;
-    VkResult res = vkCreateDescriptorSetLayout(device, &legacyLayoutInfo, nullptr, outLayout);
-    if (res != VK_SUCCESS) return false;
-
-    VkDescriptorSetAllocateInfo legacyAlloc = {};
-    legacyAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    legacyAlloc.descriptorPool = descriptorPool;
-    legacyAlloc.descriptorSetCount = 1;
-    legacyAlloc.pSetLayouts = outLayout;
-    res = vkAllocateDescriptorSets(device, &legacyAlloc, outSet);
-    if (res != VK_SUCCESS) {
-        vkDestroyDescriptorSetLayout(device, *outLayout, nullptr);
-        *outLayout = VK_NULL_HANDLE;
-        return false;
-    }
-    return true;
-}
-
 bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
                        VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet) {
     if (!device || !descriptorPool || !outLayout || !outSet) return false;
@@ -101,24 +60,6 @@ bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
     return true;
 }
 
-bool CreateDefaultPipelineLayout(VkDevice device, VkDescriptorSetLayout legacySet0Layout, VkDescriptorSetLayout bindlessSetLayout,
-                                 VkPipelineLayout* outPipelineLayout) {
-    if (!device || !legacySet0Layout || !bindlessSetLayout || !outPipelineLayout) return false;
-    *outPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout setLayouts[2] = { legacySet0Layout, bindlessSetLayout };
-    VkPushConstantRange pushRange = {};
-    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushRange.offset = 0;
-    pushRange.size = 256;
-    VkPipelineLayoutCreateInfo defaultPlInfo = {};
-    defaultPlInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    defaultPlInfo.setLayoutCount = 2;
-    defaultPlInfo.pSetLayouts = setLayouts;
-    defaultPlInfo.pushConstantRangeCount = 1;
-    defaultPlInfo.pPushConstantRanges = &pushRange;
-    return vkCreatePipelineLayout(device, &defaultPlInfo, nullptr, outPipelineLayout) == VK_SUCCESS;
-}
-
 bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeSet0Layout, VkDescriptorSetLayout bindlessSetLayout,
                                  VkPipelineLayout* outPipelineLayout) {
     if (!device || !computeSet0Layout || !bindlessSetLayout || !outPipelineLayout) return false;
@@ -135,61 +76,6 @@ bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeS
     info.pushConstantRangeCount = 1;
     info.pPushConstantRanges = &pushRange;
     return vkCreatePipelineLayout(device, &info, nullptr, outPipelineLayout) == VK_SUCCESS;
-}
-
-void UpdateLegacySet0(DeviceVK* deviceObj, CommandListVK* cmd) {
-    if (!deviceObj || !cmd) return;
-    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkDescriptorSet set = static_cast<VkDescriptorSet>(deviceObj->GetLegacySet0());
-    VkSampler sampler = static_cast<VkSampler>(deviceObj->GetDefaultSampler());
-    if (device == VK_NULL_HANDLE || set == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) return;
-    const uint32_t kImageBindings[] = { 0, 1, 2, 3, 4, 5, 6, 11, 12, 13 };
-    const uint32_t kStorageBindings[] = { 7 };
-    VkDescriptorImageInfo imageInfos[10] = {};
-    VkDescriptorBufferInfo bufferInfos[1] = {};
-    VkWriteDescriptorSet writes[11] = {};
-    uint32_t numWrites = 0;
-    for (size_t i = 0; i < 10; i++) {
-        const uint32_t b = kImageBindings[i];
-        ITexture* tex = cmd->GetBoundTexture(b);
-        if (!tex) continue;
-        TextureVK* tVK = static_cast<TextureVK*>(tex);
-        VkImageView view = static_cast<VkImageView>(tVK->m_imageView);
-        if (view == VK_NULL_HANDLE) continue;
-        imageInfos[i].sampler = sampler;
-        imageInfos[i].imageView = view;
-        imageInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        writes[numWrites].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[numWrites].dstSet = set;
-        writes[numWrites].dstBinding = b;
-        writes[numWrites].dstArrayElement = 0;
-        writes[numWrites].descriptorCount = 1;
-        writes[numWrites].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[numWrites].pImageInfo = &imageInfos[i];
-        numWrites++;
-    }
-    for (size_t i = 0; i < 1; i++) {
-        const uint32_t b = kStorageBindings[i];
-        IBuffer* buf = nullptr;
-        uint32_t offset = 0, size = 0;
-        cmd->GetBoundStorageBuffer(b, &buf, &offset, &size);
-        if (!buf) continue;
-        BufferVK* bVK = static_cast<BufferVK*>(buf);
-        VkBuffer vkBuf = static_cast<VkBuffer>(bVK->m_buffer);
-        if (vkBuf == VK_NULL_HANDLE) continue;
-        bufferInfos[i].buffer = vkBuf;
-        bufferInfos[i].offset = offset;
-        bufferInfos[i].range = size > 0 ? size : VK_WHOLE_SIZE;
-        writes[numWrites].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[numWrites].dstSet = set;
-        writes[numWrites].dstBinding = b;
-        writes[numWrites].dstArrayElement = 0;
-        writes[numWrites].descriptorCount = 1;
-        writes[numWrites].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[numWrites].pBufferInfo = &bufferInfos[i];
-        numWrites++;
-    }
-    if (numWrites > 0) vkUpdateDescriptorSets(device, numWrites, writes, 0, nullptr);
 }
 
 void UpdateComputeSet0(DeviceVK* deviceObj, CommandListVK* cmd) {

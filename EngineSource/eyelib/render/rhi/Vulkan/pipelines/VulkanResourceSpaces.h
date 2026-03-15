@@ -35,6 +35,9 @@ VkDescriptorSetLayout CreateMaterialSetLayout(VkDevice device);
 /** Set 4 — SceneBuffers: 0 draw list, 1 instance/transform, 2 light buffer, 3 cluster (all SSBO). */
 VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device);
 
+/** Set 0 — IBLPass: 0 environment cube (combined image sampler). */
+VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device);
+
 /** Forward: set0 Frame, set1 ForwardPass, set2 Material, set3 Bindless, set4 SceneBuffers. Push constants 128 bytes vertex|fragment. */
 VkPipelineLayout CreateForwardPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
@@ -77,12 +80,19 @@ VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout sceneLayout);
 
-/** Return pipeline layout for kind. Returns VK_NULL_HANDLE for Legacy (caller uses legacy path). */
+/** IBL: set0 IBLPass (env cube). Push constants 128 bytes (view, projection). */
+VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout);
+
+/** PushOnly: 0 descriptor sets; push constants 128 bytes. Used for BRDF LUT, etc. */
+VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device);
+
+/** Return pipeline layout for kind. Legacy and PushOnly return pushOnly layout. */
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
-    VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull, PipelineLayoutKind kind);
+    VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
+    VkPipelineLayout ibl, VkPipelineLayout pushOnly, PipelineLayoutKind kind);
 
-/** Number of descriptor sets the pipeline layout expects (for validation). Legacy = 0. */
+/** Number of descriptor sets the pipeline layout expects. PushOnly/Legacy = 0. */
 uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind);
 
 } // namespace vkres

@@ -3,7 +3,7 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 FragColor;
 
-layout(binding = 0) uniform samplerCube u_Skybox;
+layout(set = 1, binding = 0) uniform samplerCube u_Skybox;
 
 layout(push_constant, std430) uniform SkyboxPush {
     mat4 u_InverseViewMatrix;

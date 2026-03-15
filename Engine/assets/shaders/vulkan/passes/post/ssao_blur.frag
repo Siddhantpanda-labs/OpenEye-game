@@ -3,8 +3,8 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out float FragColor;
 
-layout(binding = 0) uniform sampler2D u_SSAO;
-layout(binding = 1) uniform sampler2D u_Depth;
+layout(set = 1, binding = 0) uniform sampler2D u_SSAO;
+layout(set = 1, binding = 1) uniform sampler2D u_Depth;
 
 layout(push_constant, std430) uniform Push {
     vec2 u_Axis;

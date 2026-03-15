@@ -124,6 +124,8 @@ DeviceVK::~DeviceVK() {
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_computeLightCullPipelineLayout = nullptr; }
     rscPl = static_cast<VkPipelineLayout>(m_computeGpuCullPipelineLayout);
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_computeGpuCullPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_iblPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_iblPipelineLayout = nullptr; }
     // Resource-space set layouts
     VkDescriptorSetLayout rscLayout = static_cast<VkDescriptorSetLayout>(m_frameSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_frameSetLayout = nullptr; }
@@ -141,6 +143,8 @@ DeviceVK::~DeviceVK() {
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_materialSetLayout = nullptr; }
     rscLayout = static_cast<VkDescriptorSetLayout>(m_sceneBuffersSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_sceneBuffersSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_iblPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_iblPassSetLayout = nullptr; }
 
     VkPipelineLayout defaultPl = static_cast<VkPipelineLayout>(m_defaultPipelineLayout);
     if (defaultPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
@@ -161,12 +165,6 @@ DeviceVK::~DeviceVK() {
     if (computeSet0Layout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, computeSet0Layout, nullptr);
         m_computeSet0Layout = nullptr;
-    }
-    m_legacySet0 = nullptr;  // freed with descriptor pool
-    VkDescriptorSetLayout legacyLayout = static_cast<VkDescriptorSetLayout>(m_legacySet0Layout);
-    if (legacyLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, legacyLayout, nullptr);
-        m_legacySet0Layout = nullptr;
     }
     VkDescriptorPool emptyBindlessPool = static_cast<VkDescriptorPool>(m_emptyBindlessPool);
     if (emptyBindlessPool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
@@ -466,33 +464,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
     m_pipelineCache = pipelineCache;
 
-    VkDescriptorSetLayout legacySet0Layout = VK_NULL_HANDLE;
-    VkDescriptorSet legacySet0 = VK_NULL_HANDLE;
-    if (!vkhelpers::CreateLegacySet0(device, descriptorPool, &legacySet0Layout, &legacySet0)) {
-        core::Log::Error("DeviceVK::Initialize: failed to create legacy set0 resources");
-        vkDestroyPipelineCache(device, pipelineCache, nullptr);
-        m_pipelineCache = nullptr;
-        vkDestroySampler(device, defaultSampler, nullptr);
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        m_descriptorPool = nullptr;
-        for (uint32_t i = 0; i < kMaxFrames; ++i) FrameContextVK::Destroy(&m_frameContexts[i], device);
-        AllocatorVK::Destroy(&m_allocatorVK);
-        vkDestroyDevice(device, nullptr);
-        InstanceVK::Destroy(&m_instanceVK);
-        m_device = nullptr;
-        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
-        return false;
-    }
-    m_legacySet0Layout = legacySet0Layout;
-    m_legacySet0 = legacySet0;
-
     VkDescriptorSetLayout computeSet0Layout = VK_NULL_HANDLE;
     VkDescriptorSet computeSet0 = VK_NULL_HANDLE;
     if (!vkhelpers::CreateComputeSet0(device, descriptorPool, &computeSet0Layout, &computeSet0)) {
         core::Log::Error("DeviceVK::Initialize: failed to create compute set0 resources");
-        vkDestroyDescriptorSetLayout(device, legacySet0Layout, nullptr);
-        m_legacySet0Layout = nullptr;
-        m_legacySet0 = nullptr;
         vkDestroyPipelineCache(device, pipelineCache, nullptr);
         m_pipelineCache = nullptr;
         vkDestroySampler(device, defaultSampler, nullptr);
@@ -541,9 +516,6 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     res = vkCreateDescriptorSetLayout(device, &bindlessLayoutInfo, nullptr, &bindlessSetLayout);
     if (res != VK_SUCCESS) {
         core::Log::ErrorF("DeviceVK::Initialize: vkCreateDescriptorSetLayout (bindless) failed (0x%x)", res);
-        vkDestroyDescriptorSetLayout(device, legacySet0Layout, nullptr);
-        m_legacySet0Layout = nullptr;
-        m_legacySet0 = nullptr;
         vkDestroyPipelineCache(device, pipelineCache, nullptr);
         m_pipelineCache = nullptr;
         vkDestroySampler(device, defaultSampler, nullptr);
@@ -560,12 +532,9 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
     m_bindlessSetLayout = bindlessSetLayout;
 
-    VkPipelineLayout defaultPipelineLayout = VK_NULL_HANDLE;
-    if (!vkhelpers::CreateDefaultPipelineLayout(device, legacySet0Layout, bindlessSetLayout, &defaultPipelineLayout)) {
-        core::Log::Error("DeviceVK::Initialize: failed to create default pipeline layout");
-        vkDestroyDescriptorSetLayout(device, legacySet0Layout, nullptr);
-        m_legacySet0Layout = nullptr;
-        m_legacySet0 = nullptr;
+    VkPipelineLayout defaultPipelineLayout = vkres::CreatePushOnlyPipelineLayout(device);
+    if (defaultPipelineLayout == VK_NULL_HANDLE) {
+        core::Log::Error("DeviceVK::Initialize: failed to create push-only pipeline layout");
         vkDestroyDescriptorSetLayout(device, bindlessSetLayout, nullptr);
         m_bindlessSetLayout = nullptr;
         vkDestroyPipelineCache(device, pipelineCache, nullptr);
@@ -591,9 +560,6 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_defaultPipelineLayout = nullptr;
         vkDestroyDescriptorSetLayout(device, bindlessSetLayout, nullptr);
         m_bindlessSetLayout = nullptr;
-        vkDestroyDescriptorSetLayout(device, legacySet0Layout, nullptr);
-        m_legacySet0Layout = nullptr;
-        m_legacySet0 = nullptr;
         vkDestroyDescriptorSetLayout(device, computeSet0Layout, nullptr);
         m_computeSet0Layout = nullptr;
         m_computeSet0 = nullptr;
@@ -696,7 +662,9 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device);
         VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device);
         VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device);
-        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout) {
+        VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device);
+        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout) {
+            if (iblPassLayout) vkDestroyDescriptorSetLayout(device, iblPassLayout, nullptr);
             if (sceneLayout) vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
             if (materialLayout) vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
             if (deferredLightingPassLayout) vkDestroyDescriptorSetLayout(device, deferredLightingPassLayout, nullptr);
@@ -735,6 +703,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_deferredLightingPassSetLayout = deferredLightingPassLayout;
         m_materialSetLayout = materialLayout;
         m_sceneBuffersSetLayout = sceneLayout;
+        m_iblPassSetLayout = iblPassLayout;
 
         VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout, sceneLayout);
         VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout);
@@ -743,7 +712,9 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkPipelineLayout deferredLightingPl = vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout);
         VkPipelineLayout computeLightCullPl = vkres::CreateComputeLightCullPipelineLayout(device, frameLayout, lightCullPassLayout, sceneLayout);
         VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout);
-        if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl) {
+        VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout);
+        if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl) {
+            if (iblPl) vkDestroyPipelineLayout(device, iblPl, nullptr);
             if (computeGpuCullPl) vkDestroyPipelineLayout(device, computeGpuCullPl, nullptr);
             if (computeLightCullPl) vkDestroyPipelineLayout(device, computeLightCullPl, nullptr);
             if (deferredLightingPl) vkDestroyPipelineLayout(device, deferredLightingPl, nullptr);
@@ -751,6 +722,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             if (shadowPl) vkDestroyPipelineLayout(device, shadowPl, nullptr);
             if (postPl) vkDestroyPipelineLayout(device, postPl, nullptr);
             if (forwardPl) vkDestroyPipelineLayout(device, forwardPl, nullptr);
+            vkDestroyDescriptorSetLayout(device, iblPassLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, deferredLightingPassLayout, nullptr);
@@ -759,6 +731,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             vkDestroyDescriptorSetLayout(device, postPassLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, forwardPassLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, frameLayout, nullptr);
+            m_iblPassSetLayout = nullptr;
             m_frameSetLayout = nullptr;
             m_forwardPassSetLayout = nullptr;
             m_postPassSetLayout = nullptr;
@@ -796,6 +769,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_deferredLightingPipelineLayout = deferredLightingPl;
         m_computeLightCullPipelineLayout = computeLightCullPl;
         m_computeGpuCullPipelineLayout = computeGpuCullPl;
+        m_iblPipelineLayout = iblPl;
 
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] = CreatePipelineLayoutWrapperVK(this, frameLayout);
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::PostPass)] = CreatePipelineLayoutWrapperVK(this, postPassLayout);
@@ -805,6 +779,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Material)] = CreatePipelineLayoutWrapperVK(this, materialLayout);
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::SceneBuffers)] = CreatePipelineLayoutWrapperVK(this, sceneLayout);
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::DeferredLightingPass)] = CreatePipelineLayoutWrapperVK(this, deferredLightingPassLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::IBLPass)] = CreatePipelineLayoutWrapperVK(this, iblPassLayout);
     }
 
     VkSemaphoreTypeCreateInfo timelineTypeInfo = {};
@@ -915,10 +890,6 @@ void DeviceVK::EnsureFullscreenQuad() {
     m_fullscreenQuadIBO = CreateBuffer(iboDesc, indices);
 }
 
-void DeviceVK::UpdateLegacySet0(CommandListVK* cmd) {
-    vkhelpers::UpdateLegacySet0(this, cmd);
-}
-
 void DeviceVK::UpdateComputeSet0(CommandListVK* cmd) {
     vkhelpers::UpdateComputeSet0(this, cmd);
 }
@@ -932,6 +903,8 @@ void* DeviceVK::GetPipelineLayoutForKind(PipelineLayoutKind kind) const {
         static_cast<VkPipelineLayout>(m_deferredLightingPipelineLayout),
         static_cast<VkPipelineLayout>(m_computeLightCullPipelineLayout),
         static_cast<VkPipelineLayout>(m_computeGpuCullPipelineLayout),
+        static_cast<VkPipelineLayout>(m_iblPipelineLayout),
+        static_cast<VkPipelineLayout>(m_defaultPipelineLayout),
         kind);
 }
 
@@ -1281,7 +1254,7 @@ IPipelineLayout* DeviceVK::CreatePipelineLayout(const PipelineLayoutDesc& desc) 
 
 IPipelineLayout* DeviceVK::GetResourceSetLayout(ResourceSetType type) {
     size_t i = static_cast<size_t>(type);
-    return (i < 8) ? m_resourceSetLayouts[i] : nullptr;
+    return (i < 9) ? m_resourceSetLayouts[i] : nullptr;
 }
 
 IPipelineLayout* DeviceVK::GetBindlessPipelineLayout() const {

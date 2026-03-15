@@ -9,13 +9,17 @@ layout(location = 4) in vec4 a_Color;
 layout(location = 5) in ivec4 a_BoneIndices;
 layout(location = 6) in vec4 a_BoneWeights;
 
-layout(std140, binding = 3) uniform Bones {
-    mat4 u_Bones[128];
+// set 1 = ShadowPass (binding 0 = cascade UBO)
+layout(set = 1, binding = 0) uniform ShadowBlock {
+    mat4 u_LightSpaceMatrix;
+};
+// set 2 = SceneBuffers (binding 1 = bones SSBO)
+layout(set = 2, binding = 1) readonly buffer Bones {
+    mat4 u_Bones[];
 };
 
-layout(push_constant, std430) uniform ShadowPush {
+layout(push_constant, std430) uniform Push {
     mat4 u_Model;
-    mat4 u_LightSpaceMatrix;
 } pc;
 
 void main() {
@@ -24,10 +28,10 @@ void main() {
     for (int i = 0; i < 4; ++i) {
         int idx = a_BoneIndices[i];
         float w = a_BoneWeights[i];
-        if (w > 0.0 && idx >= 0 && idx < 128)
+        if (w > 0.0 && idx >= 0)
             skin += u_Bones[idx] * w;
     }
     pos = skin * pos;
     vec4 worldPos = pc.u_Model * pos;
-    gl_Position = pc.u_LightSpaceMatrix * worldPos;
+    gl_Position = u_LightSpaceMatrix * worldPos;
 }

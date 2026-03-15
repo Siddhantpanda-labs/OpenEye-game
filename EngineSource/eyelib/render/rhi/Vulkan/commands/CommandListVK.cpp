@@ -261,18 +261,11 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (vkPipe == VK_NULL_HANDLE) return;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
-    // Only auto-bind legacy set0 + bindless when pipeline uses legacy layout. Resource-space pipelines use BindDescriptorSets.
-    if (pVK->m_layoutKind == PipelineLayoutKind::Legacy && !pVK->m_isCompute) {
-        VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
-        if (defaultLayout != VK_NULL_HANDLE) {
-            m_device->UpdateLegacySet0(this);
-            VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
-            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-            if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
-                VkDescriptorSet sets[2] = { set0, emptyBindless };
-                vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, defaultLayout, 0, 2, sets, 0, nullptr);
-            }
-        }
+    // PushOnly/Legacy: 0 descriptor sets; push constants only. Resource-space pipelines use BindDescriptorSets.
+    if ((pVK->m_layoutKind == PipelineLayoutKind::Legacy || pVK->m_layoutKind == PipelineLayoutKind::PushOnly) && !pVK->m_isCompute) {
+        VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+        if (layout != VK_NULL_HANDLE)
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
     }
 }
 void CommandListVK::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
@@ -306,20 +299,10 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
     BindVertexBuffer(vbo, 0, 0);
     BindIndexBuffer(ibo, IndexType::UInt16, 0);
     PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
-    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::Legacy ? pVK->m_nativePipelineLayout : m_device->GetDefaultPipelineLayout());
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout ? pVK->m_nativePipelineLayout : m_device->GetDefaultPipelineLayout());
     if (layout != VK_NULL_HANDLE) {
-        if (pVK->m_layoutKind == PipelineLayoutKind::Legacy) {
-            m_device->UpdateLegacySet0(this);
-            VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
-            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-            if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
-                VkDescriptorSet sets[2] = { set0, emptyBindless };
-                vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 2, sets, 0, nullptr);
-            }
-            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
-        } else {
-            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
-        }
+        uint32_t pushSize = (pVK->m_layoutKind == PipelineLayoutKind::Legacy || pVK->m_layoutKind == PipelineLayoutKind::PushOnly) ? 128u : 128u;
+        vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushSize, m_pushConstants);
     }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
 }
@@ -475,10 +458,13 @@ void CommandListVK::SetUniformMat4(const char* name, const float* data) {
         std::memcpy(m_pushConstants + 0, data, mat4Bytes);
     else if (std::strcmp(name, "u_InverseProjectionMatrix") == 0)
         std::memcpy(m_pushConstants + 64, data, mat4Bytes);
-    else if (std::strcmp(name, "u_View") == 0)
+    else if (std::strcmp(name, "u_View") == 0) {
         std::memcpy(m_computeParamsData + kOffsetView, data, mat4Bytes);
-    else if (std::strcmp(name, "u_Projection") == 0)
+        std::memcpy(m_pushConstants + 64, data, mat4Bytes);  // IBL push: u_View at 64
+    } else if (std::strcmp(name, "u_Projection") == 0) {
         std::memcpy(m_computeParamsData + kOffsetProjection, data, mat4Bytes);
+        std::memcpy(m_pushConstants + 0, data, mat4Bytes);   // IBL push: u_Projection at 0
+    }
 }
 void CommandListVK::SetUniformMat4Array(const char* name, const float* data, size_t count) { (void)name; (void)data; (void)count; }
 void CommandListVK::SetUniformHandle64(const char* name, uint64_t handle) { (void)name; (void)handle; }

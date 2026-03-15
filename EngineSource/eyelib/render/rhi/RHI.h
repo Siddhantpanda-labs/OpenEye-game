@@ -137,7 +137,7 @@ struct IDevice {
     virtual IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) = 0;
     virtual void DestroyDescriptorSet(IDescriptorSet* set) = 0;
     /** Resource-space set type for binding table (set 0 Frame, set 1 Pass, etc.). Get layout then CreateDescriptorSet(layout). Returns nullptr if unsupported. */
-    enum class ResourceSetType : uint32_t { Frame, PostPass, ForwardPass, ShadowPass, LightCullPass, Material, SceneBuffers, DeferredLightingPass };
+    enum class ResourceSetType : uint32_t { Frame, PostPass, ForwardPass, ShadowPass, LightCullPass, Material, SceneBuffers, DeferredLightingPass, IBLPass };
     virtual IPipelineLayout* GetResourceSetLayout(ResourceSetType type) { (void)type; return nullptr; }
 
     /** Create bindless heap for allocate-once bindless texture/buffer handles. Returns nullptr if !GetCapabilities().supportsBindless. */

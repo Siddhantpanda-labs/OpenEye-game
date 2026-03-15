@@ -7,27 +7,34 @@ layout(location = 3) in mat3 v_TBN;
 
 layout(location = 0) out vec4 FragColor;
 
-#include "../../common/material_block.glsl"
+// Set 2 = Material
+layout(set = 2, binding = 0) uniform MaterialParams {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    float ao;
+    float alpha;
+    vec3 emission;
+    float reflective;
+} MaterialBlock;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
-layout(binding = 1) uniform sampler2D u_NormalTexture;
-layout(binding = 2) uniform sampler2D u_MetallicRoughnessTexture;
-layout(binding = 3) uniform sampler2D u_MetallicTexture;
-layout(binding = 4) uniform sampler2D u_RoughnessTexture;
-layout(binding = 5) uniform sampler2D u_AOTexture;
-layout(binding = 6) uniform sampler2D u_EmissiveTexture;
+layout(set = 2, binding = 1) uniform sampler2D u_AlbedoTexture;
+layout(set = 2, binding = 2) uniform sampler2D u_NormalTexture;
+layout(set = 2, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
-layout(binding = 5) buffer SceneLightingBlock {
+// Set 1 = ForwardPass (shadow, IBL)
+layout(set = 1, binding = 0) uniform sampler2DArray u_ShadowMap;
+layout(set = 1, binding = 3) uniform samplerCube u_IrradianceMap;
+layout(set = 1, binding = 4) uniform samplerCube u_PrefilterMap;
+layout(set = 1, binding = 5) uniform sampler2D u_BRDFLUT;
+
+// Set 4 = SceneBuffers (binding 2 = light buffer)
+layout(set = 4, binding = 2) buffer SceneLightingBlock {
     vec4 header0;
     vec4 header1;
     mat4 lightSpaceMatrix;
     vec4 shadowParams;
 } sceneLight;
-
-layout(binding = 6) uniform sampler2DArray u_ShadowMap;
-layout(binding = 11) uniform samplerCube u_IrradianceMap;
-layout(binding = 12) uniform samplerCube u_PrefilterMap;
-layout(binding = 13) uniform sampler2D u_BRDFLUT;
 
 layout(push_constant, std430) uniform ForwardFragPush {
     int u_UseIBL;
@@ -43,7 +50,7 @@ void main() {
         v_TexCoord, v_TBN, v_Normal,
         MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
         u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
-        u_MetallicTexture, u_RoughnessTexture, u_AOTexture, u_EmissiveTexture,
+        u_MetallicRoughnessTexture, u_MetallicRoughnessTexture, u_MetallicRoughnessTexture, u_AlbedoTexture,
         pc.u_UseAlbedoTexture != 0, false, false, false, false, false, false,
         surf
     );

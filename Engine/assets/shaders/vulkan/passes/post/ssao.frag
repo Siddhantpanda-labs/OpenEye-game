@@ -3,9 +3,9 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out float FragColor;
 
-layout(binding = 0) uniform sampler2D g_Position;
-layout(binding = 1) uniform sampler2D g_Normal;
-layout(binding = 2) uniform sampler2D g_Depth;
+layout(set = 1, binding = 0) uniform sampler2D g_Position;
+layout(set = 1, binding = 1) uniform sampler2D g_Normal;
+layout(set = 1, binding = 2) uniform sampler2D g_Depth;
 
 layout(push_constant, std430) uniform SSAOPush {
     mat4 u_ViewMatrix;

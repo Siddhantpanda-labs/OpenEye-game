@@ -66,6 +66,7 @@ private:
     rhi::ITexture* m_irradianceRHI = nullptr;
     rhi::ITexture* m_prefilterRHI = nullptr;
     rhi::ITexture* m_brdfLUTRHI = nullptr;
+    rhi::IDescriptorSet* m_iblPassSet = nullptr;  // IBL pass set (binding 0 = env cube); Vulkan resource-space
 };
 
 } // namespace render

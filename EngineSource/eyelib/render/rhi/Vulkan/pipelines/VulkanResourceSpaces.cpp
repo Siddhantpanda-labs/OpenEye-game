@@ -223,6 +223,26 @@ VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device) {
     return layout;
 }
 
+VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device) {
+    VkDescriptorSetLayoutBinding binding = {};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = kGraphicsStages;
+
+    VkDescriptorSetLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = 1;
+    info.pBindings = &binding;
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VkResult res = vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("VulkanResourceSpaces: CreateIBLPassSetLayout failed (0x%x)", res);
+        return VK_NULL_HANDLE;
+    }
+    return layout;
+}
+
 static VkPipelineLayout createPipelineLayoutCommon(VkDevice device,
     const VkDescriptorSetLayout* setLayouts, uint32_t setLayoutCount,
     VkShaderStageFlags pushStages) {
@@ -303,9 +323,35 @@ VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
     return createPipelineLayoutCommon(device, layouts, 2, VK_SHADER_STAGE_COMPUTE_BIT);
 }
 
+VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout) {
+    VkDescriptorSetLayout layouts[1] = { iblPassLayout };
+    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages);
+}
+
+VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
+    VkPushConstantRange pushRange = {};
+    pushRange.stageFlags = kGraphicsStages;
+    pushRange.offset = 0;
+    pushRange.size = kPushConstantSize;
+    VkPipelineLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 0;
+    info.pSetLayouts = nullptr;
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &pushRange;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkResult res = vkCreatePipelineLayout(device, &info, nullptr, &layout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("VulkanResourceSpaces: CreatePushOnlyPipelineLayout failed (0x%x)", res);
+        return VK_NULL_HANDLE;
+    }
+    return layout;
+}
+
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
-    VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull, PipelineLayoutKind kind) {
+    VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
+    VkPipelineLayout ibl, VkPipelineLayout pushOnly, PipelineLayoutKind kind) {
     switch (kind) {
         case PipelineLayoutKind::Forward: return forward;
         case PipelineLayoutKind::Post: return post;
@@ -314,7 +360,8 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::DeferredLighting: return deferredLighting;
         case PipelineLayoutKind::ComputeLightCull: return computeLightCull;
         case PipelineLayoutKind::ComputeGpuCull: return computeGpuCull;
-        case PipelineLayoutKind::Legacy: return VK_NULL_HANDLE;
+        case PipelineLayoutKind::IBL: return ibl;
+        case PipelineLayoutKind::Legacy: return pushOnly; /* PushOnly same value */
     }
     return VK_NULL_HANDLE;
 }
@@ -328,7 +375,8 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::DeferredLighting: return 2;
         case PipelineLayoutKind::ComputeLightCull: return 3;
         case PipelineLayoutKind::ComputeGpuCull: return 2;
-        case PipelineLayoutKind::Legacy: return 0;
+        case PipelineLayoutKind::IBL: return 1;
+        case PipelineLayoutKind::Legacy: return 0; /* PushOnly same value */
     }
     return 0;
 }

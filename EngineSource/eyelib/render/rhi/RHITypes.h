@@ -208,16 +208,18 @@ struct RasterState {
     float depthBiasSlope = 0.f;
 };
 
-/** Pipeline layout kind: which descriptor sets a pipeline uses. Avoids shader-name heuristics; pipelines explicitly request layout. Vulkan: selects resource-space pipeline layout (Frame/Pass/Material/SceneBuffers). Legacy = current single legacy set0 path. */
+/** Pipeline layout kind: which descriptor sets a pipeline uses. Vulkan: resource-space only (Legacy treated as PushOnly). */
 enum class PipelineLayoutKind : uint32_t {
-    Legacy = 0,           ///< Legacy set0 + bindless (current path)
+    PushOnly = 0,         ///< No descriptor sets; push constants only (e.g. BRDF LUT, fullscreen)
+    Legacy = 0,           ///< Alias for PushOnly (no legacy descriptor path)
     Forward,              ///< set0 Frame, set1 ForwardPass, set2 Material, set3 Bindless, set4 SceneBuffers
     Post,                 ///< set0 Frame, set1 PostPass
-    Shadow,               ///< set0 Frame, set1 ShadowPass, set4 SceneBuffers
-    GBuffer,              ///< set0 Frame, set2 Material, set3 Bindless, set4 SceneBuffers
+    Shadow,               ///< set0 Frame, set1 ShadowPass, set2 SceneBuffers
+    GBuffer,              ///< set0 Frame, set1 Material, set2 Bindless, set3 SceneBuffers
     DeferredLighting,     ///< set0 Frame, set1 DeferredLightingPass
-    ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set4 SceneBuffers
-    ComputeGpuCull,       ///< set0 Frame, set4 SceneBuffers
+    ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set2 SceneBuffers
+    ComputeGpuCull,       ///< set0 Frame, set1 SceneBuffers
+    IBL,                  ///< set0 IBLPass (binding 0 = environment cube); push: view, projection [, roughness]
 };
 
 struct PipelineDesc {
@@ -239,7 +241,7 @@ struct PipelineDesc {
     /** Optional GPU debug name (e.g. Vulkan: vkSetDebugUtilsObjectNameEXT). */
     const char* debugName = nullptr;
     /** Which descriptor set layout to use. Legacy = current path; other kinds use resource-space layouts (set0 Frame, set1 Pass, etc.). Default Legacy. */
-    PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy;
+    PipelineLayoutKind layoutKind = PipelineLayoutKind::PushOnly;
 };
 
 // ---- Render target ----

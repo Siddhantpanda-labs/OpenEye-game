@@ -4,7 +4,8 @@ layout(location = 0) in vec3 v_WorldPos;
 
 layout(location = 0) out vec4 FragColor;
 
-layout(binding = 0) uniform samplerCube u_EnvironmentMap;
+// Legacy pipeline: set 0 = legacy set0 (binding 0 = first texture)
+layout(set = 0, binding = 0) uniform samplerCube u_EnvironmentMap;
 
 layout(push_constant, std430) uniform PrefilterPush {
     float u_Roughness;

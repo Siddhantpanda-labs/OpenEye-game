@@ -3,13 +3,13 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 o_Color;
 
-layout(binding = 0) uniform sampler2D g_Position;
-layout(binding = 1) uniform sampler2D g_Normal;
-layout(binding = 2) uniform sampler2D g_Albedo;
-layout(binding = 3) uniform sampler2D g_PBRParams;
-layout(binding = 4) uniform sampler2D g_Depth;
-layout(binding = 5) uniform sampler2D u_SceneTexture;
-layout(binding = 6) uniform samplerCube u_Skybox;
+layout(set = 1, binding = 0) uniform sampler2D g_Position;
+layout(set = 1, binding = 1) uniform sampler2D g_Normal;
+layout(set = 1, binding = 2) uniform sampler2D g_Albedo;
+layout(set = 1, binding = 3) uniform sampler2D g_PBRParams;
+layout(set = 1, binding = 4) uniform sampler2D g_Depth;
+layout(set = 1, binding = 5) uniform sampler2D u_SceneTexture;
+layout(set = 1, binding = 6) uniform samplerCube u_Skybox;
 
 layout(push_constant, std430) uniform SSRPush {
     mat4 u_ViewMatrix;

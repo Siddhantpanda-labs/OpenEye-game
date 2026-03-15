@@ -9,11 +9,15 @@ layout(location = 4) in vec4 a_Color;
 layout(location = 5) in ivec4 a_BoneIndices;
 layout(location = 6) in vec4 a_BoneWeights;
 
-layout(push_constant, std430) uniform ShadowPush {
-    mat4 u_Model;
+// set 1 = ShadowPass (binding 0 = cascade UBO)
+layout(set = 1, binding = 0) uniform ShadowBlock {
     mat4 u_LightSpaceMatrix;
+};
+
+layout(push_constant, std430) uniform Push {
+    mat4 u_Model;
 } pc;
 
 void main() {
-    gl_Position = pc.u_LightSpaceMatrix * pc.u_Model * vec4(a_Position, 1.0);
+    gl_Position = u_LightSpaceMatrix * pc.u_Model * vec4(a_Position, 1.0);
 }

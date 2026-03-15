@@ -102,11 +102,24 @@ Existing bindless heap: textures binding 0, buffers binding 1. No change.
 
 ---
 
+## IBLPass (standalone layout)
+
+Used by irradiance convolution and prefilter passes. One set, one binding.
+
+| Binding | Type   | Content        |
+|---------|--------|----------------|
+| 0       | Image  | Environment cube (combined image sampler) |
+
+Push constants: `u_Projection` (offset 0), `u_View` (offset 64). Size 128 bytes.
+
+---
+
 ## Pipeline layout kinds (which sets each uses)
 
 | Kind              | Sets used        |
 |-------------------|------------------|
-| Legacy            | (legacy set0 + bindless) |
+| PushOnly / Legacy | 0 sets. Push constants only (128 bytes). Used by BRDF LUT, fullscreen quads. Legacy is an alias for PushOnly; legacy descriptor path removed. |
+| IBL               | IBLPass (set 0: binding 0 = env cube) + push constants. |
 | Forward           | 0, 1, 2, 3, 4   |
 | Post              | 0, 1            |
 | Shadow            | 0, 1, 4         |
