@@ -475,7 +475,10 @@ int RunEditor(int argc, char** argv) {
         eyelib::api::debug::Profiler::EndFrame();
     }
 
-    // Teardown: pipelines release FBOs; then static GPU resources; device is destroyed when editorDevice goes out of scope.
+    // Teardown: wait for GPU so no resources are in use, then pipelines release FBOs; device destroyed when editorDevice goes out of scope.
+    if (imgui.IsVulkan() && editorDevice) {
+        static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get())->Finish();
+    }
     sceneViewPipeline.Shutdown();
     gameViewPipeline.Shutdown();
     assetRegistry.SetGPUResolver(nullptr);

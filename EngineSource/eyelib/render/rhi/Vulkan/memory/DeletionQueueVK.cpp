@@ -54,7 +54,7 @@ void DeletionQueueVK::EnqueueSampler(uint32_t frameIndex, void* device, void* sa
     m_perFrame[frameIndex].samplers.push_back(sampler);
 }
 
-void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex) {
+void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, std::set<void*>* alreadyDestroyedPipelines) {
     if (frameIndex >= kMaxFrames) return;
     VkDevice dev = device ? static_cast<VkDevice>(device) : VK_NULL_HANDLE;
     VmaAllocator vma = allocator ? static_cast<VmaAllocator>(allocator) : nullptr;
@@ -83,8 +83,12 @@ void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex) {
     d.imageViews.clear();
 
     for (void* p : d.pipelines) {
-        if (dev && p)
-            vkDestroyPipeline(dev, static_cast<VkPipeline>(p), nullptr);
+        if (!dev || !p) continue;
+        if (alreadyDestroyedPipelines) {
+            if (alreadyDestroyedPipelines->count(p)) continue;
+            alreadyDestroyedPipelines->insert(p);
+        }
+        vkDestroyPipeline(dev, static_cast<VkPipeline>(p), nullptr);
     }
     d.pipelines.clear();
 

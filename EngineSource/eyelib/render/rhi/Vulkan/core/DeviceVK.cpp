@@ -62,10 +62,26 @@ DeviceVK::DeviceVK() : m_caps{} {
 }
 
 DeviceVK::~DeviceVK() {
+    VkDevice device = static_cast<VkDevice>(m_device);
+    // Ensure all submitted work has completed before destroying any resources (fixes validation on exit).
+    if (device != VK_NULL_HANDLE)
+        vkDeviceWaitIdle(device);
+    // Flush deferred deletions so pipelines/buffers/images enqueued by pipeline shutdown are destroyed while GPU is idle.
+    if (device != VK_NULL_HANDLE) {
+        std::set<void*> alreadyDestroyedPipelines;
+        for (uint32_t i = 0; i < kMaxFrames; ++i)
+            m_deletionQueue.Tick(m_device, GetAllocator(), i, &alreadyDestroyedPipelines);
+        // Enqueued pipelines were just destroyed in Tick; clear cache to avoid double-destroy in loop below.
+        m_graphicsPipelineCache.clear();
+    }
+
     if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
     if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
+    if (device != VK_NULL_HANDLE) {
+        for (uint32_t i = 0; i < kMaxFrames; ++i)
+            m_deletionQueue.Tick(m_device, GetAllocator(), i);
+    }
     m_immediateCommandList.reset();
-    VkDevice device = static_cast<VkDevice>(m_device);
     if (device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             FrameContextVK::Destroy(&m_frameContexts[i], device);
@@ -195,8 +211,6 @@ DeviceVK::~DeviceVK() {
         m_timelineSemaphore = nullptr;
     }
     if (device != VK_NULL_HANDLE) {
-        for (uint32_t i = 0; i < kMaxFrames; ++i)
-            m_deletionQueue.Tick(m_device, GetAllocator(), i);
         SwapchainVK::Destroy(&m_swapchain, device);
         VkDescriptorPool imguiPool = static_cast<VkDescriptorPool>(m_imGuiDescriptorPool);
         if (imguiPool != VK_NULL_HANDLE) {
@@ -211,6 +225,11 @@ DeviceVK::~DeviceVK() {
             vkGetInstanceProcAddr(inst, "vkDestroySurfaceKHR"));
         if (pfnDestroySurface) pfnDestroySurface(inst, surface, nullptr);
         m_surface = nullptr;
+    }
+    // Flush deletion queue one last time: DestroyBuffer(m_legacyComputeParamsUBO) and DestroyPipelineLayout (etc.) above only enqueue; free all VMA allocations before destroying allocator.
+    if (device != VK_NULL_HANDLE) {
+        for (uint32_t i = 0; i < kMaxFrames; ++i)
+            m_deletionQueue.Tick(m_device, GetAllocator(), i);
     }
     UploadHeapVK::Destroy(&m_uploadHeap, GetAllocator());
     AllocatorVK::Destroy(&m_allocatorVK);
@@ -1271,7 +1290,12 @@ void DeviceVK::DestroyPipeline(IPipeline* pipeline) {
     if (!pipeline) return;
     PipelineVK* p = static_cast<PipelineVK*>(pipeline);
     if (p->m_pipeline) {
-        m_deletionQueue.EnqueuePipeline(GetCurrentFrameIndex(), m_device, p->m_pipeline);
+        void* handle = p->m_pipeline;
+        for (auto it = m_graphicsPipelineCache.begin(); it != m_graphicsPipelineCache.end(); ) {
+            if (it->second == handle) { it = m_graphicsPipelineCache.erase(it); break; }
+            else ++it;
+        }
+        m_deletionQueue.EnqueuePipeline(GetCurrentFrameIndex(), m_device, handle);
         p->m_pipeline = nullptr;
     }
     delete p;

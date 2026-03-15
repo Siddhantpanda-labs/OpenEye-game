@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 namespace eyelib {
@@ -34,8 +35,9 @@ struct DeletionQueueVK {
     void EnqueueFramebuffer(uint32_t frameIndex, void* device, void* framebuffer);
     void EnqueueSampler(uint32_t frameIndex, void* device, void* sampler);
 
-    /** Process and clear the queue for this frame index. Call after waiting that frame's fence (e.g. in BeginFrame). */
-    void Tick(void* device, void* allocator, uint32_t frameIndex);
+    /** Process and clear the queue for this frame index. Call after waiting that frame's fence (e.g. in BeginFrame).
+     *  If alreadyDestroyedPipelines is non-null, each pipeline handle is only destroyed once across multiple Tick calls (used on shutdown when same cached pipeline can be enqueued by multiple owners). */
+    void Tick(void* device, void* allocator, uint32_t frameIndex, std::set<void*>* alreadyDestroyedPipelines = nullptr);
 };
 
 } // namespace rhi
