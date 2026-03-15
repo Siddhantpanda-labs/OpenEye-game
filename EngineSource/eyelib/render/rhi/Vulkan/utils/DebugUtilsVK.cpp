@@ -9,20 +9,7 @@ namespace rhi {
 
 namespace {
 
-#ifndef VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT
-#define VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT 1000268008
-#endif
-
-typedef struct VkDebugUtilsObjectNameInfoEXT {
-    VkStructureType sType;
-    const void* pNext;
-    VkObjectType objectType;
-    uint64_t objectHandle;
-    const char* pObjectName;
-} VkDebugUtilsObjectNameInfoEXT;
-
-typedef VkResult (VKAPI_PTR *PFN_vkSetDebugUtilsObjectNameEXT)(VkDevice device, const VkDebugUtilsObjectNameInfoEXT* pNameInfo);
-
+using PFN_vkSetDebugUtilsObjectNameEXT = VkResult (VKAPI_PTR *)(VkDevice, const VkDebugUtilsObjectNameInfoEXT*);
 static PFN_vkSetDebugUtilsObjectNameEXT s_pfnSetDebugUtilsObjectName = nullptr;
 
 static void EnsureLoaded(VkDevice device) {
@@ -37,7 +24,8 @@ static void SetDebugName(VkDevice device, VkObjectType objectType, uint64_t obje
     EnsureLoaded(device);
     if (!s_pfnSetDebugUtilsObjectName) return;
     VkDebugUtilsObjectNameInfoEXT info = {};
-    info.sType = static_cast<VkStructureType>(VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT);
+    info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.pNext = nullptr;
     info.objectType = objectType;
     info.objectHandle = objectHandle;
     info.pObjectName = name;

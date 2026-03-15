@@ -20,13 +20,17 @@ struct DescriptorSetVK : IDescriptorSet {
 
     DeviceVK* m_device = nullptr;
     PipelineLayoutVK* m_layout = nullptr;
-    // VkDescriptorSet (filled when descriptor system is implemented)
     void* m_descriptorSet = nullptr;
+    bool m_ownsDescriptorSet = true;
 };
 
 IPipelineLayout* CreatePipelineLayoutVK(DeviceVK* device, const PipelineLayoutDesc& desc);
+/** Wrapper around an existing VkDescriptorSetLayout (e.g. resource-space Frame set). Does not own the set layout. */
+IPipelineLayout* CreatePipelineLayoutWrapperVK(DeviceVK* device, void* vkDescriptorSetLayout);
 void DestroyPipelineLayoutVK(DeviceVK* device, IPipelineLayout* layout);
 IDescriptorSet* CreateDescriptorSetVK(DeviceVK* device, IPipelineLayout* layout);
+/** Wraps an existing VkDescriptorSet (e.g. from BindlessHeapVK). Caller must not free the set; wrapper does not free it. */
+IDescriptorSet* CreateDescriptorSetWrapperVK(DeviceVK* device, IPipelineLayout* layout, void* existingVkDescriptorSet);
 void DestroyDescriptorSetVK(DeviceVK* device, IDescriptorSet* set);
 
 } // namespace rhi

@@ -25,6 +25,8 @@ struct ShaderDescriptor {
     rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList;
     /** True if this was loaded by name (Reload uses shaderName). */
     bool loadByName = false;
+    /** Pipeline layout kind (Legacy, Post, Forward, etc.). Used when creating pipeline from name. */
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
 };
 
 } // namespace render

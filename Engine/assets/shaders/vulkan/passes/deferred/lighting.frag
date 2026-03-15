@@ -1,24 +1,7 @@
-#version 450
+#version 460
+// Resource-space: set 0 = Frame (viewProj), set 1 = DeferredLightingPass (gbuffer 0-3, shadow 4, scene lighting 5, light space 6, IBL 7-9).
 
 layout(location = 0) in vec2 v_TexCoord;
-
-layout(binding = 0) uniform sampler2D u_Position;
-layout(binding = 1) uniform sampler2D u_Normal;
-layout(binding = 2) uniform sampler2D u_Albedo;
-layout(binding = 3) uniform sampler2D u_PBR;
-layout(binding = 6) uniform sampler2DArray u_ShadowMap;
-layout(std140, binding = 7) buffer LightSpaceBlock {
-    mat4 lightSpace[4];
-};
-layout(binding = 11) uniform samplerCube u_IrradianceMap;
-layout(binding = 12) uniform samplerCube u_PrefilterMap;
-layout(binding = 13) uniform sampler2D u_BRDFLUT;
-layout(push_constant) uniform LightingPush { int u_UseIBL; layout(offset = 16) mat4 u_ViewProj; };
-
-// Fresnel-Schlick with roughness for IBL (from common/brdf.glsl)
-vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
-    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
-}
 
 #define MAX_POINT_LIGHTS 8
 #define MAX_SPOT_LIGHTS 4
@@ -49,13 +32,40 @@ struct SpotLightData {
     float range; float innerConeCos; float outerConeCos;
     float pad2; float pad3; float pad4; float pad5; float pad6;
 };
-layout(std140, binding = 5) buffer SceneLightingBlock {
+
+layout(set = 0, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
+    mat4 u_PrevView;
+    mat4 u_PrevProjection;
+};
+
+layout(set = 1, binding = 0) uniform sampler2D u_Position;
+layout(set = 1, binding = 1) uniform sampler2D u_Normal;
+layout(set = 1, binding = 2) uniform sampler2D u_Albedo;
+layout(set = 1, binding = 3) uniform sampler2D u_PBR;
+layout(set = 1, binding = 4) uniform sampler2DArray u_ShadowMap;
+layout(set = 1, binding = 5) buffer SceneLightingBlock {
     SceneLightHeader header;
     PointLightData pointLights[MAX_POINT_LIGHTS];
     SpotLightData spotLights[MAX_SPOT_LIGHTS];
 } sceneLight;
+layout(set = 1, binding = 6) uniform LightSpaceBlock {
+    mat4 lightSpace[4];
+};
+layout(set = 1, binding = 7) uniform samplerCube u_IrradianceMap;
+layout(set = 1, binding = 8) uniform samplerCube u_PrefilterMap;
+layout(set = 1, binding = 9) uniform sampler2D u_BRDFLUT;
+
+layout(push_constant) uniform LightingPush { int u_UseIBL; };
 
 layout(location = 0) out vec4 o_Color;
+
+// Fresnel-Schlick with roughness for IBL (from common/brdf.glsl)
+vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - cosTheta, 5.0);
+}
 
 float shadowFactor(vec3 worldPos) {
     int cascades = sceneLight.header.cascadeCount;

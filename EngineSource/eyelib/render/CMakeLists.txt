@@ -49,6 +49,7 @@ if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/ShaderVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanPipelineHash.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanBindingUtils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanResourceSpaces.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/sync/FenceVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/sync/QueryPoolVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/barriers/BarrierTrackerVK.cpp
@@ -201,6 +202,12 @@ if(Vulkan_FOUND)
     target_include_directories(EyelibRender PRIVATE ${Vulkan_INCLUDE_DIRS})
     target_link_libraries(EyelibRender PRIVATE Vulkan::Vulkan)
     target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_AVAILABLE=1)
+    if(OPENEYE_VULKAN_DEBUG_CLEAR_RED)
+        target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_DEBUG_CLEAR_RED=1)
+    endif()
+    if(OPENEYE_VULKAN_VALIDATION)
+        target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_VALIDATION=1)
+    endif()
 endif()
 
 if(OPENEYE_DILIGENT_AVAILABLE)

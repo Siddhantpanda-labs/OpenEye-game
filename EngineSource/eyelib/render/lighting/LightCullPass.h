@@ -48,6 +48,10 @@ private:
     rhi::IDevice* m_device = nullptr;
     rhi::IShader* m_computeShader = nullptr;
     rhi::IPipeline* m_computePipeline = nullptr;
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_lightCullPassSet = nullptr;
+    rhi::IDescriptorSet* m_sceneBuffersSet = nullptr;
+    rhi::IBuffer* m_paramsUBO = nullptr;
     rhi::IBuffer* m_pointLightBuffer = nullptr;
     rhi::IBuffer* m_spotLightBuffer = nullptr;
     rhi::IBuffer* m_outputBuffer = nullptr;

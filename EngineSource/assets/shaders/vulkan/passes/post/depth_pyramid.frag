@@ -3,8 +3,8 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 o_Color;
 
-layout(binding = 0) uniform sampler2D u_SourceDepth;
-layout(binding = 1) uniform sampler2D u_Pyramid;
+layout(set = 1, binding = 0) uniform sampler2D u_SourceDepth;
+layout(set = 1, binding = 1) uniform sampler2D u_Pyramid;
 
 layout(push_constant, std430) uniform Push {
     int u_Level;

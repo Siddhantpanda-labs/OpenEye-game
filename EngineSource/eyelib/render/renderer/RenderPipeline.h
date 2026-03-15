@@ -260,6 +260,16 @@ private:
     /** Phase 5: single SSBO for deferred lighting (directional + point + spot); filled each frame. */
     rhi::IBuffer* m_sceneLightingBuffer = nullptr;
 
+    /** Resource-space forward pass: Frame, ForwardPass, Material, SceneBuffers sets + Frame UBO. Bindless set from m_bindlessHeap->GetDescriptorSet(). */
+    void EnsureForwardResourceSets();
+    rhi::IDescriptorSet* m_forwardFrameSet = nullptr;
+    rhi::IDescriptorSet* m_forwardPassSet = nullptr;
+    rhi::IDescriptorSet* m_forwardMaterialSet = nullptr;
+    rhi::IDescriptorSet* m_forwardSceneBuffersSet = nullptr;
+    rhi::IDescriptorSet* m_deferredLightingPassSet = nullptr;
+    rhi::IBuffer* m_forwardFrameUBO = nullptr;
+    rhi::IBuffer* m_forwardBonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)
+
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit
     PipelineMode m_mode = PipelineMode::Deferred;

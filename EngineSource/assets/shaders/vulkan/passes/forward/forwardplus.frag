@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 1 ForwardPass, set 2 Material, set 4 SceneBuffers. Same as Forward.
 
 layout(location = 0) in vec3 v_WorldPos;
 layout(location = 1) in vec3 v_ViewPos;
@@ -8,26 +9,38 @@ layout(location = 4) in mat3 v_TBN;
 
 layout(location = 0) out vec4 FragColor;
 
-#include "../../common/material_block.glsl"
+layout(set = 2, binding = 0) uniform MaterialParams {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    float ao;
+    float alpha;
+    vec3 emission;
+    float reflective;
+} MaterialBlock;
+layout(set = 2, binding = 1) uniform sampler2D u_AlbedoTexture;
+layout(set = 2, binding = 2) uniform sampler2D u_NormalTexture;
+layout(set = 2, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
-layout(binding = 1) uniform sampler2D u_NormalTexture;
-layout(binding = 2) uniform sampler2D u_MetallicRoughnessTexture;
-layout(binding = 5) buffer SceneLightingBlock {
+layout(set = 1, binding = 0) uniform sampler2DArray u_ShadowMap;
+layout(set = 1, binding = 3) uniform samplerCube u_IrradianceMap;
+layout(set = 1, binding = 4) uniform samplerCube u_PrefilterMap;
+layout(set = 1, binding = 5) uniform sampler2D u_BRDFLUT;
+
+layout(set = 4, binding = 2) buffer SceneLightingBlock {
     vec4 header0;
     vec4 header1;
+    vec4 header2;
     mat4 lightSpaceMatrix;
     vec4 shadowParams;
+    vec4 farBounds;
+    vec4 pointLights[8];
+    vec4 spotLights[4];
 } sceneLight;
-
-layout(binding = 6) uniform sampler2DArray u_ShadowMap;
-layout(binding = 11) uniform samplerCube u_IrradianceMap;
-layout(binding = 12) uniform samplerCube u_PrefilterMap;
-layout(binding = 13) uniform sampler2D u_BRDFLUT;
 
 layout(push_constant, std430) uniform ForwardPlusFragPush {
     int u_UseIBL;
-} pc;
+};
 
 #include "../../common/material_surface.glsl"
 #include "../../common/brdf.glsl"

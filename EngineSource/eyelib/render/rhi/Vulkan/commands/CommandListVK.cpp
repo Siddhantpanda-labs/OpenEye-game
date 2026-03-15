@@ -11,6 +11,7 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <cstring>
+#include <cassert>
 
 namespace eyelib {
 namespace render {
@@ -260,7 +261,8 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (vkPipe == VK_NULL_HANDLE) return;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
-    if (!pVK->m_isCompute) {
+    // Only auto-bind legacy set0 + bindless when pipeline uses legacy layout. Resource-space pipelines use BindDescriptorSets.
+    if (pVK->m_layoutKind == PipelineLayoutKind::Legacy && !pVK->m_isCompute) {
         VkPipelineLayout defaultLayout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
         if (defaultLayout != VK_NULL_HANDLE) {
             m_device->UpdateLegacySet0(this);
@@ -303,16 +305,21 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
     if (!vbo || !ibo) return;
     BindVertexBuffer(vbo, 0, 0);
     BindIndexBuffer(ibo, IndexType::UInt16, 0);
-    VkPipelineLayout layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::Legacy ? pVK->m_nativePipelineLayout : m_device->GetDefaultPipelineLayout());
     if (layout != VK_NULL_HANDLE) {
-        m_device->UpdateLegacySet0(this);
-        VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
-        VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-        if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
-            VkDescriptorSet sets[2] = { set0, emptyBindless };
-            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 2, sets, 0, nullptr);
+        if (pVK->m_layoutKind == PipelineLayoutKind::Legacy) {
+            m_device->UpdateLegacySet0(this);
+            VkDescriptorSet set0 = static_cast<VkDescriptorSet>(m_device->GetLegacySet0());
+            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+            if (set0 != VK_NULL_HANDLE && emptyBindless != VK_NULL_HANDLE) {
+                VkDescriptorSet sets[2] = { set0, emptyBindless };
+                vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 2, sets, 0, nullptr);
+            }
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
+        } else {
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
         }
-        vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, m_pushConstants);
     }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
 }
@@ -361,6 +368,25 @@ void CommandListVK::BindDescriptorSet(IDescriptorSet* set) {
     VkCommandBuffer cmdBuf = static_cast<VkCommandBuffer>(m_commandBuffer);
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &vkSet, 0, nullptr);
     vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &vkSet, 0, nullptr);
+}
+
+void CommandListVK::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets, uint32_t dynamicOffsetCount) {
+    assert(m_currentPipeline != nullptr && "BindDescriptorSets requires a bound pipeline");
+    if (count == 0 || !sets || !m_isRecording || !m_commandBuffer || !m_currentPipeline) return;
+    PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+    if (layout == VK_NULL_HANDLE) return;
+    if (pVK->m_requiredSetCount != 0 && firstSet == 0)
+        assert(count >= pVK->m_requiredSetCount && "BindDescriptorSets: bound set count less than pipeline requires");
+    std::vector<VkDescriptorSet> vkSets(count);
+    for (uint32_t i = 0; i < count; i++) {
+        if (!sets[i]) return;
+        DescriptorSetVK* dsVK = static_cast<DescriptorSetVK*>(sets[i]);
+        vkSets[i] = static_cast<VkDescriptorSet>(dsVK->m_descriptorSet);
+        if (vkSets[i] == VK_NULL_HANDLE) return;
+    }
+    VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
+    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, firstSet, count, vkSets.data(), dynamicOffsetCount, dynamicOffsets ? dynamicOffsets : nullptr);
 }
 void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
@@ -483,14 +509,18 @@ void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
     PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
     if (pVK && pVK->m_isCompute && pVK->m_pipeline != VK_NULL_HANDLE) {
-        VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(m_device->GetComputePipelineLayout());
+        VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::Legacy ? pVK->m_nativePipelineLayout : m_device->GetComputePipelineLayout());
         if (computeLayout != VK_NULL_HANDLE) {
-            m_device->UpdateComputeSet0(this);
-            VkDescriptorSet computeSet0 = static_cast<VkDescriptorSet>(m_device->GetComputeSet0());
-            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-            VkDescriptorSet sets[2] = { computeSet0, emptyBindless };
-            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 2, sets, 0, nullptr);
-            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 16, m_pushConstants);
+            if (pVK->m_layoutKind == PipelineLayoutKind::Legacy) {
+                m_device->UpdateComputeSet0(this);
+                VkDescriptorSet computeSet0 = static_cast<VkDescriptorSet>(m_device->GetComputeSet0());
+                VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+                VkDescriptorSet sets[2] = { computeSet0, emptyBindless };
+                vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 2, sets, 0, nullptr);
+                vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 16, m_pushConstants);
+            } else {
+                vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 128, m_pushConstants);
+            }
         }
         uint32_t x = (groupCountX > 0) ? groupCountX : 1u;
         uint32_t y = (groupCountY > 0) ? groupCountY : 1u;

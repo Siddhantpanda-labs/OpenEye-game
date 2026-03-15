@@ -12,8 +12,10 @@ struct SwapchainVK {
     void* swapchain = nullptr;           // VkSwapchainKHR
     std::vector<void*> images;          // VkImage per swapchain image
     std::vector<void*> imageViews;       // VkImageView per image
-    std::vector<void*> framebuffers;    // VkFramebuffer per image (for overlay render pass)
-    void* renderPass = nullptr;          // VkRenderPass (color load/store, finalLayout PRESENT_SRC_KHR)
+    std::vector<void*> framebuffers;    // VkFramebuffer per image (for overlay-on-load pass)
+    std::vector<void*> framebuffersOverlayClear;  // VkFramebuffer per image (for clear-then-overlay pass)
+    void* renderPass = nullptr;          // VkRenderPass (LOAD_OP_LOAD; use after blit)
+    void* renderPassOverlayClear = nullptr;  // VkRenderPass (LOAD_OP_CLEAR; use when no scene blit)
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t format = 0;                // VkFormat (opaque)
@@ -37,6 +39,9 @@ struct SwapchainVK {
 
     uint32_t GetImageCount() const { return static_cast<uint32_t>(images.size()); }
     void* GetRenderPass() const { return renderPass; }
+    /** Render pass for overlay when swapchain image was not blitted (clear then draw). */
+    void* GetOverlayClearRenderPass() const { return renderPassOverlayClear; }
+    void* GetOverlayClearFramebuffer(uint32_t i) const { return i < framebuffersOverlayClear.size() ? framebuffersOverlayClear[i] : nullptr; }
     void* GetImage(uint32_t i) const { return i < images.size() ? images[i] : nullptr; }
     void* GetImageView(uint32_t i) const { return i < imageViews.size() ? imageViews[i] : nullptr; }
     void* GetFramebuffer(uint32_t i) const { return i < framebuffers.size() ? framebuffers[i] : nullptr; }

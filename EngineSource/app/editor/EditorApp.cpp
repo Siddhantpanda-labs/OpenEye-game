@@ -453,6 +453,15 @@ int RunEditor(int argc, char** argv) {
 
         ImGui::Render();
         if (imgui.IsVulkan() && editorDevice) {
+            static int s_vulkanFrameCount = 0;
+            if (++s_vulkanFrameCount <= 3) {
+                const ImDrawData* dd = ImGui::GetDrawData();
+                const bool hasDrawData = dd != nullptr;
+                const int totalIdx = hasDrawData ? dd->TotalIdxCount : 0;
+                const int totalVtx = hasDrawData ? dd->TotalVtxCount : 0;
+                eyelib::api::core::Log::InfoF("Editor Vulkan frame %d: BlitToDefaultFramebuffer(nullptr) -> EndFrame -> Present. ImGui draw data: %s, TotalIdx=%d, TotalVtx=%d.",
+                    s_vulkanFrameCount, hasDrawData ? "yes" : "no", totalIdx, totalVtx);
+            }
             auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
             rhiDevice->BlitToDefaultFramebuffer(nullptr);
             rhiDevice->EndFrame();

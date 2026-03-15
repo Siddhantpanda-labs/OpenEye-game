@@ -3,8 +3,8 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 FragColor;
 
-layout(binding = 0) uniform sampler2D u_SceneTexture;
-layout(binding = 1) uniform sampler2D u_BloomTexture;
+layout(set = 1, binding = 0) uniform sampler2D u_SceneTexture;
+layout(set = 1, binding = 1) uniform sampler2D u_BloomTexture;
 
 layout(push_constant, std430) uniform BloomCompositePush {
     float u_BloomIntensity;

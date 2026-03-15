@@ -57,12 +57,19 @@ void BarrierTrackerVK::FlushBarriers(BarrierTrackerVK* tracker, CommandListVK* c
         dstStage |= ToVkPipelineStage(p.to);
     }
     for (const auto& p : tracker->m_pendingImages) {
+        const bool isDepthAspect = (p.aspectMask & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0;
+        auto layoutFor = [isDepthAspect](ResourceState state) -> VkImageLayout {
+            VkImageLayout L = ToVkImageLayout(state);
+            if (isDepthAspect && state == ResourceState::RenderTarget)
+                return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            return L;
+        };
         VkImageMemoryBarrier b = {};
         b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         b.srcAccessMask = ToVkAccessFlags(p.from);
         b.dstAccessMask = ToVkAccessFlags(p.to);
-        b.oldLayout = ToVkImageLayout(p.from);
-        b.newLayout = ToVkImageLayout(p.to);
+        b.oldLayout = layoutFor(p.from);
+        b.newLayout = layoutFor(p.to);
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.image = static_cast<VkImage>(p.image);

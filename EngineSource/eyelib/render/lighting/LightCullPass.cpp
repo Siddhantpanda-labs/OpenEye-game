@@ -57,12 +57,32 @@ void LightCullPass::EnsureResources() {
         return;
     }
 create_pipeline:
-    m_computePipeline = m_device->CreateComputePipeline(m_computeShader);
+    m_computePipeline = m_device->CreateComputePipelineWithLayout(m_computeShader, rhi::PipelineLayoutKind::ComputeLightCull);
+    if (!m_computePipeline) {
+        m_computePipeline = m_device->CreateComputePipeline(m_computeShader);
+    }
     if (!m_computePipeline) {
         core::Log::Error("LightCullPass: failed to create compute pipeline");
         m_device->DestroyShader(m_computeShader);
         m_computeShader = nullptr;
         return;
+    }
+    rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
+    rhi::IPipelineLayout* lightCullLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::LightCullPass);
+    rhi::IPipelineLayout* sceneLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
+    if (frameLayout && lightCullLayout && sceneLayout) {
+        m_frameSet = m_device->CreateDescriptorSet(frameLayout);
+        m_lightCullPassSet = m_device->CreateDescriptorSet(lightCullLayout);
+        m_sceneBuffersSet = m_device->CreateDescriptorSet(sceneLayout);
+        rhi::BufferDesc paramsDesc;
+        paramsDesc.sizeInBytes = 256;
+        paramsDesc.usage = rhi::BufferUsage::Uniform;
+        paramsDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_paramsUBO = m_device->CreateBuffer(paramsDesc, nullptr);
+        if (m_paramsUBO && m_frameSet) {
+            m_frameSet->UpdateUniformBuffer(0, m_paramsUBO, 0, 128);
+            m_frameSet->UpdateUniformBuffer(1, m_paramsUBO, 128, 128);
+        }
     }
     m_initialized = true;
 }
@@ -77,6 +97,10 @@ bool LightCullPass::Initialize(rhi::IDevice* device) {
 
 void LightCullPass::Shutdown() {
     if (!m_device) return;
+    if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+    if (m_lightCullPassSet) { m_device->DestroyDescriptorSet(m_lightCullPassSet); m_lightCullPassSet = nullptr; }
+    if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
+    if (m_paramsUBO) { m_device->DestroyBuffer(m_paramsUBO); m_paramsUBO = nullptr; }
     if (m_computePipeline) {
         m_device->DestroyPipeline(m_computePipeline);
         m_computePipeline = nullptr;
@@ -120,25 +144,54 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
     if (totalClusters == 0) return;
 
     cmd->BindPipeline(m_computePipeline);
-    cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);
-    if (m_pointLightBuffer)
-        cmd->BindStorageBuffer(m_pointLightBuffer, 2, 0, 0);
-    if (m_spotLightBuffer)
-        cmd->BindStorageBuffer(m_spotLightBuffer, 3, 0, 0);
 
-    cmd->SetUniformMat4("u_View", m_view);
-    cmd->SetUniformMat4("u_Projection", m_proj);
-    cmd->SetUniformUint("u_TileCountX", m_tileCountX);
-    cmd->SetUniformUint("u_TileCountY", m_tileCountY);
-    cmd->SetUniformUint("u_SliceCount", m_sliceCount);
-    cmd->SetUniformFloat("u_LogNear", m_logNear);
-    cmd->SetUniformFloat("u_LogFar", m_logFar);
-    cmd->SetUniformFloat("u_NearPlane", m_nearPlane);
-    cmd->SetUniformFloat("u_FarPlane", m_farPlane);
-    cmd->SetUniformFloat("u_ScreenWidth", static_cast<float>(m_screenWidth));
-    cmd->SetUniformFloat("u_ScreenHeight", static_cast<float>(m_screenHeight));
-    cmd->SetUniformInt("u_PointLightCount", static_cast<int>(m_pointLightCount));
-    cmd->SetUniformInt("u_SpotLightCount", static_cast<int>(m_spotLightCount));
+    if (m_frameSet && m_lightCullPassSet && m_sceneBuffersSet && m_paramsUBO) {
+        struct ParamsBlock {
+            float view[16];
+            float proj[16];
+            uint32_t tileCountX, tileCountY, sliceCount;
+            float logNear, logFar, nearPlane, farPlane, screenWidth, screenHeight;
+            int32_t pointLightCount, spotLightCount;
+        };
+        ParamsBlock params = {};
+        std::memcpy(params.view, m_view, sizeof(params.view));
+        std::memcpy(params.proj, m_proj, sizeof(params.proj));
+        params.tileCountX = m_tileCountX;
+        params.tileCountY = m_tileCountY;
+        params.sliceCount = m_sliceCount;
+        params.logNear = m_logNear;
+        params.logFar = m_logFar;
+        params.nearPlane = m_nearPlane;
+        params.farPlane = m_farPlane;
+        params.screenWidth = static_cast<float>(m_screenWidth);
+        params.screenHeight = static_cast<float>(m_screenHeight);
+        params.pointLightCount = static_cast<int32_t>(m_pointLightCount);
+        params.spotLightCount = static_cast<int32_t>(m_spotLightCount);
+        m_paramsUBO->Update(&params, 0, sizeof(params));
+        m_lightCullPassSet->UpdateUniformBuffer(0, m_paramsUBO, 0, sizeof(params));
+        m_lightCullPassSet->UpdateStorageBuffer(1, m_outputBuffer, 0, 0);
+        if (m_pointLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(2, m_pointLightBuffer, 0, 0);
+        if (m_spotLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(3, m_spotLightBuffer, 0, 0);
+        rhi::IDescriptorSet* sets[3] = { m_frameSet, m_lightCullPassSet, m_sceneBuffersSet };
+        cmd->BindDescriptorSets(0, 3, sets);
+    } else {
+        cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);
+        if (m_pointLightBuffer) cmd->BindStorageBuffer(m_pointLightBuffer, 2, 0, 0);
+        if (m_spotLightBuffer) cmd->BindStorageBuffer(m_spotLightBuffer, 3, 0, 0);
+        cmd->SetUniformMat4("u_View", m_view);
+        cmd->SetUniformMat4("u_Projection", m_proj);
+        cmd->SetUniformUint("u_TileCountX", m_tileCountX);
+        cmd->SetUniformUint("u_TileCountY", m_tileCountY);
+        cmd->SetUniformUint("u_SliceCount", m_sliceCount);
+        cmd->SetUniformFloat("u_LogNear", m_logNear);
+        cmd->SetUniformFloat("u_LogFar", m_logFar);
+        cmd->SetUniformFloat("u_NearPlane", m_nearPlane);
+        cmd->SetUniformFloat("u_FarPlane", m_farPlane);
+        cmd->SetUniformFloat("u_ScreenWidth", static_cast<float>(m_screenWidth));
+        cmd->SetUniformFloat("u_ScreenHeight", static_cast<float>(m_screenHeight));
+        cmd->SetUniformInt("u_PointLightCount", static_cast<int>(m_pointLightCount));
+        cmd->SetUniformInt("u_SpotLightCount", static_cast<int>(m_spotLightCount));
+    }
 
     const uint32_t groupSize = 64u;
     const uint32_t groups = (totalClusters + groupSize - 1u) / groupSize;

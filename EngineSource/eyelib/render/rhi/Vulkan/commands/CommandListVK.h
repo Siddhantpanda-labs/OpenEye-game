@@ -60,6 +60,7 @@ struct CommandListVK : ICommandList {
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
     void BindDescriptorSet(IDescriptorSet* set) override;
+    void BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) override;
     void BindBindlessHeap(IBindlessHeap* heap) override;
 
     void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;
@@ -134,7 +135,7 @@ private:
     uint32_t m_currentIndexOffset = 0;
     IndexType m_currentIndexType = IndexType::UInt16;
     rhi::IPipeline* m_currentPipeline = nullptr;
-    uint8_t m_pushConstants[128] = {};  // fragment push constants (e.g. u_UseIBL, u_ViewProj for lighting)
+    uint8_t m_pushConstants[256] = {};  // vertex + fragment push constants (e.g. u_UseIBL, u_ViewProj, stereo)
     static constexpr uint32_t kMaxLegacyBindings = 16;
     rhi::ITexture* m_boundTextures[kMaxLegacyBindings] = {};
     rhi::IBuffer* m_boundStorageBuffers[kMaxLegacyBindings] = {};

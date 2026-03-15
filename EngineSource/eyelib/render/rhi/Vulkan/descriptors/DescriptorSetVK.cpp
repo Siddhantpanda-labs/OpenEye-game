@@ -123,6 +123,28 @@ IPipelineLayout* CreatePipelineLayoutVK(DeviceVK* deviceObj, const PipelineLayou
     pl->m_desc = desc;
     pl->m_descriptorSetLayout = setLayout;
     pl->m_pipelineLayout = pipelineLayout;
+    pl->m_ownsSetLayout = true;
+    return pl;
+}
+
+IPipelineLayout* CreatePipelineLayoutWrapperVK(DeviceVK* deviceObj, void* vkDescriptorSetLayout) {
+    if (!deviceObj || !vkDescriptorSetLayout) return nullptr;
+    VkDescriptorSetLayout setLayout = static_cast<VkDescriptorSetLayout>(vkDescriptorSetLayout);
+    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
+    VkPipelineLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 1;
+    info.pSetLayouts = &setLayout;
+    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    VkResult res = vkCreatePipelineLayout(device, &info, nullptr, &pipelineLayout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("CreatePipelineLayoutWrapperVK: vkCreatePipelineLayout failed (0x%x)", res);
+        return nullptr;
+    }
+    auto* pl = new PipelineLayoutVK();
+    pl->m_descriptorSetLayout = vkDescriptorSetLayout;
+    pl->m_pipelineLayout = pipelineLayout;
+    pl->m_ownsSetLayout = false;
     return pl;
 }
 
@@ -135,7 +157,7 @@ void DestroyPipelineLayoutVK(DeviceVK* deviceObj, IPipelineLayout* layout) {
             vkDestroyPipelineLayout(device, static_cast<VkPipelineLayout>(pl->m_pipelineLayout), nullptr);
             pl->m_pipelineLayout = nullptr;
         }
-        if (pl->m_descriptorSetLayout != VK_NULL_HANDLE) {
+        if (pl->m_ownsSetLayout && pl->m_descriptorSetLayout != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(device, static_cast<VkDescriptorSetLayout>(pl->m_descriptorSetLayout), nullptr);
             pl->m_descriptorSetLayout = nullptr;
         }
@@ -160,17 +182,29 @@ IDescriptorSet* CreateDescriptorSetVK(DeviceVK* deviceObj, IPipelineLayout* layo
     if (res != VK_SUCCESS) return nullptr;
     auto* ds = new DescriptorSetVK(deviceObj, pl);
     ds->m_descriptorSet = descriptorSet;
+    ds->m_ownsDescriptorSet = true;
+    return ds;
+}
+
+IDescriptorSet* CreateDescriptorSetWrapperVK(DeviceVK* deviceObj, IPipelineLayout* layout, void* existingVkDescriptorSet) {
+    if (!deviceObj || !layout || !existingVkDescriptorSet) return nullptr;
+    PipelineLayoutVK* pl = static_cast<PipelineLayoutVK*>(layout);
+    auto* ds = new DescriptorSetVK(deviceObj, pl);
+    ds->m_descriptorSet = existingVkDescriptorSet;
+    ds->m_ownsDescriptorSet = false;
     return ds;
 }
 
 void DestroyDescriptorSetVK(DeviceVK* deviceObj, IDescriptorSet* set) {
     if (!deviceObj || !set) return;
     DescriptorSetVK* ds = static_cast<DescriptorSetVK*>(set);
-    VkDescriptorSet vkSet = static_cast<VkDescriptorSet>(ds->m_descriptorSet);
-    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkDescriptorPool descriptorPool = static_cast<VkDescriptorPool>(deviceObj->GetDescriptorPool());
-    if (vkSet != VK_NULL_HANDLE && device != VK_NULL_HANDLE && descriptorPool != VK_NULL_HANDLE)
-        vkFreeDescriptorSets(device, descriptorPool, 1, &vkSet);
+    if (ds->m_ownsDescriptorSet) {
+        VkDescriptorSet vkSet = static_cast<VkDescriptorSet>(ds->m_descriptorSet);
+        VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
+        VkDescriptorPool descriptorPool = static_cast<VkDescriptorPool>(deviceObj->GetDescriptorPool());
+        if (vkSet != VK_NULL_HANDLE && device != VK_NULL_HANDLE && descriptorPool != VK_NULL_HANDLE)
+            vkFreeDescriptorSets(device, descriptorPool, 1, &vkSet);
+    }
     ds->m_descriptorSet = nullptr;
     delete ds;
 }

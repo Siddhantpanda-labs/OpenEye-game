@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 0 = Frame, set 4 binding 1 = instance transform buffer.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -9,15 +10,19 @@ layout(location = 4) in vec4 a_Color;
 layout(location = 5) in ivec4 a_BoneIndices;
 layout(location = 6) in vec4 a_BoneWeights;
 
-layout(std430, binding = 4) readonly buffer InstanceModels {
+layout(set = 0, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
+    mat4 u_PrevView;
+    mat4 u_PrevProjection;
+};
+
+layout(set = 4, binding = 1) readonly buffer InstanceModels {
     mat4 u_InstanceModel[];
 };
 
 layout(push_constant, std430) uniform GBufferInstancedPush {
-    mat4 u_View;
-    mat4 u_Projection;
-    mat4 u_PrevView;
-    mat4 u_PrevProjection;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -44,12 +49,11 @@ void main() {
     vec2 uv = baseUv * pc.u_UVTransform.zw;
     float c = cos(pc.u_UVRotation);
     float s = sin(pc.u_UVRotation);
-    uv = mat2(c, -s, s, c) * uv;
-    uv += pc.u_UVTransform.xy;
+    uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;
     if (pc.u_FlipV > 0.5) uv.y = 1.0 - uv.y;
     v_TexCoord = uv;
-    vec4 currentPos = pc.u_Projection * pc.u_View * w;
-    vec4 prevPos = pc.u_PrevProjection * pc.u_PrevView * w;
+    vec4 currentPos = u_Projection * u_View * w;
+    vec4 prevPos = u_PrevProjection * u_PrevView * w;
     v_Velocity = (currentPos.xy / currentPos.w) - (prevPos.xy / prevPos.w);
     gl_Position = currentPos;
 }

@@ -15,11 +15,17 @@ namespace rhi {
 void DeviceVK::Present() {
     if (!m_queues.GetGraphicsQueue()) return;
     VkQueue queue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
-    if (m_pendingPresent) {
-        FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
-        m_swapchain.Present(queue, frame.renderFinished);
-        m_pendingPresent = false;
+    if (!m_pendingPresent) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan Present: skipped (m_pendingPresent false — BlitToDefaultFramebuffer did not run or returned early).");
+            once = true;
+        }
+        return;
     }
+    FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
+    m_swapchain.Present(queue, frame.renderFinished);
+    m_pendingPresent = false;
 }
 
 void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
@@ -72,43 +78,111 @@ bool DeviceVK::GetImGuiVulkanInitInfo(ImGuiVulkanInitInfo* out) {
 }
 
 void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
-    if (!m_swapchain.swapchain || m_swapchain.GetImageCount() == 0 || !m_immediateCommandList) return;
+    if (!m_swapchain.swapchain || m_swapchain.GetImageCount() == 0 || !m_immediateCommandList) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan present: BlitToDefaultFramebuffer skipped — no swapchain, zero images, or no immediate command list.");
+            once = true;
+        }
+        return;
+    }
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
-    if (!m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX)) return;
+    if (!m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX)) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan present: swapchain Acquire failed.");
+            once = true;
+        }
+        return;
+    }
     m_pendingPresent = true;
     const uint32_t imageIndex = m_swapchain.GetCurrentImageIndex();
-    if (imageIndex >= m_swapchain.GetImageCount()) return;
+    if (imageIndex >= m_swapchain.GetImageCount()) {
+        static bool once = false;
+        if (!once) {
+            core::Log::WarnF("Vulkan present: imageIndex %u >= count %u.", imageIndex, m_swapchain.GetImageCount());
+            once = true;
+        }
+        return;
+    }
 
     if (!src) {
-        if (!m_postBlitCallback || !m_swapchain.GetRenderPass() || !m_swapchain.GetFramebuffer(imageIndex)) return;
+        // Clear swapchain image then overlay with LOAD pass so ImGui uses the same pass as blit path (single init).
+        void* rpHandle = m_swapchain.GetRenderPass();
+        void* fbHandle = m_swapchain.GetFramebuffer(imageIndex);
+        if (!rpHandle || !fbHandle) {
+            static bool logged = false;
+            if (!logged) {
+                core::Log::Warn("Vulkan present: overlay pass or framebuffer missing; skipping compose.");
+                logged = true;
+            }
+            return;
+        }
         CommandListVK* imm = m_immediateCommandList.get();
         imm->EndRenderingIfActive();
         if (!imm->IsRecording())
             imm->Begin();
         VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-        if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+        if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) {
+            static bool once = false;
+            if (!once) {
+                core::Log::Warn("Vulkan present: null-src path skipped — command buffer not recording or null.");
+                once = true;
+            }
+            return;
+        }
         VkImage dstImage = static_cast<VkImage>(m_swapchain.GetImage(imageIndex));
-        VkImageMemoryBarrier barrierDst = {};
-        barrierDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        barrierDst.image = dstImage;
-        barrierDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
-        VkRenderPass rp = static_cast<VkRenderPass>(m_swapchain.GetRenderPass());
-        VkFramebuffer fb = static_cast<VkFramebuffer>(m_swapchain.GetFramebuffer(imageIndex));
-        VkClearValue clearVal = {};
+        const VkExtent2D extent = { m_swapchain.GetWidth(), m_swapchain.GetHeight() };
+        // Clear image so content is defined (LOAD pass will then load this).
+        VkImageMemoryBarrier toDst = {};
+        toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toDst.image = dstImage;
+        toDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
+        VkClearColorValue clearColor = {};
+#if defined(OPENEYE_VULKAN_DEBUG_CLEAR_RED) && OPENEYE_VULKAN_DEBUG_CLEAR_RED
+        // Debug: bright red to verify swapchain output is visible (see documentation/vulkan/vulkan_check.md).
+        clearColor.float32[0] = 1.0f;
+        clearColor.float32[1] = 0.0f;
+        clearColor.float32[2] = 0.0f;
+        clearColor.float32[3] = 1.0f;
+#else
+        clearColor.float32[0] = 0.12f;
+        clearColor.float32[1] = 0.12f;
+        clearColor.float32[2] = 0.15f;
+        clearColor.float32[3] = 1.0f;
+#endif
+        VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+        VkImageMemoryBarrier toColor = {};
+        toColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        toColor.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        toColor.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        toColor.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        toColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toColor.image = dstImage;
+        toColor.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &toColor);
         VkRenderPassBeginInfo rpBegin = {};
         rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpBegin.renderPass = rp;
-        rpBegin.framebuffer = fb;
-        rpBegin.renderArea = { { 0, 0 }, { m_swapchain.GetWidth(), m_swapchain.GetHeight() } };
-        rpBegin.clearValueCount = 1;
-        rpBegin.pClearValues = &clearVal;
+        rpBegin.renderPass = static_cast<VkRenderPass>(rpHandle);
+        rpBegin.framebuffer = static_cast<VkFramebuffer>(fbHandle);
+        rpBegin.renderArea = { { 0, 0 }, extent };
+        rpBegin.clearValueCount = 0;
+        rpBegin.pClearValues = nullptr;
         vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-        m_postBlitCallback(cmd);
+        if (m_postBlitCallback)
+            m_postBlitCallback(cmd);
         vkCmdEndRenderPass(cmd);
+        static int s_clearOverlayFramesLogged = 0;
+        if (s_clearOverlayFramesLogged < 3) {
+            core::Log::InfoF("Vulkan present: clear+overlay path executed (null src), overlay=%s, frame %d.",
+                m_postBlitCallback ? "yes" : "no", s_clearOverlayFramesLogged + 1);
+            ++s_clearOverlayFramesLogged;
+        }
         return;
     }
     RenderTargetVK* rt = static_cast<RenderTargetVK*>(src);

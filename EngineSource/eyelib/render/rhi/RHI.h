@@ -91,13 +91,15 @@ struct IDevice {
 
     virtual IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
     /** Create pipeline from logical shader name. Backend resolves paths/format (e.g. OpenGL: passes/{name}.vert/.frag). */
-    /** When depthStencilOverride is non-null, use it for the pipeline's depth/stencil state (e.g. skybox with DepthCompare::LessEqual). */
-    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr) = 0;
+    /** When depthStencilOverride is non-null, use it for the pipeline's depth/stencil state. layoutKind: Legacy = legacy set0; other = resource-space layout (Post, Forward, etc.). */
+    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy) = 0;
     /** E5.3: Create pipeline from cached binary (format + data from GetPipelineBinary). Returns nullptr if unsupported or invalid. */
     virtual IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) = 0;
     /** E5.3: Retrieve pipeline binary for caching. Returns false if unsupported; outFormat and outData set on success. */
     virtual bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) = 0;
     virtual IPipeline* CreateComputePipeline(void* computeShader) = 0;
+    /** Create compute pipeline with resource-space layout (e.g. ComputeLightCull, ComputeGpuCull). Default impl: CreateComputePipeline(shader) (Legacy). */
+    virtual IPipeline* CreateComputePipelineWithLayout(void* computeShader, PipelineLayoutKind layoutKind) { (void)layoutKind; return CreateComputePipeline(computeShader); }
     virtual void DestroyPipeline(IPipeline* pipeline) = 0;
     /** OpenGL: set SSBO block bindings on the pipeline's program (e.g. IndirectOut->0, DrawListIn->1). No-op on other backends. Call before first use to avoid interface mismatch (GL 1282). */
     virtual void EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) {}
@@ -134,6 +136,9 @@ struct IDevice {
     /** Create descriptor set from layout; fill with UpdateTexture/UpdateUniformBuffer/UpdateStorageBuffer, then BindDescriptorSet(cmd, set). */
     virtual IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) = 0;
     virtual void DestroyDescriptorSet(IDescriptorSet* set) = 0;
+    /** Resource-space set type for binding table (set 0 Frame, set 1 Pass, etc.). Get layout then CreateDescriptorSet(layout). Returns nullptr if unsupported. */
+    enum class ResourceSetType : uint32_t { Frame, PostPass, ForwardPass, ShadowPass, LightCullPass, Material, SceneBuffers, DeferredLightingPass };
+    virtual IPipelineLayout* GetResourceSetLayout(ResourceSetType type) { (void)type; return nullptr; }
 
     /** Create bindless heap for allocate-once bindless texture/buffer handles. Returns nullptr if !GetCapabilities().supportsBindless. */
     virtual IBindlessHeap* CreateBindlessHeap() = 0;
@@ -246,6 +251,8 @@ struct ICommandList {
     virtual void UnbindTexture(uint32_t binding) = 0;
     /** Bind a descriptor set (all textures/buffers updated on it). Pipeline must be bound first; set layout must match pipeline. */
     virtual void BindDescriptorSet(IDescriptorSet* set) = 0;
+    /** Bind descriptor sets. firstSet = first set index; count = number of sets; sets = array. dynamicOffsets/dynamicOffsetCount for dynamic UBO/buffer offsets (optional). Pipeline must be bound. No-op if count==0 or sets==nullptr. */
+    virtual void BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) { (void)firstSet; (void)count; (void)sets; (void)dynamicOffsets; (void)dynamicOffsetCount; }
     /** Bind bindless heap for the next draw/dispatch (bindless pipelines only). No-op if heap is null or bindless not supported. */
     virtual void BindBindlessHeap(IBindlessHeap* heap) = 0;
 
@@ -360,6 +367,8 @@ struct IBindlessHeap {
     virtual void FreeTextureHandle(BindlessHandle handle) = 0;
     /** Release a buffer handle (optional). */
     virtual void FreeBufferHandle(BindlessHandle handle) = 0;
+    /** Descriptor set for resource-space set 3 (bindless). Returns nullptr if unsupported. Do not destroy the returned set. */
+    virtual IDescriptorSet* GetDescriptorSet() { return nullptr; }
 };
 
 // ---- Descriptor set ----

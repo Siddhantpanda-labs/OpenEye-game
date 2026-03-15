@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 0 = Frame, set 4 binding 1 = bones SSBO. Push: model, UV.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -15,14 +16,19 @@ layout(location = 2) out vec2 v_TexCoord;
 layout(location = 3) out mat3 v_TBN;
 
 #define MAX_BONES 128
-layout(std140, binding = 3) uniform Bones {
+
+layout(set = 0, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
+};
+
+layout(set = 4, binding = 1) readonly buffer BonesBlock {
     mat4 u_Bones[MAX_BONES];
 };
 
 layout(push_constant, std430) uniform ForwardPush {
     mat4 u_Model;
-    mat4 u_View;
-    mat4 u_Projection;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -45,7 +51,7 @@ void main() {
     tangent = mat3(skin) * tangent;
     vec4 worldPos = pc.u_Model * pos;
     v_Position = worldPos.xyz;
-    vec4 viewPos = pc.u_View * worldPos;
+    vec4 viewPos = u_View * worldPos;
     mat3 normalMatrix = mat3(transpose(inverse(pc.u_Model)));
     vec3 worldNormal = normalize(normalMatrix * nrm);
     vec3 worldTangent = length(tangent) < 0.001
@@ -59,5 +65,5 @@ void main() {
     uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;
     if (pc.u_FlipV > 0.5) uv.y = 1.0 - uv.y;
     v_TexCoord = uv;
-    gl_Position = pc.u_Projection * viewPos;
+    gl_Position = u_Projection * viewPos;
 }

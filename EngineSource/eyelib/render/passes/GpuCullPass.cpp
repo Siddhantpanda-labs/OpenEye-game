@@ -15,6 +15,8 @@ constexpr uint32_t kIndirectRegionSize = kMaxIndirectDraws * static_cast<uint32_
 constexpr uint32_t kDrawListRegionSize = kMaxIndirectDraws * static_cast<uint32_t>(sizeof(GpuCullDrawEntry));
 constexpr const char* kCullCompWithDrawList = "passes/gpu_cull/cull_indirect_with_drawlist";
 constexpr const char* kCullCompNoDrawList = "passes/gpu_cull/cull_indirect_no_drawlist";
+constexpr const char* kCullCompWithDrawListRs = "passes/gpu_cull/cull_indirect_with_drawlist_rs";
+constexpr const char* kCullCompNoDrawListRs = "passes/gpu_cull/cull_indirect_no_drawlist_rs";
 } // namespace
 
 GpuCullPass::~GpuCullPass() {
@@ -25,6 +27,26 @@ bool GpuCullPass::IsSupported(rhi::IDevice* device) const {
     if (!device) return false;
     const auto& caps = device->GetCapabilities();
     return caps.supportsCompute && caps.supportsMultiDrawIndirect;
+}
+
+static rhi::IShader* LoadComputeShader(rhi::IDevice* device, const char* logicalName, std::string& outPath) {
+    if (!device->ResolveShaderPath(logicalName, rhi::ShaderStage::Compute, outPath)) return nullptr;
+    if (!platform::filesystem::GetEngineAssetsRoot().empty())
+        outPath = platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + outPath);
+    rhi::IShader* sh = nullptr;
+    if (outPath.find("vulkan") != std::string::npos) {
+        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(outPath + ".spv");
+        const uint32_t spirvMagic = 0x07230203u;
+        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic)
+            sh = device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
+    }
+    if (!sh || !sh->IsValid()) {
+        std::string src;
+        if (!LoadShaderSource(outPath, src)) return sh;
+        if (sh) device->DestroyShader(sh);
+        sh = device->CreateShader(rhi::ShaderStage::Compute, src.c_str(), src.size());
+    }
+    return sh;
 }
 
 void GpuCullPass::EnsureResources() {
@@ -42,38 +64,66 @@ void GpuCullPass::EnsureResources() {
         return;
     }
 
-    std::string compPath;
-    if (!m_device->ResolveShaderPath(kCullCompWithDrawList, rhi::ShaderStage::Compute, compPath)) {
-        core::Log::ErrorF("GpuCullPass: backend could not resolve path for %s", kCullCompWithDrawList);
+    rhi::BufferDesc uboDesc;
+    uboDesc.sizeInBytes = 16 * sizeof(float);
+    uboDesc.usage = rhi::BufferUsage::Uniform;
+    uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    m_viewProjUBO = m_device->CreateBuffer(uboDesc, nullptr);
+    if (!m_viewProjUBO) {
+        core::Log::Error("GpuCullPass: failed to create view-proj UBO");
         m_device->DestroyBuffer(m_indirectBuffer);
         m_indirectBuffer = nullptr;
         return;
     }
-    if (!platform::filesystem::GetEngineAssetsRoot().empty())
-        compPath = platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + compPath);
-    const bool trySpv = (compPath.find("vulkan") != std::string::npos);
-    if (trySpv) {
-        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(compPath + ".spv");
-        const uint32_t spirvMagic = 0x07230203u;
-        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic)
-            m_computeShaderWithDrawList = m_device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
-    }
-    if (!m_computeShaderWithDrawList || !m_computeShaderWithDrawList->IsValid()) {
-        std::string compSrc;
-        if (!LoadShaderSource(compPath, compSrc)) {
-            core::Log::ErrorF("GpuCullPass: failed to load %s", compPath.c_str());
-            if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
-            m_device->DestroyBuffer(m_indirectBuffer);
-            m_indirectBuffer = nullptr;
-            return;
+
+    // Prefer resource-space layout (ComputeGpuCull: set 0 Frame, set 4 SceneBuffers)
+    rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
+    rhi::IPipelineLayout* sceneLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
+    if (frameLayout && sceneLayout) {
+        std::string pathRs;
+        rhi::IShader* shWithRs = LoadComputeShader(m_device, kCullCompWithDrawListRs, pathRs);
+        if (shWithRs && shWithRs->IsValid()) {
+            std::string pathNoRs;
+            rhi::IShader* shNoRs = LoadComputeShader(m_device, kCullCompNoDrawListRs, pathNoRs);
+            if (shNoRs && shNoRs->IsValid()) {
+                m_computePipelineWithDrawList = m_device->CreateComputePipelineWithLayout(shWithRs, rhi::PipelineLayoutKind::ComputeGpuCull);
+                m_computePipelineNoDrawList = m_device->CreateComputePipelineWithLayout(shNoRs, rhi::PipelineLayoutKind::ComputeGpuCull);
+                if (m_computePipelineWithDrawList && m_computePipelineNoDrawList) {
+                    m_computeShaderWithDrawList = shWithRs;
+                    m_computeShaderNoDrawList = shNoRs;
+                    m_frameSet = m_device->CreateDescriptorSet(frameLayout);
+                    m_sceneBuffersSet = m_device->CreateDescriptorSet(sceneLayout);
+                    if (m_frameSet && m_sceneBuffersSet) {
+                        m_frameSet->UpdateUniformBuffer(0, m_viewProjUBO, 0, 16 * sizeof(float));
+                        m_sceneBuffersSet->UpdateStorageBuffer(0, m_indirectBuffer, kIndirectRegionSize, kDrawListRegionSize);
+                        m_sceneBuffersSet->UpdateStorageBuffer(1, m_indirectBuffer, 0, kIndirectRegionSize);
+                        m_useResourceSpace = true;
+                        m_initialized = true;
+                        return;
+                    }
+                    if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+                    if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
+                }
+                if (m_computePipelineWithDrawList) { m_device->DestroyPipeline(m_computePipelineWithDrawList); m_computePipelineWithDrawList = nullptr; }
+                if (m_computePipelineNoDrawList) { m_device->DestroyPipeline(m_computePipelineNoDrawList); m_computePipelineNoDrawList = nullptr; }
+            }
+            if (shNoRs) m_device->DestroyShader(shNoRs);
+            if (shWithRs) m_device->DestroyShader(shWithRs);
+        } else if (shWithRs) {
+            m_device->DestroyShader(shWithRs);
         }
-        if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
-        m_computeShaderWithDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compSrc.c_str(), compSrc.size());
     }
+
+    // Legacy path
+    std::string compPath;
+    m_computeShaderWithDrawList = LoadComputeShader(m_device, kCullCompWithDrawList, compPath);
     if (!m_computeShaderWithDrawList || !m_computeShaderWithDrawList->IsValid()) {
-        core::Log::Error("GpuCullPass: failed to create compute shader (with draw list)");
+        core::Log::ErrorF("GpuCullPass: failed to load %s", kCullCompWithDrawList);
         if (m_computeShaderWithDrawList) m_device->DestroyShader(m_computeShaderWithDrawList);
+        m_device->DestroyBuffer(m_viewProjUBO);
         m_device->DestroyBuffer(m_indirectBuffer);
+        m_computeShaderWithDrawList = nullptr;
+        m_viewProjUBO = nullptr;
         m_indirectBuffer = nullptr;
         return;
     }
@@ -81,56 +131,27 @@ void GpuCullPass::EnsureResources() {
     if (!m_computePipelineWithDrawList) {
         core::Log::Error("GpuCullPass: failed to create compute pipeline (with draw list)");
         m_device->DestroyShader(m_computeShaderWithDrawList);
+        m_device->DestroyBuffer(m_viewProjUBO);
         m_device->DestroyBuffer(m_indirectBuffer);
         m_computeShaderWithDrawList = nullptr;
+        m_viewProjUBO = nullptr;
         m_indirectBuffer = nullptr;
         return;
     }
 
     std::string compNoDrawListPath;
-    if (!m_device->ResolveShaderPath(kCullCompNoDrawList, rhi::ShaderStage::Compute, compNoDrawListPath)) {
-        core::Log::ErrorF("GpuCullPass: backend could not resolve path for %s", kCullCompNoDrawList);
-        m_device->DestroyPipeline(m_computePipelineWithDrawList);
-        m_device->DestroyShader(m_computeShaderWithDrawList);
-        m_device->DestroyBuffer(m_indirectBuffer);
-        m_computePipelineWithDrawList = nullptr;
-        m_computeShaderWithDrawList = nullptr;
-        m_indirectBuffer = nullptr;
-        return;
-    }
-    if (!platform::filesystem::GetEngineAssetsRoot().empty())
-        compNoDrawListPath = platform::filesystem::NormalizePath(platform::filesystem::GetEngineAssetsRoot() + "/" + compNoDrawListPath);
-    const bool trySpvNoDrawList = (compNoDrawListPath.find("vulkan") != std::string::npos);
-    if (trySpvNoDrawList) {
-        std::vector<uint8_t> spvData = platform::filesystem::ReadFile(compNoDrawListPath + ".spv");
-        const uint32_t spirvMagic = 0x07230203u;
-        if (spvData.size() >= 4 && *reinterpret_cast<uint32_t*>(spvData.data()) == spirvMagic)
-            m_computeShaderNoDrawList = m_device->CreateShaderFromBinary(rhi::ShaderStage::Compute, spvData.data(), spvData.size());
-    }
+    m_computeShaderNoDrawList = LoadComputeShader(m_device, kCullCompNoDrawList, compNoDrawListPath);
     if (!m_computeShaderNoDrawList || !m_computeShaderNoDrawList->IsValid()) {
-        std::string compNoDrawListSrc;
-        if (!LoadShaderSource(compNoDrawListPath, compNoDrawListSrc)) {
-            core::Log::ErrorF("GpuCullPass: failed to load %s", compNoDrawListPath.c_str());
-            if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
-            m_device->DestroyPipeline(m_computePipelineWithDrawList);
-            m_device->DestroyShader(m_computeShaderWithDrawList);
-            m_device->DestroyBuffer(m_indirectBuffer);
-            m_computePipelineWithDrawList = nullptr;
-            m_computeShaderWithDrawList = nullptr;
-            m_indirectBuffer = nullptr;
-            return;
-        }
-        if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
-        m_computeShaderNoDrawList = m_device->CreateShader(rhi::ShaderStage::Compute, compNoDrawListSrc.c_str(), compNoDrawListSrc.size());
-    }
-    if (!m_computeShaderNoDrawList || !m_computeShaderNoDrawList->IsValid()) {
-        core::Log::Error("GpuCullPass: failed to create compute shader (no draw list)");
+        core::Log::ErrorF("GpuCullPass: failed to load %s", kCullCompNoDrawList);
         if (m_computeShaderNoDrawList) m_device->DestroyShader(m_computeShaderNoDrawList);
         m_device->DestroyPipeline(m_computePipelineWithDrawList);
         m_device->DestroyShader(m_computeShaderWithDrawList);
+        m_device->DestroyBuffer(m_viewProjUBO);
         m_device->DestroyBuffer(m_indirectBuffer);
+        m_computeShaderNoDrawList = nullptr;
         m_computePipelineWithDrawList = nullptr;
         m_computeShaderWithDrawList = nullptr;
+        m_viewProjUBO = nullptr;
         m_indirectBuffer = nullptr;
         return;
     }
@@ -140,30 +161,12 @@ void GpuCullPass::EnsureResources() {
         m_device->DestroyShader(m_computeShaderNoDrawList);
         m_device->DestroyPipeline(m_computePipelineWithDrawList);
         m_device->DestroyShader(m_computeShaderWithDrawList);
+        m_device->DestroyBuffer(m_viewProjUBO);
         m_device->DestroyBuffer(m_indirectBuffer);
         m_computeShaderNoDrawList = nullptr;
         m_computePipelineWithDrawList = nullptr;
         m_computeShaderWithDrawList = nullptr;
-        m_indirectBuffer = nullptr;
-        return;
-    }
-
-    rhi::BufferDesc uboDesc;
-    uboDesc.sizeInBytes = 16 * sizeof(float);
-    uboDesc.usage = rhi::BufferUsage::Uniform;
-    uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-    m_viewProjUBO = m_device->CreateBuffer(uboDesc, nullptr);
-    if (!m_viewProjUBO) {
-        core::Log::Error("GpuCullPass: failed to create view-proj UBO");
-        m_device->DestroyPipeline(m_computePipelineNoDrawList);
-        m_device->DestroyPipeline(m_computePipelineWithDrawList);
-        m_device->DestroyShader(m_computeShaderNoDrawList);
-        m_device->DestroyShader(m_computeShaderWithDrawList);
-        m_device->DestroyBuffer(m_indirectBuffer);
-        m_computePipelineNoDrawList = nullptr;
-        m_computePipelineWithDrawList = nullptr;
-        m_computeShaderNoDrawList = nullptr;
-        m_computeShaderWithDrawList = nullptr;
+        m_viewProjUBO = nullptr;
         m_indirectBuffer = nullptr;
         return;
     }
@@ -180,6 +183,9 @@ bool GpuCullPass::Initialize(rhi::IDevice* device) {
 
 void GpuCullPass::Shutdown() {
     if (!m_device) return;
+    if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+    if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
+    m_useResourceSpace = false;
     if (m_computePipelineNoDrawList) {
         m_device->DestroyPipeline(m_computePipelineNoDrawList);
         m_computePipelineNoDrawList = nullptr;
@@ -250,17 +256,20 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
     rhi::IPipeline* pipeline = useWithDrawListPipeline ? m_computePipelineWithDrawList : m_computePipelineNoDrawList;
 
     cmd->BindPipeline(pipeline);
-    if (m_device)
+
+    if (m_useResourceSpace && m_frameSet && m_sceneBuffersSet) {
+        rhi::IDescriptorSet* sets[2] = { m_frameSet, m_sceneBuffersSet };
+        cmd->BindDescriptorSets(0, 2, sets);
+    } else {
         m_device->EnsureComputePipelineStorageBlockBindings(pipeline);
-    cmd->BindStorageBuffer(m_indirectBuffer, 0, 0, kIndirectRegionSize);
-    if (m_viewProjUBO && useWithDrawListPipeline)
-        cmd->BindUniformBuffer(m_viewProjUBO, 5, 0, static_cast<uint32_t>(16 * sizeof(float)));
+        cmd->BindStorageBuffer(m_indirectBuffer, 0, 0, kIndirectRegionSize);
+        if (m_viewProjUBO && useWithDrawListPipeline)
+            cmd->BindUniformBuffer(m_viewProjUBO, 5, 0, static_cast<uint32_t>(16 * sizeof(float)));
+    }
 
     if (useWithDrawListPipeline) {
-        const uint32_t drawListBytes = effectiveCount * static_cast<uint32_t>(sizeof(GpuCullDrawEntry));
-        cmd->BindStorageBuffer(m_indirectBuffer, 1, kIndirectRegionSize, drawListBytes);
         cmd->SetUniformUint("u_NumDraws", effectiveCount);
-        const bool useOcclusion = (m_occlusionDepthTex != nullptr && m_occlusionDepthWidth > 0 && m_occlusionDepthHeight > 0);
+        const bool useOcclusion = !m_useResourceSpace && (m_occlusionDepthTex != nullptr && m_occlusionDepthWidth > 0 && m_occlusionDepthHeight > 0);
         cmd->SetUniformInt("u_UseOcclusionCull", useOcclusion ? 1 : 0);
         if (useOcclusion) {
             cmd->BindTexture(m_occlusionDepthTex, 4);
@@ -269,6 +278,10 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
         }
     } else {
         cmd->SetUniformUint("u_NumDraws", 0);
+    }
+    if (!m_useResourceSpace && useWithDrawListPipeline) {
+        const uint32_t drawListBytes = effectiveCount * static_cast<uint32_t>(sizeof(GpuCullDrawEntry));
+        cmd->BindStorageBuffer(m_indirectBuffer, 1, kIndirectRegionSize, drawListBytes);
     }
     cmd->Dispatch(dispatchX, dispatchY, dispatchZ);
 

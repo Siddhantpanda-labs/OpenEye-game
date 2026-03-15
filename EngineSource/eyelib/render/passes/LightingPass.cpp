@@ -30,9 +30,15 @@ void LightingPass::EnsureDefaultShader(rhi::IDevice* device) {
     if (!device) return;
     m_lightingShader = std::make_shared<Shader>();
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
-    if (!m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout)) {
-        core::Log::Warn("LightingPass: deferred lighting shader load failed");
-        return;
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
+    if (device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::DeferredLightingPass))
+        layoutKind = rhi::PipelineLayoutKind::DeferredLighting;
+    if (!m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, layoutKind)) {
+        if (layoutKind != rhi::PipelineLayoutKind::Legacy &&
+            !m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Legacy)) {
+            core::Log::Warn("LightingPass: deferred lighting shader load failed");
+            return;
+        }
     }
 }
 
@@ -84,31 +90,36 @@ void LightingPass::Render(GBuffer& gbuffer,
     rhi::IPipeline* pipe = m_lightingShader->GetPipelineRHI();
     if (pipe && !pipe->HasValidProgram()) return;
 
+    const bool useResourceSpace = (m_lightingFrameSet && m_lightingDeferredPassSet && cmd);
+
     gbuffer.BindForLightingPass(cmd);
     m_lightingShader->Bind(device);
-    m_lightingShader->SetInt("u_Position", 0);
-    m_lightingShader->SetInt("u_Normal", 1);
-    m_lightingShader->SetInt("u_Albedo", 2);
-    m_lightingShader->SetInt("u_PBR", 3);
-    if (ibl && ibl->IsValid() && cmd) {
-        ibl->BindForLighting(cmd, 11, 12, 13);
-        m_lightingShader->SetInt("u_UseIBL", 1);
-    } else {
-        m_lightingShader->SetInt("u_UseIBL", 0);
-    }
-    if (cascadeMap && cmd) {
-        rhi::ITexture* shadowTex = cascadeMap->GetDepthTextureRHI();
-        if (shadowTex) cmd->BindTexture(shadowTex, 6);
-        rhi::IBuffer* lightSpaceBuf = cascadeMap->GetLightSpaceBufferRHI();
-        if (lightSpaceBuf) cmd->BindStorageBuffer(lightSpaceBuf, 7, 0, 0);
-        math::Mat4 viewProj = projection * view;
-        m_lightingShader->SetMat4("u_ViewProj", viewProj);
-    }
-    m_lightingShader->SetInt("u_ShadowMap", 6);
+    m_lightingShader->SetInt("u_UseIBL", (ibl && ibl->IsValid()) ? 1 : 0);
 
-    if (sceneLightingBuffer && cmd) {
-        cmd->BindStorageBuffer(sceneLightingBuffer, 5, 0, 0);
+    if (!useResourceSpace) {
+        m_lightingShader->SetInt("u_Position", 0);
+        m_lightingShader->SetInt("u_Normal", 1);
+        m_lightingShader->SetInt("u_Albedo", 2);
+        m_lightingShader->SetInt("u_PBR", 3);
+        if (ibl && ibl->IsValid() && cmd)
+            ibl->BindForLighting(cmd, 11, 12, 13);
+        if (cascadeMap && cmd) {
+            rhi::ITexture* shadowTex = cascadeMap->GetDepthTextureRHI();
+            if (shadowTex) cmd->BindTexture(shadowTex, 6);
+            rhi::IBuffer* lightSpaceBuf = cascadeMap->GetLightSpaceBufferRHI();
+            if (lightSpaceBuf) cmd->BindStorageBuffer(lightSpaceBuf, 7, 0, 0);
+            math::Mat4 viewProj = projection * view;
+            m_lightingShader->SetMat4("u_ViewProj", viewProj);
+        }
+        m_lightingShader->SetInt("u_ShadowMap", 6);
+        if (sceneLightingBuffer && cmd)
+            cmd->BindStorageBuffer(sceneLightingBuffer, 5, 0, 0);
     } else {
+        rhi::IDescriptorSet* sets[2] = { m_lightingFrameSet, m_lightingDeferredPassSet };
+        cmd->BindDescriptorSets(0, 2, sets);
+    }
+
+    if (!useResourceSpace && !sceneLightingBuffer) {
         if (cascadeMap && cascadeMap->GetSplitCount() > 0) {
             m_lightingShader->SetMat4("u_LightSpaceMatrix", cascadeMap->GetLightSpaceMatrix(0));
             m_lightingShader->SetFloat("u_ShadowBias", 0.005f);
@@ -151,7 +162,7 @@ void LightingPass::Render(GBuffer& gbuffer,
         cmd->DrawFullscreenQuad(m_lightingShader->GetPipelineRHI());
     if (cmd) cmd->SetDepthTest(true);
 
-    if (cascadeMap && cmd) cmd->UnbindTexture(6);
+    if (!useResourceSpace && cascadeMap && cmd) cmd->UnbindTexture(6);
     m_lightingShader->Unbind();
 }
 

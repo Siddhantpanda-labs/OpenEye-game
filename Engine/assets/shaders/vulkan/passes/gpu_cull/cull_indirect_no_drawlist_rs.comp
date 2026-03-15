@@ -1,5 +1,5 @@
 #version 450
-// Vulkan: no-draw-list variant; writes one indirect command (single quad) at slot 0.
+// Resource-space: set 0 Frame (unused), set 4 SceneBuffers binding 1 = indirect output. Writes one indirect command.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -11,7 +11,8 @@ struct DrawIndexedIndirectCommand {
     uint baseInstance;
 };
 
-layout(set = 0, binding = 0) buffer IndirectOut {
+// Set 4 — SceneBuffers: binding 1 = indirect output
+layout(set = 4, binding = 1) buffer IndirectOut {
     DrawIndexedIndirectCommand outCommands[];
 };
 

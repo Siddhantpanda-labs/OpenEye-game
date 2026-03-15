@@ -42,7 +42,8 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
 }
 
 bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
-                             const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
+                             const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
+                             rhi::PipelineLayoutKind layoutKind) {
     if (!device) return false;
     if (m_deviceRHI) Destroy(m_deviceRHI);
     m_reflection = ParseShaderReflection(vertexSrc, fragmentSrc);
@@ -58,6 +59,7 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
     desc.fragmentShader = fs;
     desc.vertexLayout = layout;
     desc.topology = topology;
+    desc.layoutKind = layoutKind;
     desc.depthStencil.depthTest = true;
     desc.depthStencil.depthWrite = true;
     rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
@@ -124,13 +126,14 @@ bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, c
 }
 
 bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-                  rhi::PrimitiveTopology topology) {
-    return Load(device, shaderName, layout, topology, {});
+                  rhi::PrimitiveTopology topology, rhi::PipelineLayoutKind layoutKind) {
+    return Load(device, shaderName, layout, topology, {}, nullptr, layoutKind);
 }
 
 bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-                  rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride) {
-    return Load(device, shaderName, layout, topology, {}, depthStencilOverride);
+                  rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride,
+                  rhi::PipelineLayoutKind layoutKind) {
+    return Load(device, shaderName, layout, topology, {}, depthStencilOverride, layoutKind);
 }
 
 bool Shader::Reload() {
@@ -156,7 +159,7 @@ static std::string ApplyDefinesToSource(const std::string& source, const std::ve
 
 bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
                   rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
-                  const rhi::DepthStencilState* depthStencilOverride) {
+                  const rhi::DepthStencilState* depthStencilOverride, rhi::PipelineLayoutKind layoutKind) {
     if (!device || shaderName.empty()) return false;
     m_descriptor = {};
     m_descriptor.loadByName = true;
@@ -164,9 +167,10 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     m_descriptor.layout = layout;
     m_descriptor.topology = topology;
     m_descriptor.keywords = keywords;
+    m_descriptor.layoutKind = layoutKind;
     if (keywords.empty()) {
         if (m_deviceRHI) Destroy(m_deviceRHI);
-        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology, depthStencilOverride);
+        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology, depthStencilOverride, layoutKind);
         if (!pipe) return false;
         m_pipelineRHI = pipe;
         m_deviceRHI = device;
@@ -204,7 +208,7 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     }
     vertexSrc = ApplyDefinesToSource(vertexSrc, keywords);
     fragmentSrc = ApplyDefinesToSource(fragmentSrc, keywords);
-    if (!BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology))
+    if (!BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology, layoutKind))
         return false;
     if (m_pipelineRHI) {
         std::vector<uint8_t> bin;
@@ -221,7 +225,7 @@ ShaderDescriptor Shader::GetDescriptor() const {
 bool Shader::LoadFromDescriptor(rhi::IDevice* device, const ShaderDescriptor& desc) {
     if (!device) return false;
     if (desc.loadByName && !desc.shaderName.empty())
-        return Load(device, desc.shaderName, desc.layout, desc.topology, desc.keywords);
+        return Load(device, desc.shaderName, desc.layout, desc.topology, desc.keywords, nullptr, desc.layoutKind);
     if (!desc.vertexPath.empty() || !desc.fragmentPath.empty())
         return LoadFromFile(device, desc.vertexPath, desc.fragmentPath, desc.layout, desc.topology);
     return false;

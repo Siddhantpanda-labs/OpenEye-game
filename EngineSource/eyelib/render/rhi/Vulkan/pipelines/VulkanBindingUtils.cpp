@@ -14,24 +14,24 @@ bool CreateLegacySet0(VkDevice device, VkDescriptorPool descriptorPool,
     if (!device || !descriptorPool || !outLayout || !outSet) return false;
     *outLayout = VK_NULL_HANDLE;
     *outSet = VK_NULL_HANDLE;
-    const uint32_t kLegacySet0ImageBindings[] = { 0, 1, 2, 3, 6, 11, 12, 13 };
-    const uint32_t kLegacySet0StorageBindings[] = { 5, 7 };
-    VkDescriptorSetLayoutBinding legacyBindings[10] = {};
-    for (size_t i = 0; i < 8; i++) {
+    const uint32_t kLegacySet0ImageBindings[] = { 0, 1, 2, 3, 4, 5, 6, 11, 12, 13 };
+    const uint32_t kLegacySet0StorageBindings[] = { 7 };
+    VkDescriptorSetLayoutBinding legacyBindings[11] = {};
+    for (size_t i = 0; i < 10; i++) {
         legacyBindings[i].binding = kLegacySet0ImageBindings[i];
         legacyBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         legacyBindings[i].descriptorCount = 1;
         legacyBindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
-    for (size_t i = 0; i < 2; i++) {
-        legacyBindings[8 + i].binding = kLegacySet0StorageBindings[i];
-        legacyBindings[8 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        legacyBindings[8 + i].descriptorCount = 1;
-        legacyBindings[8 + i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (size_t i = 0; i < 1; i++) {
+        legacyBindings[10 + i].binding = kLegacySet0StorageBindings[i];
+        legacyBindings[10 + i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        legacyBindings[10 + i].descriptorCount = 1;
+        legacyBindings[10 + i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
     VkDescriptorSetLayoutCreateInfo legacyLayoutInfo = {};
     legacyLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    legacyLayoutInfo.bindingCount = 10;
+    legacyLayoutInfo.bindingCount = 11;
     legacyLayoutInfo.pBindings = legacyBindings;
     VkResult res = vkCreateDescriptorSetLayout(device, &legacyLayoutInfo, nullptr, outLayout);
     if (res != VK_SUCCESS) return false;
@@ -61,7 +61,7 @@ bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
     computeSet0Bindings[0].descriptorCount = 1;
     computeSet0Bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     computeSet0Bindings[1].binding = 1;
-    computeSet0Bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    computeSet0Bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     computeSet0Bindings[1].descriptorCount = 1;
     computeSet0Bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     computeSet0Bindings[2].binding = 2;
@@ -107,9 +107,9 @@ bool CreateDefaultPipelineLayout(VkDevice device, VkDescriptorSetLayout legacySe
     *outPipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout setLayouts[2] = { legacySet0Layout, bindlessSetLayout };
     VkPushConstantRange pushRange = {};
-    pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
-    pushRange.size = 128;
+    pushRange.size = 256;
     VkPipelineLayoutCreateInfo defaultPlInfo = {};
     defaultPlInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     defaultPlInfo.setLayoutCount = 2;
@@ -143,13 +143,13 @@ void UpdateLegacySet0(DeviceVK* deviceObj, CommandListVK* cmd) {
     VkDescriptorSet set = static_cast<VkDescriptorSet>(deviceObj->GetLegacySet0());
     VkSampler sampler = static_cast<VkSampler>(deviceObj->GetDefaultSampler());
     if (device == VK_NULL_HANDLE || set == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) return;
-    const uint32_t kImageBindings[] = { 0, 1, 2, 3, 6, 11, 12, 13 };
-    const uint32_t kStorageBindings[] = { 5, 7 };
-    VkDescriptorImageInfo imageInfos[8] = {};
-    VkDescriptorBufferInfo bufferInfos[2] = {};
-    VkWriteDescriptorSet writes[10] = {};
+    const uint32_t kImageBindings[] = { 0, 1, 2, 3, 4, 5, 6, 11, 12, 13 };
+    const uint32_t kStorageBindings[] = { 7 };
+    VkDescriptorImageInfo imageInfos[10] = {};
+    VkDescriptorBufferInfo bufferInfos[1] = {};
+    VkWriteDescriptorSet writes[11] = {};
     uint32_t numWrites = 0;
-    for (size_t i = 0; i < 8; i++) {
+    for (size_t i = 0; i < 10; i++) {
         const uint32_t b = kImageBindings[i];
         ITexture* tex = cmd->GetBoundTexture(b);
         if (!tex) continue;
@@ -168,7 +168,7 @@ void UpdateLegacySet0(DeviceVK* deviceObj, CommandListVK* cmd) {
         writes[numWrites].pImageInfo = &imageInfos[i];
         numWrites++;
     }
-    for (size_t i = 0; i < 2; i++) {
+    for (size_t i = 0; i < 1; i++) {
         const uint32_t b = kStorageBindings[i];
         IBuffer* buf = nullptr;
         uint32_t offset = 0, size = 0;
@@ -210,7 +210,7 @@ void UpdateComputeSet0(DeviceVK* deviceObj, CommandListVK* cmd) {
     VkWriteDescriptorSet writes[6] = {};
     uint32_t numWrites = 0;
     uint32_t bufIdx = 0;
-    for (uint32_t binding : { 0u, 2u, 3u }) {
+    for (uint32_t binding : { 0u, 1u, 2u, 3u }) {
         IBuffer* buf = nullptr;
         uint32_t offset = 0, size = 0;
         cmd->GetBoundStorageBuffer(binding, &buf, &offset, &size);
@@ -230,24 +230,6 @@ void UpdateComputeSet0(DeviceVK* deviceObj, CommandListVK* cmd) {
         writes[numWrites].pBufferInfo = &bufferInfos[bufIdx];
         bufIdx++;
         numWrites++;
-    }
-    if (paramsUbo) {
-        BufferVK* paramsVK = static_cast<BufferVK*>(paramsUbo);
-        VkBuffer vkBuf = static_cast<VkBuffer>(paramsVK->m_buffer);
-        if (vkBuf != VK_NULL_HANDLE) {
-            bufferInfos[bufIdx].buffer = vkBuf;
-            bufferInfos[bufIdx].offset = 0;
-            bufferInfos[bufIdx].range = 256;
-            writes[numWrites].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[numWrites].dstSet = set;
-            writes[numWrites].dstBinding = 1;
-            writes[numWrites].dstArrayElement = 0;
-            writes[numWrites].descriptorCount = 1;
-            writes[numWrites].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            writes[numWrites].pBufferInfo = &bufferInfos[bufIdx];
-            bufIdx++;
-            numWrites++;
-        }
     }
     ITexture* tex4 = cmd->GetBoundTexture(4);
     if (tex4) {

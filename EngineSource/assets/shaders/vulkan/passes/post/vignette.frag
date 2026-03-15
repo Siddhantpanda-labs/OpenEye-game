@@ -3,7 +3,7 @@
 layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 FragColor;
 
-layout(binding = 0) uniform sampler2D u_Texture;
+layout(set = 1, binding = 0) uniform sampler2D u_Texture;
 
 layout(push_constant, std430) uniform VignettePush {
     float u_Intensity;

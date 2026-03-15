@@ -74,7 +74,10 @@ private:
     rhi::IPipeline* m_computePipelineWithDrawList = nullptr;
     rhi::IShader* m_computeShaderNoDrawList = nullptr;
     rhi::IPipeline* m_computePipelineNoDrawList = nullptr;
-    rhi::IBuffer* m_viewProjUBO = nullptr;  // View-projection for compute (UBO for pipeline compatibility)
+    rhi::IBuffer* m_viewProjUBO = nullptr;  // View-projection (UBO slot 5 legacy; Frame set binding 0 resource-space)
+    bool m_useResourceSpace = false;
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_sceneBuffersSet = nullptr;
     uint32_t m_drawCount = 1;
     uint32_t m_effectiveDrawCount = 1;  // actual count written (clamped to kMaxIndirectDraws)
     float m_viewProj[16] = {};

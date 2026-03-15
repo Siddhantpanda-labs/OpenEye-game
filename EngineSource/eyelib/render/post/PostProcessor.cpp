@@ -35,6 +35,9 @@ void PostProcessor::DestroyFramebuffers() {
     if (!m_deviceRHI) return;
     if (m_singleTexSet) { m_deviceRHI->DestroyDescriptorSet(m_singleTexSet); m_singleTexSet = nullptr; }
     if (m_singleTexLayout) { m_deviceRHI->DestroyPipelineLayout(m_singleTexLayout); m_singleTexLayout = nullptr; }
+    if (m_postPassSet) { m_deviceRHI->DestroyDescriptorSet(m_postPassSet); m_postPassSet = nullptr; }
+    if (m_frameSet) { m_deviceRHI->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+    if (m_frameUBO) { m_deviceRHI->DestroyBuffer(m_frameUBO); m_frameUBO = nullptr; }
     for (auto& rt : m_pingPongRT) {
         if (rt) {
             m_deviceRHI->DestroyRenderTarget(rt);
@@ -71,6 +74,24 @@ bool PostProcessor::Initialize(uint32_t width, uint32_t height, rhi::IDevice* de
         layoutDesc.bindings = {{0u, rhi::BindingType::Texture}};
         m_singleTexLayout = m_deviceRHI->CreatePipelineLayout(layoutDesc);
         m_singleTexSet = m_singleTexLayout ? m_deviceRHI->CreateDescriptorSet(m_singleTexLayout) : nullptr;
+    }
+    // Resource-space Post path: Frame (set 0) + PostPass (set 1) for Vulkan
+    rhi::IPipelineLayout* frameLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
+    rhi::IPipelineLayout* postPassLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+    if (frameLayout && postPassLayout) {
+        m_frameSet = m_deviceRHI->CreateDescriptorSet(frameLayout);
+        m_postPassSet = m_deviceRHI->CreateDescriptorSet(postPassLayout);
+        if (m_frameSet && m_postPassSet) {
+            rhi::BufferDesc uboDesc;
+            uboDesc.sizeInBytes = 256;
+            uboDesc.usage = rhi::BufferUsage::Uniform;
+            uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+            m_frameUBO = m_deviceRHI->CreateBuffer(uboDesc, nullptr);
+            if (m_frameUBO) {
+                m_frameSet->UpdateUniformBuffer(0, m_frameUBO, 0, 128);
+                m_frameSet->UpdateUniformBuffer(1, m_frameUBO, 128, 128);
+            }
+        }
     }
     rhi::ITexture* outTex = GetOutputTextureRHI();
     if (!m_outputRT) {
@@ -146,34 +167,35 @@ void PostProcessor::CreateFramebuffers() {
 void PostProcessor::LoadShaders() {
     if (!m_deviceRHI) return;
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
+    const rhi::PipelineLayoutKind postLayout = rhi::PipelineLayoutKind::Post;
 
     m_toneMappingShader = std::make_shared<Shader>();
-    if (!m_toneMappingShader->Load(m_deviceRHI, "passes/post/tonemap", fullscreenLayout)) {
+    if (!m_toneMappingShader->Load(m_deviceRHI, "passes/post/tonemap", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load tone mapping shader");
     }
 
     m_bloomExtractShader = std::make_shared<Shader>();
-    if (!m_bloomExtractShader->Load(m_deviceRHI, "passes/post/bloom_extract", fullscreenLayout)) {
+    if (!m_bloomExtractShader->Load(m_deviceRHI, "passes/post/bloom_extract", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom extract shader");
     }
 
     m_bloomBlurShader = std::make_shared<Shader>();
-    if (!m_bloomBlurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout)) {
+    if (!m_bloomBlurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom blur shader");
     }
 
     m_bloomCompositeShader = std::make_shared<Shader>();
-    if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout)) {
+    if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load bloom composite shader");
     }
 
     m_blurShader = std::make_shared<Shader>();
-    if (!m_blurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout)) {
+    if (!m_blurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load blur shader");
     }
 
     m_chromaticAberrationShader = std::make_shared<Shader>();
-    if (!m_chromaticAberrationShader->Load(m_deviceRHI, "passes/post/chromatic_aberration", fullscreenLayout)) {
+    if (!m_chromaticAberrationShader->Load(m_deviceRHI, "passes/post/chromatic_aberration", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
         core::Log::WarnF("PostProcessor: Failed to load chromatic aberration shader");
     }
 
@@ -399,11 +421,19 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     cmd->ClearRenderTarget(m_outputRT, clearBlack);
 
     m_toneMappingShader->Bind(m_deviceRHI);
-    m_toneMappingShader->SetInt("u_HDRTexture", 0);
-    m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
-    m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
-
-    cmd->BindTexture(hdrTexture, 0);
+    if (m_frameSet && m_postPassSet) {
+        m_postPassSet->UpdateTexture(0, hdrTexture);
+        struct TonemapPush { float exposure; int useACES; };
+        TonemapPush push = { settings.exposure, settings.useACES ? 1 : 0 };
+        cmd->SetPushConstants(0, sizeof(push), &push);
+        rhi::IDescriptorSet* sets[2] = { m_frameSet, m_postPassSet };
+        cmd->BindDescriptorSets(0, 2, sets);
+    } else {
+        m_toneMappingShader->SetInt("u_HDRTexture", 0);
+        m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
+        m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
+        cmd->BindTexture(hdrTexture, 0);
+    }
     if (m_toneMappingShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_toneMappingShader->GetPipelineRHI()); }
     m_lastOutputValid = true;
     m_toneMappingShader->Unbind();

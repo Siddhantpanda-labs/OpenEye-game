@@ -18,8 +18,10 @@ struct BindlessHeapVK : IBindlessHeap {
     BindlessHandle AllocateBufferHandle(IBuffer* buffer) override;
     void FreeTextureHandle(BindlessHandle handle) override;
     void FreeBufferHandle(BindlessHandle handle) override;
+    IDescriptorSet* GetDescriptorSet() override;
 
     DeviceVK* m_device = nullptr;
+    IDescriptorSet* m_descriptorSetWrapper = nullptr;
     void* m_descriptorPool = nullptr;  // VkDescriptorPool
     void* m_descriptorSet = nullptr;   // VkDescriptorSet
 

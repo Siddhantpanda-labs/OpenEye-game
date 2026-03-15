@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 0 = Frame. Same layout as Forward (sets 0–4).
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -15,10 +16,14 @@ layout(location = 2) out vec3 v_WorldNormal;
 layout(location = 3) out vec2 v_TexCoord;
 layout(location = 4) out mat3 v_TBN;
 
-layout(push_constant, std430) uniform ForwardPlusPush {
-    mat4 u_Model;
+layout(set = 0, binding = 0) uniform FrameBlock {
     mat4 u_View;
     mat4 u_Projection;
+    mat4 u_ViewProj;
+};
+
+layout(push_constant, std430) uniform ForwardPlusPush {
+    mat4 u_Model;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -28,7 +33,7 @@ layout(push_constant, std430) uniform ForwardPlusPush {
 void main() {
     vec4 w = pc.u_Model * vec4(a_Position, 1.0);
     v_WorldPos = w.xyz;
-    v_ViewPos = (pc.u_View * w).xyz;
+    v_ViewPos = (u_View * w).xyz;
     mat3 normalMatrix = mat3(transpose(inverse(pc.u_Model)));
     vec3 worldNormal = normalize(normalMatrix * a_Normal);
     vec3 worldTangent = length(a_Tangent) < 0.001
@@ -42,5 +47,5 @@ void main() {
     uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;
     if (pc.u_FlipV > 0.5) uv.y = 1.0 - uv.y;
     v_TexCoord = uv;
-    gl_Position = pc.u_Projection * pc.u_View * w;
+    gl_Position = u_Projection * u_View * w;
 }

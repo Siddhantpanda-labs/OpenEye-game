@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 0 = Frame (camera + prev for velocity). Push: model, UV.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -14,12 +15,16 @@ layout(location = 1) out vec3 v_WorldNormal;
 layout(location = 2) out vec2 v_TexCoord;
 layout(location = 3) out vec2 v_Velocity;
 
-layout(push_constant, std430) uniform GBufferPush {
-    mat4 u_Model;
+layout(set = 0, binding = 0) uniform FrameBlock {
     mat4 u_View;
     mat4 u_Projection;
+    mat4 u_ViewProj;
     mat4 u_PrevView;
     mat4 u_PrevProjection;
+};
+
+layout(push_constant, std430) uniform GBufferPush {
+    mat4 u_Model;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -38,8 +43,8 @@ void main() {
     uv += pc.u_UVTransform.xy;
     if (pc.u_FlipV > 0.5) uv.y = 1.0 - uv.y;
     v_TexCoord = uv;
-    vec4 currentPos = pc.u_Projection * pc.u_View * w;
-    vec4 prevPos = pc.u_PrevProjection * pc.u_PrevView * w;
+    vec4 currentPos = u_Projection * u_View * w;
+    vec4 prevPos = u_PrevProjection * u_PrevView * w;
     v_Velocity = (currentPos.xy / currentPos.w) - (prevPos.xy / prevPos.w);
     gl_Position = currentPos;
 }

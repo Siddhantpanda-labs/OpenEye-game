@@ -208,6 +208,18 @@ struct RasterState {
     float depthBiasSlope = 0.f;
 };
 
+/** Pipeline layout kind: which descriptor sets a pipeline uses. Avoids shader-name heuristics; pipelines explicitly request layout. Vulkan: selects resource-space pipeline layout (Frame/Pass/Material/SceneBuffers). Legacy = current single legacy set0 path. */
+enum class PipelineLayoutKind : uint32_t {
+    Legacy = 0,           ///< Legacy set0 + bindless (current path)
+    Forward,              ///< set0 Frame, set1 ForwardPass, set2 Material, set3 Bindless, set4 SceneBuffers
+    Post,                 ///< set0 Frame, set1 PostPass
+    Shadow,               ///< set0 Frame, set1 ShadowPass, set4 SceneBuffers
+    GBuffer,              ///< set0 Frame, set2 Material, set3 Bindless, set4 SceneBuffers
+    DeferredLighting,     ///< set0 Frame, set1 DeferredLightingPass
+    ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set4 SceneBuffers
+    ComputeGpuCull,       ///< set0 Frame, set4 SceneBuffers
+};
+
 struct PipelineDesc {
     void* vertexShader = nullptr;    // IShader* (typed in RHI.h)
     void* fragmentShader = nullptr;
@@ -226,6 +238,8 @@ struct PipelineDesc {
     RasterState raster;
     /** Optional GPU debug name (e.g. Vulkan: vkSetDebugUtilsObjectNameEXT). */
     const char* debugName = nullptr;
+    /** Which descriptor set layout to use. Legacy = current path; other kinds use resource-space layouts (set0 Frame, set1 Pass, etc.). Default Legacy. */
+    PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy;
 };
 
 // ---- Render target ----

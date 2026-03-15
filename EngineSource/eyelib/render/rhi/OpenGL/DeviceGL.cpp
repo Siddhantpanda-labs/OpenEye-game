@@ -511,7 +511,8 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
-IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
+IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
+    (void)layoutKind;
     if (!shaderName || !shaderName[0]) return nullptr;
     const std::string logicalName = ShaderPathToLogicalName(shaderName);
     if (logicalName.empty()) return nullptr;

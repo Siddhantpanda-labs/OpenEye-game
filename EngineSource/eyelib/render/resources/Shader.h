@@ -24,16 +24,19 @@ public:
     Shader(Shader&& other) noexcept;
     Shader& operator=(Shader&& other) noexcept;
 
-    /** Load by logical name; backend resolves paths/format (Option 2: backend-owned shader loading). */
+    /** Load by logical name; backend resolves paths/format. layoutKind: Legacy or resource-space (Post, Forward, etc.). */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-             rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList);
+             rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList,
+             rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy);
     /** Load with custom depth/stencil state (e.g. skybox with DepthCompare::LessEqual). */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-             rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride);
+             rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride,
+             rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy);
     /** E5.2: Load with keyword defines (e.g. {"SKINNED","SHADOWS"}). Source is loaded and #define KEY 1 prepended per keyword, then compiled. */
     bool Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
              rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
-             const rhi::DepthStencilState* depthStencilOverride = nullptr);
+             const rhi::DepthStencilState* depthStencilOverride = nullptr,
+             rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy);
     /** E5.4: Re-run last Load(name, layout, topology, keywords). Returns true if reload succeeded. No-op if never loaded by name. */
     bool Reload();
     /** CPU descriptor for last Load/LoadFromFile (for serialization or creating another instance). Empty if never loaded. */
@@ -43,9 +46,10 @@ public:
     /** RHI path: build pipeline from source with given vertex layout. */
     bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout);
     bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout);
-    /** RHI path: build pipeline with layout + topology. */
+    /** RHI path: build pipeline with layout + topology. layoutKind for resource-space pipelines (e.g. Post). */
     bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
-                         const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology);
+                         const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
+                         rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy);
     bool LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
                       const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology);
     void Destroy();

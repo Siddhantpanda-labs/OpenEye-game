@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 1 = Material (UBO + 3 textures). Bindless = set 2 when used.
 
 #define HAS_ALBEDO_TEXTURE 0
 #define HAS_NORMAL_MAP 0
@@ -19,15 +20,20 @@ layout(location = 1) in vec3 v_WorldNormal;
 layout(location = 2) in vec2 v_TexCoord;
 layout(location = 3) in vec2 v_Velocity;
 
-#include "../../common/material_block.glsl"
+// Set 1 — Material (descriptor_binding_table: binding 0 UBO, 1–3 textures)
+layout(set = 1, binding = 0) uniform MaterialParams {
+    vec3 albedo;
+    float metallic;
+    float roughness;
+    float ao;
+    float alpha;
+    vec3 emission;
+    float reflective;
+} MaterialBlock;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
-layout(binding = 1) uniform sampler2D u_NormalTexture;
-layout(binding = 2) uniform sampler2D u_MetallicRoughnessTexture;
-layout(binding = 3) uniform sampler2D u_MetallicTexture;
-layout(binding = 4) uniform sampler2D u_RoughnessTexture;
-layout(binding = 5) uniform sampler2D u_AOTexture;
-layout(binding = 6) uniform sampler2D u_EmissiveTexture;
+layout(set = 1, binding = 1) uniform sampler2D u_AlbedoTexture;
+layout(set = 1, binding = 2) uniform sampler2D u_NormalTexture;
+layout(set = 1, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
 layout(push_constant, std430) uniform GBufferFragPush {
     float u_HasAlbedoTexture;
@@ -44,7 +50,7 @@ void main() {
         v_TexCoord, tbn, v_WorldNormal,
         MaterialBlock.albedo, MaterialBlock.metallic, MaterialBlock.roughness, MaterialBlock.ao, MaterialBlock.emission, MaterialBlock.alpha, MaterialBlock.reflective,
         u_AlbedoTexture, u_NormalTexture, u_MetallicRoughnessTexture,
-        u_MetallicTexture, u_RoughnessTexture, u_AOTexture, u_EmissiveTexture,
+        u_MetallicRoughnessTexture, u_MetallicRoughnessTexture, u_MetallicRoughnessTexture, u_MetallicRoughnessTexture,
         useAlbedo, false, false, false, false, false, false,
         surf
     );

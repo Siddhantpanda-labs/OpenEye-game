@@ -25,6 +25,14 @@ public:
     /** E9: When set and device supports bindless, pass uses bindless texture handles instead of binding units. */
     void SetBindlessHeap(rhi::IBindlessHeap* heap) { m_bindlessHeap = heap; }
     void SetBindlessGetHandle(std::function<rhi::BindlessHandle(rhi::ITexture*)> fn) { m_bindlessGetHandle = std::move(fn); }
+    /** Resource-space (Vulkan): use these descriptor sets when device provides GBuffer pipeline layout. Same sets as Forward (Frame, Material, SceneBuffers); bindless from heap. */
+    void SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* materialSet, rhi::IDescriptorSet* sceneBuffersSet) {
+        m_gbufferFrameSet = frameSet;
+        m_gbufferMaterialSet = materialSet;
+        m_gbufferSceneBuffersSet = sceneBuffersSet;
+    }
+    /** Optional bones buffer for skinned/instanced resource-space (SceneBuffers binding 1). Same buffer as Forward when shared. */
+    void SetBonesBuffer(rhi::IBuffer* buffer) { m_gbufferBonesBuffer = buffer; }
     /** @deprecated Geometry shaders come from ShaderCache only; no-op. */
     void SetGeometryShader(std::shared_ptr<Shader> shader);
     /** @deprecated Returns nullptr; shaders are obtained via ShaderCache per draw. */
@@ -175,6 +183,10 @@ private:
     rhi::IBindlessHeap* m_bindlessHeap = nullptr;
     std::function<rhi::BindlessHandle(rhi::ITexture*)> m_bindlessGetHandle;
     ShaderCache* m_shaderCache = nullptr;
+    rhi::IDescriptorSet* m_gbufferFrameSet = nullptr;
+    rhi::IDescriptorSet* m_gbufferMaterialSet = nullptr;
+    rhi::IDescriptorSet* m_gbufferSceneBuffersSet = nullptr;
+    rhi::IBuffer* m_gbufferBonesBuffer = nullptr;
 };
 
 } // namespace render

@@ -73,10 +73,11 @@ struct DeviceVK : IDevice {
     void DestroyShader(IShader* shader) override;
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;
-    IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr) override;
+    IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy) override;
     IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) override;
     bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
+    IPipeline* CreateComputePipelineWithLayout(void* computeShader, PipelineLayoutKind layoutKind) override;
     void DestroyPipeline(IPipeline* pipeline) override;
     void EnsureComputePipelineStorageBlockBindings(IPipeline* pipeline) override;
     bool ComputePipelineHasStorageBlock(IPipeline* pipeline, const char* blockName) override;
@@ -104,6 +105,7 @@ struct DeviceVK : IDevice {
     void DestroyPipelineLayout(IPipelineLayout* layout) override;
     IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) override;
     void DestroyDescriptorSet(IDescriptorSet* set) override;
+    IPipelineLayout* GetResourceSetLayout(ResourceSetType type) override;
 
     IBindlessHeap* CreateBindlessHeap() override;
     void DestroyBindlessHeap(IBindlessHeap* heap) override;
@@ -158,17 +160,21 @@ struct DeviceVK : IDevice {
     void* GetDefaultPipelineLayout() const { return m_defaultPipelineLayout; }
     /** Bindless descriptor set layout (set 1: textures binding 0, buffers binding 1). */
     void* GetBindlessSetLayout() const { return m_bindlessSetLayout; }
+    /** IPipelineLayout wrapper for bindless set layout (for use with CreateDescriptorSetWrapperVK). */
+    IPipelineLayout* GetBindlessPipelineLayout() const;
     /** Empty bindless set to bind at set 1 when no heap is bound (partially bound). */
     void* GetEmptyBindlessSet() const { return m_emptyBindlessSet; }
-    /** Legacy set 0 (bindings 0-13 image, 5/7 storage). Updated by UpdateLegacySet0(cmd); bind before draw. */
+    /** Legacy set 0 (bindings 0,1,2,3,4,5,6,11,12,13 image; 7 storage). Updated by UpdateLegacySet0(cmd); bind before draw. */
     void* GetLegacySet0() const { return m_legacySet0; }
     /** Update legacy set 0 from command list bound textures/buffers. Call before binding set 0 and drawing. */
     void UpdateLegacySet0(CommandListVK* cmd);
-    /** Compute set 0 (bindings 0,2,3 storage; 1,5 UBO; 4 image). Updated by UpdateComputeSet0(cmd). */
+    /** Compute set 0 (bindings 0,1,2,3 storage; 4 image; 5 UBO). Updated by UpdateComputeSet0(cmd). */
     void* GetComputeSet0() const { return m_computeSet0; }
     void* GetComputePipelineLayout() const { return m_computePipelineLayout; }
     /** Update compute set 0 from command list bound buffers/textures/UBOs. Call before compute dispatch. */
     void UpdateComputeSet0(CommandListVK* cmd);
+    /** Pipeline layout for resource-space kind (Forward, Post, Shadow, ComputeLightCull, ComputeGpuCull). Returns nullptr for Legacy — use GetDefaultPipelineLayout/GetComputePipelineLayout. */
+    void* GetPipelineLayoutForKind(PipelineLayoutKind kind) const;
     /** Legacy compute params UBO (binding 1; ParamsBlock for light_cull). Host-visible; update before dispatch. */
     IBuffer* GetLegacyComputeParamsUBO() const { return m_legacyComputeParamsUBO; }
     /** Timeline semaphore for GPU completion (set 1 = graphics). Used by InsertFence/Submit/WaitFence. */
@@ -217,6 +223,7 @@ private:
     void* m_pipelineCache = nullptr;  // VkPipelineCache
     void* m_defaultPipelineLayout = nullptr;  // VkPipelineLayout (set 0 empty, set 1 bindless)
     void* m_bindlessSetLayout = nullptr;      // VkDescriptorSetLayout for bindless heap (set 1)
+    mutable IPipelineLayout* m_bindlessPipelineLayoutWrapper = nullptr;  // wrapper for GetBindlessPipelineLayout
     void* m_emptyBindlessSet = nullptr;       // VkDescriptorSet (partially bound, for set 1 when no heap bound)
     void* m_emptyBindlessPool = nullptr;     // VkDescriptorPool for m_emptyBindlessSet
     void* m_legacySet0Layout = nullptr;      // VkDescriptorSetLayout (set 0: image 0,1,2,3,6,11,12,13; storage 5,7)
@@ -224,6 +231,24 @@ private:
     void* m_computeSet0Layout = nullptr;     // VkDescriptorSetLayout (set 0 compute: 0,2,3 storage; 1,5 UBO; 4 image)
     void* m_computeSet0 = nullptr;           // VkDescriptorSet (updated by UpdateComputeSet0)
     void* m_computePipelineLayout = nullptr; // VkPipelineLayout (compute set0 + bindless set1 + push 16 bytes)
+    // Resource-space layouts (set0 Frame, set1 Pass, set2 Material, set3 Bindless, set4 SceneBuffers). See descriptor_binding_table.md.
+    void* m_frameSetLayout = nullptr;
+    void* m_forwardPassSetLayout = nullptr;
+    void* m_postPassSetLayout = nullptr;
+    void* m_shadowPassSetLayout = nullptr;
+    void* m_lightCullPassSetLayout = nullptr;
+    void* m_materialSetLayout = nullptr;
+    void* m_sceneBuffersSetLayout = nullptr;
+    void* m_deferredLightingPassSetLayout = nullptr;
+    void* m_forwardPipelineLayout = nullptr;
+    void* m_postPipelineLayout = nullptr;
+    void* m_shadowPipelineLayout = nullptr;
+    void* m_gbufferPipelineLayout = nullptr;
+    void* m_deferredLightingPipelineLayout = nullptr;
+    void* m_computeLightCullPipelineLayout = nullptr;
+    void* m_computeGpuCullPipelineLayout = nullptr;
+    /** Wrappers for GetResourceSetLayout (single-set IPipelineLayout per type); do not own set layouts. */
+    IPipelineLayout* m_resourceSetLayouts[8] = {};  // Frame, PostPass, ForwardPass, ShadowPass, LightCullPass, Material, SceneBuffers, DeferredLightingPass
     rhi::IBuffer* m_legacyComputeParamsUBO = nullptr; // 256 bytes, binding 1 (ParamsBlock for light_cull)
     void* m_timelineSemaphore = nullptr;     // VkSemaphore (timeline, for fence sync)
     uint64_t m_timelineValue = 0;           // next value to signal on submit

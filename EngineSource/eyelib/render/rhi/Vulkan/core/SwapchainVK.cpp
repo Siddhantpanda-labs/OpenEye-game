@@ -13,44 +13,71 @@ static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
     if (sw->renderPass != nullptr && !sw->framebuffers.empty()) return;
     VkDevice device = static_cast<VkDevice>(sw->device);
     VkFormat fmt = static_cast<VkFormat>(sw->format);
-    VkRenderPassCreateInfo rpInfo = {};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    VkAttachmentDescription att = {};
-    att.format = fmt;
-    att.samples = VK_SAMPLE_COUNT_1_BIT;
-    att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    att.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    att.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    rpInfo.attachmentCount = 1;
-    rpInfo.pAttachments = &att;
+
+    // Overlay-on-load pass: use after blitting scene to swapchain image.
+    VkAttachmentDescription attLoad = {};
+    attLoad.format = fmt;
+    attLoad.samples = VK_SAMPLE_COUNT_1_BIT;
+    attLoad.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attLoad.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attLoad.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attLoad.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attLoad.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attLoad.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     VkAttachmentReference ref = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &ref;
+    VkRenderPassCreateInfo rpInfo = {};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = 1;
+    rpInfo.pAttachments = &attLoad;
     rpInfo.subpassCount = 1;
     rpInfo.pSubpasses = &subpass;
     VkRenderPass rp = VK_NULL_HANDLE;
     if (vkCreateRenderPass(device, &rpInfo, nullptr, &rp) != VK_SUCCESS) return;
     sw->renderPass = rp;
+
+    // Overlay-clear pass: use when no scene blit (clear then draw overlay).
+    VkAttachmentDescription attClear = {};
+    attClear.format = fmt;
+    attClear.samples = VK_SAMPLE_COUNT_1_BIT;
+    attClear.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attClear.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attClear.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attClear.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attClear.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attClear.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    rpInfo.pAttachments = &attClear;
+    VkRenderPass rpClear = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(device, &rpInfo, nullptr, &rpClear) != VK_SUCCESS) {
+        vkDestroyRenderPass(device, rp, nullptr);
+        sw->renderPass = nullptr;
+        return;
+    }
+    sw->renderPassOverlayClear = rpClear;
+
     sw->framebuffers.resize(sw->imageViews.size());
+    sw->framebuffersOverlayClear.resize(sw->imageViews.size());
     for (size_t i = 0; i < sw->imageViews.size(); ++i) {
         VkImageView view = static_cast<VkImageView>(sw->imageViews[i]);
         if (view == VK_NULL_HANDLE) continue;
         VkFramebufferCreateInfo fbInfo = {};
         fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass = rp;
         fbInfo.attachmentCount = 1;
         fbInfo.pAttachments = &view;
         fbInfo.width = sw->width;
         fbInfo.height = sw->height;
         fbInfo.layers = 1;
+        fbInfo.renderPass = rp;
         VkFramebuffer fb = VK_NULL_HANDLE;
         if (vkCreateFramebuffer(device, &fbInfo, nullptr, &fb) == VK_SUCCESS)
             sw->framebuffers[i] = fb;
+        fbInfo.renderPass = rpClear;
+        fb = VK_NULL_HANDLE;
+        if (vkCreateFramebuffer(device, &fbInfo, nullptr, &fb) == VK_SUCCESS)
+            sw->framebuffersOverlayClear[i] = fb;
     }
 }
 
@@ -153,10 +180,19 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
 void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
     if (!sw || !device) return;
     VkDevice dev = static_cast<VkDevice>(device);
+    for (void* fb : sw->framebuffersOverlayClear) {
+        if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
+    }
+    sw->framebuffersOverlayClear.clear();
     for (void* fb : sw->framebuffers) {
         if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
     }
     sw->framebuffers.clear();
+    VkRenderPass rpClear = static_cast<VkRenderPass>(sw->renderPassOverlayClear);
+    if (rpClear != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(dev, rpClear, nullptr);
+        sw->renderPassOverlayClear = nullptr;
+    }
     VkRenderPass rp = static_cast<VkRenderPass>(sw->renderPass);
     if (rp != VK_NULL_HANDLE) {
         vkDestroyRenderPass(dev, rp, nullptr);
@@ -188,10 +224,19 @@ void SwapchainVK::Resize(uint32_t width, uint32_t height) {
     VkSurfaceKHR surf = static_cast<VkSurfaceKHR>(surface);
     vkDeviceWaitIdle(dev);
 
+    for (void* fb : framebuffersOverlayClear) {
+        if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
+    }
+    framebuffersOverlayClear.clear();
     for (void* fb : framebuffers) {
         if (fb) vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(fb), nullptr);
     }
     framebuffers.clear();
+    VkRenderPass rpClear = static_cast<VkRenderPass>(renderPassOverlayClear);
+    if (rpClear != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(dev, rpClear, nullptr);
+        renderPassOverlayClear = nullptr;
+    }
     VkRenderPass rp = static_cast<VkRenderPass>(renderPass);
     if (rp != VK_NULL_HANDLE) {
         vkDestroyRenderPass(dev, rp, nullptr);

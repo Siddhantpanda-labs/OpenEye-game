@@ -1,4 +1,5 @@
 #version 460
+// Resource-space: set 0 = Frame, set 4 binding 1 = bones (or per-draw transform buffer when u_UsePerDrawTransformBuffer). Push: model, UV, flags.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -16,19 +17,21 @@ layout(location = 3) out vec2 v_Velocity;
 layout(location = 4) out mat3 v_TBN;
 
 #define MAX_BONES 128
-layout(std140, binding = 3) uniform Bones {
-    mat4 u_Bones[MAX_BONES];
+
+layout(set = 0, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
+    mat4 u_PrevView;
+    mat4 u_PrevProjection;
 };
-layout(std430, binding = 4) readonly buffer PerDrawModel {
-    mat4 u_ModelArray[];
+
+layout(set = 4, binding = 1) readonly buffer BoneOrTransformBlock {
+    mat4 u_Data[];
 };
 
 layout(push_constant, std430) uniform GBufferSkinnedPush {
     mat4 u_Model;
-    mat4 u_View;
-    mat4 u_Projection;
-    mat4 u_PrevView;
-    mat4 u_PrevProjection;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -40,23 +43,29 @@ void main() {
     vec4 pos = vec4(a_Position, 1.0);
     vec3 nrm = a_Normal;
     vec3 tang = a_Tangent;
-    mat4 skin = mat4(0.0);
-    float totalWeight = 0.0;
-    for (int i = 0; i < 4; ++i) {
-        int idx = a_BoneIndices[i];
-        float w = a_BoneWeights[i];
-        if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
-            skin += u_Bones[idx] * w;
-            totalWeight += w;
+    mat4 modelMat = pc.u_Model;
+
+    if (pc.u_UsePerDrawTransformBuffer != 0) {
+        modelMat = u_Data[gl_DrawID];
+    } else {
+        mat4 skin = mat4(0.0);
+        float totalWeight = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            int idx = a_BoneIndices[i];
+            float w = a_BoneWeights[i];
+            if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
+                skin += u_Data[idx] * w;
+                totalWeight += w;
+            }
         }
+        if (totalWeight <= 0.0) skin = mat4(1.0);
+        pos = skin * pos;
+        nrm = mat3(skin) * nrm;
+        tang = mat3(skin) * tang;
     }
-    if (totalWeight <= 0.0) skin = mat4(1.0);
-    pos = skin * pos;
-    nrm = mat3(skin) * nrm;
-    tang = mat3(skin) * tang;
-    mat4 model = (pc.u_UsePerDrawTransformBuffer != 0) ? u_ModelArray[gl_DrawID] : pc.u_Model;
-    vec4 worldPos = model * pos;
-    mat3 normalMatrix = mat3(transpose(inverse(model)));
+
+    vec4 worldPos = modelMat * pos;
+    mat3 normalMatrix = mat3(transpose(inverse(modelMat)));
     vec3 worldNormal = normalize(normalMatrix * nrm);
     vec3 worldTangent = length(tang) < 0.001
         ? (abs(worldNormal.y) < 0.999 ? normalize(cross(vec3(0.0, 1.0, 0.0), worldNormal)) : normalize(cross(vec3(1.0, 0.0, 0.0), worldNormal)))
@@ -67,12 +76,11 @@ void main() {
     vec2 uv = baseUv * pc.u_UVTransform.zw;
     float c = cos(pc.u_UVRotation);
     float s = sin(pc.u_UVRotation);
-    uv = mat2(c, -s, s, c) * uv;
-    uv += pc.u_UVTransform.xy;
+    uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;
     if (pc.u_FlipV > 0.5) uv.y = 1.0 - uv.y;
     v_TexCoord = uv;
-    vec4 currentPos = pc.u_Projection * pc.u_View * worldPos;
-    vec4 prevPos = pc.u_PrevProjection * pc.u_PrevView * worldPos;
+    vec4 currentPos = u_Projection * u_View * worldPos;
+    vec4 prevPos = u_PrevProjection * u_PrevView * worldPos;
     v_Velocity = (currentPos.xy / currentPos.w) - (prevPos.xy / prevPos.w);
     vec3 T = normalize(worldTangent - dot(worldTangent, worldNormal) * worldNormal);
     v_TBN = mat3(T, cross(worldNormal, T), worldNormal);

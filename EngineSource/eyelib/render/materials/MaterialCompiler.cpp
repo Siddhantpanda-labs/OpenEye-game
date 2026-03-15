@@ -4,6 +4,7 @@
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
@@ -114,8 +115,14 @@ std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Ma
     replacePlaceholder(fragmentSrc, "@MATERIAL_FRAGMENT_SNIPPET@", material->GetFragmentSnippet());
     replacePlaceholder(fragmentSrc, "@MATERIAL_SHADING_SNIPPET@", material->GetShadingSnippet());
 
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
+    if (stage == PipelineStage::Depth) layoutKind = rhi::PipelineLayoutKind::Shadow;
+    if (stage == PipelineStage::GBuffer) layoutKind = rhi::PipelineLayoutKind::GBuffer;
+    if (stage == PipelineStage::Forward || stage == PipelineStage::ForwardPlus)
+        layoutKind = rhi::PipelineLayoutKind::Forward;
+
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI())) {
+    if (!shader->BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, layoutKind)) {
         core::Log::ErrorF("MaterialCompiler: BuildFromSource failed for %s (materialTypeId=%llu)", logicalName.c_str(), static_cast<unsigned long long>(material->GetShaderIndex()));
         return nullptr;
     }

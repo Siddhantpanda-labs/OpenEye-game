@@ -63,8 +63,19 @@ public:
     /** No-op; cache owns shaders and is reloaded at pipeline level. */
     void ReloadShaders() {}
 
+    /** Releases resource-space descriptor sets and UBO. Call before device teardown. */
+    void Shutdown();
+
 private:
+    void EnsureResourceSpaceSets(rhi::IDevice* device);
+
     ShaderCache* m_shaderCache = nullptr;
+    rhi::IDevice* m_device = nullptr;
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_shadowPassSet = nullptr;
+    rhi::IDescriptorSet* m_sceneBuffersSet = nullptr;
+    rhi::IBuffer* m_frameUBO = nullptr;
+    rhi::IBuffer* m_bonesBuffer = nullptr;  // SceneBuffers binding 1 for skinned (resource-space)
 };
 
 } // namespace render

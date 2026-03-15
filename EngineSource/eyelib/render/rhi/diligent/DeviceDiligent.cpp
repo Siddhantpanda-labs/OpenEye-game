@@ -379,7 +379,8 @@ IPipeline* DeviceDiligent::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
-IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
+IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
+    (void)layoutKind;
     (void)depthStencilOverride;  // TODO: apply to pipeline desc when creating PSO
     auto* p = new PipelineDiligent();
     p->m_vertexLayout = layout;

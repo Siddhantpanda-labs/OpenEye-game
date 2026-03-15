@@ -21,6 +21,11 @@ public:
 
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
+    /** Resource-space (Vulkan): use Frame + DeferredLightingPass descriptor sets when set. */
+    void SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* deferredLightingPassSet) {
+        m_lightingFrameSet = frameSet;
+        m_lightingDeferredPassSet = deferredLightingPassSet;
+    }
 
     /** Render to currently bound FBO (context-based). If sceneLightingBuffer is non-null, it is bound at binding 5. cascadeMap: bind cascade depth array at 6, light-space SSBO at 7. ibl: when non-null and valid, binds irradiance/prefilter/BRDF at 11/12/13 and sets u_UseIBL. */
     void Render(GBuffer& gbuffer,
@@ -56,6 +61,8 @@ private:
     void EnsureDefaultShader(rhi::IDevice* device);
 
     std::shared_ptr<Shader> m_lightingShader;
+    rhi::IDescriptorSet* m_lightingFrameSet = nullptr;
+    rhi::IDescriptorSet* m_lightingDeferredPassSet = nullptr;
 };
 
 } // namespace render

@@ -13,6 +13,7 @@
 #include "eyelib/render/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanPipelineHash.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanBindingUtils.h"
+#include "eyelib/render/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
@@ -101,6 +102,46 @@ DeviceVK::~DeviceVK() {
         vkDestroyPipelineCache(device, pipelineCache, nullptr);
         m_pipelineCache = nullptr;
     }
+    // Resource set layout wrappers (single-set IPipelineLayout per type; destroy before set layouts)
+    for (size_t i = 0; i < 8; ++i) {
+        if (m_resourceSetLayouts[i]) {
+            DestroyPipelineLayout(m_resourceSetLayouts[i]);
+            m_resourceSetLayouts[i] = nullptr;
+        }
+    }
+    // Resource-space pipeline layouts (destroy before set layouts)
+    VkPipelineLayout rscPl = static_cast<VkPipelineLayout>(m_forwardPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_forwardPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_postPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_postPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_shadowPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_shadowPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_gbufferPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_gbufferPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_deferredLightingPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_deferredLightingPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_computeLightCullPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_computeLightCullPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_computeGpuCullPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_computeGpuCullPipelineLayout = nullptr; }
+    // Resource-space set layouts
+    VkDescriptorSetLayout rscLayout = static_cast<VkDescriptorSetLayout>(m_frameSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_frameSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_forwardPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_forwardPassSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_postPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_postPassSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_shadowPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_shadowPassSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_lightCullPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_lightCullPassSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_deferredLightingPassSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_deferredLightingPassSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_materialSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_materialSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_sceneBuffersSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_sceneBuffersSetLayout = nullptr; }
+
     VkPipelineLayout defaultPl = static_cast<VkPipelineLayout>(m_defaultPipelineLayout);
     if (defaultPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, defaultPl, nullptr);
@@ -133,6 +174,10 @@ DeviceVK::~DeviceVK() {
         m_emptyBindlessPool = nullptr;
     }
     m_emptyBindlessSet = nullptr;  // freed with pool
+    if (m_bindlessPipelineLayoutWrapper) {
+        DestroyPipelineLayout(m_bindlessPipelineLayoutWrapper);
+        m_bindlessPipelineLayoutWrapper = nullptr;
+    }
     VkDescriptorSetLayout bindlessLayout = static_cast<VkDescriptorSetLayout>(m_bindlessSetLayout);
     if (bindlessLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device, bindlessLayout, nullptr);
@@ -236,9 +281,33 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         queueCreateInfos.push_back(qci);
     }
 
+    VkPhysicalDeviceFeatures2 features2 = {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.features.fragmentStoresAndAtomics = VK_TRUE;
+
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing = {};
+    descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
+    descriptorIndexing.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    descriptorIndexing.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+    features2.pNext = &descriptorIndexing;
+
+    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures = {};
+    timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
+    descriptorIndexing.pNext = &timelineSemaphoreFeatures;
+
+    VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering = {};
+    dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    dynamicRendering.dynamicRendering = VK_TRUE;
+    timelineSemaphoreFeatures.pNext = &dynamicRendering;
+    dynamicRendering.pNext = nullptr;
+
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.pNext = nullptr;
+    deviceCreateInfo.pNext = &features2;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
     deviceCreateInfo.enabledExtensionCount = deviceExtensionCount;
@@ -465,6 +534,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     VkDescriptorSetLayoutCreateInfo bindlessLayoutInfo = {};
     bindlessLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     bindlessLayoutInfo.pNext = &bindingFlagsInfo;
+    bindlessLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
     bindlessLayoutInfo.bindingCount = 2;
     bindlessLayoutInfo.pBindings = bindlessBindings;
     VkDescriptorSetLayout bindlessSetLayout = VK_NULL_HANDLE;
@@ -616,6 +686,127 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
     m_emptyBindlessSet = emptyBindlessSet;
 
+    // Resource-space descriptor set layouts and pipeline layouts (Frame/Pass/Material/SceneBuffers). See descriptor_binding_table.md.
+    {
+        VkDescriptorSetLayout frameLayout = vkres::CreateFrameSetLayout(device);
+        VkDescriptorSetLayout forwardPassLayout = vkres::CreateForwardPassSetLayout(device);
+        VkDescriptorSetLayout postPassLayout = vkres::CreatePostPassSetLayout(device);
+        VkDescriptorSetLayout shadowPassLayout = vkres::CreateShadowPassSetLayout(device);
+        VkDescriptorSetLayout lightCullPassLayout = vkres::CreateLightCullPassSetLayout(device);
+        VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device);
+        VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device);
+        VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device);
+        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout) {
+            if (sceneLayout) vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
+            if (materialLayout) vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
+            if (deferredLightingPassLayout) vkDestroyDescriptorSetLayout(device, deferredLightingPassLayout, nullptr);
+            if (lightCullPassLayout) vkDestroyDescriptorSetLayout(device, lightCullPassLayout, nullptr);
+            if (shadowPassLayout) vkDestroyDescriptorSetLayout(device, shadowPassLayout, nullptr);
+            if (postPassLayout) vkDestroyDescriptorSetLayout(device, postPassLayout, nullptr);
+            if (forwardPassLayout) vkDestroyDescriptorSetLayout(device, forwardPassLayout, nullptr);
+            if (frameLayout) vkDestroyDescriptorSetLayout(device, frameLayout, nullptr);
+            core::Log::Error("DeviceVK::Initialize: resource-space set layout creation failed");
+            vkDestroyDescriptorPool(device, emptyBindlessPool, nullptr);
+            vkDestroyPipelineLayout(device, defaultPipelineLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, bindlessSetLayout, nullptr);
+            m_emptyBindlessPool = nullptr;
+            m_emptyBindlessSet = nullptr;
+            m_defaultPipelineLayout = nullptr;
+            m_bindlessSetLayout = nullptr;
+            vkDestroyPipelineCache(device, pipelineCache, nullptr);
+            m_pipelineCache = nullptr;
+            vkDestroySampler(device, defaultSampler, nullptr);
+            vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+            m_descriptorPool = nullptr;
+            m_defaultSampler = nullptr;
+            for (uint32_t i = 0; i < kMaxFrames; ++i) FrameContextVK::Destroy(&m_frameContexts[i], device);
+            AllocatorVK::Destroy(&m_allocatorVK);
+            vkDestroyDevice(device, nullptr);
+            InstanceVK::Destroy(&m_instanceVK);
+            m_device = nullptr;
+            PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+            return false;
+        }
+        m_frameSetLayout = frameLayout;
+        m_forwardPassSetLayout = forwardPassLayout;
+        m_postPassSetLayout = postPassLayout;
+        m_shadowPassSetLayout = shadowPassLayout;
+        m_lightCullPassSetLayout = lightCullPassLayout;
+        m_deferredLightingPassSetLayout = deferredLightingPassLayout;
+        m_materialSetLayout = materialLayout;
+        m_sceneBuffersSetLayout = sceneLayout;
+
+        VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout, sceneLayout);
+        VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout);
+        VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout);
+        VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout);
+        VkPipelineLayout deferredLightingPl = vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout);
+        VkPipelineLayout computeLightCullPl = vkres::CreateComputeLightCullPipelineLayout(device, frameLayout, lightCullPassLayout, sceneLayout);
+        VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout);
+        if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl) {
+            if (computeGpuCullPl) vkDestroyPipelineLayout(device, computeGpuCullPl, nullptr);
+            if (computeLightCullPl) vkDestroyPipelineLayout(device, computeLightCullPl, nullptr);
+            if (deferredLightingPl) vkDestroyPipelineLayout(device, deferredLightingPl, nullptr);
+            if (gbufferPl) vkDestroyPipelineLayout(device, gbufferPl, nullptr);
+            if (shadowPl) vkDestroyPipelineLayout(device, shadowPl, nullptr);
+            if (postPl) vkDestroyPipelineLayout(device, postPl, nullptr);
+            if (forwardPl) vkDestroyPipelineLayout(device, forwardPl, nullptr);
+            vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, deferredLightingPassLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, lightCullPassLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, shadowPassLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, postPassLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, forwardPassLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, frameLayout, nullptr);
+            m_frameSetLayout = nullptr;
+            m_forwardPassSetLayout = nullptr;
+            m_postPassSetLayout = nullptr;
+            m_shadowPassSetLayout = nullptr;
+            m_lightCullPassSetLayout = nullptr;
+            m_deferredLightingPassSetLayout = nullptr;
+            m_materialSetLayout = nullptr;
+            m_sceneBuffersSetLayout = nullptr;
+            core::Log::Error("DeviceVK::Initialize: resource-space pipeline layout creation failed");
+            vkDestroyDescriptorPool(device, emptyBindlessPool, nullptr);
+            vkDestroyPipelineLayout(device, defaultPipelineLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, bindlessSetLayout, nullptr);
+            m_emptyBindlessPool = nullptr;
+            m_emptyBindlessSet = nullptr;
+            m_defaultPipelineLayout = nullptr;
+            m_bindlessSetLayout = nullptr;
+            vkDestroyPipelineCache(device, pipelineCache, nullptr);
+            m_pipelineCache = nullptr;
+            vkDestroySampler(device, defaultSampler, nullptr);
+            vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+            m_descriptorPool = nullptr;
+            m_defaultSampler = nullptr;
+            for (uint32_t i = 0; i < kMaxFrames; ++i) FrameContextVK::Destroy(&m_frameContexts[i], device);
+            AllocatorVK::Destroy(&m_allocatorVK);
+            vkDestroyDevice(device, nullptr);
+            InstanceVK::Destroy(&m_instanceVK);
+            m_device = nullptr;
+            PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+            return false;
+        }
+        m_forwardPipelineLayout = forwardPl;
+        m_postPipelineLayout = postPl;
+        m_shadowPipelineLayout = shadowPl;
+        m_gbufferPipelineLayout = gbufferPl;
+        m_deferredLightingPipelineLayout = deferredLightingPl;
+        m_computeLightCullPipelineLayout = computeLightCullPl;
+        m_computeGpuCullPipelineLayout = computeGpuCullPl;
+
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] = CreatePipelineLayoutWrapperVK(this, frameLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::PostPass)] = CreatePipelineLayoutWrapperVK(this, postPassLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ForwardPass)] = CreatePipelineLayoutWrapperVK(this, forwardPassLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ShadowPass)] = CreatePipelineLayoutWrapperVK(this, shadowPassLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::LightCullPass)] = CreatePipelineLayoutWrapperVK(this, lightCullPassLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Material)] = CreatePipelineLayoutWrapperVK(this, materialLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::SceneBuffers)] = CreatePipelineLayoutWrapperVK(this, sceneLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::DeferredLightingPass)] = CreatePipelineLayoutWrapperVK(this, deferredLightingPassLayout);
+    }
+
     VkSemaphoreTypeCreateInfo timelineTypeInfo = {};
     timelineTypeInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
     timelineTypeInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
@@ -732,6 +923,18 @@ void DeviceVK::UpdateComputeSet0(CommandListVK* cmd) {
     vkhelpers::UpdateComputeSet0(this, cmd);
 }
 
+void* DeviceVK::GetPipelineLayoutForKind(PipelineLayoutKind kind) const {
+    return vkres::GetPipelineLayoutForKind(
+        static_cast<VkPipelineLayout>(m_forwardPipelineLayout),
+        static_cast<VkPipelineLayout>(m_postPipelineLayout),
+        static_cast<VkPipelineLayout>(m_shadowPipelineLayout),
+        static_cast<VkPipelineLayout>(m_gbufferPipelineLayout),
+        static_cast<VkPipelineLayout>(m_deferredLightingPipelineLayout),
+        static_cast<VkPipelineLayout>(m_computeLightCullPipelineLayout),
+        static_cast<VkPipelineLayout>(m_computeGpuCullPipelineLayout),
+        kind);
+}
+
 const RHICapabilities& DeviceVK::GetCapabilities() const { return m_caps; }
 
 const char* DeviceVK::GetShaderBackendName() const { return "vulkan"; }
@@ -810,7 +1013,11 @@ void DeviceVK::BeginFrame() {
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(buf, &beginInfo) != VK_SUCCESS) return;
+    VkResult beginRes = vkBeginCommandBuffer(buf, &beginInfo);
+    if (beginRes != VK_SUCCESS) {
+        core::Log::ErrorF("Vulkan BeginFrame: vkBeginCommandBuffer failed (0x%x); frame may be black.", beginRes);
+        return;
+    }
     m_immediateCommandList->SetCommandBuffer(buf, true);
     m_immediateCommandList->SetRecordingState(true);
     m_frameOpen = true;
@@ -819,30 +1026,49 @@ void DeviceVK::BeginFrame() {
 // Submission is device-owned: only EndFrame() / SubmitCommandList() submit to the queue. Renderer only records.
 void DeviceVK::EndFrame() {
     m_frameOpen = false;
-    if (!m_immediateCommandList || !m_queues.GetGraphicsQueue()) return;
+    if (!m_immediateCommandList || !m_queues.GetGraphicsQueue()) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan EndFrame: skipped — no immediate command list or no graphics queue.");
+            once = true;
+        }
+        return;
+    }
     CommandListVK* imm = m_immediateCommandList.get();
     imm->End();
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
     VkQueue queue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
     VkFence fence = static_cast<VkFence>(frame.fence);
-    if (buf != VK_NULL_HANDLE && fence != VK_NULL_HANDLE) {
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &buf;
-        VkSemaphore waitSem = static_cast<VkSemaphore>(frame.imageAvailable);
-        VkSemaphore signalSem = static_cast<VkSemaphore>(frame.renderFinished);
-        if (m_pendingPresent && waitSem != VK_NULL_HANDLE && signalSem != VK_NULL_HANDLE) {
-            VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            submitInfo.waitSemaphoreCount = 1;
-            submitInfo.pWaitSemaphores = &waitSem;
-            submitInfo.pWaitDstStageMask = &waitStage;
-            submitInfo.signalSemaphoreCount = 1;
-            submitInfo.pSignalSemaphores = &signalSem;
+    if (buf == VK_NULL_HANDLE || fence == VK_NULL_HANDLE) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan EndFrame: submit skipped — null command buffer or fence.");
+            once = true;
         }
-        vkQueueSubmit(queue, 1, &submitInfo, fence);
+        return;
     }
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &buf;
+    VkSemaphore waitSem = static_cast<VkSemaphore>(frame.imageAvailable);
+    VkSemaphore signalSem = static_cast<VkSemaphore>(frame.renderFinished);
+    if (m_pendingPresent && waitSem != VK_NULL_HANDLE && signalSem != VK_NULL_HANDLE) {
+        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &waitSem;
+        submitInfo.pWaitDstStageMask = &waitStage;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &signalSem;
+    } else if (m_pendingPresent) {
+        static bool once = false;
+        if (!once) {
+            core::Log::Warn("Vulkan EndFrame: m_pendingPresent true but semaphores null — present may not wait for image.");
+            once = true;
+        }
+    }
+    vkQueueSubmit(queue, 1, &submitInfo, fence);
 }
 
 void DeviceVK::SubmitCommandList(ICommandList* list) {
@@ -968,8 +1194,8 @@ IPipeline* DeviceVK::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return CreateGraphicsPipelineVK(this, desc);
 }
 
-IPipeline* DeviceVK::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
-    return CreateGraphicsPipelineFromNameVK(this, shaderName, layout, topology, depthStencilOverride);
+IPipeline* DeviceVK::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
+    return CreateGraphicsPipelineFromNameVK(this, shaderName, layout, topology, depthStencilOverride, layoutKind);
 }
 
 IPipeline* DeviceVK::CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) {
@@ -984,6 +1210,10 @@ bool DeviceVK::GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outD
 
 IPipeline* DeviceVK::CreateComputePipeline(void* computeShader) {
     return CreateComputePipelineVK(this, computeShader);
+}
+
+IPipeline* DeviceVK::CreateComputePipelineWithLayout(void* computeShader, PipelineLayoutKind layoutKind) {
+    return CreateComputePipelineVK(this, computeShader, layoutKind);
 }
 
 void DeviceVK::DestroyPipeline(IPipeline* pipeline) {
@@ -1049,11 +1279,23 @@ IPipelineLayout* DeviceVK::CreatePipelineLayout(const PipelineLayoutDesc& desc) 
     return CreatePipelineLayoutVK(this, desc);
 }
 
+IPipelineLayout* DeviceVK::GetResourceSetLayout(ResourceSetType type) {
+    size_t i = static_cast<size_t>(type);
+    return (i < 8) ? m_resourceSetLayouts[i] : nullptr;
+}
+
+IPipelineLayout* DeviceVK::GetBindlessPipelineLayout() const {
+    if (!m_bindlessSetLayout) return nullptr;
+    if (!m_bindlessPipelineLayoutWrapper)
+        m_bindlessPipelineLayoutWrapper = CreatePipelineLayoutWrapperVK(const_cast<DeviceVK*>(this), m_bindlessSetLayout);
+    return m_bindlessPipelineLayoutWrapper;
+}
+
 void DeviceVK::DestroyPipelineLayout(IPipelineLayout* layout) {
     if (!layout) return;
     PipelineLayoutVK* pl = static_cast<PipelineLayoutVK*>(layout);
     const uint32_t frameIndex = GetCurrentFrameIndex();
-    if (pl->m_descriptorSetLayout)
+    if (pl->m_descriptorSetLayout && pl->m_ownsSetLayout)
         m_deletionQueue.EnqueueDescriptorSetLayout(frameIndex, m_device, pl->m_descriptorSetLayout);
     if (pl->m_pipelineLayout)
         m_deletionQueue.EnqueuePipelineLayout(frameIndex, m_device, pl->m_pipelineLayout);

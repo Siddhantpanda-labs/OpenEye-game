@@ -155,6 +155,10 @@ private:
     // Descriptor set for single-texture passes (Phase 3: layout-driven binding)
     rhi::IPipelineLayout* m_singleTexLayout = nullptr;
     rhi::IDescriptorSet* m_singleTexSet = nullptr;
+    // Resource-space Post path (set 0 Frame, set 1 PostPass). When non-null, use BindDescriptorSets instead of legacy.
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_postPassSet = nullptr;
+    rhi::IBuffer* m_frameUBO = nullptr;
 
     // Ping-pong render targets for multi-pass effects
     rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};

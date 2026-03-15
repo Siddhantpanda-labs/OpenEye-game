@@ -9,16 +9,17 @@ layout(location = 4) in vec4 a_Color;
 layout(location = 5) in ivec4 a_BoneIndices;
 layout(location = 6) in vec4 a_BoneWeights;
 
-layout(std430, binding = 4) readonly buffer InstanceModels {
+// set 1 = ShadowPass (binding 0 = cascade UBO)
+layout(set = 1, binding = 0) uniform ShadowBlock {
+    mat4 u_LightSpaceMatrix;
+};
+// set 2 = SceneBuffers (binding 1 = instance matrices)
+layout(set = 2, binding = 1) readonly buffer InstanceModels {
     mat4 u_InstanceModel[];
 };
-
-layout(push_constant, std430) uniform ShadowPush {
-    mat4 u_LightSpaceMatrix;
-} pc;
 
 void main() {
     mat4 u_Model = u_InstanceModel[gl_InstanceIndex];
     vec4 worldPos = u_Model * vec4(a_Position, 1.0);
-    gl_Position = pc.u_LightSpaceMatrix * worldPos;
+    gl_Position = u_LightSpaceMatrix * worldPos;
 }

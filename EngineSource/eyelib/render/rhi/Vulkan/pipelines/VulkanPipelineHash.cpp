@@ -51,6 +51,7 @@ uint64_t HashPipelineDesc(const PipelineDesc& desc) {
     h = HashCombine(h, static_cast<uint64_t>(desc.transformFeedbackVaryings.size()));
     for (const char* p : desc.transformFeedbackVaryings)
         h = HashCombine(h, p ? reinterpret_cast<uintptr_t>(p) : 0);
+    h = HashCombine(h, static_cast<uint64_t>(static_cast<uint32_t>(desc.layoutKind)));
     return h;
 }
 

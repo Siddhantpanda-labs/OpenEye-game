@@ -131,20 +131,47 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
     }
 
     const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && device->GetCapabilities().supportsBindless);
+    rhi::IDescriptorSet* bindlessSet = (m_bindlessHeap) ? m_bindlessHeap->GetDescriptorSet() : nullptr;
+    const bool useResourceSpace = (m_gbufferFrameSet && m_gbufferMaterialSet && m_gbufferSceneBuffersSet && bindlessSet && cmd);
     if (useBindless && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
-    auto drawOne = [this, device, cmd, useBindless](Shader* shader, const Drawable& d) {
+    auto drawOne = [this, device, cmd, useBindless, useResourceSpace, bindlessSet](Shader* shader, const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
+        const math::Mat4* bonePtr = d.bones;
+        size_t boneCount = d.boneCount;
+        if ((!bonePtr || boneCount == 0) && d.materialInstance) {
+            d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        } else if (!bonePtr || boneCount == 0) {
+            material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        }
+        if (bonePtr && boneCount > 0) boneCount = std::min(boneCount, kMaxBones);
+
         applyMaterialBlendAndCull(cmd, material.get());
 
-        rhi::IBuffer* materialBuffer = d.materialInstance
-            ? d.materialInstance->GetMaterialBufferRHI(device)
-            : material->GetMaterialBufferRHI(device);
-        if (materialBuffer && cmd)
-            cmd->BindUniformBuffer(materialBuffer, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+        if (!useResourceSpace) {
+            rhi::IBuffer* materialBuffer = d.materialInstance
+                ? d.materialInstance->GetMaterialBufferRHI(device)
+                : material->GetMaterialBufferRHI(device);
+            if (materialBuffer && cmd)
+                cmd->BindUniformBuffer(materialBuffer, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+        } else {
+            if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+            else material->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+            if (bonePtr && boneCount > 0 && m_gbufferBonesBuffer) {
+                const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
+                m_gbufferBonesBuffer->Update(bonePtr, 0, boneBytes);
+                m_gbufferSceneBuffersSet->UpdateStorageBuffer(1, m_gbufferBonesBuffer, 0, boneBytes);
+            }
+            rhi::IDescriptorSet* sets[4] = { m_gbufferFrameSet, m_gbufferMaterialSet, bindlessSet, m_gbufferSceneBuffersSet };
+            cmd->BindDescriptorSets(0, 4, sets);
+        }
 
         auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
             return d.materialInstance ? d.materialInstance->GetVec4(name, def) : material->GetVec4(name, def);
@@ -170,31 +197,13 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
         shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
 
-        bool hasBones = false;
-        if (d.bones && d.boneCount > 0) {
-            const size_t boneCount = std::min(d.boneCount, kMaxBones);
-            shader->SetMat4Array("u_Bones", d.bones, boneCount);
-            hasBones = true;
-        } else if (d.materialInstance) {
-            d.materialInstance->ForEachMat4Array([shader, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
-                if (values && count > 0) {
-                    const size_t clamped = (name == "u_Bones") ? std::min(count, kMaxBones) : count;
-                    shader->SetMat4Array(name, values, clamped);
-                    hasBones = true;
-                }
-            });
-        } else {
-            material->ForEachMat4Array([shader, &hasBones](const std::string& name, const math::Mat4* values, size_t count) {
-                if (values && count > 0) {
-                    const size_t clamped = (name == "u_Bones") ? std::min(count, kMaxBones) : count;
-                    shader->SetMat4Array(name, values, clamped);
-                    hasBones = true;
-                }
-            });
-        }
-        if (!hasBones) {
-            static const math::Mat4 identityBone = math::Mat4(1.0f);
-            shader->SetMat4Array("u_Bones", &identityBone, 1);
+        if (!useResourceSpace) {
+            if (bonePtr && boneCount > 0)
+                shader->SetMat4Array("u_Bones", bonePtr, boneCount);
+            else {
+                static const math::Mat4 identityBone = math::Mat4(1.0f);
+                shader->SetMat4Array("u_Bones", &identityBone, 1);
+            }
         }
 
         const char* textureOrder[] = {
@@ -250,10 +259,12 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
             rhi::IPipeline* pipe = shader->GetPipelineRHI();
             if (pipe && !pipe->HasValidProgram()) continue;
             shader->Bind(device);
-            shader->SetMat4("u_View", view);
-            shader->SetMat4("u_Projection", projection);
-            shader->SetMat4("u_PrevView", prevView);
-            shader->SetMat4("u_PrevProjection", prevProjection);
+            if (!useResourceSpace) {
+                shader->SetMat4("u_View", view);
+                shader->SetMat4("u_Projection", projection);
+                shader->SetMat4("u_PrevView", prevView);
+                shader->SetMat4("u_PrevProjection", prevProjection);
+            }
             for (const auto& d : drawables)
                 drawOne(shader.get(), d);
             shader->Unbind();

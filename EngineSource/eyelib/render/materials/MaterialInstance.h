@@ -9,7 +9,7 @@
 namespace eyelib {
 namespace render {
 
-namespace rhi { struct IDevice; struct ITexture; struct IBuffer; struct ICommandList; }
+namespace rhi { struct IDevice; struct ITexture; struct IBuffer; struct ICommandList; struct IDescriptorSet; }
 class Material;
 class Shader;
 class Texture2D;
@@ -57,6 +57,8 @@ public:
 
     /** Apply base material + overrides to an already-bound shader. Call after shader->Bind(device). If cmd is non-null, binds MaterialBlock UBO at binding 2. */
     void ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd = nullptr) const;
+    /** Update resource-space Material descriptor set (set 2). No-op if device or set is null. */
+    void UpdateForwardResourceSet(rhi::IDevice* device, rhi::IDescriptorSet* set) const;
 
     /** Refractor Phase 2: GPU buffer with effective PBR props (base + overrides). Returns null if device is null. */
     rhi::IBuffer* GetMaterialBufferRHI(rhi::IDevice* device) const;

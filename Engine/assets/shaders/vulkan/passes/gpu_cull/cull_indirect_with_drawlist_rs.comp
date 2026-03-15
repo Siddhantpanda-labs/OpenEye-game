@@ -1,5 +1,5 @@
 #version 450
-// Vulkan: frustum cull with draw list; writes indirect commands. Layout matches GpuCullDrawEntry.
+// Resource-space: set 0 Frame (viewProj), set 4 SceneBuffers (draw list + indirect out). Occlusion not in layout; use push u_UseOcclusionCull=0.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -23,19 +23,19 @@ struct DrawEntry {
     uint baseInstance;
 };
 
-layout(set = 0, binding = 0) buffer IndirectOut {
+// Set 0 — Frame
+layout(set = 0, binding = 0) uniform ViewProjBlock {
+    mat4 u_ViewProj;
+};
+
+// Set 4 — SceneBuffers: binding 0 = draw list (GPU cull input), binding 1 = indirect output
+layout(set = 4, binding = 0) readonly buffer DrawListIn {
+    DrawEntry drawList[];
+};
+layout(set = 4, binding = 1) buffer IndirectOut {
     DrawIndexedIndirectCommand outCommands[];
 };
 
-layout(set = 0, binding = 1) readonly buffer DrawListIn {
-    DrawEntry drawList[];
-};
-
-layout(set = 0, binding = 4) uniform sampler2D u_DepthTex;
-
-layout(set = 0, binding = 5) uniform ViewProjBlock {
-    mat4 u_ViewProj;
-};
 layout(push_constant, std430) uniform Push {
     uint u_NumDraws;
     int u_UseOcclusionCull;
@@ -69,21 +69,6 @@ bool aabbVisible(vec3 aabbMin, vec3 aabbMax) {
     return true;
 }
 
-bool notOccluded(vec3 aabbMin, vec3 aabbMax) {
-    vec3 center = (aabbMin + aabbMax) * 0.5;
-    vec4 clip = u_ViewProj * vec4(center, 1.0);
-    if (clip.w <= 0.0) return true;
-    vec2 ndc = clip.xy / clip.w;
-    if (ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0) return true;
-    float ndcZ = clip.z / clip.w;
-    float depthVal = ndcZ * 0.5 + 0.5;
-    vec2 uv = ndc * 0.5 + 0.5;
-    uv.y = 1.0 - uv.y;
-    float sampledDepth = texture(u_DepthTex, uv).r;
-    const float epsilon = 0.0001;
-    return depthVal <= sampledDepth + epsilon;
-}
-
 void main() {
     uint id = gl_GlobalInvocationID.x;
     if (id >= pc.u_NumDraws)
@@ -94,8 +79,7 @@ void main() {
     vec3 aabbMin = vec3(e.aabbMinX, e.aabbMinY, e.aabbMinZ);
     vec3 aabbMax = vec3(e.aabbMaxX, e.aabbMaxY, e.aabbMaxZ);
     bool visible = aabbVisible(aabbMin, aabbMax);
-    if (visible && pc.u_UseOcclusionCull != 0)
-        visible = notOccluded(aabbMin, aabbMax);
+    // Occlusion not bound in resource-space layout; skip notOccluded when u_UseOcclusionCull != 0 would require depth texture
 
     if (visible) {
         outCommands[id].indexCount = e.indexCount;

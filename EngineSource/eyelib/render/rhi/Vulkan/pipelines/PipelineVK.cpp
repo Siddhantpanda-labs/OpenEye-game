@@ -1,4 +1,5 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/PipelineVK.h"
+#include "eyelib/render/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/ShaderVK.h"
 #include "eyelib/render/rhi/Vulkan/utils/VulkanEnums.h"
@@ -188,8 +189,15 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
     if (!device) return nullptr;
     const uint64_t hash = HashPipelineDesc(desc);
     void* pipeline = device->GetCachedGraphicsPipeline(hash);
-    if (!pipeline && desc.vertexShader && desc.fragmentShader && device->GetDefaultPipelineLayout() && device->GetPipelineCache()) {
-        void* created = CreateVkGraphicsPipeline(device, desc, device->GetDefaultPipelineLayout(), device->GetPipelineCache());
+    void* layoutToUse = nullptr;
+    if (desc.layoutKind != PipelineLayoutKind::Legacy) {
+        layoutToUse = device->GetPipelineLayoutForKind(desc.layoutKind);
+    }
+    if (!layoutToUse) {
+        layoutToUse = device->GetDefaultPipelineLayout();
+    }
+    if (!pipeline && desc.vertexShader && desc.fragmentShader && layoutToUse && device->GetPipelineCache()) {
+        void* created = CreateVkGraphicsPipeline(device, desc, layoutToUse, device->GetPipelineCache());
         if (created) {
             if (desc.debugName)
                 SetDebugNamePipeline(device, created, desc.debugName);
@@ -205,10 +213,13 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
     p->m_depthStencil = desc.depthStencil;
     p->m_raster = desc.raster;
     p->m_pipeline = pipeline;
+    p->m_layoutKind = desc.layoutKind;
+    p->m_nativePipelineLayout = (desc.layoutKind != PipelineLayoutKind::Legacy && layoutToUse) ? layoutToUse : nullptr;
+    p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(desc.layoutKind));
     return p;
 }
 
-IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride) {
+IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
     if (!device || !shaderName || !shaderName[0]) return nullptr;
     const std::string logicalName = ShaderPathToLogicalName(shaderName);
     if (logicalName.empty()) return nullptr;
@@ -231,6 +242,7 @@ IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shader
     desc.fragmentShader = fs;
     desc.vertexLayout = layout;
     desc.topology = topology;
+    desc.layoutKind = layoutKind;
     if (depthStencilOverride)
         desc.depthStencil = *depthStencilOverride;
     else {
@@ -244,13 +256,27 @@ IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shader
 }
 
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader) {
+    return CreateComputePipelineVK(device, computeShader, PipelineLayoutKind::Legacy);
+}
+
+IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader, PipelineLayoutKind layoutKind) {
     if (!device) return nullptr;
     auto* p = new PipelineVK(device);
     p->m_isCompute = true;
-    if (!computeShader || !device->GetComputePipelineLayout() || !device->GetPipelineCache()) return p;
+    p->m_layoutKind = layoutKind;
+    p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(layoutKind));
+    void* layoutToUse = nullptr;
+    if (layoutKind != PipelineLayoutKind::Legacy) {
+        layoutToUse = device->GetPipelineLayoutForKind(layoutKind);
+    }
+    if (!layoutToUse) {
+        layoutToUse = device->GetComputePipelineLayout();
+    }
+    if (!computeShader || !layoutToUse || !device->GetPipelineCache()) return p;
     ShaderVK* shader = static_cast<ShaderVK*>(computeShader);
     if (!shader->m_module) return p;
-    p->m_pipeline = CreateVkComputePipeline(device, device->GetComputePipelineLayout(), device->GetPipelineCache(), shader->m_module);
+    p->m_pipeline = CreateVkComputePipeline(device, layoutToUse, device->GetPipelineCache(), shader->m_module);
+    p->m_nativePipelineLayout = (layoutKind != PipelineLayoutKind::Legacy) ? layoutToUse : nullptr;
     return p;
 }
 

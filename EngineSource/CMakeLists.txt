@@ -4,6 +4,10 @@ set(OPENEYE_ENGINE_SOURCE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Vulkan: ON = build Vulkan RHI and ImGui Vulkan backend when SDK is found (editor/player default backend).
 option(OPENEYE_USE_VULKAN "Build with Vulkan support (RHI + ImGui backend; requires Vulkan SDK)" ON)
+# Debug: ON = clear swapchain to bright red when no scene (see documentation/vulkan/vulkan_check.md). Set OFF for normal clear.
+option(OPENEYE_VULKAN_DEBUG_CLEAR_RED "Vulkan debug: red clear to verify present path" ON)
+# Validation: ON = enable VK_LAYER_KHRONOS_validation (requires Vulkan SDK; outputs to stderr).
+option(OPENEYE_VULKAN_VALIDATION "Enable Vulkan validation layer" ON)
 
 # --------------------------------------
 # LZ4 & Zstd (FetchContent)

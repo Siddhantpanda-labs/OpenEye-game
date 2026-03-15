@@ -1,5 +1,7 @@
 #include "eyelib/render/rhi/Vulkan/descriptors/BindlessHeapVK.h"
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
+#include "eyelib/render/rhi/Vulkan/descriptors/DescriptorSetVK.h"
+#include "eyelib/render/rhi/Vulkan/pipelines/PipelineLayoutVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/TextureVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/BufferVK.h"
 #include <vulkan/vulkan.h>
@@ -41,11 +43,25 @@ BindlessHeapVK::BindlessHeapVK(DeviceVK* device) : m_device(device) {
 }
 
 BindlessHeapVK::~BindlessHeapVK() {
+    if (m_descriptorSetWrapper && m_device) {
+        DestroyDescriptorSetVK(m_device, m_descriptorSetWrapper);
+        m_descriptorSetWrapper = nullptr;
+    }
     if (!m_device || !m_descriptorPool) return;
     VkDevice device = static_cast<VkDevice>(m_device->GetDevice());
     vkDestroyDescriptorPool(device, static_cast<VkDescriptorPool>(m_descriptorPool), nullptr);
     m_descriptorPool = nullptr;
     m_descriptorSet = nullptr;
+}
+
+IDescriptorSet* BindlessHeapVK::GetDescriptorSet() {
+    if (!m_descriptorSet || !m_device) return nullptr;
+    if (!m_descriptorSetWrapper) {
+        IPipelineLayout* layout = m_device->GetBindlessPipelineLayout();
+        if (layout)
+            m_descriptorSetWrapper = CreateDescriptorSetWrapperVK(m_device, layout, m_descriptorSet);
+    }
+    return m_descriptorSetWrapper;
 }
 
 uint32_t BindlessHeapVK::allocTextureSlot() {

@@ -1,5 +1,5 @@
 #version 450
-// Vulkan: compute-based light culling; one thread per cluster. Layout matches OpenGL.
+// Resource-space: set 0 Frame, set 1 LightCullPass (binding 0 Params UBO, 1 output SSBO), set 4 SceneBuffers (2 point lights, 3 spot lights).
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -7,10 +7,28 @@ const uint TILE_SIZE = 16u;
 const uint DEPTH_SLICES = 32u;
 const uint MAX_LIGHTS_PER_CLUSTER = 64u;
 
-layout(set = 0, binding = 0) buffer LightIndexOut {
+// Set 1 — LightCullPass
+layout(set = 1, binding = 0) uniform ParamsBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    uint u_TileCountX;
+    uint u_TileCountY;
+    uint u_SliceCount;
+    float u_LogNear;
+    float u_LogFar;
+    float u_NearPlane;
+    float u_FarPlane;
+    float u_ScreenWidth;
+    float u_ScreenHeight;
+    int u_PointLightCount;
+    int u_SpotLightCount;
+};
+
+layout(set = 1, binding = 1) buffer LightIndexOut {
     uint lightIndices[];
 };
 
+// Set 4 — SceneBuffers (binding 2 = point lights, 3 = spot lights)
 struct PointLight {
     vec3 position;
     float _p0;
@@ -33,24 +51,8 @@ struct SpotLight {
     float _p4, _p5, _p6;
 };
 
-layout(set = 0, binding = 2) readonly buffer PointLightBuffer { PointLight pointLights[]; };
-layout(set = 0, binding = 3) readonly buffer SpotLightBuffer { SpotLight spotLights[]; };
-
-layout(set = 0, binding = 1) uniform ParamsBlock {
-    mat4 u_View;
-    mat4 u_Projection;
-    uint u_TileCountX;
-    uint u_TileCountY;
-    uint u_SliceCount;
-    float u_LogNear;
-    float u_LogFar;
-    float u_NearPlane;
-    float u_FarPlane;
-    float u_ScreenWidth;
-    float u_ScreenHeight;
-    int u_PointLightCount;
-    int u_SpotLightCount;
-};
+layout(set = 4, binding = 2) readonly buffer PointLightBuffer { PointLight pointLights[]; };
+layout(set = 4, binding = 3) readonly buffer SpotLightBuffer { SpotLight spotLights[]; };
 
 struct ClusterAABB {
     vec3 min;

@@ -2,6 +2,7 @@
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/materials/Material.h"
@@ -28,6 +29,51 @@ bool IsVisibleInCascade(const Drawable& d, const math::Frustum& cascadeFrustum) 
 
 ShadowPass::ShadowPass() = default;
 
+void ShadowPass::EnsureResourceSpaceSets(rhi::IDevice* device) {
+    if (!device || m_frameSet) return;
+    rhi::IPipelineLayout* frameLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
+    rhi::IPipelineLayout* shadowPassLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::ShadowPass);
+    rhi::IPipelineLayout* sceneLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
+    if (!frameLayout || !shadowPassLayout || !sceneLayout) return;
+    m_frameSet = device->CreateDescriptorSet(frameLayout);
+    m_shadowPassSet = device->CreateDescriptorSet(shadowPassLayout);
+    m_sceneBuffersSet = device->CreateDescriptorSet(sceneLayout);
+    if (!m_frameSet || !m_shadowPassSet || !m_sceneBuffersSet) {
+        if (m_frameSet) { device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+        if (m_shadowPassSet) { device->DestroyDescriptorSet(m_shadowPassSet); m_shadowPassSet = nullptr; }
+        if (m_sceneBuffersSet) { device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
+        return;
+    }
+    rhi::BufferDesc uboDesc;
+    uboDesc.sizeInBytes = 256;
+    uboDesc.usage = rhi::BufferUsage::Uniform;
+    uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    m_frameUBO = device->CreateBuffer(uboDesc, nullptr);
+    rhi::BufferDesc bonesDesc;
+    bonesDesc.sizeInBytes = kMaxBones * 64u;
+    bonesDesc.usage = rhi::BufferUsage::Storage;
+    bonesDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    m_bonesBuffer = device->CreateBuffer(bonesDesc, nullptr);
+    if (m_frameUBO) {
+        m_frameSet->UpdateUniformBuffer(0, m_frameUBO, 0, 128);
+        m_frameSet->UpdateUniformBuffer(1, m_frameUBO, 128, 128);
+        m_shadowPassSet->UpdateUniformBuffer(0, m_frameUBO, 0, 128);
+    }
+    if (m_bonesBuffer)
+        m_sceneBuffersSet->UpdateStorageBuffer(1, m_bonesBuffer, 0, static_cast<uint32_t>(bonesDesc.sizeInBytes));
+    m_device = device;
+}
+
+void ShadowPass::Shutdown() {
+    if (!m_device) return;
+    if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
+    if (m_shadowPassSet) { m_device->DestroyDescriptorSet(m_shadowPassSet); m_shadowPassSet = nullptr; }
+    if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
+    if (m_frameUBO) { m_device->DestroyBuffer(m_frameUBO); m_frameUBO = nullptr; }
+    if (m_bonesBuffer) { m_device->DestroyBuffer(m_bonesBuffer); m_bonesBuffer = nullptr; }
+    m_device = nullptr;
+}
+
 void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                         rhi::IDevice* device,
                         rhi::ICommandList* cmd,
@@ -40,6 +86,7 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                         float farPlane,
                         float aspectRatio) {
     if (!m_shaderCache || !device || !cmd) return;
+    EnsureResourceSpaceSets(device);
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
@@ -84,6 +131,10 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
         math::Frustum cascadeFrustum;
         cascadeFrustum.FromMatrix(lightMatrix);
 
+        const bool useResourceSpace = (m_frameSet && m_shadowPassSet && m_sceneBuffersSet);
+        if (useResourceSpace && m_frameUBO)
+            m_frameUBO->Update(&lightMatrix, 0, sizeof(math::Mat4));
+
         auto drawOne = [&](Shader* shader, const Drawable& d) {
             const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
             if (!d.mesh || !material) return;
@@ -105,8 +156,13 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
             shader->SetMat4("u_Model", d.transform);
             if (bonePtr && boneCount > 0) {
                 boneCount = std::min(boneCount, kMaxBones);
-                shader->SetMat4Array("u_Bones", bonePtr, boneCount);
+                if (useResourceSpace && m_bonesBuffer)
+                    m_bonesBuffer->Update(bonePtr, 0, boneCount * sizeof(math::Mat4));
+                else
+                    shader->SetMat4Array("u_Bones", bonePtr, boneCount);
             }
+            if (!useResourceSpace)
+                shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
             d.mesh->Bind(device);
             { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
             d.mesh->Unbind();
@@ -117,7 +173,10 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
             if (it == shaders.end()) continue;
             auto& shader = it->second;
             shader->Bind(device);
-            shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
+            if (m_frameSet && m_shadowPassSet && m_sceneBuffersSet) {
+                rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, m_sceneBuffersSet };
+                cmd->BindDescriptorSets(0, 3, sets);
+            }
             for (const auto& d : drawables)
                 if (IsVisibleInCascade(d, cascadeFrustum))
                     drawOne(shader.get(), d);
@@ -146,6 +205,7 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
                                  float aspectRatio,
                                  int32_t submeshIndex) {
     if (!m_shaderCache || !device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0) return;
+    EnsureResourceSpaceSets(device);
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
@@ -161,7 +221,11 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
     if (shaderPipe && !shaderPipe->HasValidProgram()) return;
 
     const uint32_t splitCount = cascadeMap.GetSplitCount();
-    cmd->BindStorageBuffer(instanceMatrixBuffer, rhi::StorageBinding::InstanceMatrix, 0, instanceCount * 64u);
+    const bool useResourceSpace = (m_frameSet && m_shadowPassSet && m_sceneBuffersSet);
+    if (useResourceSpace)
+        m_sceneBuffersSet->UpdateStorageBuffer(1, instanceMatrixBuffer, 0, instanceCount * 64u);
+    else
+        cmd->BindStorageBuffer(instanceMatrixBuffer, rhi::StorageBinding::InstanceMatrix, 0, instanceCount * 64u);
 
     for (uint32_t i = 0; i < splitCount; ++i) {
         cascadeMap.BindForShadowPass(cmd, i);
@@ -170,8 +234,16 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
         cmd->SetCullFace(!material->GetTwoSided());
         cmd->SetCullFrontFace(true);
 
-        shader->SetMat4("u_LightSpaceMatrix", cascadeMap.GetLightSpaceMatrix(i));
+        const math::Mat4 lightMatrix = cascadeMap.GetLightSpaceMatrix(i);
+        if (useResourceSpace && m_frameUBO)
+            m_frameUBO->Update(&lightMatrix, 0, sizeof(math::Mat4));
+        else
+            shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
         shader->Bind(device);
+        if (useResourceSpace) {
+            rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, m_sceneBuffersSet };
+            cmd->BindDescriptorSets(0, 3, sets);
+        }
         mesh->Bind(device);
         MeshHandle h = mesh->GetHandle();
         if (h.IsValid()) h.DrawInstanced(device, submeshIndex, instanceCount);
