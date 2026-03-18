@@ -1,4 +1,5 @@
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
+#include "eyelib/render/rhi/Vulkan/barriers/BarrierTrackerVK.h"
 #include "eyelib/render/rhi/Vulkan/commands/CommandListVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/RenderTargetVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/TextureVK.h"
@@ -192,15 +193,30 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
     uint32_t w = std::min(srcW, m_swapchain.GetWidth());
     uint32_t h = std::min(srcH, m_swapchain.GetHeight());
     if (w == 0 || h == 0) return;
+
+    ResourceState srcTracked = BarrierTrackerVK::GetImageState(&m_barrierTracker, tex->m_image);
+    VkImageLayout srcOldLayout;
+    VkAccessFlags srcOldAccess;
+    VkPipelineStageFlags srcStage;
+    if (srcTracked == ResourceState::ShaderResource) {
+        srcOldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        srcOldAccess = VK_ACCESS_SHADER_READ_BIT;
+        srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        srcOldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        srcOldAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }
+
     VkImageMemoryBarrier barrierSrc = {};
     barrierSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrierSrc.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    barrierSrc.srcAccessMask = srcOldAccess;
     barrierSrc.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrierSrc.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrierSrc.oldLayout = srcOldLayout;
     barrierSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrierSrc.image = srcImage;
     barrierSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierSrc);
+    vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierSrc);
     VkImageMemoryBarrier barrierDst = {};
     barrierDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -214,6 +230,17 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
     copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     copy.extent = { w, h, 1 };
     vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    VkImageMemoryBarrier restoreSrc = {};
+    restoreSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    restoreSrc.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    restoreSrc.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    restoreSrc.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    restoreSrc.image = srcImage;
+    restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
+    BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
 
     if (m_postBlitCallback && m_swapchain.GetRenderPass() != nullptr && m_swapchain.GetFramebuffer(imageIndex) != nullptr) {
         barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;

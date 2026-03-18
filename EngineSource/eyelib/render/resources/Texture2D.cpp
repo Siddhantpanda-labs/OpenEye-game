@@ -71,6 +71,7 @@ static TextureFormat RHIFormatToTextureFormat(rhi::RHITextureFormat f) {
         case rhi::RHITextureFormat::RGBA8: return TextureFormat::RGBA8;
         case rhi::RHITextureFormat::RGB8_SRGB: return TextureFormat::RGB8_SRGB;
         case rhi::RHITextureFormat::RGBA8_SRGB: return TextureFormat::RGBA8_SRGB;
+        case rhi::RHITextureFormat::BGRA8: return TextureFormat::RGBA8;
         case rhi::RHITextureFormat::RGB16F: return TextureFormat::RGB16F;
         case rhi::RHITextureFormat::RGBA16F: return TextureFormat::RGBA16F;
         case rhi::RHITextureFormat::Depth24: return TextureFormat::Depth24;

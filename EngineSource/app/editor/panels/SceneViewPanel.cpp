@@ -298,7 +298,15 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             eyelib::api::debug::Profiler::EndSample();
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
                 ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);
-            void* texId = ctx->sceneViewPipeline->GetOutputColorTextureNativeHandle();
+            void* rawTexId = ctx->sceneViewPipeline->GetOutputColorTextureNativeHandle();
+            {
+                static bool once = false;
+                if (!once) {
+                    eyelib::api::Log::InfoF("Scene panel: rawTexId=%p (should match Pipeline output tex)", rawTexId);
+                    once = true;
+                }
+            }
+            void* texId = rawTexId;
             if (ctx->resolveImGuiTextureId)
                 texId = ctx->resolveImGuiTextureId(texId);
             if (texId && ctx->sceneViewPipeline->HasValidOutput()) {

@@ -36,6 +36,7 @@ void PostProcessor::Shutdown() {
 void PostProcessor::DestroyFramebuffers() {
     if (!m_deviceRHI) return;
     m_lastOutputTexture = nullptr;
+    m_lastOutputRT = nullptr;
     for (auto& frameSets : m_transientPostSetsByFrame) {
         frameSets.clear();
     }
@@ -146,12 +147,14 @@ void PostProcessor::Resize(uint32_t width, uint32_t height) {
         m_height = height;
         m_lastOutputValid = false;
         m_lastOutputTexture = nullptr;
+        m_lastOutputRT = nullptr;
         return;
     }
     m_width = width;
     m_height = height;
     m_lastOutputValid = false;
     m_lastOutputTexture = nullptr;
+    m_lastOutputRT = nullptr;
     DestroyFramebuffers();
     CreateFramebuffers();
 }
@@ -333,6 +336,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         m_postPassLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
     m_lastOutputValid = false;
     m_lastOutputTexture = nullptr;
+    m_lastOutputRT = nullptr;
     if (!hdrInputTexture || !GetOutputTextureRHI()) {
         return hdrInputTexture;
     }
@@ -457,6 +461,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     }
 
     m_lastOutputTexture = toneMappedTexture;
+    m_lastOutputRT = ResolveRenderTargetForTexture(toneMappedTexture);
     return toneMappedTexture;
 }
 
@@ -501,6 +506,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (m_toneMappingShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_toneMappingShader->GetPipelineRHI()); }
     m_lastOutputValid = true;
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     m_toneMappingShader->Unbind();
     return m_lastOutputTexture;
 }
@@ -667,6 +673,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (m_chromaticAberrationShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_chromaticAberrationShader->GetPipelineRHI()); }
     m_chromaticAberrationShader->Unbind();
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     return m_lastOutputTexture;
 }
 
@@ -703,6 +710,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (m_fxaaShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_fxaaShader->GetPipelineRHI()); }
     m_fxaaShader->Unbind();
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     return m_lastOutputTexture;
 }
 
@@ -970,6 +978,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (m_motionBlurShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_motionBlurShader->GetPipelineRHI()); }
     m_motionBlurShader->Unbind();
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     return m_lastOutputTexture;
 }
 
@@ -1008,6 +1017,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (m_vignetteShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_vignetteShader->GetPipelineRHI()); }
     m_vignetteShader->Unbind();
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     return m_lastOutputTexture;
 }
 
@@ -1045,6 +1055,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (m_filmGrainShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_filmGrainShader->GetPipelineRHI()); }
     m_filmGrainShader->Unbind();
     m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
     return m_lastOutputTexture;
 }
 
@@ -1114,6 +1125,28 @@ rhi::IRenderTarget* PostProcessor::SelectPostTarget(rhi::ITexture* inputTexture)
     if (m_pingPongRT[0] && GetColorTexture(m_pingPongRT[0]) != inputTexture) return m_pingPongRT[0];
     if (m_pingPongRT[1] && GetColorTexture(m_pingPongRT[1]) != inputTexture) return m_pingPongRT[1];
     return nullptr;
+}
+
+rhi::IRenderTarget* PostProcessor::ResolveRenderTargetForTexture(rhi::ITexture* texture) const {
+    if (!texture) return nullptr;
+    if (m_outputRT && GetColorTexture(m_outputRT) == texture) return m_outputRT;
+    if (m_ldrPingPong && GetColorTexture(m_ldrPingPong) == texture) return m_ldrPingPong;
+    if (m_pingPongRT[0] && GetColorTexture(m_pingPongRT[0]) == texture) return m_pingPongRT[0];
+    if (m_pingPongRT[1] && GetColorTexture(m_pingPongRT[1]) == texture) return m_pingPongRT[1];
+    if (m_bloomExtractRT && GetColorTexture(m_bloomExtractRT) == texture) return m_bloomExtractRT;
+    if (m_ssaoRT && GetColorTexture(m_ssaoRT) == texture) return m_ssaoRT;
+    if (m_ssaoBlurRT && GetColorTexture(m_ssaoBlurRT) == texture) return m_ssaoBlurRT;
+    if (m_ssrPrevRT && GetColorTexture(m_ssrPrevRT) == texture) return m_ssrPrevRT;
+    return nullptr;
+}
+
+rhi::IRenderTarget* PostProcessor::GetOutputRenderTargetRHI() const {
+    if (m_lastOutputRT) return m_lastOutputRT;
+    if (m_lastOutputTexture) {
+        if (rhi::IRenderTarget* resolved = ResolveRenderTargetForTexture(m_lastOutputTexture))
+            return resolved;
+    }
+    return m_outputRT;
 }
 
 rhi::ITexture* PostProcessor::GetOutputTextureRHI() const {

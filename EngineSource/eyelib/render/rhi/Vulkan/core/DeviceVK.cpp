@@ -5,6 +5,7 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/PipelineVK.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/PipelineLayoutVK.h"
 #include "eyelib/render/rhi/Vulkan/descriptors/DescriptorSetVK.h"
+#include "eyelib/render/rhi/Vulkan/barriers/BarrierTrackerVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/RenderTargetVK.h"
 #include "eyelib/render/rhi/Vulkan/sync/QueryPoolVK.h"
 #include "eyelib/render/rhi/Vulkan/sync/FenceVK.h"
@@ -71,6 +72,9 @@ DeviceVK::~DeviceVK() {
         std::set<void*> alreadyDestroyedPipelines;
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i, &alreadyDestroyedPipelines);
+        for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
+            DestroyDescriptorSetVK(this, set);
+        m_pendingDescriptorSetsToFree.clear();
         // Enqueued pipelines were just destroyed in Tick; clear cache to avoid double-destroy in loop below.
         m_graphicsPipelineCache.clear();
     }
@@ -1051,6 +1055,13 @@ void DeviceVK::BeginFrame() {
 
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
     m_deletionQueue.Tick(m_device, GetAllocator(), m_currentFrameIndex);
+    ++m_ticksUntilDescriptorSetFree;
+    if (m_ticksUntilDescriptorSetFree >= kMaxFrames && !m_pendingDescriptorSetsToFree.empty()) {
+        for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
+            DestroyDescriptorSetVK(this, set);
+        m_pendingDescriptorSetsToFree.clear();
+        m_ticksUntilDescriptorSetFree = 0;
+    }
     UploadHeapVK::BeginFrame(&m_uploadHeap, m_device, frame.fence, m_currentFrameIndex);
     DescriptorAllocatorVK::Reset(&m_descriptorAllocator, m_device, m_currentFrameIndex);
     DescriptorCacheVK::Reset(&m_descriptorCache, m_device, m_currentFrameIndex);
@@ -1203,7 +1214,15 @@ void DeviceVK::DestroyBuffer(IBuffer* buffer) {
 }
 
 ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialData) {
-    return CreateTextureVK(this, desc, initialData);
+    ITexture* t = CreateTextureVK(this, desc, initialData);
+    if (t && initialData && desc.type == TextureType::Texture2D && !desc.transient &&
+        desc.format != RHITextureFormat::Depth24 && desc.format != RHITextureFormat::Depth24Stencil8 &&
+        desc.format != RHITextureFormat::None) {
+        auto* tv = static_cast<TextureVK*>(t);
+        if (tv->m_image)
+            BarrierTrackerVK::SetImageState(&m_barrierTracker, tv->m_image, ResourceState::ShaderResource);
+    }
+    return t;
 }
 
 void DeviceVK::DestroyTexture(ITexture* texture) {
@@ -1385,6 +1404,12 @@ IDescriptorSet* DeviceVK::CreateDescriptorSet(IPipelineLayout* layout) {
 
 void DeviceVK::DestroyDescriptorSet(IDescriptorSet* set) {
     DestroyDescriptorSetVK(this, set);
+}
+
+void DeviceVK::EnqueueDestroyDescriptorSet(IDescriptorSet* set) {
+    if (!set) return;
+    m_pendingDescriptorSetsToFree.push_back(set);
+    m_ticksUntilDescriptorSetFree = 0;
 }
 
 IBindlessHeap* DeviceVK::CreateBindlessHeap() { return new BindlessHeapVK(this); }

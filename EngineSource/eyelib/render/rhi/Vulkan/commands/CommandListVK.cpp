@@ -312,6 +312,10 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
         uint32_t pushSize = 256u;  // matches VulkanResourceSpaces kPushConstantSize
         vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushSize, m_pushConstants);
     }
+    if (m_currentRenderTarget == nullptr) {
+        core::Log::Warn("DrawFullscreenQuad: not inside active rendering (no render target); draw skipped - output will not be written.");
+        return;
+    }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), 6, 1, 0, 0, 0);
 }
 void CommandListVK::BindUniformBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset, uint32_t size) {

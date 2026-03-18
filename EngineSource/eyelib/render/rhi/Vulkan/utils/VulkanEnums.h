@@ -30,6 +30,7 @@ inline VkFormat ToVkFormat(RHITextureFormat format) {
         case RHITextureFormat::RGBA8: return VK_FORMAT_R8G8B8A8_UNORM;
         case RHITextureFormat::RGB8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
         case RHITextureFormat::RGBA8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
+        case RHITextureFormat::BGRA8: return VK_FORMAT_B8G8R8A8_UNORM;
         case RHITextureFormat::RGB16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::RGBA16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::R32UI: return VK_FORMAT_R32_UINT;

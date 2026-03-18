@@ -74,7 +74,7 @@ IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t h
     texDesc.height = height;
     texDesc.mipLevels = 1;
     texDesc.samples = (samples > 0) ? samples : 1u;
-    texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget);
+    texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc);
     texDesc.transient = transient;
     for (size_t i = 0; i < colorFormats.size(); ++i) {
         texDesc.format = colorFormats[i];

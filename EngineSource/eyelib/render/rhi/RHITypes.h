@@ -63,6 +63,8 @@ enum class RHITextureFormat {
     RGBA8,
     RGB8_SRGB,   ///< sRGB decode on sample (for LDR images: JPG/PNG skybox, etc.)
     RGBA8_SRGB,
+    ///< B8G8R8A8 UNORM; matches typical Windows Vulkan swapchain for transfer copy.
+    BGRA8,
     RGB16F,
     RGBA16F,
     R32UI,  ///< Single-channel unsigned int (e.g. entity ID buffer)

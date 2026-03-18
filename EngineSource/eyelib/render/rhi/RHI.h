@@ -156,7 +156,13 @@ struct IDevice {
     virtual void BeginFrame() {}
     /** End frame: end recording and submit. Vulkan: end immediate command buffer and submit. Call after all recording (scene, blit, UI) and before Present(). Other backends: no-op. */
     virtual void EndFrame() {}
+    /** Current frame index (0 .. N-1) for per-frame resources. Vulkan: ring index for DeletionQueue/descriptor sets. Default 0 for backends without multiple frames in flight. */
+    virtual uint32_t GetCurrentFrameIndex() const { return 0; }
+    /** Monotonic frame number (incremented each BeginFrame). Use to avoid updating a descriptor set more than once per frame. Default 0. */
+    virtual uint32_t GetFrameNumber() const { return 0; }
     virtual void Present() = 0;
+    /** Destroy descriptor set after in-flight work is done (Vulkan: deferred). Default: destroy immediately. */
+    virtual void EnqueueDestroyDescriptorSet(IDescriptorSet* set) { if (set) DestroyDescriptorSet(set); }
     /** Notify backend that output window framebuffer size changed; backend may recreate swapchain/default backbuffer resources. */
     virtual void OnWindowResized(uint32_t width, uint32_t height) { (void)width; (void)height; }
     /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */

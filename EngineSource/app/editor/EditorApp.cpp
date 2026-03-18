@@ -41,6 +41,7 @@
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
+#include <vector>
 
 namespace openeye::editor {
 
@@ -196,8 +197,15 @@ public:
                 vkInfo.ImageCount = info.image_count;
                 vkInfo.PipelineCache = static_cast<VkPipelineCache>(info.pipeline_cache);
                 if (ImGui_ImplVulkan_Init(&vkInfo)) {
-                    auto* vkDevice = static_cast<eyelib::render::rhi::DeviceVK*>(rhiDevice);
-                    m_vulkanSampler = static_cast<VkSampler>(vkDevice->GetDefaultSampler());
+                    auto* vkDeviceObj = static_cast<eyelib::render::rhi::DeviceVK*>(rhiDevice);
+                    m_vulkanSampler = static_cast<VkSampler>(vkDeviceObj->GetDefaultSampler());
+                    m_vkDevice = static_cast<VkDevice>(info.device);
+                    if (!CreateViewportDescriptorSets()) {
+                        ImGui_ImplVulkan_Shutdown();
+                        ImGui_ImplGlfw_Shutdown();
+                        ImGui::DestroyContext();
+                        return false;
+                    }
                     rhiDevice->SetPostBlitCallback([](void* cmd) {
                         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd));
                     });
@@ -223,11 +231,7 @@ public:
         if (!m_ready) return;
         if (m_vulkan) {
 #ifdef OPENEYE_IMGUI_VULKAN
-            for (const auto& it : m_vulkanTextureSets) {
-                if (it.second != VK_NULL_HANDLE)
-                    ImGui_ImplVulkan_RemoveTexture(it.second);
-            }
-            m_vulkanTextureSets.clear();
+            DestroyViewportDescriptorSets();
             ImGui_ImplVulkan_Shutdown();
 #endif
         } else {
@@ -237,19 +241,37 @@ public:
         ImGui::DestroyContext();
     }
     bool IsVulkan() const { return m_vulkan; }
+    /** Call at start of each frame (after device BeginFrame). Stores frame index and resets slot so we never update a set still in use by a pending command buffer. */
+    void PruneTextureDescriptors(eyelib::render::rhi::IDevice* rhiDevice) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        if (!m_vulkan) return;
+        if (rhiDevice) m_currentFrameIndex = rhiDevice->GetCurrentFrameIndex() % kViewportFramesInFlight;
+        m_resolveCallIndex = 0;
+#endif
+    }
+    /** Returns an ImGui texture ID (VkDescriptorSet) for the given pipeline output image view. Uses per-frame sets (frameIndex * kViewportSlots + slot) so we never update a set in use. */
     void* ResolveTextureId(void* nativeTexture) {
 #ifdef OPENEYE_IMGUI_VULKAN
         if (!m_vulkan) return nativeTexture;
-        if (!nativeTexture || m_vulkanSampler == VK_NULL_HANDLE) return nullptr;
-        auto it = m_vulkanTextureSets.find(nativeTexture);
-        if (it != m_vulkanTextureSets.end())
-            return reinterpret_cast<void*>(it->second);
-        VkDescriptorSet set = ImGui_ImplVulkan_AddTexture(
-            m_vulkanSampler,
-            static_cast<VkImageView>(nativeTexture),
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (!nativeTexture || m_vulkanSampler == VK_NULL_HANDLE || m_vkDevice == VK_NULL_HANDLE) return nullptr;
+        const uint32_t slot = (m_resolveCallIndex < kViewportSlots) ? m_resolveCallIndex : (kViewportSlots - 1u);
+        m_resolveCallIndex++;
+        const uint32_t setIndex = m_currentFrameIndex * kViewportSlots + slot;
+        VkDescriptorSet set = m_viewportSets[setIndex];
         if (set == VK_NULL_HANDLE) return nullptr;
-        m_vulkanTextureSets[nativeTexture] = set;
+        VkDescriptorImageInfo imageInfo = {};
+        imageInfo.sampler = m_vulkanSampler;
+        imageInfo.imageView = static_cast<VkImageView>(nativeTexture);
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet write = {};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = set;
+        write.dstBinding = 0;
+        write.dstArrayElement = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &imageInfo;
+        vkUpdateDescriptorSets(m_vkDevice, 1, &write, 0, nullptr);
         return reinterpret_cast<void*>(set);
 #else
         return nativeTexture;
@@ -259,8 +281,73 @@ private:
     bool m_ready = false;
     bool m_vulkan = false;
 #ifdef OPENEYE_IMGUI_VULKAN
+    VkDevice m_vkDevice = VK_NULL_HANDLE;
     VkSampler m_vulkanSampler = VK_NULL_HANDLE;
-    std::unordered_map<void*, VkDescriptorSet> m_vulkanTextureSets;
+    VkDescriptorSetLayout m_viewportSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_viewportDescriptorPool = VK_NULL_HANDLE;
+    static constexpr uint32_t kViewportFramesInFlight = 3;
+    static constexpr uint32_t kViewportSlots = 2;
+    static constexpr uint32_t kViewportSetCount = kViewportFramesInFlight * kViewportSlots;
+    VkDescriptorSet m_viewportSets[kViewportSetCount] = {};
+    uint32_t m_resolveCallIndex = 0;
+    uint32_t m_currentFrameIndex = 0;
+
+    bool CreateViewportDescriptorSets() {
+        if (m_vkDevice == VK_NULL_HANDLE) return false;
+        for (uint32_t i = 0; i < kViewportSetCount; ++i) m_viewportSets[i] = VK_NULL_HANDLE;
+        VkDescriptorSetLayoutBinding binding = {};
+        binding.binding = 0;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &binding;
+        if (vkCreateDescriptorSetLayout(m_vkDevice, &layoutInfo, nullptr, &m_viewportSetLayout) != VK_SUCCESS)
+            return false;
+        VkDescriptorPoolSize poolSize = {};
+        poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSize.descriptorCount = kViewportSetCount;
+        VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = kViewportSetCount;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        if (vkCreateDescriptorPool(m_vkDevice, &poolInfo, nullptr, &m_viewportDescriptorPool) != VK_SUCCESS) {
+            vkDestroyDescriptorSetLayout(m_vkDevice, m_viewportSetLayout, nullptr);
+            m_viewportSetLayout = VK_NULL_HANDLE;
+            return false;
+        }
+        VkDescriptorSetLayout layouts[kViewportSetCount];
+        for (uint32_t i = 0; i < kViewportSetCount; ++i) layouts[i] = m_viewportSetLayout;
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_viewportDescriptorPool;
+        allocInfo.descriptorSetCount = kViewportSetCount;
+        allocInfo.pSetLayouts = layouts;
+        if (vkAllocateDescriptorSets(m_vkDevice, &allocInfo, m_viewportSets) != VK_SUCCESS) {
+            vkDestroyDescriptorPool(m_vkDevice, m_viewportDescriptorPool, nullptr);
+            vkDestroyDescriptorSetLayout(m_vkDevice, m_viewportSetLayout, nullptr);
+            m_viewportDescriptorPool = VK_NULL_HANDLE;
+            m_viewportSetLayout = VK_NULL_HANDLE;
+            return false;
+        }
+        return true;
+    }
+    void DestroyViewportDescriptorSets() {
+        if (m_vkDevice == VK_NULL_HANDLE) return;
+        if (m_viewportDescriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(m_vkDevice, m_viewportDescriptorPool, nullptr);
+            m_viewportDescriptorPool = VK_NULL_HANDLE;
+            for (uint32_t i = 0; i < kViewportSetCount; ++i) m_viewportSets[i] = VK_NULL_HANDLE;
+        }
+        if (m_viewportSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_vkDevice, m_viewportSetLayout, nullptr);
+            m_viewportSetLayout = VK_NULL_HANDLE;
+        }
+    }
 #endif
 };
 
@@ -430,7 +517,9 @@ int RunEditor(int argc, char** argv) {
 
         if (imgui.IsVulkan() && editorDevice) {
 #ifdef OPENEYE_IMGUI_VULKAN
-            static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get())->BeginFrame();
+            auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
+            rhiDevice->BeginFrame();
+            imgui.PruneTextureDescriptors(rhiDevice);
             ImGui_ImplVulkan_NewFrame();
 #endif
         } else {
@@ -461,6 +550,19 @@ int RunEditor(int argc, char** argv) {
             rhiDevice->BlitToDefaultFramebuffer(nullptr);
             rhiDevice->EndFrame();
             rhiDevice->Present();
+            // One-time readback: after frame 30, wait for GPU then read 1 pixel from scene pipeline output.
+            {
+                static int s_frameCount = 0;
+                if (ctx.sceneViewPipeline && ++s_frameCount == 30) {
+                    ctx.sceneViewPipeline->Finish();
+                    uint8_t px[4] = {};
+                    if (ctx.sceneViewPipeline->ReadOutputPixels(1, 1, px)) {
+                        eyelib::api::core::Log::InfoF("Scene output readback (1x1): R=%u G=%u B=%u A=%u (non-zero => draw wrote)", px[0], px[1], px[2], px[3]);
+                    } else {
+                        eyelib::api::core::Log::Info("Scene output readback: ReadOutputPixels failed");
+                    }
+                }
+            }
         } else {
             if (ctx.sceneViewPipeline)
                 ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(

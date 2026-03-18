@@ -35,6 +35,7 @@ unsigned int TextureFormatToGLInternal(RHITextureFormat format) {
         case RHITextureFormat::RGBA8: return GL_RGBA8;
         case RHITextureFormat::RGB8_SRGB: return GL_SRGB8;
         case RHITextureFormat::RGBA8_SRGB: return GL_SRGB8_ALPHA8;
+        case RHITextureFormat::BGRA8: return GL_RGBA8;
         case RHITextureFormat::RGB16F: return GL_RGB16F;
         case RHITextureFormat::RGBA16F: return GL_RGBA16F;
         case RHITextureFormat::R32UI: return GL_R32UI;
@@ -53,6 +54,7 @@ unsigned int TextureFormatToGLFormat(RHITextureFormat format) {
         case RHITextureFormat::RGB8_SRGB: return GL_RGB;
         case RHITextureFormat::RGBA8:
         case RHITextureFormat::RGBA8_SRGB: return GL_RGBA;
+        case RHITextureFormat::BGRA8: return GL_BGRA;
         case RHITextureFormat::RGB16F: return GL_RGB;
         case RHITextureFormat::RGBA16F: return GL_RGBA;
         case RHITextureFormat::R32UI: return GL_RED_INTEGER;

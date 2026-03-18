@@ -6,13 +6,14 @@
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/lighting/LightCullPass.h"
 #include "eyelib/render/rhi/RHI.h"
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <cstddef>
 
 namespace eyelib {
 namespace render {
@@ -174,6 +175,10 @@ private:
     void EnsureStereoForwardShader();
     void EnsureSkyboxShader();
     void EnsureProceduralSkyboxShader();
+    /** Ensures m_skyboxDummyTexture exists (1x1 RGBA8). Used to fill unused Post set bindings. */
+    void EnsureSkyboxDummyTexture();
+    /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
+    void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
     void EnsureOutlinePostShader();
     void EnsureEntityIdShader();
     void EnsureStreamingNV12Pass();
@@ -212,8 +217,11 @@ private:
     std::shared_ptr<Shader> m_stereoForwardShader;
     std::shared_ptr<Shader> m_skyboxShader;
     std::shared_ptr<Shader> m_proceduralSkyboxShader;
-    rhi::IDescriptorSet* m_skyboxPostSet = nullptr;
+    static constexpr uint32_t kSkyboxPostSetsFrames = 3;
+    std::array<rhi::IDescriptorSet*, kSkyboxPostSetsFrames> m_skyboxPostSets = {};
+    uint32_t m_lastSkyboxPostSetFilledFrameNumber = 0xffffffffu;  // avoid updating same set twice in one frame
     rhi::ITexture* m_cachedSkyboxTexture = nullptr;
+    rhi::ITexture* m_skyboxDummyTexture = nullptr;
     std::shared_ptr<Shader> m_outlinePostShader;
     rhi::IDescriptorSet* m_outlinePostSet = nullptr;
     std::shared_ptr<Shader> m_entityIdShader;

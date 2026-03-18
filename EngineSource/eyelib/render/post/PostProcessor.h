@@ -126,7 +126,7 @@ public:
     /**
      * @brief Get output texture (after full chain)
      */
-    rhi::IRenderTarget* GetOutputRenderTargetRHI() const { return m_outputRT; }
+    rhi::IRenderTarget* GetOutputRenderTargetRHI() const;
     rhi::ITexture* GetOutputTextureRHI() const;
     /** E6: Ping-pong RT for graph-driven post (e.g. tone-mapped intermediate). Index 0 or 1. */
     rhi::IRenderTarget* GetPingPongRT(int index) const { return (index >= 0 && index <= 1) ? m_pingPongRT[index] : nullptr; }
@@ -151,6 +151,7 @@ private:
     /** For LDR passes only: returns an LDR RT (m_outputRT or m_ldrPingPong) different from input. */
     rhi::IRenderTarget* SelectPostTargetLDR(rhi::ITexture* inputTexture) const;
     rhi::IRenderTarget* SelectPostTarget(rhi::ITexture* inputTexture) const;
+    rhi::IRenderTarget* ResolveRenderTargetForTexture(rhi::ITexture* texture) const;
     void LoadShaders();
     void RecycleTransientPostSetsIfNeeded();
     rhi::IDescriptorSet* CreateTransientPostSet(const std::vector<std::pair<uint32_t, rhi::ITexture*>>& bindings);
@@ -194,6 +195,7 @@ private:
     uint32_t m_height = 0;
     bool m_lastOutputValid = false;
     rhi::ITexture* m_lastOutputTexture = nullptr;
+    rhi::IRenderTarget* m_lastOutputRT = nullptr;
 
     // Shaders
     std::shared_ptr<Shader> m_toneMappingShader;

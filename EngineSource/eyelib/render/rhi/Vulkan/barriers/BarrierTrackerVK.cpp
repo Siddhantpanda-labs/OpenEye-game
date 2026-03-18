@@ -10,9 +10,10 @@ namespace rhi {
 void BarrierTrackerVK::Reset(BarrierTrackerVK* tracker) {
     if (!tracker) return;
     tracker->m_bufferState.clear();
-    tracker->m_imageState.clear();
     tracker->m_pendingBuffers.clear();
     tracker->m_pendingImages.clear();
+    // Keep m_imageState: GPU image layouts persist across frames; clearing caused
+    // UNDEFINED->COLOR barriers after Blit left sources in TRANSFER_SRC.
 }
 
 void BarrierTrackerVK::TransitionBuffer(BarrierTrackerVK* tracker, void* buffer, ResourceState newState) {
@@ -95,6 +96,17 @@ void BarrierTrackerVK::FlushBarriers(BarrierTrackerVK* tracker, CommandListVK* c
 
     tracker->m_pendingBuffers.clear();
     tracker->m_pendingImages.clear();
+}
+
+ResourceState BarrierTrackerVK::GetImageState(const BarrierTrackerVK* tracker, void* image) {
+    if (!tracker || !image) return ResourceState::Undefined;
+    auto it = tracker->m_imageState.find(image);
+    return it == tracker->m_imageState.end() ? ResourceState::Undefined : it->second;
+}
+
+void BarrierTrackerVK::SetImageState(BarrierTrackerVK* tracker, void* image, ResourceState state) {
+    if (!tracker || !image) return;
+    tracker->m_imageState[image] = state;
 }
 
 } // namespace rhi

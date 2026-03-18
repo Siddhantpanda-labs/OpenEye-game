@@ -657,6 +657,7 @@ static Diligent::TEXTURE_FORMAT ToDiligentFormat(RHITextureFormat fmt) {
         case RHITextureFormat::RGBA8: return TEX_FORMAT_RGBA8_UNORM;
         case RHITextureFormat::RGB8_SRGB: return TEX_FORMAT_RGB8_UNORM_SRGB;
         case RHITextureFormat::RGBA8_SRGB: return TEX_FORMAT_RGBA8_UNORM_SRGB;
+        case RHITextureFormat::BGRA8: return TEX_FORMAT_BGRA8_UNORM;
         case RHITextureFormat::RGB16F: return TEX_FORMAT_RGBA16_FLOAT;
         case RHITextureFormat::RGBA16F: return TEX_FORMAT_RGBA16_FLOAT;
         case RHITextureFormat::R32UI: return TEX_FORMAT_R32_UINT;

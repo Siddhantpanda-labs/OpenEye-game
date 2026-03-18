@@ -105,8 +105,11 @@ void RenderPipeline::Shutdown() {
         if (m_forwardMaterialSet) { m_device->DestroyDescriptorSet(m_forwardMaterialSet); m_forwardMaterialSet = nullptr; }
         if (m_forwardSceneBuffersSet) { m_device->DestroyDescriptorSet(m_forwardSceneBuffersSet); m_forwardSceneBuffersSet = nullptr; }
         if (m_deferredLightingPassSet) { m_device->DestroyDescriptorSet(m_deferredLightingPassSet); m_deferredLightingPassSet = nullptr; }
-        if (m_skyboxPostSet) { m_device->DestroyDescriptorSet(m_skyboxPostSet); m_skyboxPostSet = nullptr; }
+        for (rhi::IDescriptorSet*& set : m_skyboxPostSets) {
+            if (set) { m_device->EnqueueDestroyDescriptorSet(set); set = nullptr; }
+        }
         m_cachedSkyboxTexture = nullptr;
+        if (m_skyboxDummyTexture) { m_device->DestroyTexture(m_skyboxDummyTexture); m_skyboxDummyTexture = nullptr; }
         if (m_outlinePostSet) { m_device->DestroyDescriptorSet(m_outlinePostSet); m_outlinePostSet = nullptr; }
         if (m_forwardFrameUBO) { m_device->DestroyBuffer(m_forwardFrameUBO); m_forwardFrameUBO = nullptr; }
     }
@@ -236,10 +239,14 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     m_clusteredLightGrid = std::make_unique<ClusteredLightGrid>();
     m_clusteredLightGrid->Initialize(width, height, 0.1f, 1000.0f);  // Default, will be updated per-frame
 
-    m_postProcessor = std::make_unique<PostProcessor>();
-    if (!m_postProcessor->Initialize(width, height, m_device)) {
-        core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
-        return false;
+    // Debug: set to false to enable post-processing and narrow skybox-vs-post bug.
+    static constexpr bool kDisablePostForDebug = true;
+    if (!kDisablePostForDebug) {
+        m_postProcessor = std::make_unique<PostProcessor>();
+        if (!m_postProcessor->Initialize(width, height, m_device)) {
+            core::Log::Error("RenderPipeline::Initialize: PostProcessor::Initialize failed");
+            return false;
+        }
     }
     m_reflectionProbeManager = std::make_unique<ReflectionProbeManager>();
 
@@ -881,9 +888,10 @@ void RenderPipeline::BuildForwardGraph() {
                         if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
                     }
                 }
-                const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+                const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
+                { static bool once = false; if (!once) { core::Log::InfoF("Forward Opaque: cleared HDR rt=%p clear.depth=%f", (void*)m_hdrRenderTarget, clearFwd.depth); once = true; } }
                 if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
                 RenderForwardOpaque(c.cmd, *m_currentFrameData);
             };
@@ -1008,8 +1016,10 @@ void RenderPipeline::EnsureForwardResourceSets() {
     uboDesc.usage = rhi::BufferUsage::Uniform;
     uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
     m_forwardFrameUBO = m_device->CreateBuffer(uboDesc, nullptr);
-    if (m_forwardFrameUBO)
+    if (m_forwardFrameUBO) {
         m_forwardFrameSet->UpdateUniformBuffer(0, m_forwardFrameUBO, 0, 320);
+        m_forwardFrameSet->UpdateUniformBuffer(1, m_forwardFrameUBO, 0, 320);
+    }
     rhi::BufferDesc bonesDesc;
     bonesDesc.sizeInBytes = 128 * 64;  // 128 mat4 for skinned
     bonesDesc.usage = rhi::BufferUsage::Storage;
@@ -1291,7 +1301,7 @@ void RenderPipeline::BuildForwardStereoGraph() {
                         if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
                     }
                 }
-                const rhi::ClearValue clearFwd = { 0.1f, 0.1f, 0.15f, 1.f };
+                const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
                 if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
@@ -1779,6 +1789,12 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
     // Intentionally do not force GPU sync here; explicit sync is handled by Finish()/fences when needed.
 
     const CameraView cam = view.GetCamera();
+    // Debug: bypass all passes and clear HDR to solid color to verify pipeline -> descriptor -> panel path.
+    static bool kDebugBypassAllPasses = false;  // set to false to restore normal rendering
+    if (kDebugBypassAllPasses) {
+        const rhi::ClearValue clearRed = { 1.f, 0.f, 0.f, 1.f };
+        rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearRed);
+    } else {
     // Single path: all modes go through frame graph (Deferred/Forward/ForwardPlus use BuildAndExecute*FrameGraph).
     switch (m_mode) {
     case PipelineMode::Deferred:
@@ -1801,12 +1817,6 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         view.ForEachOpaqueDrawable([&opaqueCount](const Drawable&) { ++opaqueCount; });
         if (opaqueCount == entityIdsForOpaque->size())
             RenderEntityIDPass(view, *entityIdsForOpaque);
-    }
-
-    // Draw skybox to HDR with depth LEQUAL (behind geometry). When post is used, the frame-graph Skybox pass already filled HDR; we only draw after the graph when output is HDR (no post). Uses cubemap if set, else procedural default.
-    if (GetCurrentFrameOutputRT() == m_hdrRenderTarget) {
-        const bool useGbufferDepth = (m_mode == PipelineMode::Deferred);
-        RenderSkybox(view, useGbufferDepth, m_hdrRenderTarget);
     }
 
     if (m_prePostCallback) {
@@ -1847,6 +1857,7 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         rhi::ITexture* skyboxTex = skybox && skybox->IsValid() ? skybox->GetTextureRHI() : nullptr;
         float time = core::Time::TotalTime();
         rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
+        { static bool once = false; if (!once) { core::Log::InfoF("Post input: hdrTex=%p m_hdrRenderTarget=%p (should match skybox rt)", (void*)hdrTex, (void*)m_hdrRenderTarget); once = true; } }
         settings.ssrNearPlane = cam.nearPlane;
         settings.ssrFarPlane = cam.farPlane;
         rhi::ITexture* finalTexture = m_postProcessor->ApplyPostProcessing(
@@ -1855,6 +1866,8 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
             invView, invProj, cam.viewPos, skyboxTex, time, probeTex);
         (void)finalTexture;
     }
+
+    } // !kDebugBypassAllPasses
 
     rhi::ITexture* outputTex = GetCurrentFrameOutputColorTextureRHI();
     if (cmd && outputTex)
@@ -1892,7 +1905,17 @@ bool RenderPipeline::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* 
 
 rhi::ITexture* RenderPipeline::GetCurrentFrameOutputColorTextureRHI() const {
     rhi::IRenderTarget* rt = GetCurrentFrameOutputRT();
-    return rt ? rt->GetColorTexture(0) : nullptr;
+    rhi::ITexture* tex = rt ? rt->GetColorTexture(0) : nullptr;
+    {
+        static int s_logIndex = 0;
+        if (tex && s_logIndex < 2) {
+            const bool outputIsHDR = (rt == m_hdrRenderTarget);
+            core::Log::InfoF("Pipeline output #%d: pipeline=%p outputIsHDR=%d rt=%p tex=%p (same pipeline=>editor bug; same rt=>device/reuse)",
+                             s_logIndex, (const void*)this, outputIsHDR ? 1 : 0, (void*)rt, (void*)tex->GetNativeTexture());
+            ++s_logIndex;
+        }
+    }
+    return tex;
 }
 
 void RenderPipeline::BlitToScreen() {
@@ -1934,9 +1957,10 @@ void RenderPipeline::EnsureSkyboxShader() {
     if (!m_device) return;
     m_skyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
-    skyboxDepth.depthTest = true;
+    skyboxDepth.depthTest = false;  // TEST: disable to isolate depth — if skybox appears, depth was the cause
     skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
+    core::Log::InfoF("Skybox: TEST depth test disabled (cubemap pipeline)");
     if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
         core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
@@ -1945,12 +1969,7 @@ void RenderPipeline::EnsureSkyboxShader() {
         core::Log::Warn("Skybox shader invalid after load.");
         return;
     }
-    if (!m_skyboxPostSet) {
-        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
-        if (postLayout)
-            m_skyboxPostSet = m_device->CreateDescriptorSet(postLayout);
-        m_cachedSkyboxTexture = nullptr;
-    }
+    m_cachedSkyboxTexture = nullptr;
 }
 
 void RenderPipeline::EnsureProceduralSkyboxShader() {
@@ -1958,9 +1977,10 @@ void RenderPipeline::EnsureProceduralSkyboxShader() {
     if (!m_device) return;
     m_proceduralSkyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
-    skyboxDepth.depthTest = true;
+    skyboxDepth.depthTest = false;  // TEST: disable to isolate depth
     skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
+    core::Log::InfoF("Skybox: TEST depth test disabled (procedural pipeline)");
     if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
         core::Log::WarnF("Procedural skybox shader failed to load (passes/sky/skybox_procedural).");
         return;
@@ -1971,14 +1991,80 @@ void RenderPipeline::EnsureProceduralSkyboxShader() {
     }
 }
 
+static constexpr uint32_t kPostPassBindingCount = 7;
+
+void RenderPipeline::EnsureSkyboxDummyTexture() {
+    if (m_skyboxDummyTexture || !m_device) return;
+    rhi::TextureDesc desc = {};
+    desc.type = rhi::TextureType::Texture2D;
+    desc.width = 1;
+    desc.height = 1;
+    desc.format = rhi::RHITextureFormat::RGBA8;
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    desc.mipLevels = 1;
+    static const uint8_t black[4] = { 0, 0, 0, 255 };
+    m_skyboxDummyTexture = m_device->CreateTexture(desc, black);
+}
+
+void RenderPipeline::EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex) {
+    if (!m_device) {
+        static bool once = false;
+        if (!once) { core::Log::InfoF("Skybox PostSet: skip (no device)"); once = true; }
+        return;
+    }
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kSkyboxPostSetsFrames;
+    const uint32_t frameNumber = m_device->GetFrameNumber();
+    rhi::IDescriptorSet*& setRef = m_skyboxPostSets[frameIndex];
+    if (!setRef) {
+        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+        if (!postLayout) {
+            static bool once = false;
+            if (!once) { core::Log::InfoF("Skybox PostSet: skip (no PostPass layout)"); once = true; }
+            return;
+        }
+        setRef = m_device->CreateDescriptorSet(postLayout);
+        if (!setRef) {
+            static bool once = false;
+            if (!once) { core::Log::InfoF("Skybox PostSet: skip (CreateDescriptorSet failed)"); once = true; }
+            return;
+        }
+        core::Log::InfoF("Skybox PostSet: created set for frameIndex=%u", frameIndex);
+    }
+    if (m_lastSkyboxPostSetFilledFrameNumber == frameNumber) {
+        static bool once = false;
+        if (!once) { core::Log::InfoF("Skybox PostSet: skip update (same frame frameNumber=%u)", frameNumber); once = true; }
+        return;
+    }
+    EnsureSkyboxDummyTexture();
+    rhi::ITexture* dummy = m_skyboxDummyTexture;
+    if (!dummy) {
+        static bool once = false;
+        if (!once) { core::Log::InfoF("Skybox PostSet: skip update (dummy texture null)"); once = true; }
+        return;
+    }
+    rhi::ITexture* tex0 = binding0Tex ? binding0Tex : dummy;
+    setRef->UpdateTexture(0, tex0);
+    for (uint32_t b = 1; b < kPostPassBindingCount; ++b)
+        setRef->UpdateTexture(b, dummy);
+    m_lastSkyboxPostSetFilledFrameNumber = frameNumber;
+    core::Log::InfoF("Skybox PostSet: updated frameIndex=%u frameNumber=%u binding0=%s", frameIndex, frameNumber, binding0Tex ? "cubemap" : "dummy");
+}
+
 void RenderPipeline::AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool useGbufferDepth) {
     m_frameGraph->AddPass("Skybox",
         [this, useGbufferDepth](const FGPassResources&) {
-            if (!m_currentFrameData) return;
-            if (m_currentFrameData->skybox && m_currentFrameData->skybox->IsValid())
+            if (!m_currentFrameData) {
+                static bool once = false;
+                if (!once) { core::Log::InfoF("Skybox pass: skip (no m_currentFrameData)"); once = true; }
+                return;
+            }
+            if (m_currentFrameData->skybox && m_currentFrameData->skybox->IsValid()) {
+                core::Log::InfoF("Skybox pass: path=cubemap useGbufferDepth=%d", useGbufferDepth ? 1 : 0);
                 RenderSkyboxImpl(m_currentFrameData->camera, m_currentFrameData->skybox, useGbufferDepth);
-            else
+            } else {
+                core::Log::InfoF("Skybox pass: path=procedural useGbufferDepth=%d", useGbufferDepth ? 1 : 0);
                 RenderProceduralSkyboxImpl(m_currentFrameData->camera, useGbufferDepth);
+            }
             debug::Profiler::AddFrameCounter("drawCalls", 1);
             debug::Profiler::AddFrameCounter("triangles", 2);
             debug::Profiler::AddFrameCounter("stateChanges", 1);
@@ -2014,34 +2100,52 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
         m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
     if (cmdSky && rt)
         cmdSky->SetRenderTarget(rt);
+    // Debug: clear to magenta at start of Skybox pass; if panel shows magenta, pass ran but draw didn't overwrite; if skybox, draw worked.
+    if (cmdSky && rt) {
+        const rhi::ClearValue clearMagenta = { 1.f, 0.f, 1.f, 1.f };
+        rhi::ClearAndSetRenderTargetWithViewport(cmdSky, rt, 0, 0, vpW, vpH, clearMagenta);
+    }
 
-    if (cmdSky)
+    if (cmdSky) {
         cmdSky->SetCullFace(false);
-
+        cmdSky->SetDepthTest(true);
+        cmdSky->SetDepthWrite(true);
+        cmdSky->SetDepthFuncLess(true);
+    }
     m_skyboxShader->Bind(m_device);
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
     m_skyboxShader->SetMat4("u_InverseProjectionMatrix", glm::inverse(camera.projection));
     m_skyboxShader->SetInt("u_Skybox", 0);
-    if (!m_skyboxPostSet && m_device) {
-        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
-        if (postLayout)
-            m_skyboxPostSet = m_device->CreateDescriptorSet(postLayout);
+    EnsureForwardResourceSets();
+    EnsureSkyboxPostSetFilled(skyboxTex);
+    const uint32_t frameIndex = m_device ? m_device->GetCurrentFrameIndex() % kSkyboxPostSetsFrames : 0u;
+    rhi::IDescriptorSet* skyboxPostSet = m_skyboxPostSets[frameIndex];
+    if (!m_forwardFrameSet || !skyboxPostSet) {
+        core::Log::InfoF("Skybox cubemap: skip draw (forwardFrameSet=%p skyboxPostSet=%p frameIndex=%u)", (void*)m_forwardFrameSet, (void*)skyboxPostSet, frameIndex);
+        return;
     }
-    rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
-    if (cmdSky && pipe)
-        cmdSky->BindPipeline(pipe);
-    if (m_skyboxPostSet && cmdSky) {
-        if (skyboxTex && m_cachedSkyboxTexture != skyboxTex) {
-            m_skyboxPostSet->UpdateTexture(0, skyboxTex);
-            m_cachedSkyboxTexture = skyboxTex;
-        }
-        cmdSky->BindDescriptorSets(1, 1, &m_skyboxPostSet);
-    } else {
-        skybox->Bind(0);
-    }
+    m_cachedSkyboxTexture = skyboxTex;
 
-    if (pipe && cmdSky)
-        cmdSky->DrawFullscreenQuad(pipe);
+    rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
+    if (!cmdSky || !pipe) {
+        core::Log::InfoF("Skybox cubemap: skip draw (cmdSky=%p pipe=%p)", (void*)cmdSky, (void*)pipe);
+        return;
+    }
+    cmdSky->BindPipeline(pipe);
+    // Sanity check: set to true to skip binding set 0; validation should report missing/wrong set and confirm set 0 is in the path.
+    static const bool kSkyboxSanityCheckSkipSet0 = false;
+    if (kSkyboxSanityCheckSkipSet0) {
+        cmdSky->BindDescriptorSets(1, 1, &skyboxPostSet);  // only set 1 (PostPass); set 0 (Frame) not bound
+    } else {
+        rhi::IDescriptorSet* sets[2] = { m_forwardFrameSet, skyboxPostSet };
+        cmdSky->BindDescriptorSets(0, 2, sets);
+    }
+    if (vpW == 0 || vpH == 0) {
+        core::Log::WarnF("Skybox cubemap: zero viewport vpW=%u vpH=%u (draw skipped)", vpW, vpH);
+        return;
+    }
+    cmdSky->SetViewport(0, 0, vpW, vpH);
+    cmdSky->DrawFullscreenQuad(pipe);
 
     m_skyboxShader->Unbind();
     if (cmdSky) {
@@ -2077,9 +2181,29 @@ void RenderPipeline::RenderProceduralSkyboxImpl(const CameraView& camera, bool u
     m_proceduralSkyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
     m_proceduralSkyboxShader->SetMat4("u_InverseProjectionMatrix", glm::inverse(camera.projection));
 
+    EnsureForwardResourceSets();
+    EnsureSkyboxPostSetFilled(nullptr);
+    const uint32_t frameIndex = m_device ? m_device->GetCurrentFrameIndex() % kSkyboxPostSetsFrames : 0u;
+    rhi::IDescriptorSet* skyboxPostSet = m_skyboxPostSets[frameIndex];
+    if (!m_forwardFrameSet || !skyboxPostSet) {
+        core::Log::InfoF("Skybox procedural: skip draw (forwardFrameSet=%p skyboxPostSet=%p frameIndex=%u)", (void*)m_forwardFrameSet, (void*)skyboxPostSet, frameIndex);
+        return;
+    }
+
     rhi::IPipeline* pipe = m_proceduralSkyboxShader->GetPipelineRHI();
-    if (pipe && cmdSky)
-        cmdSky->DrawFullscreenQuad(pipe);
+    if (!cmdSky || !pipe) {
+        core::Log::InfoF("Skybox procedural: skip draw (cmdSky=%p pipe=%p)", (void*)cmdSky, (void*)pipe);
+        return;
+    }
+    cmdSky->BindPipeline(pipe);
+    rhi::IDescriptorSet* sets[2] = { m_forwardFrameSet, skyboxPostSet };
+    cmdSky->BindDescriptorSets(0, 2, sets);
+    if (vpW == 0 || vpH == 0) {
+        core::Log::WarnF("Skybox procedural: zero viewport vpW=%u vpH=%u (draw skipped)", vpW, vpH);
+        return;
+    }
+    cmdSky->SetViewport(0, 0, vpW, vpH);
+    cmdSky->DrawFullscreenQuad(pipe);
 
     m_proceduralSkyboxShader->Unbind();
     if (cmdSky) {

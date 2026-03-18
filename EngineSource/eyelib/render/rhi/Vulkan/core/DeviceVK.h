@@ -189,9 +189,10 @@ struct DeviceVK : IDevice {
     /** True between BeginFrame() and EndFrame(). CommandListVK uses this to avoid resetting the immediate buffer mid-frame. */
     bool IsFrameOpen() const { return m_frameOpen; }
     /** Current frame index (0 .. kMaxFrames-1). Used by DeletionQueue, DescriptorCache, UploadHeap, etc. */
-    uint32_t GetCurrentFrameIndex() const { return m_currentFrameIndex; }
+    uint32_t GetCurrentFrameIndex() const override { return m_currentFrameIndex; }
     /** Monotonic frame number (incremented each BeginFrame). For profiling and frame-based logic. */
-    uint32_t GetFrameNumber() const { return m_frameNumber; }
+    uint32_t GetFrameNumber() const override { return m_frameNumber; }
+    void EnqueueDestroyDescriptorSet(IDescriptorSet* set) override;
     /** Deferred destruction queue. Enqueue here instead of destroying immediately; Tick is called in BeginFrame. */
     DeletionQueueVK* GetDeletionQueue() { return &m_deletionQueue; }
     /** Ring staging buffer with per-frame regions. BeginFrame(..., frameIndex) resets that frame's region; Allocate(heap, frameIndex, ...) then vkCmdCopyBuffer from GetBuffer(). */
@@ -270,6 +271,9 @@ private:
     bool m_frameOpen = false;               // true between BeginFrame() and EndFrame()
     void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui
     DeletionQueueVK m_deletionQueue;
+    /** Descriptor sets to free after 3 frame boundaries (so no CB still references them). */
+    std::vector<IDescriptorSet*> m_pendingDescriptorSetsToFree;
+    uint32_t m_ticksUntilDescriptorSetFree = 0;
     void EnsureImGuiDescriptorPool();
 };
 

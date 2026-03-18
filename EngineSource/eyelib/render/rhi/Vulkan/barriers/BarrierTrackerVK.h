@@ -30,6 +30,12 @@ struct BarrierTrackerVK {
     /** Record all pending barriers into the command list's command buffer. Clears pending. */
     static void FlushBarriers(BarrierTrackerVK* tracker, CommandListVK* cmdList);
 
+    /** Tracked layout for an image (VkImage as void*). Undefined if unknown. */
+    static ResourceState GetImageState(const BarrierTrackerVK* tracker, void* image);
+
+    /** Set tracked layout after an explicit barrier (no pending barrier recorded). */
+    static void SetImageState(BarrierTrackerVK* tracker, void* image, ResourceState state);
+
 private:
     std::unordered_map<void*, ResourceState> m_bufferState;
     std::unordered_map<void*, ResourceState> m_imageState;
