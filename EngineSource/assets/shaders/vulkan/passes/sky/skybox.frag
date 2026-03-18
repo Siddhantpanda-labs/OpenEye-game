@@ -22,4 +22,5 @@ void main() {
     color = mix(vec3(luma), color, 1.0);
     color = (color - 0.5) * 1.0 + 0.5;
     FragColor = vec4(color, 1.0);
+    // FragColor = vec4( 1.0,1.0,1.0, 1.0);
 }

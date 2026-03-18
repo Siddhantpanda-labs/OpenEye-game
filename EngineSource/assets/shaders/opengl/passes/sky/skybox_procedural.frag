@@ -30,5 +30,5 @@ void main() {
     vec3 horizonWhite = vec3(1.0, 1.0, 1.0);
     color = mix(color, horizonWhite * kBrightness, horizonBand * 0.1);
 
-    FragColor = vec4(0.0,1.0,0.0, 1.0);
+    FragColor = vec4(color, 1.0);
 }

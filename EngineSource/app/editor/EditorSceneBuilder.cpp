@@ -360,9 +360,10 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.castShadows = true;
 
     scene.skybox.reset();
+    // Empty skybox id → no cubemap; RenderPipeline uses procedural sky by default.
     const std::string skyboxId = (world && !world->GetSkyboxAssetId().empty())
         ? world->GetSkyboxAssetId()
-        : std::string(kDefaultSkyboxCrossPath);
+        : std::string();
     if (!skyboxId.empty()) {
         auto it = m_skyboxCache.find(skyboxId);
         if (it != m_skyboxCache.end()) {

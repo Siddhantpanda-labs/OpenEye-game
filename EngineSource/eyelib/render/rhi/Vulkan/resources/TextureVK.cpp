@@ -236,6 +236,120 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
     return true;
 }
 
+/** Upload 6 faces (tightly packed in buffer: face * w*h*srcBpp expanded per face via rowPitch) to cube array layers 0..5. */
+bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, uint32_t width, uint32_t height,
+                             VkBuffer staging) {
+    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
+    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    if (!queue) return false;
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
+        return false;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = pool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(device, &allocInfo, &cmd) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkImageMemoryBarrier toTransfer = {};
+    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toTransfer.srcAccessMask = 0;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image = image;
+    toTransfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toTransfer.subresourceRange.baseMipLevel = 0;
+    toTransfer.subresourceRange.levelCount = 1;
+    toTransfer.subresourceRange.baseArrayLayer = 0;
+    toTransfer.subresourceRange.layerCount = 6;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+
+    const uint32_t dstBpp = VkFormatColorTexelBytes(vkFormat);
+    const size_t rowPitch = (static_cast<size_t>(width) * dstBpp + 3u) & ~size_t{3};
+    const VkDeviceSize faceBytes = static_cast<VkDeviceSize>(rowPitch * height);
+
+    VkBufferImageCopy regions[6];
+    for (uint32_t i = 0; i < 6; ++i) {
+        regions[i] = {};
+        regions[i].bufferOffset = faceBytes * static_cast<VkDeviceSize>(i);
+        regions[i].bufferRowLength = static_cast<uint32_t>(rowPitch / dstBpp);
+        regions[i].bufferImageHeight = height;
+        regions[i].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        regions[i].imageSubresource.mipLevel = 0;
+        regions[i].imageSubresource.baseArrayLayer = i;
+        regions[i].imageSubresource.layerCount = 1;
+        regions[i].imageOffset = { 0, 0, 0 };
+        regions[i].imageExtent = { width, height, 1 };
+    }
+    vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions);
+
+    VkImageMemoryBarrier toSample = {};
+    toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toSample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toSample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toSample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toSample.image = image;
+    toSample.subresourceRange = toTransfer.subresourceRange;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toSample);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fenceInfo = {};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkSubmitInfo submit = {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    if (vkQueueSubmit(queue, 1, &submit, fence) != VK_SUCCESS) {
+        vkDestroyFence(device, fence, nullptr);
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, pool, 1, &cmd);
+    vkDestroyCommandPool(device, pool, nullptr);
+    return true;
+}
+
 } // namespace
 
 ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const void* initialData) {
@@ -247,6 +361,10 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     const bool wantUpload = initialData != nullptr && desc.type == TextureType::Texture2D && !desc.transient &&
                             desc.mipLevels == 1 && desc.format != RHITextureFormat::Depth24 &&
                             desc.format != RHITextureFormat::Depth24Stencil8 && desc.format != RHITextureFormat::None;
+    const bool wantCubeUpload = initialData != nullptr && desc.type == TextureType::TextureCube && !desc.transient &&
+                                desc.mipLevels == 1 && desc.depthOrArrayLayers >= 6u &&
+                                desc.format != RHITextureFormat::Depth24 &&
+                                desc.format != RHITextureFormat::Depth24Stencil8 && desc.format != RHITextureFormat::None;
 
     VkImageType imageType = VK_IMAGE_TYPE_2D;
     if (desc.type == TextureType::Texture3D) imageType = VK_IMAGE_TYPE_3D;
@@ -269,7 +387,7 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     imgInfo.samples = static_cast<VkSampleCountFlagBits>(desc.samples);
     imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imgInfo.usage = ToVkImageUsageForFormat(desc.format, desc.usage);
-    if (wantUpload)
+    if (wantUpload || wantCubeUpload)
         imgInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (desc.type == TextureType::TextureCube)
         imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
@@ -342,6 +460,68 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
             vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);
             vmaDestroyImage(allocator, image, allocation);
             core::Log::Error("CreateTextureVK: texture upload submit failed");
+            return nullptr;
+        }
+        vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);
+    }
+
+    if (wantCubeUpload) {
+        uint32_t srcBpp = 0, dstBpp = 0;
+        if (!GetUploadLayout(desc.format, &srcBpp, &dstBpp)) {
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::ErrorF("CreateTextureVK: cube upload not implemented for format %u", static_cast<unsigned>(desc.format));
+            return nullptr;
+        }
+        const size_t rowPitch = (static_cast<size_t>(desc.width) * dstBpp + 3u) & ~size_t{3};
+        const size_t faceStagingSize = rowPitch * desc.height;
+        const VkDeviceSize stagingSize = static_cast<VkDeviceSize>(faceStagingSize * 6u);
+        const size_t srcFaceBytes = static_cast<size_t>(desc.width) * static_cast<size_t>(desc.height) * static_cast<size_t>(srcBpp);
+
+        VkBufferCreateInfo bufInfo = {};
+        bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufInfo.size = stagingSize;
+        bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        VmaAllocationCreateInfo stagingAllocInfo = {};
+        stagingAllocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        stagingAllocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                                 VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        VkBuffer stagingBuf = VK_NULL_HANDLE;
+        VmaAllocation stagingAlloc = VK_NULL_HANDLE;
+        VmaAllocationInfo stagingInfo = {};
+        res = vmaCreateBuffer(allocator, &bufInfo, &stagingAllocInfo, &stagingBuf, &stagingAlloc, &stagingInfo);
+        if (res != VK_SUCCESS) {
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::ErrorF("CreateTextureVK: cube staging buffer failed (0x%x)", res);
+            return nullptr;
+        }
+        void* mapped = stagingInfo.pMappedData;
+        bool unmapAfter = false;
+        if (!mapped) {
+            if (vmaMapMemory(allocator, stagingAlloc, &mapped) != VK_SUCCESS)
+                mapped = nullptr;
+            else
+                unmapAfter = true;
+        }
+        if (!mapped) {
+            vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::Error("CreateTextureVK: failed to map cube staging buffer");
+            return nullptr;
+        }
+        std::memset(mapped, 0, static_cast<size_t>(stagingSize));
+        const auto* srcBase = static_cast<const uint8_t*>(initialData);
+        auto* dstBase = static_cast<uint8_t*>(mapped);
+        for (uint32_t face = 0; face < 6u; ++face)
+            CopyToStaging(desc.format, srcBase + face * srcFaceBytes, desc.width, desc.height,
+                          dstBase + face * faceStagingSize, rowPitch);
+        vmaFlushAllocation(allocator, stagingAlloc, 0, stagingSize);
+        if (unmapAfter)
+            vmaUnmapMemory(allocator, stagingAlloc);
+
+        if (!SubmitCubeTextureUpload(deviceObj, image, imgInfo.format, desc.width, desc.height, stagingBuf)) {
+            vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::Error("CreateTextureVK: cube texture upload submit failed");
             return nullptr;
         }
         vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);

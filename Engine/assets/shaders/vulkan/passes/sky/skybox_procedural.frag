@@ -8,10 +8,10 @@ layout(push_constant, std430) uniform SkyboxProceduralPush {
     mat4 u_InverseProjectionMatrix;
 } pc;
 
-const vec3 kSkyColor = vec3(0.75, 0.91, 0.99) * 2.0;
+const vec3 kSkyColor = vec3(0.75, 0.91, 0.99) * 1.5;
 const vec3 kGroundColor = vec3(0.40, 0.34, 0.202);
 const float kHorizonSharpness = 0.05;
-const float kBrightness = 0.14;
+const float kBrightness = 0.64;
 
 void main() {
     vec2 ndc = v_TexCoord * 2.0 - 1.0;
