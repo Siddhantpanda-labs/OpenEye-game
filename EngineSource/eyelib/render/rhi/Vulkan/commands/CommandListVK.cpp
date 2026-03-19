@@ -35,11 +35,7 @@ void CommandListVK::SetCommandBuffer(void* commandBuffer, bool isImmediate) {
     m_isImmediate = isImmediate;
 }
 
-void CommandListVK::Begin() {
-    if (m_isImmediate && m_device && m_device->IsFrameOpen())
-        return;
-    m_isRecording = false;
-    // Stateless rule: clear all bound state so no state survives across frames.
+void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
     m_currentRenderTarget = nullptr;
     m_currentVertexBuffer = nullptr;
     m_currentVertexOffset = 0;
@@ -58,6 +54,15 @@ void CommandListVK::Begin() {
         m_boundUniformSizes[i] = 0;
     }
     std::memset(m_computeParamsData, 0, sizeof(m_computeParamsData));
+    m_pendingTimelineValue = 0;
+}
+
+void CommandListVK::Begin() {
+    if (m_isImmediate && m_device && m_device->IsFrameOpen())
+        return;
+    m_isRecording = false;
+    // Stateless rule: clear all bound state so no state survives across frames.
+    ResetCpuRecordingStateAfterPoolReset();
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(m_commandBuffer);
     if (buf == VK_NULL_HANDLE) return;
     vkResetCommandBuffer(buf, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
@@ -155,10 +160,19 @@ void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
         VkClearAttachment att = {};
         att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         att.colorAttachment = i;
-        att.clearValue.color.float32[0] = clear.color[0];
-        att.clearValue.color.float32[1] = clear.color[1];
-        att.clearValue.color.float32[2] = clear.color[2];
-        att.clearValue.color.float32[3] = clear.color[3];
+        ITexture* ctex = rtVK->GetColorTexture(i);
+        const RHITextureFormat fmt = ctex ? ctex->GetFormat() : RHITextureFormat::RGBA8;
+        if (fmt == RHITextureFormat::R32UI) {
+            att.clearValue.color.uint32[0] = clear.colorUint;
+            att.clearValue.color.uint32[1] = 0;
+            att.clearValue.color.uint32[2] = 0;
+            att.clearValue.color.uint32[3] = 0;
+        } else {
+            att.clearValue.color.float32[0] = clear.color[0];
+            att.clearValue.color.float32[1] = clear.color[1];
+            att.clearValue.color.float32[2] = clear.color[2];
+            att.clearValue.color.float32[3] = clear.color[3];
+        }
         clears.push_back(att);
     }
     if (rtVK->GetDepthImageView() != VK_NULL_HANDLE) {
@@ -261,10 +275,14 @@ void CommandListVK::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, si
 
 void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (!pipeline || !m_isRecording || !m_commandBuffer || !m_device) return;
-    m_currentPipeline = pipeline;
     PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
     VkPipeline vkPipe = static_cast<VkPipeline>(pVK->m_pipeline);
-    if (vkPipe == VK_NULL_HANDLE) return;
+    if (vkPipe == VK_NULL_HANDLE) {
+        // Do not set m_currentPipeline: BindDescriptorSets and draws require a real VkPipeline bind.
+        m_currentPipeline = nullptr;
+        return;
+    }
+    m_currentPipeline = pipeline;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
     // PushOnly/Legacy: 0 descriptor sets; push constants only. Resource-space pipelines use BindDescriptorSets.
@@ -498,10 +516,22 @@ void CommandListVK::SetSubroutineIndices(ShaderStage stage, uint32_t count, cons
 
 void CommandListVK::Draw(uint32_t vertexCount, uint32_t firstVertex) {
     if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_currentRenderTarget) {
+        static int n = 0;
+        if (n++ < 4)
+            core::Log::WarnF("Vulkan Draw: skipped (no active dynamic rendering); SetRenderTarget did not begin rendering");
+        return;
+    }
     vkCmdDraw(static_cast<VkCommandBuffer>(m_commandBuffer), vertexCount, 1, firstVertex, 0);
 }
 void CommandListVK::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_currentRenderTarget) {
+        static int n = 0;
+        if (n++ < 4)
+            core::Log::WarnF("Vulkan DrawIndexed: skipped (no active dynamic rendering); SetRenderTarget may have failed");
+        return;
+    }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, 1, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
@@ -509,6 +539,12 @@ void CommandListVK::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex,
 }
 void CommandListVK::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
     if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_currentRenderTarget) {
+        static int n = 0;
+        if (n++ < 4)
+            core::Log::WarnF("Vulkan DrawIndexedInstanced: skipped (no active dynamic rendering)");
+        return;
+    }
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, instanceCount, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }

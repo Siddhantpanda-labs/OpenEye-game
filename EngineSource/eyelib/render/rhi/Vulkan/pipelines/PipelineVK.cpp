@@ -96,6 +96,10 @@ static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc)
             out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
             out.depthFormat = VK_FORMAT_D32_SFLOAT;
         }
+        if (shaderName == "passes/entityid/entityid") {
+            out.colorFormats = { VK_FORMAT_R32_UINT };
+            out.depthFormat = VK_FORMAT_D32_SFLOAT;
+        }
         if (shaderName == "passes/ibl/irradiance_convolution" || shaderName == "passes/ibl/prefilter")
             out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
     }

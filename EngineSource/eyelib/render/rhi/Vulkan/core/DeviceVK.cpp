@@ -1078,6 +1078,7 @@ void DeviceVK::BeginFrame() {
         return;
     }
     m_immediateCommandList->SetCommandBuffer(buf, true);
+    m_immediateCommandList->ResetCpuRecordingStateAfterPoolReset();
     m_immediateCommandList->SetRecordingState(true);
     m_frameOpen = true;
 
@@ -1190,6 +1191,9 @@ void DeviceVK::TransitionTextureToState(ITexture* texture, ResourceState newStat
 void DeviceVK::FlushBarrierTracker(ICommandList* cmd) {
     if (!cmd) return;
     CommandListVK* cmdVK = static_cast<CommandListVK*>(cmd);
+    // Dynamic rendering: vkCmdPipelineBarrier must not run inside an active rendering scope
+    // when transitioning attachments. Frame graph runs transitions between passes; end rendering first.
+    cmdVK->EndRenderingIfActive();
     BarrierTrackerVK::FlushBarriers(&m_barrierTracker, cmdVK);
 }
 

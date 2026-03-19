@@ -120,6 +120,8 @@ struct CommandListVK : ICommandList {
     void EndRenderingIfActive();
     /** Called by DeviceVK::BeginFrame() after reset+begin so the list is marked recording. Do not call from application code. */
     void SetRecordingState(bool recording) { m_isRecording = recording; }
+    /** After vkResetCommandPool + vkBeginCommandBuffer: GPU CB has no RT/pipeline/bind state; CPU must match. */
+    void ResetCpuRecordingStateAfterPoolReset();
 
 private:
     DeviceVK* m_device = nullptr;

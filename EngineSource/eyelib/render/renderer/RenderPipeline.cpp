@@ -746,6 +746,7 @@ void RenderPipeline::BuildDeferredGraph() {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
                 RenderOpaqueGeometryToGBuffer(c.cmd, *m_currentFrameData, m_currentFrameData->camera, m_lastGpuCullDrawListCount);
+                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
             };
             if (name == "Copy depth for occlusion")
                 return [this](const FGPassResources&) {
@@ -809,6 +810,7 @@ void RenderPipeline::BuildDeferredGraph() {
                     debug::Profiler::AddFrameCounter("drawCalls", 1);
                     debug::Profiler::AddFrameCounter("triangles", 2);
                     debug::Profiler::AddFrameCounter("stateChanges", 1);
+                    if (c.cmd) c.cmd->SetRenderTarget(nullptr);
                 };
             if (name == "Transparency")
                 return [this](const FGPassResources&) {
@@ -894,6 +896,7 @@ void RenderPipeline::BuildForwardGraph() {
                 { static bool once = false; if (!once) { core::Log::InfoF("Forward Opaque: cleared HDR rt=%p clear.depth=%f", (void*)m_hdrRenderTarget, clearFwd.depth); once = true; } }
                 if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
                 RenderForwardOpaque(c.cmd, *m_currentFrameData);
+                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
             };
         if (name == "Copy depth for occlusion")
             return [this](const FGPassResources&) {
@@ -943,6 +946,7 @@ void RenderPipeline::BuildForwardPlusGraph() {
                 RenderContext c = RenderContext::FromDevice(m_device);
                 PrepareForwardPlusFrame(c.cmd, *m_currentFrameData);
                 RenderForwardPlusOpaqueBatched(c.cmd, *m_currentFrameData);
+                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
             };
         if (name == "Transparency")
             return [this](const FGPassResources&) {
@@ -1110,7 +1114,6 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         sh->Bind(m_device);
         debug::Profiler::AddFrameCounter("stateChanges", 1);
         if (useForwardResourceSets) {
-            core::Log::Info("RenderForwardOpaque: BindDescriptorSets(0, 5)");
             rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
             cmd->BindDescriptorSets(0, 5, sets);
         } else {
@@ -1125,8 +1128,6 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         }
         sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
         for (const Drawable& d : drawables) {
-            static bool s_firstDrawLogged = false;
-            if (!s_firstDrawLogged) { core::Log::Info("RenderForwardOpaque: first draw iteration"); s_firstDrawLogged = true; }
             const math::Mat4* bonePtr = d.bones;
             size_t boneCount = d.boneCount;
             if ((!bonePtr || boneCount == 0) && d.materialInstance) {
@@ -2263,7 +2264,12 @@ void RenderPipeline::EnsureEntityIdShader() {
     if (m_entityIdShader && m_entityIdShader->IsValid()) return;
     if (!m_device) return;
     m_entityIdShader = std::make_shared<Shader>();
-    if (!m_entityIdShader->Load(m_device, "passes/entityid/entityid", Mesh::GetVertexLayoutRHI())) {
+    rhi::DepthStencilState entityIdDepth{};
+    entityIdDepth.depthTest = true;
+    entityIdDepth.depthWrite = false;
+    entityIdDepth.depthCompare = rhi::DepthCompare::Less;
+    if (!m_entityIdShader->Load(m_device, "passes/entityid/entityid", Mesh::GetVertexLayoutRHI(),
+                                rhi::PrimitiveTopology::TriangleList, &entityIdDepth)) {
         core::Log::WarnF("EntityID shader failed to load (passes/entityid/entityid). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
