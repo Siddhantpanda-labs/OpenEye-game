@@ -67,15 +67,8 @@ void GBuffer::BindForGeometryPass(rhi::ICommandList* cmd) {
 }
 
 void GBuffer::BindForLightingPass(rhi::ICommandList* cmd) {
-    if (!cmd) return;
-    rhi::ITexture* pos = GetPositionTextureRHI();
-    rhi::ITexture* norm = GetNormalTextureRHI();
-    rhi::ITexture* alb = GetAlbedoTextureRHI();
-    rhi::ITexture* pbr = GetPBRParamsTextureRHI();
-    if (pos) cmd->BindTexture(pos, 0);
-    if (norm) cmd->BindTexture(norm, 1);
-    if (alb) cmd->BindTexture(alb, 2);
-    if (pbr) cmd->BindTexture(pbr, 3);
+    (void)cmd;
+    // Deferred lighting uses Frame + DeferredLightingPass descriptor sets; no manual G-buffer texture binds.
 }
 
 void GBuffer::BindDepthTexture(unsigned int textureUnit) {

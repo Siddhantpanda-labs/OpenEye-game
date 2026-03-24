@@ -367,7 +367,9 @@ void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
     vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
     const ResourceState srcRestoreState = (srcTracked == ResourceState::Undefined) ? ResourceState::RenderTarget : srcTracked;
-    const ResourceState dstRestoreState = (dstTracked == ResourceState::Undefined) ? ResourceState::ShaderResource : dstTracked;
+    // Blit destination is consumed as sampled input in post/outline flows.
+    // Restore to ShaderResource deterministically to avoid layout mismatch with descriptor imageLayout.
+    const ResourceState dstRestoreState = ResourceState::ShaderResource;
     VkImageLayout srcRestoreLayout, dstRestoreLayout;
     VkAccessFlags srcRestoreAccess, dstRestoreAccess;
     VkPipelineStageFlags srcRestoreStage, dstRestoreStage;

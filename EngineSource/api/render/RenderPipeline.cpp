@@ -105,14 +105,6 @@ RenderDevice RenderPipeline::GetDevice() const {
 
 void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
     if (!m_impl->pipeline) return nullptr;
-    {
-        static int s_apiLogIndex = 0;
-        if (s_apiLogIndex < 2) {
-            core::Log::InfoF("API GetOutputColorTextureNativeHandle #%d: apiThis=%p internalPipeline=%p (same internal=>api/engine bug)",
-                             s_apiLogIndex, (const void*)this, (void*)m_impl->pipeline.get());
-            ++s_apiLogIndex;
-        }
-    }
     ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetCurrentFrameOutputColorTextureRHI();
     return tex ? tex->GetNativeTexture() : nullptr;
 }

@@ -74,7 +74,7 @@ IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t h
     texDesc.height = height;
     texDesc.mipLevels = 1;
     texDesc.samples = (samples > 0) ? samples : 1u;
-    texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc);
+    texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc | TextureUsage::TransferDst);
     texDesc.transient = transient;
     for (size_t i = 0; i < colorFormats.size(); ++i) {
         texDesc.format = colorFormats[i];
@@ -159,7 +159,7 @@ IRenderTarget* CreateRenderTargetWithSharedDepthVK(DeviceVK* deviceObj, uint32_t
     texDesc.height = height;
     texDesc.mipLevels = 1;
     texDesc.samples = (samples > 0) ? samples : 1u;
-    texDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+    texDesc.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource | TextureUsage::TransferSrc | TextureUsage::TransferDst;
     for (size_t i = 0; i < colorFormats.size(); ++i) {
         texDesc.format = colorFormats[i];
         texDesc.debugName = (i == 0) ? "RT_Color0" : nullptr;

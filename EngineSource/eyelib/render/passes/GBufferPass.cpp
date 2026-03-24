@@ -11,6 +11,7 @@
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -20,6 +21,15 @@ namespace render {
 
 namespace {
 constexpr size_t kMaxBones = 128;
+
+bool GBufferResourceBindingsReady(rhi::IDevice* device, rhi::ICommandList* cmd,
+                                  rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* materialSet,
+                                  rhi::IDescriptorSet* sceneSet, rhi::IBindlessHeap* heap) {
+    if (!device || !cmd || !frameSet || !materialSet || !sceneSet) return false;
+    if (!device->GetCapabilities().supportsBindless) return false;
+    if (!heap || !heap->GetDescriptorSet()) return false;
+    return true;
+}
 
 void applyMaterialBlendAndCull(rhi::ICommandList* cmd, const Material* material) {
     if (!cmd || !material) return;
@@ -130,13 +140,23 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
     }
 
+    rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
     const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && device->GetCapabilities().supportsBindless);
-    rhi::IDescriptorSet* bindlessSet = (m_bindlessHeap) ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    const bool useResourceSpace = (m_gbufferFrameSet && m_gbufferMaterialSet && m_gbufferSceneBuffersSet && bindlessSet && cmd);
-    if (useBindless && cmd)
-        cmd->BindBindlessHeap(m_bindlessHeap);
+    if (!GBufferResourceBindingsReady(device, cmd, m_gbufferFrameSet, m_gbufferMaterialSet, m_gbufferSceneBuffersSet, m_bindlessHeap)) {
+        static std::atomic<bool> s_warned{false};
+        if (!s_warned.exchange(true) && m_shaderCache)
+            core::Log::WarnF("GBufferPass: descriptor sets + bindless not ready; skipping G-buffer geometry.");
+        gbuffer.Unbind(cmd);
+        m_currentGBuffer = nullptr;
+        if (cmd) {
+            for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+            cmd->SetCullFace(true);
+        }
+        return;
+    }
+    if (useBindless && cmd) cmd->BindBindlessHeap(m_bindlessHeap);
 
-    auto drawOne = [this, device, cmd, useBindless, useResourceSpace, bindlessSet](Shader* shader, const Drawable& d) {
+    auto drawOne = [this, device, cmd, bindlessSet](Shader* shader, const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
@@ -155,23 +175,15 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
 
         applyMaterialBlendAndCull(cmd, material.get());
 
-        if (!useResourceSpace) {
-            rhi::IBuffer* materialBuffer = d.materialInstance
-                ? d.materialInstance->GetMaterialBufferRHI(device)
-                : material->GetMaterialBufferRHI(device);
-            if (materialBuffer && cmd)
-                cmd->BindUniformBuffer(materialBuffer, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
-        } else {
-            if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
-            else material->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
-            if (bonePtr && boneCount > 0 && m_gbufferBonesBuffer) {
-                const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
-                m_gbufferBonesBuffer->Update(bonePtr, 0, boneBytes);
-                m_gbufferSceneBuffersSet->UpdateStorageBuffer(1, m_gbufferBonesBuffer, 0, boneBytes);
-            }
-            rhi::IDescriptorSet* sets[4] = { m_gbufferFrameSet, m_gbufferMaterialSet, bindlessSet, m_gbufferSceneBuffersSet };
-            cmd->BindDescriptorSets(0, 4, sets);
+        if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+        else material->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+        if (bonePtr && boneCount > 0 && m_gbufferBonesBuffer) {
+            const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
+            m_gbufferBonesBuffer->Update(bonePtr, 0, boneBytes);
+            m_gbufferSceneBuffersSet->UpdateStorageBuffer(1, m_gbufferBonesBuffer, 0, boneBytes);
         }
+        rhi::IDescriptorSet* sets[4] = { m_gbufferFrameSet, m_gbufferMaterialSet, bindlessSet, m_gbufferSceneBuffersSet };
+        cmd->BindDescriptorSets(0, 4, sets);
 
         auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
             return d.materialInstance ? d.materialInstance->GetVec4(name, def) : material->GetVec4(name, def);
@@ -185,10 +197,6 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
             return d.materialInstance ? d.materialInstance->GetTextureRHI(name) : material->GetTextureRHI(name);
         };
-        auto bindTextureToSlot = [&](const std::string& name, int unit) -> bool {
-            return d.materialInstance ? d.materialInstance->BindTextureToSlot(name, unit) : material->BindTextureToSlot(name, unit);
-        };
-
         shader->SetMat4("u_Model", d.transform);
         shader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
 
@@ -197,33 +205,14 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
         shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
 
-        if (!useResourceSpace) {
-            if (bonePtr && boneCount > 0)
-                shader->SetMat4Array("u_Bones", bonePtr, boneCount);
-            else {
-                static const math::Mat4 identityBone = math::Mat4(1.0f);
-                shader->SetMat4Array("u_Bones", &identityBone, 1);
-            }
-        }
-
         const char* textureOrder[] = {
             "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
             "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
         };
-        if (useBindless) {
-            for (const char* texName : textureOrder) {
-                rhi::ITexture* rhiTex = getTextureRHI(texName);
-                rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
-                shader->SetHandle64(texName, static_cast<uint64_t>(h));
-            }
-        } else {
-            int unit = 0;
-            for (const char* texName : textureOrder) {
-                if (bindTextureToSlot(texName, unit)) {
-                    shader->SetInt(texName, unit);
-                    ++unit;
-                }
-            }
+        for (const char* texName : textureOrder) {
+            rhi::ITexture* rhiTex = getTextureRHI(texName);
+            rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
+            shader->SetHandle64(texName, static_cast<uint64_t>(h));
         }
         auto hasTex = [&](const std::string& name) {
             auto t = getTexture(name);
@@ -259,12 +248,6 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
             rhi::IPipeline* pipe = shader->GetPipelineRHI();
             if (pipe && !pipe->HasValidProgram()) continue;
             shader->Bind(device);
-            if (!useResourceSpace) {
-                shader->SetMat4("u_View", view);
-                shader->SetMat4("u_Projection", projection);
-                shader->SetMat4("u_PrevView", prevView);
-                shader->SetMat4("u_PrevProjection", prevProjection);
-            }
             for (const auto& d : drawables)
                 drawOne(shader.get(), d);
             shader->Unbind();

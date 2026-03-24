@@ -190,8 +190,10 @@ private:
     void EnsureForwardMaterialFallbackTextures();
     /** Select current per-frame forward descriptor sets/buffers based on GetCurrentFrameIndex(). */
     void SelectForwardResourceSetFrame();
-    /** Update current forward Material set with guaranteed valid texture bindings 1..3. */
-    void UpdateForwardMaterialSetWithFallback(const Material* material, const MaterialInstance* materialInstance);
+    /** Update target forward Material set with guaranteed valid texture bindings 1..3. */
+    void UpdateForwardMaterialSetWithFallback(rhi::IDescriptorSet* targetSet, const Material* material, const MaterialInstance* materialInstance);
+    /** Acquire a per-draw material descriptor set for the current frame (safe to update before immediate bind). */
+    rhi::IDescriptorSet* AcquireForwardDrawMaterialSet();
     /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
     void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
     void EnsureOutlinePostShader();
@@ -300,6 +302,8 @@ private:
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardMaterialSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardSceneBuffersSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_deferredLightingPassSets = {};
+    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardMaterialDrawSets = {};
+    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardMaterialDrawSetCursor = {};
     std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardFrameUBOs = {};
     std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardBonesBuffers = {};
 

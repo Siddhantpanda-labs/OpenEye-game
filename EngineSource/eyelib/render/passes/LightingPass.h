@@ -21,13 +21,13 @@ public:
 
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
-    /** Resource-space (Vulkan): use Frame + DeferredLightingPass descriptor sets when set. */
+    /** Frame + DeferredLightingPass descriptor sets (required for Render; see descriptor_binding_table.md). */
     void SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* deferredLightingPassSet) {
         m_lightingFrameSet = frameSet;
         m_lightingDeferredPassSet = deferredLightingPassSet;
     }
 
-    /** Render to currently bound FBO (context-based). If sceneLightingBuffer is non-null, it is bound at binding 5. cascadeMap: bind cascade depth array at 6, light-space SSBO at 7. ibl: when non-null and valid, binds irradiance/prefilter/BRDF at 11/12/13 and sets u_UseIBL. */
+    /** Render to currently bound FBO (context-based). G-buffer and lighting inputs come from descriptor sets (RenderPipeline updates). Sets u_UseIBL from ibl. */
     void Render(GBuffer& gbuffer,
                 const RenderContext& ctx,
                 const LightParams& light,
@@ -40,7 +40,7 @@ public:
                 rhi::IBuffer* sceneLightingBuffer = nullptr,
                 IBL* ibl = nullptr);
 
-    /** Render to currently bound FBO. device and cmd must be non-null. ibl: when non-null and valid, binds IBL textures and sets u_UseIBL. */
+    /** Render to currently bound FBO. Requires cmd, lightingFrameSet, and lightingDeferredPassSet. */
     void Render(GBuffer& gbuffer,
                 rhi::IDevice* device,
                 rhi::ICommandList* cmd,

@@ -22,6 +22,7 @@ public:
     void Resize(uint32_t width, uint32_t height);
 
     void BindForGeometryPass(rhi::ICommandList* cmd);
+    /** No-op: deferred lighting binds G-buffer via descriptor sets. Kept for API compatibility. */
     void BindForLightingPass(rhi::ICommandList* cmd);
     void BindDepthTexture(unsigned int textureUnit);
     void Unbind(rhi::ICommandList* cmd);

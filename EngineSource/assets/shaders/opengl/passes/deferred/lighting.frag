@@ -1,24 +1,25 @@
 #version 460 core
+// Physical GL bindings: Frame UBO 0–1 (from Frame set); deferred pass maps logical 0–9 via
+// OpenGLResourceSpaceBindings (textures 2–6, SSBO 7, LightSpace UBO 8, IBL 9–11). Matches Vulkan semantics.
 
 in vec2 v_TexCoord;
 
-layout(binding = 0) uniform sampler2D u_Position;
-layout(binding = 1) uniform sampler2D u_Normal;
-layout(binding = 2) uniform sampler2D u_Albedo;
-layout(binding = 3) uniform sampler2D u_PBR;
-layout(binding = 6) uniform sampler2DArray u_ShadowMap;
-layout(std140, binding = 7) buffer LightSpaceBlock {
-    mat4 lightSpace[4];
+layout(std140, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
+    mat4 u_PrevView;
+    mat4 u_PrevProjection;
 };
-// IBL (binding 11, 12, 13) - bound by LightingPass when IBL is valid
-layout(binding = 11) uniform samplerCube u_IrradianceMap;
-layout(binding = 12) uniform samplerCube u_PrefilterMap;
-layout(binding = 13) uniform sampler2D u_BRDFLUT;
-uniform int u_UseIBL = 0;
+
+layout(binding = 2) uniform sampler2D u_Position;
+layout(binding = 3) uniform sampler2D u_Normal;
+layout(binding = 4) uniform sampler2D u_Albedo;
+layout(binding = 5) uniform sampler2D u_PBR;
+layout(binding = 6) uniform sampler2DArray u_ShadowMap;
 
 #include "../../common/brdf.glsl"
 
-// Phase 5 + 7.1: scene lighting from SSBO (binding 5); cascade count and farBounds for CSM
 #define MAX_POINT_LIGHTS 8
 #define MAX_SPOT_LIGHTS 4
 #define MAX_CASCADES 4
@@ -48,15 +49,24 @@ struct SpotLightData {
     float range; float innerConeCos; float outerConeCos;
     float pad2; float pad3; float pad4; float pad5; float pad6;
 };
-layout(std140, binding = 5) buffer SceneLightingBlock {
+
+layout(std140, binding = 7) buffer SceneLightingBlock {
     SceneLightHeader header;
     PointLightData pointLights[MAX_POINT_LIGHTS];
     SpotLightData spotLights[MAX_SPOT_LIGHTS];
 } sceneLight;
 
-layout(location = 0) out vec4 o_Color;
+layout(std140, binding = 8) uniform LightSpaceBlock {
+    mat4 lightSpace[4];
+};
 
-uniform mat4 u_ViewProj;  // for cascade selection (NDC z)
+layout(binding = 9) uniform samplerCube u_IrradianceMap;
+layout(binding = 10) uniform samplerCube u_PrefilterMap;
+layout(binding = 11) uniform sampler2D u_BRDFLUT;
+
+uniform int u_UseIBL = 0;
+
+layout(location = 0) out vec4 o_Color;
 
 float shadowFactor(vec3 worldPos) {
     int cascades = sceneLight.header.cascadeCount;
