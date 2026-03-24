@@ -8,6 +8,7 @@
 #include "eyelib/render/rhi/diligent/RenderTargetDiligent.h"
 #include "eyelib/render/rhi/diligent/QueryPoolDiligent.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -36,6 +37,40 @@
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+namespace {
+#if OPENEYE_USE_DILIGENT
+static Diligent::TEXTURE_FORMAT RHIToDiligentTextureFormat(RHITextureFormat fmt) {
+    using namespace Diligent;
+    switch (fmt) {
+        case RHITextureFormat::R8: return TEX_FORMAT_R8_UNORM;
+        case RHITextureFormat::RG8: return TEX_FORMAT_RG8_UNORM;
+        case RHITextureFormat::RGB8: return TEX_FORMAT_RGBA8_UNORM;
+        case RHITextureFormat::RGBA8: return TEX_FORMAT_RGBA8_UNORM;
+        case RHITextureFormat::RGB8_SRGB: return TEX_FORMAT_RGB8_UNORM_SRGB;
+        case RHITextureFormat::RGBA8_SRGB: return TEX_FORMAT_RGBA8_UNORM_SRGB;
+        case RHITextureFormat::BGRA8: return TEX_FORMAT_BGRA8_UNORM;
+        case RHITextureFormat::RGB16F: return TEX_FORMAT_RGBA16_FLOAT;
+        case RHITextureFormat::RGBA16F: return TEX_FORMAT_RGBA16_FLOAT;
+        case RHITextureFormat::R32UI: return TEX_FORMAT_R32_UINT;
+        case RHITextureFormat::Depth24: return TEX_FORMAT_D32_FLOAT;
+        case RHITextureFormat::Depth24Stencil8: return TEX_FORMAT_D24_UNORM_S8_UINT;
+        default: return TEX_FORMAT_RGBA8_UNORM;
+    }
+}
+#endif
+static std::string ApplyKeywordDefinesDiligent(const std::string& source, const std::vector<std::string>& keywords) {
+    if (keywords.empty()) return source;
+    std::string prefix;
+    for (const auto& k : keywords) {
+        if (k.empty()) continue;
+        prefix += "#define ";
+        prefix += k;
+        prefix += " 1\n";
+    }
+    return prefix + source;
+}
+} // namespace
 
 DeviceDiligent::DeviceDiligent(void* nwh, uint32_t width, uint32_t height, DeviceDiligentImpl* impl)
     : m_impl(impl), m_width(width), m_height(height) {
@@ -379,21 +414,19 @@ IPipeline* DeviceDiligent::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
-IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
-    (void)layoutKind;
-    (void)depthStencilOverride;  // TODO: apply to pipeline desc when creating PSO
+IPipeline* DeviceDiligent::CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) {
     auto* p = new PipelineDiligent();
-    p->m_vertexLayout = layout;
-    p->m_topology = topology;
+    p->m_vertexLayout = info.vertexLayout;
+    p->m_topology = info.topology;
 
 #if OPENEYE_USE_DILIGENT
-    if (!m_impl || !m_impl->pDevice || !shaderName || !shaderName[0]) {
+    if (!m_impl || !m_impl->pDevice) {
         delete p;
         return nullptr;
     }
 
-    const std::string logicalName = eyelib::render::ShaderPathToLogicalName(shaderName);
-    if (logicalName.empty()) {
+    const bool fromOverrides = !info.vertexSourceOverride.empty() && !info.fragmentSourceOverride.empty();
+    if (!fromOverrides && info.assetPath.empty()) {
         delete p;
         return nullptr;
     }
@@ -401,30 +434,44 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     using namespace Diligent;
     using namespace eyelib::platform::filesystem;
 
-    // Prefer exe directory (e.g. build/bin/Debug) so assets/shaders/diligent next to the exe is used
-    std::string baseDir = "assets/shaders/diligent/";
-    std::string vshPath, pshPath;
-    std::string exeDir = GetDirectory(GetExecutablePath());
-    if (!exeDir.empty() && FileExists(exeDir + baseDir + logicalName + ".vsh")) {
-        vshPath = exeDir + baseDir + logicalName + ".vsh";
-        pshPath = exeDir + baseDir + logicalName + ".psh";
+    std::vector<uint8_t> vsBuf;
+    std::vector<uint8_t> psBuf;
+    if (fromOverrides) {
+        const std::string vsStr = ApplyKeywordDefinesDiligent(info.vertexSourceOverride, info.keywordDefines);
+        const std::string psStr = ApplyKeywordDefinesDiligent(info.fragmentSourceOverride, info.keywordDefines);
+        vsBuf.assign(vsStr.begin(), vsStr.end());
+        psBuf.assign(psStr.begin(), psStr.end());
+        vsBuf.push_back(0);
+        psBuf.push_back(0);
     } else {
-        vshPath = baseDir + logicalName + ".vsh";
-        pshPath = baseDir + logicalName + ".psh";
+        const std::string logicalName = eyelib::render::ShaderPathToLogicalName(info.assetPath);
+        if (logicalName.empty()) {
+            delete p;
+            return nullptr;
+        }
+        std::string baseDir = "assets/shaders/diligent/";
+        std::string vshPath, pshPath;
+        std::string exeDir = GetDirectory(GetExecutablePath());
+        if (!exeDir.empty() && FileExists(exeDir + baseDir + logicalName + ".vsh")) {
+            vshPath = exeDir + baseDir + logicalName + ".vsh";
+            pshPath = exeDir + baseDir + logicalName + ".psh";
+        } else {
+            vshPath = baseDir + logicalName + ".vsh";
+            pshPath = baseDir + logicalName + ".psh";
+        }
+        if (!FileExists(vshPath) || !FileExists(pshPath)) {
+            delete p;
+            return nullptr;
+        }
+        vsBuf = ReadFile(vshPath);
+        psBuf = ReadFile(pshPath);
+        if (vsBuf.empty() || psBuf.empty()) {
+            delete p;
+            return nullptr;
+        }
+        vsBuf.push_back(0);
+        psBuf.push_back(0);
     }
-    if (!FileExists(vshPath) || !FileExists(pshPath)) {
-        delete p;
-        return nullptr;
-    }
-
-    std::vector<uint8_t> vsBuf = ReadFile(vshPath);
-    std::vector<uint8_t> psBuf = ReadFile(pshPath);
-    if (vsBuf.empty() || psBuf.empty()) {
-        delete p;
-        return nullptr;
-    }
-    vsBuf.push_back(0);
-    psBuf.push_back(0);
     const char* vsSrc = reinterpret_cast<const char*>(vsBuf.data());
     const char* psSrc = reinterpret_cast<const char*>(psBuf.data());
 
@@ -446,14 +493,14 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     static constexpr Uint32 MAX_EL = 8u;
     LayoutElement layoutElements[MAX_EL];
     Uint32 numElements = 0;
-    if (!layout.attributes.empty() && layout.attributes.size() <= MAX_EL) {
-        for (const auto& a : layout.attributes) {
+    if (!info.vertexLayout.attributes.empty() && info.vertexLayout.attributes.size() <= MAX_EL) {
+        for (const auto& a : info.vertexLayout.attributes) {
             LayoutElement& e = layoutElements[numElements++];
             e.HLSLSemantic = "ATTRIB";
             e.InputIndex = a.location;
             e.BufferSlot = 0;
             e.RelativeOffset = a.offsetInBytes;
-            e.Stride = layout.strideInBytes;
+            e.Stride = info.vertexLayout.strideInBytes;
             e.Frequency = INPUT_ELEMENT_FREQUENCY_PER_VERTEX;
             switch (a.type) {
                 case VertexAttributeType::Float:  e.NumComponents = 1; e.ValueType = VT_FLOAT32; break;
@@ -481,7 +528,7 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
 
     // Pipeline Resource Signature: declare every cbuffer/texture/sampler the shaders use.
     // Names must match HLSL exactly (e.g. "Constants", "Material", "Bones", "u_ShadowMap").
-    const std::string nameStr(shaderName);
+    const std::string nameStr = fromOverrides ? (info.assetPath.empty() ? std::string("(inline)") : info.assetPath) : info.assetPath;
     const bool isTest = (nameStr.find("test/") == 0);
     const bool isForward = (nameStr.find("passes/forward/") != std::string::npos);
     const bool isShadow = (nameStr.find("passes/shadow/") != std::string::npos);
@@ -533,19 +580,37 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
         return p;
 
     GraphicsPipelineStateCreateInfo psoci;
-    psoci.PSODesc.Name = shaderName;
+    psoci.PSODesc.Name = nameStr.c_str();
     psoci.PSODesc.PipelineType = PIPELINE_TYPE_GRAPHICS;
     psoci.pVS = pDgVs;
     psoci.pPS = pDgPs;
     psoci.GraphicsPipeline.InputLayout = inputLayoutDesc;
-    psoci.GraphicsPipeline.PrimitiveTopology = (topology == PrimitiveTopology::TriangleList)
+    psoci.GraphicsPipeline.PrimitiveTopology = (info.topology == PrimitiveTopology::TriangleList)
         ? PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-        : (topology == PrimitiveTopology::TriangleStrip)
+        : (info.topology == PrimitiveTopology::TriangleStrip)
             ? PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
-            : (topology == PrimitiveTopology::PointList)
+            : (info.topology == PrimitiveTopology::PointList)
                 ? PRIMITIVE_TOPOLOGY_POINT_LIST
                 : PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    if (isShadow) {
+    if (info.attachmentFormats.has_value()) {
+        const PipelineAttachmentFormats& af = *info.attachmentFormats;
+        static constexpr Uint32 kMaxMrt = 8u;
+        const size_t nColors = af.color.size();
+        psoci.GraphicsPipeline.NumRenderTargets = static_cast<Uint32>(std::min(nColors, size_t(kMaxMrt)));
+        for (Uint32 i = 0; i < psoci.GraphicsPipeline.NumRenderTargets; ++i)
+            psoci.GraphicsPipeline.RTVFormats[i] = RHIToDiligentTextureFormat(af.color[i]);
+        if (af.depthStencil == RHITextureFormat::None) {
+            psoci.GraphicsPipeline.DSVFormat = TEX_FORMAT_UNKNOWN;
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthEnable = false;
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthWriteEnable = false;
+        } else {
+            psoci.GraphicsPipeline.DSVFormat = RHIToDiligentTextureFormat(af.depthStencil);
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthEnable = true;
+            psoci.GraphicsPipeline.DepthStencilDesc.DepthWriteEnable = true;
+        }
+        if (info.layoutKind != PipelineLayoutKind::Shadow)
+            psoci.GraphicsPipeline.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
+    } else if (isShadow) {
         psoci.GraphicsPipeline.NumRenderTargets = 0;
         psoci.GraphicsPipeline.DSVFormat = TEX_FORMAT_D32_FLOAT;
     } else {
@@ -562,29 +627,29 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
             // test/cube: no cull so cube is visible (no depth buffer; winding can hide faces otherwise).
             psoci.GraphicsPipeline.RasterizerDesc.CullMode = Diligent::CULL_MODE_NONE;
             if (isPost) {
-            // Bloom stages render to HDR RTs (RGBA16F); tonemap/composite/fxaa/copy render to LDR (RGBA8) or swapchain.
-            if (nameStr == "passes/post/bloom_extract" || nameStr == "passes/post/bloom_blur")
-                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA16_FLOAT;
-            else if (nameStr == "passes/post/copy" && m_impl->pSwapChain)
-                psoci.GraphicsPipeline.RTVFormats[0] = m_impl->pSwapChain->GetDesc().ColorBufferFormat;
-            else
-                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
-        } else {
-            // test/*: match swap chain when drawing to screen, else RGBA8_UNORM for offscreen RT
-            if (isTest) {
-                if (m_impl->pSwapChain) {
-                    const auto& scDesc = m_impl->pSwapChain->GetDesc();
-                    psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
-                } else
+                // Bloom stages render to HDR RTs (RGBA16F); tonemap/composite/fxaa/copy render to LDR (RGBA8) or swapchain.
+                if (nameStr == "passes/post/bloom_extract" || nameStr == "passes/post/bloom_blur")
+                    psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA16_FLOAT;
+                else if (nameStr == "passes/post/copy" && m_impl->pSwapChain)
+                    psoci.GraphicsPipeline.RTVFormats[0] = m_impl->pSwapChain->GetDesc().ColorBufferFormat;
+                else
                     psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
             } else {
-                psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
-                if (m_impl->pSwapChain) {
-                    const auto& scDesc = m_impl->pSwapChain->GetDesc();
-                    psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+                // test/*: match swap chain when drawing to screen, else RGBA8_UNORM for offscreen RT
+                if (isTest) {
+                    if (m_impl->pSwapChain) {
+                        const auto& scDesc = m_impl->pSwapChain->GetDesc();
+                        psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+                    } else
+                        psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM;
+                } else {
+                    psoci.GraphicsPipeline.RTVFormats[0] = TEX_FORMAT_RGBA8_UNORM_SRGB;
+                    if (m_impl->pSwapChain) {
+                        const auto& scDesc = m_impl->pSwapChain->GetDesc();
+                        psoci.GraphicsPipeline.RTVFormats[0] = scDesc.ColorBufferFormat;
+                    }
                 }
             }
-        }
         }
     }
     // test/cube: explicit rasterizer. CW = front (D3D default). Cube indices wound CW from outside.
@@ -598,6 +663,11 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     psoci.ppResourceSignatures = pPRSArray;
     psoci.ResourceSignaturesCount = 1;
 
+    if (info.useDepthStencilOverride) {
+        psoci.GraphicsPipeline.DepthStencilDesc.DepthEnable = info.depthStencilOverride.depthTest;
+        psoci.GraphicsPipeline.DepthStencilDesc.DepthWriteEnable = info.depthStencilOverride.depthWrite;
+    }
+
     Diligent::IPipelineState* pPSOPtr = nullptr;
     m_impl->pDevice->CreateGraphicsPipelineState(psoci, &pPSOPtr);
     DestroyShader(pRhiVs);
@@ -605,7 +675,7 @@ IPipeline* DeviceDiligent::CreateGraphicsPipelineFromName(const char* shaderName
     if (pPSOPtr) {
         pPSOPtr->AddRef();
         p->m_pNative = pPSOPtr;
-        p->m_shaderName = nameStr;
+        p->m_shaderAssetPath = nameStr;
         Diligent::IShaderResourceBinding* pSRBPtr = nullptr;
         pPRS->CreateShaderResourceBinding(&pSRBPtr, true);
         if (pSRBPtr) {
@@ -647,27 +717,6 @@ void DeviceDiligent::DestroyPipeline(IPipeline* pipeline) {
         delete static_cast<PipelineDiligent*>(pipeline);
 }
 
-#if OPENEYE_USE_DILIGENT
-static Diligent::TEXTURE_FORMAT ToDiligentFormat(RHITextureFormat fmt) {
-    using namespace Diligent;
-    switch (fmt) {
-        case RHITextureFormat::R8: return TEX_FORMAT_R8_UNORM;
-        case RHITextureFormat::RG8: return TEX_FORMAT_RG8_UNORM;
-        case RHITextureFormat::RGB8: return TEX_FORMAT_RGBA8_UNORM;
-        case RHITextureFormat::RGBA8: return TEX_FORMAT_RGBA8_UNORM;
-        case RHITextureFormat::RGB8_SRGB: return TEX_FORMAT_RGB8_UNORM_SRGB;
-        case RHITextureFormat::RGBA8_SRGB: return TEX_FORMAT_RGBA8_UNORM_SRGB;
-        case RHITextureFormat::BGRA8: return TEX_FORMAT_BGRA8_UNORM;
-        case RHITextureFormat::RGB16F: return TEX_FORMAT_RGBA16_FLOAT;
-        case RHITextureFormat::RGBA16F: return TEX_FORMAT_RGBA16_FLOAT;
-        case RHITextureFormat::R32UI: return TEX_FORMAT_R32_UINT;
-        case RHITextureFormat::Depth24: return TEX_FORMAT_D32_FLOAT;
-        case RHITextureFormat::Depth24Stencil8: return TEX_FORMAT_D24_UNORM_S8_UINT;
-        default: return TEX_FORMAT_RGBA8_UNORM;
-    }
-}
-#endif
-
 IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t height,
                                                    const std::vector<RHITextureFormat>& colorFormats,
                                                    RHITextureFormat depthFormat,
@@ -690,7 +739,7 @@ IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t heigh
             dgDesc.Type = RESOURCE_DIM_TEX_2D;
             dgDesc.Width = width;
             dgDesc.Height = height;
-            dgDesc.Format = ToDiligentFormat(fmt);
+            dgDesc.Format = RHIToDiligentTextureFormat(fmt);
             dgDesc.BindFlags = BIND_RENDER_TARGET | BIND_SHADER_RESOURCE;
             dgDesc.Usage = USAGE_DEFAULT;
             Diligent::ITexture* pTex = nullptr;
@@ -714,7 +763,7 @@ IRenderTarget* DeviceDiligent::CreateRenderTarget(uint32_t width, uint32_t heigh
             dgDesc.Type = RESOURCE_DIM_TEX_2D;
             dgDesc.Width = width;
             dgDesc.Height = height;
-            dgDesc.Format = ToDiligentFormat(depthFormat);
+            dgDesc.Format = RHIToDiligentTextureFormat(depthFormat);
             dgDesc.BindFlags = BIND_DEPTH_STENCIL;
             dgDesc.Usage = USAGE_DEFAULT;
             Diligent::ITexture* pTex = nullptr;
@@ -841,7 +890,13 @@ void DeviceDiligent::EnsureBlitResources() {
     if (m_blitPipeline) return;
     using namespace Diligent;
     VertexLayout emptyLayout;
-    m_blitPipeline = CreateGraphicsPipelineFromName("passes/post/copy", emptyLayout, PrimitiveTopology::TriangleList);
+    ShaderGraphicsPipelineCreateInfo blitInfo{};
+    blitInfo.assetPath = "passes/post/copy";
+    blitInfo.vertexLayout = emptyLayout;
+    blitInfo.topology = PrimitiveTopology::TriangleList;
+    blitInfo.layoutKind = PipelineLayoutKind::Post;
+    blitInfo.attachmentFormats = StandardAttachmentFormats::PostCopyBGRA();
+    m_blitPipeline = CreateGraphicsPipelineFromShaderAsset(blitInfo);
     if (!m_blitPipeline || !static_cast<PipelineDiligent*>(m_blitPipeline)->HasValidProgram()) {
         core::Log::Warn("Diligent EnsureBlitResources: failed (copy pipeline null or invalid program)");
         return;

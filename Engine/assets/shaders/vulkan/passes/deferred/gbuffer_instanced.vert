@@ -1,5 +1,5 @@
 #version 460
-// Resource-space: set 0 = Frame, set 4 binding 1 = instance transform buffer.
+// Resource-space: set 0 = Frame, set 3 binding 1 = instance transform buffer.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -18,7 +18,7 @@ layout(set = 0, binding = 0) uniform FrameBlock {
     mat4 u_PrevProjection;
 };
 
-layout(set = 4, binding = 1) readonly buffer InstanceModels {
+layout(set = 3, binding = 1) readonly buffer InstanceModels {
     mat4 u_InstanceModel[];
 };
 

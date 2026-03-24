@@ -1,4 +1,5 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/PipelineVK.h"
+#include "eyelib/render/rhi/Vulkan/pipelines/VulkanGlslToSpirv.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/ShaderVK.h"
@@ -6,8 +7,11 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanPipelineHash.h"
 #include "eyelib/render/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include "eyelib/render/ShaderPathResolve.h"
+#include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
+#include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
+#include <cassert>
 #include <vector>
 #include <string>
 
@@ -18,15 +22,31 @@ namespace rhi {
 PipelineVK::PipelineVK(DeviceVK* device) : m_device(device) {}
 
 PipelineVK::~PipelineVK() {
-    if (m_pipeline && m_device && m_device->GetDevice()) {
+    if (!m_pipeline || !m_device || !m_device->GetDevice()) return;
+    if (m_graphicsCacheHash != 0) {
+        // Graphics: shared VkPipeline — refcounted via DeviceVK (DestroyPipeline normally clears m_pipeline first).
+        static_cast<DeviceVK*>(m_device)->ReleaseGraphicsPipeline(m_graphicsCacheHash, m_pipeline);
+    } else {
         vkDestroyPipeline(static_cast<VkDevice>(m_device->GetDevice()), static_cast<VkPipeline>(m_pipeline), nullptr);
-        m_pipeline = nullptr;
     }
+    m_pipeline = nullptr;
 }
 
 void PipelineVK::GetComputeBlockPresence(ComputeBlockPresence& out) const { out = m_computeBlockPresence; }
 
 namespace {
+
+static std::string ApplyKeywordDefinesString(const std::string& source, const std::vector<std::string>& keywords) {
+    if (keywords.empty()) return source;
+    std::string prefix;
+    for (const auto& k : keywords) {
+        if (k.empty()) continue;
+        prefix += "#define ";
+        prefix += k;
+        prefix += " 1\n";
+    }
+    return prefix + source;
+}
 
 struct RenderingFormatSelection {
     std::vector<VkFormat> colorFormats;
@@ -34,15 +54,27 @@ struct RenderingFormatSelection {
     VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
 };
 
-static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc) {
-    RenderingFormatSelection out;
+static void ApplyExplicitAttachmentFormats(const PipelineAttachmentFormats& af, RenderingFormatSelection& out) {
+    out.colorFormats.clear();
+    out.depthFormat = VK_FORMAT_UNDEFINED;
+    out.stencilFormat = VK_FORMAT_UNDEFINED;
+    for (RHITextureFormat f : af.color)
+        out.colorFormats.push_back(ToVkFormat(f));
+    if (af.depthStencil == RHITextureFormat::Depth24Stencil8) {
+        out.depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
+        out.stencilFormat = VK_FORMAT_D24_UNORM_S8_UINT;
+    } else if (af.depthStencil != RHITextureFormat::None) {
+        out.depthFormat = ToVkFormat(af.depthStencil);
+        out.stencilFormat = VK_FORMAT_UNDEFINED;
+    }
+}
 
-    // Conservative default for legacy/test paths.
-    out.colorFormats = { VK_FORMAT_B8G8R8A8_UNORM };
-
-    switch (desc.layoutKind) {
+static void InferAttachmentFormatsFromLayoutKind(PipelineLayoutKind kind, RenderingFormatSelection& out) {
+    out.colorFormats.clear();
+    out.depthFormat = VK_FORMAT_UNDEFINED;
+    out.stencilFormat = VK_FORMAT_UNDEFINED;
+    switch (kind) {
     case PipelineLayoutKind::Shadow:
-        out.colorFormats.clear();
         out.depthFormat = VK_FORMAT_D32_SFLOAT;
         break;
     case PipelineLayoutKind::Forward:
@@ -51,11 +83,11 @@ static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc)
         break;
     case PipelineLayoutKind::GBuffer:
         out.colorFormats = {
-            VK_FORMAT_R16G16B16A16_SFLOAT, // position
-            VK_FORMAT_R16G16B16A16_SFLOAT, // normal
-            VK_FORMAT_R8G8B8A8_UNORM,      // albedo
-            VK_FORMAT_R8G8B8A8_UNORM,      // pbr params
-            VK_FORMAT_R16G16B16A16_SFLOAT  // velocity
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_FORMAT_R16G16B16A16_SFLOAT,
         };
         out.depthFormat = VK_FORMAT_D32_SFLOAT;
         break;
@@ -66,51 +98,43 @@ static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc)
     case PipelineLayoutKind::IBL:
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         break;
-    case PipelineLayoutKind::Post:
-        out.colorFormats = { VK_FORMAT_R8G8B8A8_UNORM };
-        break;
     case PipelineLayoutKind::OutlinePost:
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         break;
-    default:
+    case PipelineLayoutKind::Post: {
+        static bool s_warnedPostInfer = false;
+        if (!s_warnedPostInfer) {
+            core::Log::Warn(
+                "Vulkan: Post pipeline created without explicit PipelineDesc::attachmentFormats; defaulting to HDR "
+                "RGB16F. Pass StandardAttachmentFormats from the load site for LDR / R8 / BGRA targets.");
+            s_warnedPostInfer = true;
+        }
+        out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         break;
     }
-
-    // Shader-name specialization for post passes that target non-default offscreen formats.
-    if (desc.debugName) {
-        const std::string shaderName(desc.debugName);
-        if (desc.layoutKind == PipelineLayoutKind::Post) {
-            if (shaderName == "passes/post/bloom_extract" || shaderName == "passes/post/bloom_blur" ||
-                shaderName == "passes/post/ssr" || shaderName == "passes/post/depth_pyramid")
-                out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
-            else if (shaderName == "passes/post/ssao" || shaderName == "passes/post/ssao_blur")
-                out.colorFormats = { VK_FORMAT_R8_UNORM };
-            else if (shaderName == "passes/post/copy")
-                out.colorFormats = { VK_FORMAT_B8G8R8A8_UNORM };
-            else if (shaderName == "passes/sky/skybox" || shaderName == "passes/sky/skybox_procedural") {
-                out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
-                out.depthFormat = VK_FORMAT_D32_SFLOAT;
-            }
-        }
-        if (shaderName == "debug/lines") {
-            out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
-            out.depthFormat = VK_FORMAT_D32_SFLOAT;
-        }
-        if (shaderName == "passes/entityid/entityid") {
-            out.colorFormats = { VK_FORMAT_R32_UINT };
-            out.depthFormat = VK_FORMAT_D32_SFLOAT;
-        }
-        if (shaderName == "passes/ibl/irradiance_convolution" || shaderName == "passes/ibl/prefilter")
-            out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
+    case PipelineLayoutKind::ComputeLightCull:
+    case PipelineLayoutKind::ComputeGpuCull:
+        break;
+    case PipelineLayoutKind::PushOnly:
+    default:
+        out.colorFormats = { VK_FORMAT_R8G8B8A8_UNORM };
+        break;
     }
+}
 
+static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc) {
+    RenderingFormatSelection out;
+    if (desc.attachmentFormats.has_value())
+        ApplyExplicitAttachmentFormats(*desc.attachmentFormats, out);
+    else
+        InferAttachmentFormatsFromLayoutKind(desc.layoutKind, out);
     return out;
 }
 
 } // namespace
 
 void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void* pipelineLayout, void* pipelineCache) {
-    if (!device || !desc.vertexShader || !desc.fragmentShader || !pipelineLayout || !pipelineCache)
+    if (!device || !desc.vertexShader || !desc.fragmentShader || !pipelineLayout)
         return nullptr;
     ShaderVK* vs = static_cast<ShaderVK*>(desc.vertexShader);
     ShaderVK* fs = static_cast<ShaderVK*>(desc.fragmentShader);
@@ -181,21 +205,27 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = desc.blend.blendEnable ? VK_TRUE : VK_FALSE;
-    colorBlendAttachment.srcColorBlendFactor = ToVkBlendFactor(desc.blend.srcColor);
-    colorBlendAttachment.dstColorBlendFactor = ToVkBlendFactor(desc.blend.dstColor);
-    colorBlendAttachment.colorBlendOp = ToVkBlendOp(desc.blend.colorOp);
-    colorBlendAttachment.srcAlphaBlendFactor = ToVkBlendFactor(desc.blend.srcAlpha);
-    colorBlendAttachment.dstAlphaBlendFactor = ToVkBlendFactor(desc.blend.dstAlpha);
-    colorBlendAttachment.alphaBlendOp = ToVkBlendOp(desc.blend.alphaOp);
+    // Single source of truth for dynamic rendering: blend attachment count MUST equal colorAttachmentCount (Vulkan spec).
+    const RenderingFormatSelection selectedFormats = SelectRenderingFormats(desc);
+    const uint32_t colorAttachmentCount = static_cast<uint32_t>(selectedFormats.colorFormats.size());
+    std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorAttachmentCount);
+    for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
+        VkPipelineColorBlendAttachmentState& a = colorBlendAttachments[i];
+        a.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        a.blendEnable = desc.blend.blendEnable ? VK_TRUE : VK_FALSE;
+        a.srcColorBlendFactor = ToVkBlendFactor(desc.blend.srcColor);
+        a.dstColorBlendFactor = ToVkBlendFactor(desc.blend.dstColor);
+        a.colorBlendOp = ToVkBlendOp(desc.blend.colorOp);
+        a.srcAlphaBlendFactor = ToVkBlendFactor(desc.blend.srcAlpha);
+        a.dstAlphaBlendFactor = ToVkBlendFactor(desc.blend.dstAlpha);
+        a.alphaBlendOp = ToVkBlendOp(desc.blend.alphaOp);
+    }
 
     VkPipelineColorBlendStateCreateInfo colorBlend = {};
     colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlend.logicOpEnable = VK_FALSE;
-    colorBlend.attachmentCount = 1;
-    colorBlend.pAttachments = &colorBlendAttachment;
+    colorBlend.attachmentCount = colorAttachmentCount;
+    colorBlend.pAttachments = colorAttachmentCount ? colorBlendAttachments.data() : nullptr;
 
     VkPipelineDepthStencilStateCreateInfo depthStencil = {};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -206,13 +236,13 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     depthStencil.stencilTestEnable = desc.depthStencil.stencilTest ? VK_TRUE : VK_FALSE;
     depthStencil.front = depthStencil.back = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 0, 0, 0 };
 
-    const RenderingFormatSelection selectedFormats = SelectRenderingFormats(desc);
     VkPipelineRenderingCreateInfo renderingInfo = {};
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    renderingInfo.colorAttachmentCount = static_cast<uint32_t>(selectedFormats.colorFormats.size());
-    renderingInfo.pColorAttachmentFormats = selectedFormats.colorFormats.empty() ? nullptr : selectedFormats.colorFormats.data();
+    renderingInfo.colorAttachmentCount = colorAttachmentCount;
+    renderingInfo.pColorAttachmentFormats = colorAttachmentCount ? selectedFormats.colorFormats.data() : nullptr;
     renderingInfo.depthAttachmentFormat = selectedFormats.depthFormat;
     renderingInfo.stencilAttachmentFormat = selectedFormats.stencilFormat;
+    assert(colorBlend.attachmentCount == renderingInfo.colorAttachmentCount);
 
     VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicState = {};
@@ -241,16 +271,24 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(vkDevice, cache, 1, &gpInfo, nullptr, &pipeline);
-    return (res == VK_SUCCESS && pipeline) ? pipeline : nullptr;
+    if (res != VK_SUCCESS || pipeline == VK_NULL_HANDLE) {
+        const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
+        core::Log::ErrorF(
+            "vkCreateGraphicsPipelines failed: VkResult=%d (0x%08X) layoutKind=%u colorAttachments=%u name=%s",
+            static_cast<int>(res), static_cast<unsigned int>(static_cast<uint32_t>(res)),
+            static_cast<unsigned>(static_cast<uint32_t>(desc.layoutKind)), colorAttachmentCount, dbg);
+        return nullptr;
+    }
+    return pipeline;
 }
 
 void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipelineCache, void* shaderModule) {
-    if (!device || !pipelineLayout || !pipelineCache || !shaderModule) return nullptr;
+    if (!device || !pipelineLayout || !shaderModule) return nullptr;
     VkDevice vkDevice = static_cast<VkDevice>(device->GetDevice());
     VkPipelineLayout layout = static_cast<VkPipelineLayout>(pipelineLayout);
     VkPipelineCache cache = static_cast<VkPipelineCache>(pipelineCache);
     VkShaderModule module = static_cast<VkShaderModule>(shaderModule);
-    if (vkDevice == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || cache == VK_NULL_HANDLE || module == VK_NULL_HANDLE)
+    if (vkDevice == VK_NULL_HANDLE || layout == VK_NULL_HANDLE || module == VK_NULL_HANDLE)
         return nullptr;
 
     VkPipelineShaderStageCreateInfo stageInfo = {};
@@ -274,20 +312,34 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
     const uint64_t hash = HashPipelineDesc(desc);
     void* pipeline = device->GetCachedGraphicsPipeline(hash);
     void* layoutToUse = nullptr;
-    if (desc.layoutKind != PipelineLayoutKind::Legacy) {
+    if (desc.layoutKind != PipelineLayoutKind::PushOnly) {
         layoutToUse = device->GetPipelineLayoutForKind(desc.layoutKind);
     }
     if (!layoutToUse) {
         layoutToUse = device->GetDefaultPipelineLayout();
     }
-    if (!pipeline && desc.vertexShader && desc.fragmentShader && layoutToUse && device->GetPipelineCache()) {
-        void* created = CreateVkGraphicsPipeline(device, desc, layoutToUse, device->GetPipelineCache());
+    // Pipeline cache is optional: VK_NULL_HANDLE is valid for vkCreateGraphicsPipelines (no serialized cache).
+    if (!pipeline && desc.vertexShader && desc.fragmentShader && layoutToUse) {
+        void* created =
+            CreateVkGraphicsPipeline(device, desc, layoutToUse, device->GetPipelineCache());
         if (created) {
             if (desc.debugName)
                 SetDebugNamePipeline(device, created, desc.debugName);
             device->RegisterGraphicsPipeline(hash, created);
             pipeline = created;
         }
+    }
+    if (!pipeline) {
+        static int s_logCount = 0;
+        if (s_logCount < 8) {
+            ++s_logCount;
+            const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
+            core::Log::WarnF(
+                "CreateGraphicsPipelineVK: graphics pipeline creation failed or skipped (layoutKind=%u layout=%p vs=%p fs=%p name=%s).",
+                static_cast<unsigned>(static_cast<int>(desc.layoutKind)), layoutToUse, (void*)desc.vertexShader,
+                (void*)desc.fragmentShader, dbg);
+        }
+        return nullptr;
     }
     auto* p = new PipelineVK(device);
     p->m_vertexLayout = desc.vertexLayout;
@@ -298,70 +350,177 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
     p->m_raster = desc.raster;
     p->m_pipeline = pipeline;
     p->m_layoutKind = desc.layoutKind;
-    p->m_nativePipelineLayout = (desc.layoutKind != PipelineLayoutKind::Legacy && layoutToUse) ? layoutToUse : nullptr;
+    p->m_nativePipelineLayout = (desc.layoutKind != PipelineLayoutKind::PushOnly && layoutToUse) ? layoutToUse : nullptr;
     p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(desc.layoutKind));
+    p->m_graphicsCacheHash = hash;
+    device->RetainGraphicsPipeline(hash);
     return p;
 }
 
-IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
-    if (!device || !shaderName || !shaderName[0]) return nullptr;
-    const std::string logicalName = ShaderPathToLogicalName(shaderName);
-    if (logicalName.empty()) return nullptr;
+IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const ShaderGraphicsPipelineCreateInfo& info) {
+    if (!device) return nullptr;
+    const bool fromOverrides = !info.vertexSourceOverride.empty() && !info.fragmentSourceOverride.empty();
+    if (!fromOverrides && info.assetPath.empty()) return nullptr;
+
     std::string root = platform::filesystem::GetEngineAssetsRoot();
-    std::string baseDir = root.empty()
+    const std::string baseDir = root.empty()
         ? std::string("assets/shaders/vulkan/")
         : platform::filesystem::NormalizePath(root + "/assets/shaders/vulkan/");
-    std::string vertPath = baseDir + logicalName + ".vert.spv";
-    std::string fragPath = baseDir + logicalName + ".frag.spv";
 
-    rhi::IShader* vs = nullptr;
-    rhi::IShader* fs = nullptr;
-    if (!TryLoadShaderPairVK(device, vertPath.c_str(), fragPath.c_str(), vs, fs) || !vs || !fs) {
+    std::string logicalName;
+    const char* debugNameCstr = nullptr;
+    std::string debugNameStorage;
+    if (fromOverrides) {
+        debugNameStorage = info.assetPath.empty() ? std::string("(generated)") : info.assetPath;
+        debugNameCstr = debugNameStorage.c_str();
+        logicalName = info.assetPath.empty() ? std::string("generated") : ShaderPathToLogicalName(info.assetPath);
+    } else {
+        logicalName = ShaderPathToLogicalName(info.assetPath);
+        if (logicalName.empty()) return nullptr;
+        debugNameStorage = info.assetPath;
+        debugNameCstr = debugNameStorage.c_str();
+    }
+
+    IShader* vs = nullptr;
+    IShader* fs = nullptr;
+
+    auto destroyStages = [&]() {
         if (vs) DestroyShaderVK(device, vs);
         if (fs) DestroyShaderVK(device, fs);
-        return nullptr;
+        vs = nullptr;
+        fs = nullptr;
+    };
+
+    auto tryLoadSpirvFiles = [&]() -> bool {
+        destroyStages();
+        const std::string vertSpv = baseDir + logicalName + ".vert.spv";
+        const std::string fragSpv = baseDir + logicalName + ".frag.spv";
+        return TryLoadShaderPairVK(device, vertSpv.c_str(), fragSpv.c_str(), vs, fs) && vs && fs;
+    };
+
+    auto compilePair = [&](const std::string& vsrc, const std::string& fsrc) -> bool {
+        destroyStages();
+        const std::string vertLabel = baseDir + logicalName + ".vert";
+        const std::string fragLabel = baseDir + logicalName + ".frag";
+        std::vector<uint32_t> vspirv, fspirv;
+        if (!VulkanCompileGlslToSpirv(vsrc.c_str(), vsrc.size(), ShaderStage::Vertex, vertLabel.c_str(), vspirv))
+            return false;
+        if (!VulkanCompileGlslToSpirv(fsrc.c_str(), fsrc.size(), ShaderStage::Fragment, fragLabel.c_str(), fspirv))
+            return false;
+        vs = CreateShaderFromBinaryVK(device, ShaderStage::Vertex, vspirv.data(), vspirv.size() * sizeof(uint32_t));
+        fs = CreateShaderFromBinaryVK(device, ShaderStage::Fragment, fspirv.data(), fspirv.size() * sizeof(uint32_t));
+        return vs && fs;
+    };
+
+    if (fromOverrides) {
+        const std::string vsrc = ApplyKeywordDefinesString(info.vertexSourceOverride, info.keywordDefines);
+        const std::string fsrc = ApplyKeywordDefinesString(info.fragmentSourceOverride, info.keywordDefines);
+        if (!compilePair(vsrc, fsrc)) {
+            destroyStages();
+            return nullptr;
+        }
+    } else {
+        switch (info.sourcePolicy) {
+        case ShaderSourcePolicy::SpirvOnly:
+            if (!tryLoadSpirvFiles()) {
+                destroyStages();
+                core::Log::ErrorF("CreateGraphicsPipelineFromShaderAssetVK: SpirvOnly but missing or invalid .spv for %s",
+                                  info.assetPath.c_str());
+                return nullptr;
+            }
+            break;
+        case ShaderSourcePolicy::CompileFromSource: {
+            const std::string vertGlsl = baseDir + logicalName + ".vert";
+            const std::string fragGlsl = baseDir + logicalName + ".frag";
+            std::string vraw, fraw;
+            if (!LoadShaderSource(vertGlsl, vraw) || !LoadShaderSource(fragGlsl, fraw)) {
+                destroyStages();
+                core::Log::ErrorF("CreateGraphicsPipelineFromShaderAssetVK: failed to load GLSL for %s",
+                                  info.assetPath.c_str());
+                return nullptr;
+            }
+            const std::string vsrc = ApplyKeywordDefinesString(vraw, info.keywordDefines);
+            const std::string fsrc = ApplyKeywordDefinesString(fraw, info.keywordDefines);
+            if (!compilePair(vsrc, fsrc)) {
+                destroyStages();
+                return nullptr;
+            }
+            break;
+        }
+        case ShaderSourcePolicy::PreferSpirv:
+        default:
+            if (!tryLoadSpirvFiles()) {
+                const std::string vertGlsl = baseDir + logicalName + ".vert";
+                const std::string fragGlsl = baseDir + logicalName + ".frag";
+                std::string vraw, fraw;
+                if (!LoadShaderSource(vertGlsl, vraw) || !LoadShaderSource(fragGlsl, fraw)) {
+                    destroyStages();
+                    core::Log::ErrorF(
+                        "CreateGraphicsPipelineFromShaderAssetVK: no .spv and missing GLSL for %s",
+                        info.assetPath.c_str());
+                    return nullptr;
+                }
+                const std::string vsrc = ApplyKeywordDefinesString(vraw, info.keywordDefines);
+                const std::string fsrc = ApplyKeywordDefinesString(fraw, info.keywordDefines);
+                if (!compilePair(vsrc, fsrc)) {
+                    destroyStages();
+                    return nullptr;
+                }
+            }
+            break;
+        }
     }
+
     PipelineDesc desc;
     desc.vertexShader = vs;
     desc.fragmentShader = fs;
-    desc.debugName = shaderName;
-    desc.vertexLayout = layout;
-    desc.topology = topology;
-    desc.layoutKind = layoutKind;
-    if (depthStencilOverride)
-        desc.depthStencil = *depthStencilOverride;
+    desc.debugName = debugNameCstr;
+    desc.vertexLayout = info.vertexLayout;
+    desc.topology = info.topology;
+    desc.layoutKind = info.layoutKind;
+    desc.attachmentFormats = info.attachmentFormats;
+    if (info.useDepthStencilOverride)
+        desc.depthStencil = info.depthStencilOverride;
     else {
         desc.depthStencil.depthTest = true;
         desc.depthStencil.depthWrite = true;
     }
     IPipeline* pipe = CreateGraphicsPipelineVK(device, desc);
-    DestroyShaderVK(device, vs);
-    DestroyShaderVK(device, fs);
+    destroyStages();
     return pipe;
 }
 
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader) {
-    return CreateComputePipelineVK(device, computeShader, PipelineLayoutKind::Legacy);
+    return CreateComputePipelineVK(device, computeShader, PipelineLayoutKind::PushOnly);
 }
 
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader, PipelineLayoutKind layoutKind) {
-    if (!device) return nullptr;
-    auto* p = new PipelineVK(device);
-    p->m_isCompute = true;
-    p->m_layoutKind = layoutKind;
-    p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(layoutKind));
+    if (!device || !computeShader) return nullptr;
     void* layoutToUse = nullptr;
-    if (layoutKind != PipelineLayoutKind::Legacy) {
+    if (layoutKind != PipelineLayoutKind::PushOnly) {
         layoutToUse = device->GetPipelineLayoutForKind(layoutKind);
     }
     if (!layoutToUse) {
         layoutToUse = device->GetComputePipelineLayout();
     }
-    if (!computeShader || !layoutToUse || !device->GetPipelineCache()) return p;
+    if (!layoutToUse) return nullptr;
     ShaderVK* shader = static_cast<ShaderVK*>(computeShader);
-    if (!shader->m_module) return p;
-    p->m_pipeline = CreateVkComputePipeline(device, layoutToUse, device->GetPipelineCache(), shader->m_module);
-    p->m_nativePipelineLayout = (layoutKind != PipelineLayoutKind::Legacy) ? layoutToUse : nullptr;
+    if (!shader->m_module) return nullptr;
+    void* vkPipe = CreateVkComputePipeline(device, layoutToUse, device->GetPipelineCache(), shader->m_module);
+    if (!vkPipe) {
+        static int s_logCount = 0;
+        if (s_logCount < 8) {
+            ++s_logCount;
+            core::Log::WarnF("CreateComputePipelineVK: VkPipeline is null (layoutKind=%u).", static_cast<unsigned>(static_cast<int>(layoutKind)));
+        }
+        return nullptr;
+    }
+    auto* p = new PipelineVK(device);
+    p->m_isCompute = true;
+    p->m_layoutKind = layoutKind;
+    p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(layoutKind));
+    p->m_pipeline = vkPipe;
+    p->m_nativePipelineLayout = (layoutKind != PipelineLayoutKind::PushOnly) ? layoutToUse : nullptr;
     return p;
 }
 

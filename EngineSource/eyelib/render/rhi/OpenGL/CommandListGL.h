@@ -53,6 +53,7 @@ struct CommandListGL : ICommandList {
     void BindTexture(ITexture* texture, uint32_t binding) override;
     void UnbindTexture(uint32_t binding) override;
     void BindDescriptorSet(IDescriptorSet* set) override;
+    void BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) override;
     void BindBindlessHeap(IBindlessHeap* heap) override;
 
     void SetPushConstants(uint32_t offset, uint32_t size, const void* data) override;

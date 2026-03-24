@@ -1,151 +1,221 @@
 # Vulkan descriptor binding table (resource-space layouts)
 
-Single source of truth for set and binding indices. Shaders and C++ must match.
+This document is the authoritative ABI contract for Vulkan descriptor sets and push constants.
+Shaders, C++ descriptor updates, and pipeline layout creation must match this file exactly.
 
-**Rule:** Sets are organized by **lifetime** (frame / pass / material / textures / scene).
+## Contract metadata
 
-| Set | Role        | Lifetime   |
-|-----|-------------|------------|
-| 0   | Frame       | Once/frame |
-| 1   | Pass        | Per pass   |
-| 2   | Material    | Per draw   |
-| 3   | Textures    | Bindless   |
-| 4   | SceneBuffers| Frame/pass |
+- ABI name: `OpenEye.ResourceSpaces`
+- ABI version: `v1`
+- Backward compatibility: none unless version is explicitly bumped
+- Ownership: render/rhi + renderer teams
 
 ---
 
-## Set 0 — Frame
+## Global rules (non-negotiable)
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | UBO    | Camera (view, projection, viewProj) |
-| 1       | UBO    | Time / global lighting (optional)   |
+1. Sets are organized by lifetime, not by feature.
+2. Every declared binding index must always be valid at bind time.
+3. Optional resources still require a valid descriptor write (dummy fallback texture/buffer).
+4. Shader reflection, C++ descriptor writes, and layout factories must agree 1:1.
+5. New code must not introduce `Legacy` descriptor paths.
+
+| Set | Role         | Lifetime   |
+| --- | ------------ | ---------- |
+| 0   | Frame        | Once/frame |
+| 1   | Pass         | Per pass   |
+| 2   | Material     | Per draw   |
+| 3   | Textures     | Bindless   |
+| 4   | SceneBuffers | Frame/pass |
 
 ---
 
-## Set 1 — Pass (layout depends on pass type)
+## Set 0 - Frame
+
+| Binding | Type | Required | Content                             |
+| ------- | ---- | -------- | ----------------------------------- |
+| 0       | UBO  | Yes      | Camera (view, projection, viewProj) |
+| 1       | UBO  | Yes      | Global frame data (time/exposure/etc.) |
+
+---
+
+## Set 1 - Pass (layout per pass kind)
 
 ### ForwardPass
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | Image  | Shadow map(s) / cascade array |
-| 1       | SSBO   | Light list     |
-| 2       | SSBO   | Cluster grid (optional) |
-| 3       | Image  | IBL irradiance (cube) |
-| 4       | Image  | IBL prefilter (cube) |
-| 5       | Image  | BRDF LUT (2D) |
+| Binding | Type  | Required | Content                            |
+| ------- | ----- | -------- | ---------------------------------- |
+| 0       | Image | Yes      | Shadow map(s) / cascade array      |
+| 1       | SSBO  | Yes      | Light list / scene lighting payload |
+| 2       | SSBO  | Yes      | Cluster grid or dummy SSBO         |
+| 3       | Image | Yes      | IBL irradiance cube or dummy       |
+| 4       | Image | Yes      | IBL prefilter cube or dummy        |
+| 5       | Image | Yes      | BRDF LUT or dummy                  |
 
 ### PostPass
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | Image  | Scene color    |
-| 1       | Image  | Scene depth    |
-| 2       | Image  | Velocity (optional) |
+| Binding | Type  | Required | Content                  |
+| ------- | ----- | -------- | ------------------------ |
+| 0       | Image | Yes      | Scene color              |
+| 1       | Image | Yes      | Scene depth              |
+| 2       | Image | Yes      | Velocity (or dummy)      |
+| 3       | Image | Yes      | Albedo (SSR path) or dummy |
+| 4       | Image | Yes      | PBR (SSR path) or dummy  |
+| 5       | Image | Yes      | Scene copy or dummy      |
+| 6       | Image | Yes      | Skybox cube/dummy        |
 
 ### ShadowPass
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | UBO    | Cascade/shadow params (optional) |
+| Binding | Type | Required | Content                                  |
+| ------- | ---- | -------- | ---------------------------------------- |
+| 0       | UBO  | Yes      | Cascade/shadow params (or dummy/default) |
 
 ### LightCullPass (compute)
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | UBO    | ParamsBlock (view, tile count, etc.) |
-| 1       | SSBO   | Light list output |
+| Binding | Type | Required | Content                              |
+| ------- | ---- | -------- | ------------------------------------ |
+| 0       | UBO  | Yes      | ParamsBlock (view, tile count, etc.) |
+| 1       | SSBO | Yes      | Light list output                    |
 
 ### DeferredLightingPass
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | Image  | GBuffer position |
-| 1       | Image  | GBuffer normal   |
-| 2       | Image  | GBuffer albedo   |
-| 3       | Image  | GBuffer PBR      |
-| 4       | Image  | Shadow map (cascade array) |
-| 5       | SSBO   | Scene lighting   |
-| 6       | Buffer | Light space (cascade matrices) |
-| 7       | Image  | IBL irradiance   |
-| 8       | Image  | IBL prefilter    |
-| 9       | Image  | BRDF LUT         |
+| Binding | Type   | Required | Content                        |
+| ------- | ------ | -------- | ------------------------------ |
+| 0       | Image  | Yes      | GBuffer position               |
+| 1       | Image  | Yes      | GBuffer normal                 |
+| 2       | Image  | Yes      | GBuffer albedo                 |
+| 3       | Image  | Yes      | GBuffer PBR                    |
+| 4       | Image  | Yes      | Shadow map (cascade array)     |
+| 5       | SSBO   | Yes      | Scene lighting                 |
+| 6       | Buffer | Yes      | Light space matrices           |
+| 7       | Image  | Yes      | IBL irradiance                 |
+| 8       | Image  | Yes      | IBL prefilter                  |
+| 9       | Image  | Yes      | BRDF LUT                       |
 
 ---
 
-## Set 2 — Material
+## Set 2 - Material
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | UBO    | Material constants |
-| 1       | Image  | Albedo / base color |
-| 2       | Image  | Normal (optional) |
-| 3       | Image  | Roughness/Metal (optional) |
-
----
-
-## Set 3 — Textures (bindless)
-
-Existing bindless heap: textures binding 0, buffers binding 1. No change.
+| Binding | Type  | Required | Content                                   |
+| ------- | ----- | -------- | ----------------------------------------- |
+| 0       | UBO   | Yes      | Material constants                        |
+| 1       | Image | Yes      | Albedo / base color (or fallback)         |
+| 2       | Image | Yes      | Normal (or fallback flat normal)          |
+| 3       | Image | Yes      | Roughness/Metal (or fallback packed map)  |
 
 ---
 
-## Set 4 — SceneBuffers
+## Set 3 - Textures (bindless)
 
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | SSBO   | Draw list (GPU cull input) |
-| 1       | SSBO   | Instance / transform buffer; or bone matrices (skinned Forward/ForwardPlus/GBuffer) |
-| 2       | SSBO   | Light buffer   |
-| 3       | SSBO   | Cluster data (optional) |
+Bindless heap remains stable:
 
----
+- Binding 0: sampled textures table
+- Binding 1: storage/buffer table
 
-## IBLPass (standalone layout)
-
-Used by irradiance convolution and prefilter passes. One set, one binding.
-
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | Image  | Environment cube (combined image sampler) |
-
-Push constants: `u_Projection` (offset 0), `u_View` (offset 64). Size 128 bytes.
+All pipelines that include set 3 must bind a valid set (real or empty bindless set).
 
 ---
 
-## OutlinePost (standalone layout)
+## Set 4 - SceneBuffers
 
-Used by outline post-process (fullscreen quad over scene + entity ID buffer). One set, two bindings.
-
-| Binding | Type   | Content        |
-|---------|--------|----------------|
-| 0       | Image  | Scene color (combined image sampler) |
-| 1       | Image  | Entity ID (R32UI, combined image sampler) |
-
-Push constants: `u_SelectedID`, `u_OutlineColor`, `u_InvSize`. Size ≤ 256 bytes.
+| Binding | Type | Required | Content                                                           |
+| ------- | ---- | -------- | ----------------------------------------------------------------- |
+| 0       | SSBO | Yes      | Draw list / indirect metadata                                     |
+| 1       | SSBO | Yes      | Instance transforms or bones payload                              |
+| 2       | SSBO | Yes      | Scene light buffer                                                |
+| 3       | SSBO | Yes      | Cluster/auxiliary scene data (or dummy)                          |
 
 ---
 
-## Pipeline layout kinds (which sets each uses)
+## Standalone layouts
 
-| Kind              | Sets used        |
-|-------------------|------------------|
-| PushOnly / Legacy | 0 sets. Push constants only (128 bytes). Used by BRDF LUT, fullscreen quads. Legacy is an alias for PushOnly; legacy descriptor path removed. |
-| IBL               | IBLPass (set 0: binding 0 = env cube) + push constants. |
-| OutlinePost       | OutlinePost (set 0: binding 0 = scene color, 1 = entity ID) + push constants. |
-| Forward           | 0, 1, 2, 3, 4   |
-| Post              | 0, 1            |
-| Shadow            | 0, 1, 4         |
-| GBuffer           | 0, 2, 3, 4      |
-| DeferredLighting  | 0, 1            |
-| ComputeLightCull  | 0, 1, 4         |
-| ComputeGpuCull    | 0, 4            |
+### IBLPass
+
+| Binding | Type  | Required | Content                      |
+| ------- | ----- | -------- | ---------------------------- |
+| 0       | Image | Yes      | Environment cube             |
+
+Push constants:
+
+- `u_Projection`: offset 0, 64 bytes
+- `u_View`: offset 64, 64 bytes
+- Max used: 128 bytes
+
+### OutlinePost
+
+| Binding | Type  | Required | Content         |
+| ------- | ----- | -------- | --------------- |
+| 0       | Image | Yes      | Scene color     |
+| 1       | Image | Yes      | Entity ID R32UI |
+
+Push constants:
+
+- `u_SelectedID`, `u_OutlineColor`, `u_InvSize`
+- Total must remain <= 256 bytes
 
 ---
 
-## Push constants
+## Pipeline layout kinds (required set topology)
 
-- **Size:** ≤ 256 bytes for all new pipelines (VulkanResourceSpaces kPushConstantSize).
-- **Use for:** draw ID, material index, pass flags.
-- **Everything else:** use buffers in Frame / Pass / Material / SceneBuffers.
+| Kind              | Sets used |
+| ----------------- | --------- |
+| PushOnly          | none      |
+| IBL               | 0         |
+| OutlinePost       | 0         |
+| Forward           | 0,1,2,3,4 |
+| Post              | 0,1       |
+| Shadow            | 0,1,4     |
+| GBuffer           | 0,2,3,4   |
+| DeferredLighting  | 0,1       |
+| ComputeLightCull  | 0,1,4     |
+| ComputeGpuCull    | 0,4       |
+
+`Legacy` is treated as deprecated alias of `PushOnly` and is migration-only.
+
+---
+
+## Push constant policy
+
+- Hard limit: <= 256 bytes per pipeline layout.
+- Use only for tiny high-frequency values (draw ID, flags, tiny per-draw payload).
+- Do not use push constants as primary transport for frame/pass/material data.
+- Preferred data hierarchy:
+  1. Frame/Pass/Material/SceneBuffers descriptors
+  2. Push constants only for minimal hot fields
+
+---
+
+## Validation and CI gates
+
+1. Shader reflection check: every `(set,binding,type)` in shaders matches this table.
+2. Descriptor write check: every required binding is updated each frame/pass.
+3. Pipeline layout check: kind -> set count must match this table.
+4. Runtime bind check: no draw/dispatch with missing required sets.
+5. Fallback check: optional features must bind explicit dummy descriptors.
+
+If any gate fails, the ABI is considered broken.
+
+---
+
+## Migration policy (legacy removal)
+
+- New code: must use resource-space layouts only.
+- No new `Legacy` pipeline usage allowed.
+- Existing `Legacy` paths are temporary and must be migrated pass-by-pass.
+- Once all active passes are migrated, remove `Legacy` alias and related code paths.
+
+---
+
+## Change management
+
+Any modification to set/binding/type semantics requires:
+
+1. ABI version bump (`v1 -> v2`)
+2. Synchronized updates to:
+   - VulkanResourceSpaces layout factories
+   - shader declarations
+   - descriptor updates in renderer/passes
+   - validation tests
+
+Without these, the change is invalid.
+

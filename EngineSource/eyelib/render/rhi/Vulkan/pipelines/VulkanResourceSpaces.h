@@ -60,7 +60,7 @@ VkPipelineLayout CreateShadowPipelineLayout(VkDevice device,
     VkDescriptorSetLayout shadowPassLayout,
     VkDescriptorSetLayout sceneLayout);
 
-/** GBuffer: set0 Frame, set2 Material, set3 Bindless, set4 SceneBuffers. Push constants 128 bytes. */
+/** GBuffer: set0 Frame, set1 Material, set2 Bindless, set3 SceneBuffers. Push constants 128 bytes. */
 VkPipelineLayout CreateGBufferPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout materialLayout,

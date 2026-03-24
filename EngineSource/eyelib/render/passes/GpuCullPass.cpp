@@ -95,8 +95,15 @@ void GpuCullPass::EnsureResources() {
                     m_sceneBuffersSet = m_device->CreateDescriptorSet(sceneLayout);
                     if (m_frameSet && m_sceneBuffersSet) {
                         m_frameSet->UpdateUniformBuffer(0, m_viewProjUBO, 0, 16 * sizeof(float));
+                        // Frame ABI contract requires set0 binding1 to be valid as well.
+                        // GpuCull uses a compact per-pass UBO; bind the same buffer as a valid fallback.
+                        m_frameSet->UpdateUniformBuffer(1, m_viewProjUBO, 0, 16 * sizeof(float));
                         m_sceneBuffersSet->UpdateStorageBuffer(0, m_indirectBuffer, kIndirectRegionSize, kDrawListRegionSize);
                         m_sceneBuffersSet->UpdateStorageBuffer(1, m_indirectBuffer, 0, kIndirectRegionSize);
+                        // SceneBuffers ABI contract requires bindings 0..3 to always be valid.
+                        // GpuCull only consumes 0/1; keep 2/3 bound to a valid fallback buffer.
+                        m_sceneBuffersSet->UpdateStorageBuffer(2, m_indirectBuffer, 0, kIndirectRegionSize);
+                        m_sceneBuffersSet->UpdateStorageBuffer(3, m_indirectBuffer, 0, kIndirectRegionSize);
                         m_useResourceSpace = true;
                         m_initialized = true;
                         return;
@@ -263,8 +270,12 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
             rhi::IDescriptorSet* sets[5] = { m_frameSet, emptySet, emptySet, emptySet, m_sceneBuffersSet };
             cmd->BindDescriptorSets(0, 5, sets);
         } else {
-            rhi::IDescriptorSet* sets[2] = { m_frameSet, m_sceneBuffersSet };
-            cmd->BindDescriptorSets(0, 2, sets);
+            static bool loggedMissingEmptySet = false;
+            if (!loggedMissingEmptySet) {
+                core::Log::Error("GpuCullPass: empty resource descriptor set is required for ComputeGpuCull layout (sets 1-3 placeholders). Dispatch skipped.");
+                loggedMissingEmptySet = true;
+            }
+            return;
         }
     } else {
         m_device->EnsureComputePipelineStorageBlockBindings(pipeline);

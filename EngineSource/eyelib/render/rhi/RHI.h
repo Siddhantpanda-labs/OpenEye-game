@@ -90,9 +90,8 @@ struct IDevice {
     virtual void DestroyShader(IShader* shader) = 0;
 
     virtual IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
-    /** Create pipeline from logical shader name. Backend resolves paths/format (e.g. OpenGL: passes/{name}.vert/.frag). */
-    /** When depthStencilOverride is non-null, use it for the pipeline's depth/stencil state. layoutKind: Legacy = legacy set0; other = resource-space layout (Post, Forward, etc.). */
-    virtual IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy) = 0;
+    /** Create a graphics pipeline from a logical shader asset (SPIR-V and/or GLSL resolution is backend-specific). */
+    virtual IPipeline* CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) = 0;
     /** E5.3: Create pipeline from cached binary (format + data from GetPipelineBinary). Returns nullptr if unsupported or invalid. */
     virtual IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) = 0;
     /** E5.3: Retrieve pipeline binary for caching. Returns false if unsupported; outFormat and outData set on success. */

@@ -11,6 +11,7 @@
 #include "api/platform/Window.h"
 #include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/resources/Shader.h"
@@ -24,6 +25,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -128,7 +130,8 @@ int main(int argc, char** argv) {
     rhi::DepthStencilState noDepth;
     noDepth.depthTest = false;
     noDepth.depthWrite = false;
-    if (!copyShader->Load(device, "passes/post/copy", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, &noDepth, rhi::PipelineLayoutKind::Post)) {
+    if (!copyShader->Load(device, "passes/post/copy", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, &noDepth, rhi::PipelineLayoutKind::Post,
+                          std::optional{rhi::StandardAttachmentFormats::PostCopyBGRA()})) {
         std::cerr << "VulkanTest: failed to load passes/post/copy shader (run from project root so assets/shaders/ are found)\n";
         deviceHolder.reset();
         window.Shutdown();

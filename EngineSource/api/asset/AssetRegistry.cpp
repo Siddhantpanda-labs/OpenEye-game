@@ -57,7 +57,7 @@ struct AssetIdHash {
 };
 
 void LoadedMaterialToDescriptor(const asset::LoadedMaterial& src, eyelib::render::MaterialDescriptor& dst) {
-    dst.shaderName = "passes/forward/forward";
+    dst.shaderAssetPath = "passes/forward/forward";
     dst.albedo.x = src.albedoColorR;
     dst.albedo.y = src.albedoColorG;
     dst.albedo.z = src.albedoColorB;
@@ -251,7 +251,7 @@ AssetId AssetRegistry::LoadAsset(const std::string& filePath, AssetType type) {
         case AssetType::Shader: {
             eyelib::render::ShaderDescriptor desc;
             if (filePath.size() > 5 && filePath.compare(0, 5, "name:") == 0)
-                desc = eyelib::render::ShaderLoader::BuildDescriptorByName(filePath.substr(5));
+                desc = eyelib::render::ShaderLoader::BuildDescriptorFromAsset(filePath.substr(5));
             else {
                 std::string::size_type sep = filePath.find('|');
                 if (sep != std::string::npos)

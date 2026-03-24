@@ -1,8 +1,10 @@
 #include "eyelib/fluids/FluidVolumeRenderer.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_inverse.hpp>
 #include <algorithm>
+#include <optional>
 #include <vector>
 
 namespace eyelib {
@@ -210,17 +212,20 @@ void FluidVolumeRenderer::EnsureShaders() {
     if (!m_shRayDataBack) {
         m_shRayDataBack = std::make_shared<render::Shader>();
         m_shRayDataBack->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
-                                     "assets/shaders/fluids/rendering/raydata_back.frag", posOnly);
+                                     "assets/shaders/fluids/rendering/raydata_back.frag", posOnly, render::rhi::PrimitiveTopology::TriangleList,
+                                     std::optional{render::rhi::StandardAttachmentFormats::FluidRayDataRGBA16F()});
     }
     if (!m_shRayDataFront) {
         m_shRayDataFront = std::make_shared<render::Shader>();
         m_shRayDataFront->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
-                                      "assets/shaders/fluids/rendering/raydata_front.frag", posOnly);
+                                      "assets/shaders/fluids/rendering/raydata_front.frag", posOnly, render::rhi::PrimitiveTopology::TriangleList,
+                                      std::optional{render::rhi::StandardAttachmentFormats::FluidRayDataRGBA16F()});
     }
     if (!m_shRaymarch) {
         m_shRaymarch = std::make_shared<render::Shader>();
         m_shRaymarch->LoadFromFile(m_device, "assets/shaders/fluids/rendering/raydata.vert",
-                                  "assets/shaders/fluids/rendering/raymarching.frag", posOnly);
+                                  "assets/shaders/fluids/rendering/raymarching.frag", posOnly, render::rhi::PrimitiveTopology::TriangleList,
+                                  std::optional{render::rhi::StandardAttachmentFormats::ForwardColorDepth()});
     }
 }
 

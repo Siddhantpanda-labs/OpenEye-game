@@ -39,32 +39,32 @@ CommandListDiligent::~CommandListDiligent() {
 #if OPENEYE_USE_DILIGENT
 namespace {
 // Map (post shader name, slot) -> HLSL texture variable name for SRB binding.
-const char* PostSlotToVariableName(const char* shaderName, uint32_t slot) {
-    if (!shaderName || slot >= 8) return nullptr;
-    if (strcmp(shaderName, "passes/post/tonemap") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
-    if (strcmp(shaderName, "passes/post/bloom_extract") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
-    if (strcmp(shaderName, "passes/post/bloom_blur") == 0) return (slot == 0) ? "u_Texture" : nullptr;
-    if (strcmp(shaderName, "passes/post/bloom_composite") == 0) {
+const char* PostSlotToVariableName(const char* assetPath, uint32_t slot) {
+    if (!assetPath || slot >= 8) return nullptr;
+    if (strcmp(assetPath, "passes/post/tonemap") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
+    if (strcmp(assetPath, "passes/post/bloom_extract") == 0) return (slot == 0) ? "u_HDRTexture" : nullptr;
+    if (strcmp(assetPath, "passes/post/bloom_blur") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/bloom_composite") == 0) {
         if (slot == 0) return "u_SceneTexture";
         if (slot == 1) return "u_BloomTexture";
         return nullptr;
     }
-    if (strcmp(shaderName, "passes/post/chromatic_aberration") == 0) return (slot == 0) ? "u_Texture" : nullptr;
-    if (strcmp(shaderName, "passes/post/fxaa") == 0) return (slot == 0) ? "u_Texture" : nullptr;
-    if (strcmp(shaderName, "passes/post/vignette") == 0) return (slot == 0) ? "u_Texture" : nullptr;
-    if (strcmp(shaderName, "passes/post/motion_blur") == 0) {
+    if (strcmp(assetPath, "passes/post/chromatic_aberration") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/fxaa") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/vignette") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/motion_blur") == 0) {
         if (slot == 0) return "u_Texture";
         if (slot == 1) return "g_Velocity";
         return nullptr;
     }
-    if (strcmp(shaderName, "passes/post/film_grain") == 0) return (slot == 0) ? "u_Texture" : nullptr;
-    if (strcmp(shaderName, "passes/post/ssao") == 0) {
+    if (strcmp(assetPath, "passes/post/film_grain") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/ssao") == 0) {
         if (slot == 0) return "g_Position";
         if (slot == 1) return "g_Normal";
         if (slot == 2) return "g_Depth";
         return nullptr;
     }
-    if (strcmp(shaderName, "passes/post/ssr") == 0) {
+    if (strcmp(assetPath, "passes/post/ssr") == 0) {
         if (slot == 0) return "g_Position";
         if (slot == 1) return "g_Normal";
         if (slot == 2) return "g_Albedo";
@@ -72,7 +72,7 @@ const char* PostSlotToVariableName(const char* shaderName, uint32_t slot) {
         if (slot == 4) return "u_Skybox";
         return nullptr;
     }
-    if (strcmp(shaderName, "passes/post/copy") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/copy") == 0) return (slot == 0) ? "u_Texture" : nullptr;
     return nullptr;
 }
 } // namespace
@@ -104,7 +104,7 @@ void CommandListDiligent::CommitShaderResources() {
         return;
     }
     if (!m_currentPipeline->m_pSRB) {
-        static int once; if (once++ == 0) core::Log::WarnF("CommitShaderResources: no SRB for pipeline '%s'", m_currentPipeline->m_shaderName.c_str());
+        static int once; if (once++ == 0) core::Log::WarnF("CommitShaderResources: no SRB for pipeline '%s'", m_currentPipeline->m_shaderAssetPath.c_str());
         return;
     }
     Diligent::IShaderResourceBinding* pSRB = static_cast<Diligent::IShaderResourceBinding*>(m_currentPipeline->m_pSRB);
@@ -137,7 +137,7 @@ void CommandListDiligent::CommitShaderResources() {
         if (auto* v = pSRB->GetVariableByName(st, name))
             v->Set(pObj);
     };
-    const std::string& shaderName = m_currentPipeline->m_shaderName;
+    const std::string& assetPath = m_currentPipeline->m_shaderAssetPath;
 
     if (pCbConstants) {
         setVar(Diligent::SHADER_TYPE_VERTEX, "Constants", pCbConstants);
@@ -146,13 +146,13 @@ void CommandListDiligent::CommitShaderResources() {
     if (pCbMaterial) setVar(Diligent::SHADER_TYPE_PIXEL, "Material", pCbMaterial);
     if (pCbBones) setVar(Diligent::SHADER_TYPE_VERTEX, "Bones", pCbBones);
 
-    if (shaderName.size() >= 14 && shaderName.compare(0, 14, "passes/forward/") == 0 && m_boundTextures[5]) {
+    if (assetPath.size() >= 14 && assetPath.compare(0, 14, "passes/forward/") == 0 && m_boundTextures[5]) {
         TextureDiligent* shadowTex = static_cast<TextureDiligent*>(m_boundTextures[5]);
         if (shadowTex->m_pSRV)
             setVar(Diligent::SHADER_TYPE_PIXEL, "u_ShadowMap", static_cast<Diligent::IDeviceObject*>(shadowTex->m_pSRV));
     }
 
-    if (shaderName.size() >= 12 && shaderName.compare(0, 12, "passes/post/") == 0) {
+    if (assetPath.size() >= 12 && assetPath.compare(0, 12, "passes/post/") == 0) {
         Diligent::ISampler* pLinSamp = static_cast<Diligent::ISampler*>(m_device->GetLinearSampler());
         if (pLinSamp) {
             setVar(Diligent::SHADER_TYPE_PIXEL, "u_LinearSampler", pLinSamp);
@@ -161,14 +161,14 @@ void CommandListDiligent::CommitShaderResources() {
         for (uint32_t s = 0; s < kMaxTextureSlots; s++) {
             ITexture* tex = m_boundTextures[s];
             if (!tex) continue;
-            const char* varName = PostSlotToVariableName(shaderName.c_str(), s);
+            const char* varName = PostSlotToVariableName(assetPath.c_str(), s);
             if (!varName) continue;
             TextureDiligent* td = static_cast<TextureDiligent*>(tex);
             if (td->m_pSRV)
                 setVar(Diligent::SHADER_TYPE_PIXEL, varName, static_cast<Diligent::IDeviceObject*>(td->m_pSRV));
         }
-    } else if (shaderName.size() >= 5 && shaderName.compare(0, 5, "test/") == 0) {
-        if (shaderName != "test/cube") {
+    } else if (assetPath.size() >= 5 && assetPath.compare(0, 5, "test/") == 0) {
+        if (assetPath != "test/cube") {
             Diligent::ISampler* pLinSamp = static_cast<Diligent::ISampler*>(m_device->GetLinearSampler());
             if (pLinSamp)
                 setVar(Diligent::SHADER_TYPE_PIXEL, "u_Texture_sampler", pLinSamp);

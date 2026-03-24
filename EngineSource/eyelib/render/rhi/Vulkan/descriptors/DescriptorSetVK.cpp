@@ -5,10 +5,81 @@
 #include "eyelib/render/rhi/Vulkan/utils/VulkanEnums.h"
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
+#include <algorithm>
+#include <string>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+namespace {
+
+static bool TryGetDeclaredBindingType(const PipelineLayoutVK* layout, uint32_t binding, BindingType* outType) {
+    if (!layout) return false;
+    const auto& bindings = layout->m_desc.bindings;
+    if (bindings.empty()) return false;
+    auto it = std::find_if(bindings.begin(), bindings.end(), [binding](const BindingDesc& b) { return b.binding == binding; });
+    if (it == bindings.end()) return false;
+    if (outType) *outType = it->type;
+    return true;
+}
+
+static const char* BindingTypeName(BindingType type) {
+    switch (type) {
+    case BindingType::Texture: return "Texture";
+    case BindingType::TextureCube: return "TextureCube";
+    case BindingType::UniformBuffer: return "UniformBuffer";
+    case BindingType::StorageBuffer: return "StorageBuffer";
+    default: return "Unknown";
+    }
+}
+
+static const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
+    switch (kind) {
+    case PipelineLayoutKind::PushOnly: return "PushOnly";
+    case PipelineLayoutKind::Forward: return "Forward";
+    case PipelineLayoutKind::Post: return "Post";
+    case PipelineLayoutKind::Shadow: return "Shadow";
+    case PipelineLayoutKind::GBuffer: return "GBuffer";
+    case PipelineLayoutKind::DeferredLighting: return "DeferredLighting";
+    case PipelineLayoutKind::ComputeLightCull: return "ComputeLightCull";
+    case PipelineLayoutKind::ComputeGpuCull: return "ComputeGpuCull";
+    case PipelineLayoutKind::IBL: return "IBL";
+    case PipelineLayoutKind::OutlinePost: return "OutlinePost";
+    default: return "Unknown";
+    }
+}
+
+static std::string DescribeBindings(const PipelineLayoutVK* layout, uint32_t mask, bool onlyMasked) {
+    if (!layout) return "{}";
+    std::string out = "{";
+    bool first = true;
+    for (const BindingDesc& b : layout->m_desc.bindings) {
+        const bool tracked = (b.binding < DescriptorSetVK::kTrackedBindings);
+        const bool inMask = tracked ? ((mask & (1u << b.binding)) != 0u) : false;
+        if (onlyMasked && !inMask) continue;
+        if (!first) out += ", ";
+        first = false;
+        out += std::to_string(b.binding);
+        out += ":";
+        out += BindingTypeName(b.type);
+        if (!tracked) out += "(untracked)";
+    }
+    out += "}";
+    return out;
+}
+
+static uint32_t ComputeRequiredBindingMask(const PipelineLayoutVK* layout) {
+    if (!layout) return 0u;
+    uint32_t mask = 0u;
+    for (const BindingDesc& b : layout->m_desc.bindings) {
+        if (b.binding < DescriptorSetVK::kTrackedBindings)
+            mask |= (1u << b.binding);
+    }
+    return mask;
+}
+
+} // namespace
 
 DescriptorSetVK::DescriptorSetVK(DeviceVK* device, PipelineLayoutVK* layout)
     : m_device(device), m_layout(layout) {}
@@ -17,9 +88,22 @@ DescriptorSetVK::~DescriptorSetVK() = default;
 
 void DescriptorSetVK::UpdateTexture(uint32_t binding, ITexture* texture) {
     if (!m_device || !m_descriptorSet || !m_layout) return;
+    BindingType declared = BindingType::Texture;
+    if (TryGetDeclaredBindingType(m_layout, binding, &declared)) {
+        if (declared != BindingType::Texture && declared != BindingType::TextureCube) {
+            core::Log::ErrorF("DescriptorSetVK::UpdateTexture type mismatch: binding=%u expected=Texture/TextureCube declared=%s layoutBindings=%s",
+                              binding, BindingTypeName(declared), DescribeBindings(m_layout, 0u, false).c_str());
+            return;
+        }
+    } else if (!m_layout->m_desc.bindings.empty()) {
+        core::Log::ErrorF("DescriptorSetVK::UpdateTexture undeclared binding=%u layoutBindings=%s",
+                          binding, DescribeBindings(m_layout, 0u, false).c_str());
+        return;
+    }
     TextureVK* texVK = texture ? static_cast<TextureVK*>(texture) : nullptr;
     VkImageView imageView = texVK && texVK->m_imageView ? static_cast<VkImageView>(texVK->m_imageView) : VK_NULL_HANDLE;
-    VkSampler sampler = static_cast<VkSampler>(m_device->GetDefaultSampler());
+    const bool needsNearestSampler = (texture && texture->GetFormat() == RHITextureFormat::R32UI);
+    VkSampler sampler = static_cast<VkSampler>(needsNearestSampler ? m_device->GetNearestSampler() : m_device->GetDefaultSampler());
     if (sampler == VK_NULL_HANDLE) return;
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = sampler;
@@ -34,10 +118,24 @@ void DescriptorSetVK::UpdateTexture(uint32_t binding, ITexture* texture) {
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.pImageInfo = &imageInfo;
     vkUpdateDescriptorSets(static_cast<VkDevice>(m_device->GetDevice()), 1, &write, 0, nullptr);
+    if (binding < kTrackedBindings) m_writtenBindingMask |= (1u << binding);
+    m_loggedIncomplete = false;
 }
 
 void DescriptorSetVK::UpdateUniformBuffer(uint32_t binding, IBuffer* buffer, uint32_t offset, uint32_t size) {
     if (!m_device || !m_descriptorSet || !buffer) return;
+    BindingType declared = BindingType::UniformBuffer;
+    if (TryGetDeclaredBindingType(m_layout, binding, &declared)) {
+        if (declared != BindingType::UniformBuffer) {
+            core::Log::ErrorF("DescriptorSetVK::UpdateUniformBuffer type mismatch: binding=%u expected=UniformBuffer declared=%s layoutBindings=%s",
+                              binding, BindingTypeName(declared), DescribeBindings(m_layout, 0u, false).c_str());
+            return;
+        }
+    } else if (m_layout && !m_layout->m_desc.bindings.empty()) {
+        core::Log::ErrorF("DescriptorSetVK::UpdateUniformBuffer undeclared binding=%u layoutBindings=%s",
+                          binding, DescribeBindings(m_layout, 0u, false).c_str());
+        return;
+    }
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
@@ -56,10 +154,24 @@ void DescriptorSetVK::UpdateUniformBuffer(uint32_t binding, IBuffer* buffer, uin
     write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     write.pBufferInfo = &bufferInfo;
     vkUpdateDescriptorSets(static_cast<VkDevice>(m_device->GetDevice()), 1, &write, 0, nullptr);
+    if (binding < kTrackedBindings) m_writtenBindingMask |= (1u << binding);
+    m_loggedIncomplete = false;
 }
 
 void DescriptorSetVK::UpdateStorageBuffer(uint32_t binding, IBuffer* buffer, uint32_t offset, uint32_t size) {
     if (!m_device || !m_descriptorSet || !buffer) return;
+    BindingType declared = BindingType::StorageBuffer;
+    if (TryGetDeclaredBindingType(m_layout, binding, &declared)) {
+        if (declared != BindingType::StorageBuffer) {
+            core::Log::ErrorF("DescriptorSetVK::UpdateStorageBuffer type mismatch: binding=%u expected=StorageBuffer declared=%s layoutBindings=%s",
+                              binding, BindingTypeName(declared), DescribeBindings(m_layout, 0u, false).c_str());
+            return;
+        }
+    } else if (m_layout && !m_layout->m_desc.bindings.empty()) {
+        core::Log::ErrorF("DescriptorSetVK::UpdateStorageBuffer undeclared binding=%u layoutBindings=%s",
+                          binding, DescribeBindings(m_layout, 0u, false).c_str());
+        return;
+    }
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
@@ -78,6 +190,26 @@ void DescriptorSetVK::UpdateStorageBuffer(uint32_t binding, IBuffer* buffer, uin
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     write.pBufferInfo = &bufferInfo;
     vkUpdateDescriptorSets(static_cast<VkDevice>(m_device->GetDevice()), 1, &write, 0, nullptr);
+    if (binding < kTrackedBindings) m_writtenBindingMask |= (1u << binding);
+    m_loggedIncomplete = false;
+}
+
+bool DescriptorSetVK::IsCompleteForBind(uint32_t setIndex, PipelineLayoutKind layoutKind) const {
+    if (!m_ownsDescriptorSet) return true;
+    if (!m_layout) return true;
+    const uint32_t requiredMask = ComputeRequiredBindingMask(m_layout);
+    if (requiredMask == 0u) return true;
+    if ((m_writtenBindingMask & requiredMask) == requiredMask) return true;
+    if (!m_loggedIncomplete) {
+        const uint32_t missing = (requiredMask & ~m_writtenBindingMask);
+        const std::string requiredBindings = DescribeBindings(m_layout, requiredMask, true);
+        const std::string missingBindings = DescribeBindings(m_layout, missing, true);
+        core::Log::ErrorF("DescriptorSetVK incomplete: layoutKind=%s set=%u vkSet=%p requiredMask=0x%08X writtenMask=0x%08X missingMask=0x%08X requiredBindings=%s missingBindings=%s",
+                          PipelineLayoutKindName(layoutKind), setIndex, (void*)m_descriptorSet, requiredMask, m_writtenBindingMask, missing,
+                          requiredBindings.c_str(), missingBindings.c_str());
+        m_loggedIncomplete = true;
+    }
+    return false;
 }
 
 IPipelineLayout* CreatePipelineLayoutVK(DeviceVK* deviceObj, const PipelineLayoutDesc& desc) {
@@ -128,6 +260,11 @@ IPipelineLayout* CreatePipelineLayoutVK(DeviceVK* deviceObj, const PipelineLayou
 }
 
 IPipelineLayout* CreatePipelineLayoutWrapperVK(DeviceVK* deviceObj, void* vkDescriptorSetLayout) {
+    PipelineLayoutDesc empty;
+    return CreatePipelineLayoutWrapperVK(deviceObj, vkDescriptorSetLayout, empty);
+}
+
+IPipelineLayout* CreatePipelineLayoutWrapperVK(DeviceVK* deviceObj, void* vkDescriptorSetLayout, const PipelineLayoutDesc& desc) {
     if (!deviceObj || !vkDescriptorSetLayout) return nullptr;
     VkDescriptorSetLayout setLayout = static_cast<VkDescriptorSetLayout>(vkDescriptorSetLayout);
     VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
@@ -142,6 +279,7 @@ IPipelineLayout* CreatePipelineLayoutWrapperVK(DeviceVK* deviceObj, void* vkDesc
         return nullptr;
     }
     auto* pl = new PipelineLayoutVK();
+    pl->m_desc = desc;
     pl->m_descriptorSetLayout = vkDescriptorSetLayout;
     pl->m_pipelineLayout = pipelineLayout;
     pl->m_ownsSetLayout = false;

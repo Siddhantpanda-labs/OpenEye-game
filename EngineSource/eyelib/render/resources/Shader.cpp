@@ -38,12 +38,13 @@ Shader& Shader::operator=(Shader&& other) noexcept {
 }
 
 bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc, const rhi::VertexLayout& layout) {
-    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, rhi::PrimitiveTopology::TriangleList);
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly, std::nullopt);
 }
 
 bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
                              const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
-                             rhi::PipelineLayoutKind layoutKind) {
+                             rhi::PipelineLayoutKind layoutKind,
+                             const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
     if (!device) return false;
     if (m_deviceRHI) Destroy(m_deviceRHI);
     m_reflection = ParseShaderReflection(vertexSrc, fragmentSrc);
@@ -60,6 +61,7 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
     desc.vertexLayout = layout;
     desc.topology = topology;
     desc.layoutKind = layoutKind;
+    desc.attachmentFormats = attachmentFormats;
     desc.depthStencil.depthTest = true;
     desc.depthStencil.depthWrite = true;
     rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
@@ -71,8 +73,27 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
     return true;
 }
 
-bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath, const rhi::VertexLayout& layout) {
-    return LoadFromFile(device, vertexPath, fragmentPath, layout, rhi::PrimitiveTopology::TriangleList);
+bool Shader::BuildFromShaders(rhi::IDevice* device, rhi::IShader* vs, rhi::IShader* fs, const rhi::VertexLayout& layout,
+                             rhi::PrimitiveTopology topology, rhi::PipelineLayoutKind layoutKind,
+                             const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
+    if (!device || !vs || !fs) return false;
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    rhi::PipelineDesc desc;
+    desc.vertexShader = vs;
+    desc.fragmentShader = fs;
+    desc.vertexLayout = layout;
+    desc.topology = topology;
+    desc.layoutKind = layoutKind;
+    desc.attachmentFormats = attachmentFormats;
+    desc.depthStencil.depthTest = true;
+    desc.depthStencil.depthWrite = true;
+    rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
+    device->DestroyShader(vs);
+    device->DestroyShader(fs);
+    if (!pipe) return false;
+    m_pipelineRHI = pipe;
+    m_deviceRHI = device;
+    return true;
 }
 
 static bool HasShaderExtension(const std::string& path) {
@@ -86,28 +107,40 @@ static bool HasShaderExtension(const std::string& path) {
 }
 
 bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, const std::string& fragmentPath,
-                          const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology) {
+                          const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
+                          const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
     if (!device) return false;
     if (vertexPath == fragmentPath && !HasShaderExtension(vertexPath)) {
         std::string logicalName = ShaderPathToLogicalName(vertexPath);
-        if (!logicalName.empty() && Load(device, logicalName, layout, topology))
+        if (!logicalName.empty() && Load(device, logicalName, layout, topology, rhi::PipelineLayoutKind::PushOnly, attachmentFormats))
             return true;
     }
     m_descriptor = {};
-    m_descriptor.loadByName = false;
+    m_descriptor.loadFromAsset = false;
     m_descriptor.vertexPath = vertexPath;
     m_descriptor.fragmentPath = fragmentPath;
     m_descriptor.layout = layout;
     m_descriptor.topology = topology;
+    m_descriptor.attachmentFormats = attachmentFormats;
     rhi::IShader* vs = nullptr;
     rhi::IShader* fs = nullptr;
+    const char* backend = device->GetShaderBackendName();
+    const bool trySpv = backend && std::strcmp(backend, "vulkan") == 0;
+    if (trySpv) {
+        const std::string vertSpv = std::string(vertexPath) + ".spv";
+        const std::string fragSpv = std::string(fragmentPath) + ".spv";
+        if (device->TryLoadShaderFromPaths(vertSpv.c_str(), fragSpv.c_str(), vs, fs) && vs && fs)
+            goto create_pipeline_from_shaders;
+    }
     if (device->TryLoadShaderFromPaths(vertexPath.c_str(), fragmentPath.c_str(), vs, fs) && vs && fs) {
+create_pipeline_from_shaders:
         if (m_deviceRHI) Destroy(m_deviceRHI);
         rhi::PipelineDesc desc;
         desc.vertexShader = vs;
         desc.fragmentShader = fs;
         desc.vertexLayout = layout;
         desc.topology = topology;
+        desc.attachmentFormats = attachmentFormats;
         desc.depthStencil.depthTest = true;
         desc.depthStencil.depthWrite = true;
         rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
@@ -122,22 +155,24 @@ bool Shader::LoadFromFile(rhi::IDevice* device, const std::string& vertexPath, c
     if (!LoadShaderSource(vertexPath, vertexSrc)) return false;
     std::string fragmentSrc;
     if (!LoadShaderSource(fragmentPath, fragmentSrc)) return false;
-    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology);
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology, rhi::PipelineLayoutKind::PushOnly, attachmentFormats);
 }
 
-bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
-                  rhi::PrimitiveTopology topology, rhi::PipelineLayoutKind layoutKind) {
-    return Load(device, shaderName, layout, topology, {}, nullptr, layoutKind);
+bool Shader::Load(rhi::IDevice* device, const std::string& assetPath, const rhi::VertexLayout& layout,
+                  rhi::PrimitiveTopology topology, rhi::PipelineLayoutKind layoutKind,
+                  const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
+    return Load(device, assetPath, layout, topology, {}, nullptr, layoutKind, attachmentFormats);
 }
 
-bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+bool Shader::Load(rhi::IDevice* device, const std::string& assetPath, const rhi::VertexLayout& layout,
                   rhi::PrimitiveTopology topology, const rhi::DepthStencilState* depthStencilOverride,
-                  rhi::PipelineLayoutKind layoutKind) {
-    return Load(device, shaderName, layout, topology, {}, depthStencilOverride, layoutKind);
+                  rhi::PipelineLayoutKind layoutKind,
+                  const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
+    return Load(device, assetPath, layout, topology, {}, depthStencilOverride, layoutKind, attachmentFormats);
 }
 
 bool Shader::Reload() {
-    bool canReload = (m_descriptor.loadByName && !m_descriptor.shaderName.empty()) ||
+    bool canReload = (m_descriptor.loadFromAsset && !m_descriptor.assetPath.empty()) ||
                      !m_descriptor.vertexPath.empty() || !m_descriptor.fragmentPath.empty();
     if (!canReload) return false;
     rhi::IDevice* device = GetDevice();
@@ -157,26 +192,39 @@ static std::string ApplyDefinesToSource(const std::string& source, const std::ve
     return prefix + source;
 }
 
-bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi::VertexLayout& layout,
+bool Shader::Load(rhi::IDevice* device, const std::string& assetPath, const rhi::VertexLayout& layout,
                   rhi::PrimitiveTopology topology, const std::vector<std::string>& keywords,
-                  const rhi::DepthStencilState* depthStencilOverride, rhi::PipelineLayoutKind layoutKind) {
-    if (!device || shaderName.empty()) return false;
+                  const rhi::DepthStencilState* depthStencilOverride, rhi::PipelineLayoutKind layoutKind,
+                  const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
+    if (!device || assetPath.empty()) return false;
     m_descriptor = {};
-    m_descriptor.loadByName = true;
-    m_descriptor.shaderName = shaderName;
+    m_descriptor.loadFromAsset = true;
+    m_descriptor.assetPath = assetPath;
     m_descriptor.layout = layout;
     m_descriptor.topology = topology;
     m_descriptor.keywords = keywords;
     m_descriptor.layoutKind = layoutKind;
+    m_descriptor.attachmentFormats = attachmentFormats;
     if (keywords.empty()) {
         if (m_deviceRHI) Destroy(m_deviceRHI);
-        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromName(shaderName.c_str(), layout, topology, depthStencilOverride, layoutKind);
+        rhi::ShaderGraphicsPipelineCreateInfo gp{};
+        gp.assetPath = assetPath;
+        gp.vertexLayout = layout;
+        gp.topology = topology;
+        gp.layoutKind = layoutKind;
+        gp.attachmentFormats = attachmentFormats;
+        gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
+        if (depthStencilOverride) {
+            gp.useDepthStencilOverride = true;
+            gp.depthStencilOverride = *depthStencilOverride;
+        }
+        rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromShaderAsset(gp);
         if (!pipe) return false;
         m_pipelineRHI = pipe;
         m_deviceRHI = device;
         return true;
     }
-    std::string key = PipelineCacheKey(shaderName, topology, keywords);
+    std::string key = PipelineCacheKey(assetPath, topology, keywords);
     uint32_t format = 0;
     std::vector<uint8_t> cached;
     if (LoadPipelineBinary(key, format, cached) && !cached.empty()) {
@@ -197,19 +245,35 @@ bool Shader::Load(rhi::IDevice* device, const std::string& shaderName, const rhi
     }
     std::string root = platform::filesystem::GetEngineAssetsRoot();
     std::string basePath = root.empty()
-        ? (std::string("assets/shaders/") + backend + "/" + shaderName)
-        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + shaderName);
+        ? (std::string("assets/shaders/") + backend + "/" + assetPath)
+        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + assetPath);
     std::string vertexPath = basePath + vertExt;
     std::string fragmentPath = basePath + fragExt;
     std::string vertexSrc, fragmentSrc;
     if (!LoadShaderSource(vertexPath, vertexSrc) || !LoadShaderSource(fragmentPath, fragmentSrc)) {
-        core::Log::ErrorF("Shader::Load with keywords: failed to load %s", shaderName.c_str());
+        core::Log::ErrorF("Shader::Load with keywords: failed to load %s", assetPath.c_str());
         return false;
     }
     vertexSrc = ApplyDefinesToSource(vertexSrc, keywords);
     fragmentSrc = ApplyDefinesToSource(fragmentSrc, keywords);
-    if (!BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology, layoutKind))
-        return false;
+    m_reflection = ParseShaderReflection(vertexSrc, fragmentSrc);
+    if (m_deviceRHI) Destroy(m_deviceRHI);
+    rhi::ShaderGraphicsPipelineCreateInfo gp{};
+    gp.assetPath = assetPath;
+    gp.vertexLayout = layout;
+    gp.topology = topology;
+    gp.layoutKind = layoutKind;
+    gp.attachmentFormats = attachmentFormats;
+    gp.vertexSourceOverride = std::move(vertexSrc);
+    gp.fragmentSourceOverride = std::move(fragmentSrc);
+    if (depthStencilOverride) {
+        gp.useDepthStencilOverride = true;
+        gp.depthStencilOverride = *depthStencilOverride;
+    }
+    rhi::IPipeline* pipe = device->CreateGraphicsPipelineFromShaderAsset(gp);
+    if (!pipe) return false;
+    m_pipelineRHI = pipe;
+    m_deviceRHI = device;
     if (m_pipelineRHI) {
         std::vector<uint8_t> bin;
         if (device->GetPipelineBinary(m_pipelineRHI, bin, format) && !bin.empty())
@@ -224,10 +288,10 @@ ShaderDescriptor Shader::GetDescriptor() const {
 
 bool Shader::LoadFromDescriptor(rhi::IDevice* device, const ShaderDescriptor& desc) {
     if (!device) return false;
-    if (desc.loadByName && !desc.shaderName.empty())
-        return Load(device, desc.shaderName, desc.layout, desc.topology, desc.keywords, nullptr, desc.layoutKind);
+    if (desc.loadFromAsset && !desc.assetPath.empty())
+        return Load(device, desc.assetPath, desc.layout, desc.topology, desc.keywords, nullptr, desc.layoutKind, desc.attachmentFormats);
     if (!desc.vertexPath.empty() || !desc.fragmentPath.empty())
-        return LoadFromFile(device, desc.vertexPath, desc.fragmentPath, desc.layout, desc.topology);
+        return LoadFromFile(device, desc.vertexPath, desc.fragmentPath, desc.layout, desc.topology, desc.attachmentFormats);
     return false;
 }
 

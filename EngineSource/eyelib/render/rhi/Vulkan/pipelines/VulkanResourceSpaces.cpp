@@ -407,7 +407,7 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::ComputeGpuCull: return computeGpuCull;
         case PipelineLayoutKind::IBL: return ibl;
         case PipelineLayoutKind::OutlinePost: return outlinePost;
-        case PipelineLayoutKind::Legacy: return pushOnly; /* PushOnly same value */
+        case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
     }
     return VK_NULL_HANDLE;
 }
@@ -423,7 +423,7 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::ComputeGpuCull: return 5;
         case PipelineLayoutKind::IBL: return 1;
         case PipelineLayoutKind::OutlinePost: return 1;
-        case PipelineLayoutKind::Legacy: return 0; /* PushOnly same value */
+        case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
     }
     return 0;
 }

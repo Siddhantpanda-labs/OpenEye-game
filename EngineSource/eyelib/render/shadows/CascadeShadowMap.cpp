@@ -247,6 +247,11 @@ void CascadeShadowMap::BindForShadowPass(rhi::ICommandList* cmd, uint32_t cascad
 
 void CascadeShadowMap::Unbind(rhi::ICommandList* cmd) {
     if (cmd) cmd->SetRenderTarget(nullptr);
+    if (cmd && m_renderTargetRHI) {
+        rhi::ITexture* depth = m_renderTargetRHI->GetDepthTexture();
+        if (depth)
+            rhi::BarrierDepthTextureForShaderSampling(cmd, depth);
+    }
 }
 
 const math::Mat4& CascadeShadowMap::GetLightSpaceMatrix(uint32_t cascadeIndex) const {

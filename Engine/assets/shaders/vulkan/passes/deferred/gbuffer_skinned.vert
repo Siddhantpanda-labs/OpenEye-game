@@ -1,5 +1,5 @@
 #version 460
-// Resource-space: set 0 = Frame, set 4 binding 1 = bones (or per-draw transform buffer when u_UsePerDrawTransformBuffer). Push: model, UV, flags.
+// Resource-space: set 0 = Frame, set 3 binding 1 = bones (or per-draw transform buffer when u_UsePerDrawTransformBuffer). Push: model, UV, flags.
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
@@ -26,7 +26,7 @@ layout(set = 0, binding = 0) uniform FrameBlock {
     mat4 u_PrevProjection;
 };
 
-layout(set = 4, binding = 1) readonly buffer BoneOrTransformBlock {
+layout(set = 3, binding = 1) readonly buffer BoneOrTransformBlock {
     mat4 u_Data[];
 };
 

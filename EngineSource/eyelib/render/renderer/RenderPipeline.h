@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/IRenderSceneView.h"
+#include "eyelib/render/PipelineSharedResources.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/passes/GpuCullPass.h"
@@ -33,6 +34,8 @@ class Mesh;
 class Shader;
 class TextureCube;
 class FullscreenQuad;
+class Material;
+class MaterialInstance;
 
 /** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Skybox, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Skybox, Post). ForwardPlus: tiled forward (many lights), skybox drawn after; legacy path. */
 enum class PipelineMode { Forward, Deferred, ForwardPlus };
@@ -54,6 +57,12 @@ public:
     bool Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t width, uint32_t height);
     /** Initialize with shared RHI device (caller owns device; pipeline does not mutate global state). */
     bool Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height);
+    /** Initialize with shared RHI device and reuse shaders/cache from another pipeline. shareFrom must be already initialized. */
+    bool Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height, PipelineSharedResources* shareFrom);
+
+    /** Returns shared resources (populated after first init with shared device). Pass to Initialize(..., shareFrom) for subsequent pipelines. */
+    PipelineSharedResources* GetSharedResources() { return m_sharedResources.get(); }
+    ShaderCache* GetShaderCache() const { return m_shaderCache; }
     /** Resize pipeline (GBuffer, HDR RT, post-process). May only be called at frame boundary, before Render() for this frame. Never call mid-frame or while a command list is active. */
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
@@ -133,8 +142,8 @@ public:
     void RenderSceneToTarget(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, rhi::IRenderTarget* rt);
 
 private:
-    /** Shared init after m_device is set (owned or shared). */
-    bool InitializeDeviceResources(uint32_t width, uint32_t height);
+    /** Shared init after m_device is set (owned or shared). When shareFrom is non-null, reuses its shaders/cache. */
+    bool InitializeDeviceResources(uint32_t width, uint32_t height, PipelineSharedResources* shareFrom = nullptr);
     void EnsureResources(uint32_t width, uint32_t height);
     void CreateHDRFramebuffer();
     void DestroyHDRFramebuffer();
@@ -177,6 +186,12 @@ private:
     void EnsureProceduralSkyboxShader();
     /** Ensures m_skyboxDummyTexture exists (1x1 RGBA8). Used to fill unused Post set bindings. */
     void EnsureSkyboxDummyTexture();
+    /** Ensures forward material fallback textures exist (albedo/normal/metal-rough). */
+    void EnsureForwardMaterialFallbackTextures();
+    /** Select current per-frame forward descriptor sets/buffers based on GetCurrentFrameIndex(). */
+    void SelectForwardResourceSetFrame();
+    /** Update current forward Material set with guaranteed valid texture bindings 1..3. */
+    void UpdateForwardMaterialSetWithFallback(const Material* material, const MaterialInstance* materialInstance);
     /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
     void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
     void EnsureOutlinePostShader();
@@ -196,12 +211,17 @@ private:
     uint32_t PrepareGpuCullFromFrameData(const RenderFrameData& frameData, const CameraView& cam);
     /** Ensure IBL is built from frameData.skybox; returns m_ibl.get() when valid, else nullptr. Used by Deferred Lighting, Forward, Forward+. */
     IBL* EnsureIBLFromFrameData(const RenderFrameData& frameData);
+    /** Transition persistent textures (IBL/probe) to shader-read once per frame, before frame-graph pass rendering begins. */
+    void PreparePersistentShaderReadInputs(rhi::ICommandList* cmd, const RenderFrameData& frameData);
 
     rhi::IDevice* m_device = nullptr;
     std::unique_ptr<rhi::IDevice> m_ownedDevice;
+    std::unique_ptr<PipelineSharedResources> m_sharedResources;  // Populated on first init; used when shareFrom is null
+    PipelineSharedResources* m_usingShared = nullptr;            // Non-null when we borrow from another pipeline
     std::unique_ptr<GBuffer> m_gbuffer;
     std::unique_ptr<CascadeShadowMap> m_cascadeShadowMap;
-    std::unique_ptr<ShaderCache> m_shaderCache;
+    /** Points to our or shared ShaderCache. Use GetShaderCache(). */
+    ShaderCache* m_shaderCache = nullptr;
     std::unique_ptr<GBufferPass> m_gbufferPass;
     std::unique_ptr<ShadowPass> m_shadowPass;
     std::unique_ptr<LightingPass> m_lightingPass;
@@ -223,7 +243,8 @@ private:
     rhi::ITexture* m_cachedSkyboxTexture = nullptr;
     rhi::ITexture* m_skyboxDummyTexture = nullptr;
     std::shared_ptr<Shader> m_outlinePostShader;
-    rhi::IDescriptorSet* m_outlinePostSet = nullptr;
+    static constexpr uint32_t kOutlinePostSetsFrames = 3;
+    std::array<rhi::IDescriptorSet*, kOutlinePostSetsFrames> m_outlinePostSets = {};
     std::shared_ptr<Shader> m_entityIdShader;
     rhi::IPipeline* m_streamingNV12Pipeline = nullptr;
     rhi::IShader* m_streamingNV12Shader = nullptr;
@@ -272,7 +293,17 @@ private:
     rhi::IBuffer* m_sceneLightingBuffer = nullptr;
 
     /** Resource-space forward pass: Frame, ForwardPass, Material, SceneBuffers sets + Frame UBO. Bindless set from m_bindlessHeap->GetDescriptorSet(). */
+    static constexpr uint32_t kForwardResourceSetsFrames = 3;
     void EnsureForwardResourceSets();
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardFrameSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardPassSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardMaterialSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardSceneBuffersSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_deferredLightingPassSets = {};
+    std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardFrameUBOs = {};
+    std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardBonesBuffers = {};
+
+    /** Current frame aliases into per-frame arrays (updated by SelectForwardResourceSetFrame). */
     rhi::IDescriptorSet* m_forwardFrameSet = nullptr;
     rhi::IDescriptorSet* m_forwardPassSet = nullptr;
     rhi::IDescriptorSet* m_forwardMaterialSet = nullptr;
@@ -280,6 +311,9 @@ private:
     rhi::IDescriptorSet* m_deferredLightingPassSet = nullptr;
     rhi::IBuffer* m_forwardFrameUBO = nullptr;
     rhi::IBuffer* m_forwardBonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)
+    rhi::ITexture* m_forwardFallbackAlbedoTexture = nullptr;
+    rhi::ITexture* m_forwardFallbackNormalTexture = nullptr;
+    rhi::ITexture* m_forwardFallbackMetalRoughTexture = nullptr;
 
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit

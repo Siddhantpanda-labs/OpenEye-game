@@ -76,6 +76,7 @@ private:
     rhi::IDescriptorSet* m_sceneBuffersSet = nullptr;
     rhi::IBuffer* m_frameUBO = nullptr;
     rhi::IBuffer* m_bonesBuffer = nullptr;  // SceneBuffers binding 1 for skinned (resource-space)
+    rhi::IBuffer* m_sceneFallbackBuffer = nullptr;  // SceneBuffers fallback for required bindings 0..3
 };
 
 } // namespace render

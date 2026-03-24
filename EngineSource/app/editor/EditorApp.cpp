@@ -389,6 +389,15 @@ int RunEditor(int argc, char** argv) {
         return 2;
     }
 
+    // Resolve engine root and set working directory before RHI/pipeline init so shader paths
+    // (including .spv) resolve correctly during warmup.
+    std::string engineRoot = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
+    std::string engineAssets = "assets";
+    if (!engineRoot.empty()) {
+        engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets");
+        eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
+    }
+
     // One RHI device per window; pipelines are view configs only (no pipeline-owned device).
     // Prefer Vulkan; fall back to OpenGL if Vulkan init fails so the editor always starts.
     void* platformWindow = window.GetPlatformWindow();
@@ -420,21 +429,17 @@ int RunEditor(int argc, char** argv) {
     if (!editorDevice) {
         std::fprintf(stderr, "Editor: CreateGraphicsDevice failed (scene/game view will show placeholder).\n");
     } else {
-        if (!sceneViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
+        bool scenePipelineOk = false;
+        if (!(scenePipelineOk = sceneViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256))) {
             std::fprintf(stderr, "Editor: Scene view pipeline init failed (scene view will show placeholder).\n");
         }
-        if (!gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256)) {
+        bool gamePipelineOk = scenePipelineOk
+            ? gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256, &sceneViewPipeline)
+            : gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256);
+        if (!gamePipelineOk) {
             std::fprintf(stderr, "Editor: Game view pipeline init failed (debug camera preview disabled).\n");
         }
         eyelib::api::core::Log::Info("Editor: both pipelines initialized, before AssetRegistry.Scan");
-    }
-
-    // Engine assets (shaders, etc.) load directly from Engine/assets — no copy to exe dir
-    std::string engineRoot = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
-    std::string engineAssets = "assets";
-    if (!engineRoot.empty()) {
-        engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets");
-        eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
     }
 
     eyelib::api::AssetRegistry assetRegistry;

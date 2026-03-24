@@ -231,7 +231,7 @@ std::shared_ptr<Material> CreateMaterialFromDescriptor(
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
     std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
     auto mat = std::make_shared<Material>();
-    if (!desc.shaderName.empty())
+    if (!desc.shaderAssetPath.empty())
         mat->SetMaterialShaderId(MaterialShaderIds::PBR);
     for (const auto& p : desc.texturePaths) {
         auto tex = resolveTexture(p.second);

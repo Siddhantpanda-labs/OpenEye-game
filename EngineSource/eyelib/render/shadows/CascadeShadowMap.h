@@ -47,6 +47,7 @@ public:
 
     /** Bind RT for rendering cascade i: sets layer, viewport, clear. Call before drawing shadow geometry. */
     void BindForShadowPass(rhi::ICommandList* cmd, uint32_t cascadeIndex);
+    /** End shadow rendering; transitions depth to shader-readable (required before lighting/forward samples the map). */
     void Unbind(rhi::ICommandList* cmd);
 
     /** Light-space matrix for cascade i (for shadow pass vertex shader). */

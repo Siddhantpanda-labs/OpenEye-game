@@ -3,10 +3,12 @@
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/core/Log.h"
 #include <cmath>
 #include <cstring>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -211,62 +213,74 @@ void PostProcessor::LoadShaders() {
     const rhi::PipelineLayoutKind postLayout = rhi::PipelineLayoutKind::Post;
 
     m_toneMappingShader = std::make_shared<Shader>();
-    if (!m_toneMappingShader->Load(m_deviceRHI, "passes/post/tonemap", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_toneMappingShader->Load(m_deviceRHI, "passes/post/tonemap", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                   std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load tone mapping shader");
     }
 
     m_bloomExtractShader = std::make_shared<Shader>();
-    if (!m_bloomExtractShader->Load(m_deviceRHI, "passes/post/bloom_extract", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_bloomExtractShader->Load(m_deviceRHI, "passes/post/bloom_extract", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                    std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load bloom extract shader");
     }
 
     m_bloomBlurShader = std::make_shared<Shader>();
-    if (!m_bloomBlurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_bloomBlurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                 std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load bloom blur shader");
     }
 
     m_bloomCompositeShader = std::make_shared<Shader>();
-    if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                      std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load bloom composite shader");
     }
 
     m_blurShader = std::make_shared<Shader>();
-    if (!m_blurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_blurShader->Load(m_deviceRHI, "passes/post/bloom_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                            std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load blur shader");
     }
 
     m_chromaticAberrationShader = std::make_shared<Shader>();
-    if (!m_chromaticAberrationShader->Load(m_deviceRHI, "passes/post/chromatic_aberration", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_chromaticAberrationShader->Load(m_deviceRHI, "passes/post/chromatic_aberration", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                           std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load chromatic aberration shader");
     }
 
     m_fxaaShader = std::make_shared<Shader>();
-    if (!m_fxaaShader->Load(m_deviceRHI, "passes/post/fxaa", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_fxaaShader->Load(m_deviceRHI, "passes/post/fxaa", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                            std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load FXAA shader");
     }
 
     m_ssaoShader = std::make_shared<Shader>();
-    if (!m_ssaoShader->Load(m_deviceRHI, "passes/post/ssao", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_ssaoShader->Load(m_deviceRHI, "passes/post/ssao", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                            std::optional{rhi::StandardAttachmentFormats::PostR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load SSAO shader");
     }
 
     m_ssrShader = std::make_shared<Shader>();
-    if (!m_ssrShader->Load(m_deviceRHI, "passes/post/ssr", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_ssrShader->Load(m_deviceRHI, "passes/post/ssr", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                           std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load SSR shader");
     }
 
     m_motionBlurShader = std::make_shared<Shader>();
-    if (!m_motionBlurShader->Load(m_deviceRHI, "passes/post/motion_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_motionBlurShader->Load(m_deviceRHI, "passes/post/motion_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                  std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load motion blur shader");
     }
 
     m_vignetteShader = std::make_shared<Shader>();
-    if (!m_vignetteShader->Load(m_deviceRHI, "passes/post/vignette", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_vignetteShader->Load(m_deviceRHI, "passes/post/vignette", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load vignette shader");
     }
 
     m_filmGrainShader = std::make_shared<Shader>();
-    if (!m_filmGrainShader->Load(m_deviceRHI, "passes/post/film_grain", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_filmGrainShader->Load(m_deviceRHI, "passes/post/film_grain", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                 std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load film grain shader");
     }
 
@@ -294,18 +308,22 @@ void main() {
     o_Color = vec4(scene * occlusion, 1.0);
 }
 )";
-    m_ssaoBlendShader->BuildFromSource(m_deviceRHI, ssaoBlendVert, ssaoBlendFrag, fullscreenLayout);
+    m_ssaoBlendShader->BuildFromSource(m_deviceRHI, ssaoBlendVert, ssaoBlendFrag, fullscreenLayout, rhi::PrimitiveTopology::TriangleList,
+                                       rhi::PipelineLayoutKind::PushOnly, std::optional{rhi::StandardAttachmentFormats::LegacyRGBA8()});
 
     m_ssaoBlurShader = std::make_shared<Shader>();
-    if (!m_ssaoBlurShader->Load(m_deviceRHI, "passes/post/ssao_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_ssaoBlurShader->Load(m_deviceRHI, "passes/post/ssao_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                std::optional{rhi::StandardAttachmentFormats::PostR8()})) {
         core::Log::WarnF("PostProcessor: Failed to load SSAO blur shader");
     }
     m_copyShader = std::make_shared<Shader>();
-    if (!m_copyShader->Load(m_deviceRHI, "passes/post/copy", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_copyShader->Load(m_deviceRHI, "passes/post/copy", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                            std::optional{rhi::StandardAttachmentFormats::PostCopyBGRA()})) {
         core::Log::WarnF("PostProcessor: Failed to load copy shader");
     }
     m_depthPyramidShader = std::make_shared<Shader>();
-    if (!m_depthPyramidShader->Load(m_deviceRHI, "passes/post/depth_pyramid", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout)) {
+    if (!m_depthPyramidShader->Load(m_deviceRHI, "passes/post/depth_pyramid", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
+                                    std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load depth_pyramid shader");
     }
 }
@@ -606,8 +624,9 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_blurShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
     m_blurShader->SetFloat("u_Intensity", intensity);
 
+    // Same HDR ping-pong as BlurTexture / bloom: pipeline color format is RGBA16F (see PipelineVK SelectRenderingFormats).
     for (int i = 0; i < iterations; ++i) {
-        rhi::IRenderTarget* rt = SelectPostTargetLDR(currentTexture);
+        rhi::IRenderTarget* rt = m_pingPongRT[horizontal ? 0 : 1];
         if (!rt) break;
         rhi::BarrierTextureForShaderRead(cmd, currentTexture);
         cmd->SetRenderTarget(rt);
@@ -1067,14 +1086,16 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
         [this, hdrInput, settings, cmd](const FGPassResources& res) {
             rhi::ITexture* hdrTex = res.getTextureRHI(hdrInput);
             if (!hdrTex || !m_toneMappingShader || !m_toneMappingShader->IsValid()) return;
-            cmd->SetRenderTarget(m_pingPongRT[0]);
+            rhi::IRenderTarget* toneTarget = SelectPostTargetLDR(hdrTex);
+            if (!toneTarget) return;
+            cmd->SetRenderTarget(toneTarget);
             cmd->SetViewport(0, 0, res.width, res.height);
             cmd->SetDepthTest(false);
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
             cmd->SetBlend(false);
             rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
-            cmd->ClearRenderTarget(m_pingPongRT[0], clearBlack);
+            cmd->ClearRenderTarget(toneTarget, clearBlack);
             m_toneMappingShader->Bind(m_deviceRHI);
             m_toneMappingShader->SetInt("u_HDRTexture", 0);
             m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);

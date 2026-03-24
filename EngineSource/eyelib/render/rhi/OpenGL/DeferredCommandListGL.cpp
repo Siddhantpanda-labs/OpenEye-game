@@ -2,6 +2,7 @@
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace eyelib {
 namespace render {
@@ -117,6 +118,21 @@ void DeferredCommandListGL::UnbindTexture(uint32_t binding) {
 }
 void DeferredCommandListGL::BindDescriptorSet(IDescriptorSet* set) {
     Record([set](ICommandList* c) { c->BindDescriptorSet(set); });
+}
+
+void DeferredCommandListGL::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets,
+                                               const uint32_t* dynamicOffsets, uint32_t dynamicOffsetCount) {
+    std::vector<IDescriptorSet*> setCopy;
+    std::vector<uint32_t> dynCopy;
+    if (sets && count > 0)
+        setCopy.assign(sets, sets + count);
+    if (dynamicOffsets && dynamicOffsetCount > 0)
+        dynCopy.assign(dynamicOffsets, dynamicOffsets + dynamicOffsetCount);
+    Record([firstSet, setCopy, dynCopy](ICommandList* c) {
+        c->BindDescriptorSets(firstSet, static_cast<uint32_t>(setCopy.size()),
+            setCopy.empty() ? nullptr : setCopy.data(),
+            dynCopy.empty() ? nullptr : dynCopy.data(), static_cast<uint32_t>(dynCopy.size()));
+    });
 }
 void DeferredCommandListGL::BindBindlessHeap(IBindlessHeap* heap) {
     Record([heap](ICommandList* c) { c->BindBindlessHeap(heap); });

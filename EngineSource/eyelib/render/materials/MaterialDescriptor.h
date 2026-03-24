@@ -21,7 +21,8 @@ class Texture2D;
  * Use with Material::CreateFromDescriptor(device, desc, resolveShader, resolveTexture) to build a GPU-bound Material.
  */
 struct MaterialDescriptor {
-    std::string shaderName;
+    /** Non-empty selects built-in PBR material path (e.g. default forward asset). */
+    std::string shaderAssetPath;
     /** Texture slot name -> file path. */
     std::unordered_map<std::string, std::string> texturePaths;
     std::unordered_map<std::string, float> floats;

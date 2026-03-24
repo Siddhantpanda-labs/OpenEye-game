@@ -18,6 +18,24 @@ namespace eyelib {
 namespace render {
 namespace rhi {
 
+namespace {
+const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
+    switch (kind) {
+    case PipelineLayoutKind::PushOnly: return "PushOnly";
+    case PipelineLayoutKind::Forward: return "Forward";
+    case PipelineLayoutKind::Post: return "Post";
+    case PipelineLayoutKind::Shadow: return "Shadow";
+    case PipelineLayoutKind::GBuffer: return "GBuffer";
+    case PipelineLayoutKind::DeferredLighting: return "DeferredLighting";
+    case PipelineLayoutKind::ComputeLightCull: return "ComputeLightCull";
+    case PipelineLayoutKind::ComputeGpuCull: return "ComputeGpuCull";
+    case PipelineLayoutKind::IBL: return "IBL";
+    case PipelineLayoutKind::OutlinePost: return "OutlinePost";
+    default: return "Unknown";
+    }
+}
+}
+
 CommandListVK::CommandListVK(DeviceVK* device) : m_device(device) {}
 
 CommandListVK::CommandListVK(DeviceVK* device, void* commandBuffer, void* commandPool)
@@ -36,6 +54,7 @@ void CommandListVK::SetCommandBuffer(void* commandBuffer, bool isImmediate) {
 }
 
 void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
+    m_isRenderingActive = false;
     m_currentRenderTarget = nullptr;
     m_currentVertexBuffer = nullptr;
     m_currentVertexOffset = 0;
@@ -85,18 +104,35 @@ void CommandListVK::End() {
 }
 
 void CommandListVK::EndRenderingIfActive() {
-    if (!m_currentRenderTarget || !m_commandBuffer || !m_isRecording) return;
+    if (!m_isRenderingActive || !m_commandBuffer || !m_isRecording) return;
     vkCmdEndRendering(static_cast<VkCommandBuffer>(m_commandBuffer));
+    m_isRenderingActive = false;
     m_currentRenderTarget = nullptr;
 }
 
-void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
-    EndRenderingIfActive();
-    if (!rt || !m_isRecording || !m_commandBuffer) return;
-    RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
+void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions) {
+    if (!rtVK || !m_isRecording || !m_commandBuffer || !m_device) return;
     const uint32_t colorCount = rtVK->GetColorAttachmentCount();
-    if (colorCount == 0) return;
-    std::vector<VkRenderingAttachmentInfo> colorAttachments(colorCount);
+    VkImageView depthView = static_cast<VkImageView>(rtVK->GetDepthImageView());
+    if (colorCount == 0 && depthView == VK_NULL_HANDLE) return;
+    const uint32_t rtWidth = rtVK->GetWidth();
+    const uint32_t rtHeight = rtVK->GetHeight();
+    if (rtWidth == 0 || rtHeight == 0) return;
+
+    if (doTransitions) {
+        for (uint32_t i = 0; i < colorCount; ++i) {
+            ITexture* tex = rtVK->GetColorTexture(i);
+            if (tex) m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
+        }
+        ITexture* depthTex = rtVK->GetDepthTexture();
+        if (depthTex) m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
+        m_device->FlushBarrierTracker(this);
+    }
+
+    std::vector<VkRenderingAttachmentInfo> colorAttachments;
+    if (colorCount > 0) {
+        colorAttachments.resize(colorCount);
+    }
     for (uint32_t i = 0; i < colorCount; ++i) {
         VkImageView view = static_cast<VkImageView>(rtVK->GetColorImageView(i));
         if (view == VK_NULL_HANDLE) return;
@@ -107,27 +143,13 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
         colorAttachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         colorAttachments[i].clearValue.color = { 0.f, 0.f, 0.f, 1.f };
     }
-    VkImageView depthView = static_cast<VkImageView>(rtVK->GetDepthImageView());
-
-    // Ensure color and depth images are in the layouts declared for vkCmdBeginRendering.
-    for (uint32_t i = 0; i < colorCount; ++i) {
-        ITexture* tex = rtVK->GetColorTexture(i);
-        if (tex) m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
-    }
-    ITexture* depthTex = rtVK->GetDepthTexture();
-    if (depthTex) m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
-    m_device->FlushBarrierTracker(this);
-
-    const uint32_t rtWidth = rtVK->GetWidth();
-    const uint32_t rtHeight = rtVK->GetHeight();
-    if (rtWidth == 0 || rtHeight == 0) return;
 
     VkRenderingInfo renderingInfo = {};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     renderingInfo.renderArea = { { 0, 0 }, { rtWidth, rtHeight } };
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = colorCount;
-    renderingInfo.pColorAttachments = colorAttachments.data();
+    renderingInfo.pColorAttachments = colorAttachments.empty() ? nullptr : colorAttachments.data();
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
     VkRenderingAttachmentInfo depthAttachment = {};
@@ -141,7 +163,15 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
         renderingInfo.pDepthAttachment = &depthAttachment;
     }
     vkCmdBeginRendering(static_cast<VkCommandBuffer>(m_commandBuffer), &renderingInfo);
+    m_isRenderingActive = true;
     m_currentRenderTarget = rtVK;
+}
+
+void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
+    EndRenderingIfActive();
+    if (!rt || !m_isRecording || !m_commandBuffer) return;
+    RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
+    BeginRenderingWithTarget(rtVK, true);
 }
 
 void CommandListVK::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) {
@@ -230,7 +260,11 @@ void CommandListVK::SetPolygonOffsetLine(bool enable, float factor, float units)
 
 void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
     if (!buffer || !m_isRecording || !m_commandBuffer) return;
-    // Dynamic rendering disallows vkCmdPipelineBarrier inside an active rendering scope.
+    if (m_isRenderingActive) {
+        static int warnCount = 0;
+        if (warnCount++ < 8)
+            core::Log::Warn("Vulkan BarrierBuffer called during active rendering; ending render scope explicitly. Move barriers outside render passes.");
+    }
     EndRenderingIfActive();
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
@@ -252,7 +286,11 @@ void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, Reso
 void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
     if (!texture || !m_isRecording || !m_commandBuffer) return;
     (void)fromState;
-    // Vulkan transitions must be derived from tracked state, not caller assumptions.
+    if (m_isRenderingActive) {
+        static int warnCount = 0;
+        if (warnCount++ < 8)
+            core::Log::Warn("Vulkan BarrierTexture called during active rendering; ending render scope explicitly. Move barriers outside render passes.");
+    }
     EndRenderingIfActive();
     if (!m_device) return;
     m_device->TransitionTextureToState(texture, toState);
@@ -261,7 +299,11 @@ void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, R
 
 void CommandListVK::MemoryBarrierStorage() {
     if (!m_isRecording || !m_commandBuffer) return;
-    // Keep storage synchronization outside active dynamic-rendering instances.
+    if (m_isRenderingActive) {
+        static int warnCount = 0;
+        if (warnCount++ < 8)
+            core::Log::Warn("Vulkan MemoryBarrierStorage called during active rendering; ending render scope explicitly. Move barriers outside render passes.");
+    }
     EndRenderingIfActive();
     VkMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -272,6 +314,18 @@ void CommandListVK::MemoryBarrierStorage() {
     vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), srcStage, dstStage, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 void CommandListVK::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) { (void)pboHandle; (void)slot; (void)size; }
+
+void CommandListVK::PushGraphicsConstantsIfPossible() {
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_currentPipeline) return;
+    PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
+    if (pVK->m_isCompute) return;
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+    if (layout == VK_NULL_HANDLE)
+        layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    if (layout == VK_NULL_HANDLE) return;
+    vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
+}
 
 void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (!pipeline || !m_isRecording || !m_commandBuffer || !m_device) return;
@@ -285,12 +339,8 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     m_currentPipeline = pipeline;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
-    // PushOnly/Legacy: 0 descriptor sets; push constants only. Resource-space pipelines use BindDescriptorSets.
-    if ((pVK->m_layoutKind == PipelineLayoutKind::Legacy || pVK->m_layoutKind == PipelineLayoutKind::PushOnly) && !pVK->m_isCompute) {
-        VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
-        if (layout != VK_NULL_HANDLE)
-            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
-    }
+    // Push at bind for immediate validity; draws also push to capture post-bind SetUniform* updates.
+    PushGraphicsConstantsIfPossible();
 }
 void CommandListVK::BindVertexBuffer(IBuffer* buffer, uint32_t binding, uint32_t offset) {
     if (!m_isRecording || !m_commandBuffer) return;
@@ -330,7 +380,7 @@ void CommandListVK::DrawFullscreenQuad(IPipeline* pipeline) {
         uint32_t pushSize = 256u;  // matches VulkanResourceSpaces kPushConstantSize
         vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushSize, m_pushConstants);
     }
-    if (m_currentRenderTarget == nullptr) {
+    if (!m_isRenderingActive) {
         core::Log::Warn("DrawFullscreenQuad: not inside active rendering (no render target); draw skipped - output will not be written.");
         return;
     }
@@ -384,19 +434,32 @@ void CommandListVK::BindDescriptorSet(IDescriptorSet* set) {
 }
 
 void CommandListVK::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets, uint32_t dynamicOffsetCount) {
-    assert(m_currentPipeline != nullptr && "BindDescriptorSets requires a bound pipeline");
+    // Requires a successfully bound graphics/compute pipeline (vkCmdBindPipeline). IPipeline without VkPipeline must not exist (CreateGraphicsPipelineVK enforces that).
     if (count == 0 || !sets || !m_isRecording || !m_commandBuffer || !m_currentPipeline) return;
     PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
     VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
     if (layout == VK_NULL_HANDLE) return;
-    if (pVK->m_requiredSetCount != 0 && firstSet == 0)
-        assert(count >= pVK->m_requiredSetCount && "BindDescriptorSets: bound set count less than pipeline requires");
+    if (pVK->m_requiredSetCount != 0 && firstSet == 0 && count < pVK->m_requiredSetCount) {
+        core::Log::ErrorF("CommandListVK::BindDescriptorSets insufficient set count: layoutKind=%s required=%u provided=%u firstSet=%u",
+                          PipelineLayoutKindName(pVK->m_layoutKind), static_cast<uint32_t>(pVK->m_requiredSetCount), count, firstSet);
+        return;
+    }
     std::vector<VkDescriptorSet> vkSets(count);
     for (uint32_t i = 0; i < count; i++) {
-        if (!sets[i]) return;
+        if (!sets[i]) {
+            core::Log::ErrorF("CommandListVK::BindDescriptorSets null descriptor set: layoutKind=%s firstSet=%u localIndex=%u",
+                              PipelineLayoutKindName(pVK->m_layoutKind), firstSet, i);
+            return;
+        }
         DescriptorSetVK* dsVK = static_cast<DescriptorSetVK*>(sets[i]);
+        if (!dsVK->IsCompleteForBind(firstSet + i, pVK->m_layoutKind))
+            return;
         vkSets[i] = static_cast<VkDescriptorSet>(dsVK->m_descriptorSet);
-        if (vkSets[i] == VK_NULL_HANDLE) return;
+        if (vkSets[i] == VK_NULL_HANDLE) {
+            core::Log::ErrorF("CommandListVK::BindDescriptorSets null vk descriptor set: layoutKind=%s set=%u",
+                              PipelineLayoutKindName(pVK->m_layoutKind), firstSet + i);
+            return;
+        }
     }
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, firstSet, count, vkSets.data(), dynamicOffsetCount, dynamicOffsets ? dynamicOffsets : nullptr);
@@ -516,22 +579,24 @@ void CommandListVK::SetSubroutineIndices(ShaderStage stage, uint32_t count, cons
 
 void CommandListVK::Draw(uint32_t vertexCount, uint32_t firstVertex) {
     if (!m_isRecording || !m_commandBuffer) return;
-    if (!m_currentRenderTarget) {
+    if (!m_isRenderingActive) {
         static int n = 0;
         if (n++ < 4)
             core::Log::WarnF("Vulkan Draw: skipped (no active dynamic rendering); SetRenderTarget did not begin rendering");
         return;
     }
+    PushGraphicsConstantsIfPossible();
     vkCmdDraw(static_cast<VkCommandBuffer>(m_commandBuffer), vertexCount, 1, firstVertex, 0);
 }
 void CommandListVK::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
     if (!m_isRecording || !m_commandBuffer) return;
-    if (!m_currentRenderTarget) {
+    if (!m_isRenderingActive) {
         static int n = 0;
         if (n++ < 4)
             core::Log::WarnF("Vulkan DrawIndexed: skipped (no active dynamic rendering); SetRenderTarget may have failed");
         return;
     }
+    PushGraphicsConstantsIfPossible();
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, 1, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
@@ -539,12 +604,13 @@ void CommandListVK::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex,
 }
 void CommandListVK::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
     if (!m_isRecording || !m_commandBuffer) return;
-    if (!m_currentRenderTarget) {
+    if (!m_isRenderingActive) {
         static int n = 0;
         if (n++ < 4)
             core::Log::WarnF("Vulkan DrawIndexedInstanced: skipped (no active dynamic rendering)");
         return;
     }
+    PushGraphicsConstantsIfPossible();
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, instanceCount, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
@@ -557,9 +623,9 @@ void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
     PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
     if (pVK && pVK->m_isCompute && pVK->m_pipeline != VK_NULL_HANDLE) {
-        VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::Legacy ? pVK->m_nativePipelineLayout : m_device->GetComputePipelineLayout());
+        VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::PushOnly ? pVK->m_nativePipelineLayout : m_device->GetComputePipelineLayout());
         if (computeLayout != VK_NULL_HANDLE) {
-            if (pVK->m_layoutKind == PipelineLayoutKind::Legacy) {
+            if (pVK->m_layoutKind == PipelineLayoutKind::PushOnly) {
                 m_device->UpdateComputeSet0(this);
                 VkDescriptorSet computeSet0 = static_cast<VkDescriptorSet>(m_device->GetComputeSet0());
                 VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());

@@ -1,8 +1,10 @@
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -135,7 +137,8 @@ void Primitives::FlushLines() {
         s_lineShader = std::make_shared<Shader>();
         rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : s_staticDevice);
         if (!device) return;
-        s_lineShader->Load(device, "passes/2d/primitive", GetVertexLayout());
+        s_lineShader->Load(device, "passes/2d/primitive", GetVertexLayout(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly,
+                           std::optional{rhi::StandardAttachmentFormats::ForwardColorDepth()});
     }
     if (!s_lineShader->IsValid()) return;
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : s_staticDevice);
@@ -167,7 +170,8 @@ void Primitives::FlushTriangles() {
         s_triShader = std::make_shared<Shader>();
         rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : s_staticDevice);
         if (!device) return;
-        s_triShader->Load(device, "passes/2d/primitive", GetVertexLayout());
+        s_triShader->Load(device, "passes/2d/primitive", GetVertexLayout(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly,
+                          std::optional{rhi::StandardAttachmentFormats::ForwardColorDepth()});
     }
     if (!s_triShader->IsValid()) return;
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : (m_deviceRHI ? m_deviceRHI : s_staticDevice);

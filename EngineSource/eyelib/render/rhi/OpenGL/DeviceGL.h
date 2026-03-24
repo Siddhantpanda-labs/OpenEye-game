@@ -2,6 +2,7 @@
 
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/OpenGL/CommandListGL.h"
+#include <array>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -63,7 +64,7 @@ struct DeviceGL : IDevice {
     void DestroyShader(IShader* shader) override;
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;
-    IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy) override;
+    IPipeline* CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) override;
     IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) override;
     bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
@@ -94,6 +95,8 @@ struct DeviceGL : IDevice {
     void DestroyPipelineLayout(IPipelineLayout* layout) override;
     IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) override;
     void DestroyDescriptorSet(IDescriptorSet* set) override;
+    IPipelineLayout* GetResourceSetLayout(ResourceSetType type) override;
+    IDescriptorSet* GetEmptyResourceSet() override;
 
     IBindlessHeap* CreateBindlessHeap() override;
     void DestroyBindlessHeap(IBindlessHeap* heap) override;
@@ -136,6 +139,10 @@ private:
 private:
     void QueryCapabilities();
     RHICapabilities m_caps;
+    static constexpr size_t kResourceSetTypeCount = 10;
+    std::array<IPipelineLayout*, kResourceSetTypeCount> m_resourceSetLayouts{};
+    IPipelineLayout* m_emptyPipelineLayout = nullptr;
+    IDescriptorSet* m_emptyResourceSet = nullptr;
     std::unique_ptr<CommandListGL> m_immediateCommandList;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;

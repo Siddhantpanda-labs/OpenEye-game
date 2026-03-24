@@ -54,10 +54,22 @@ void ShadowPass::EnsureResourceSpaceSets(rhi::IDevice* device) {
     bonesDesc.usage = rhi::BufferUsage::Storage;
     bonesDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
     m_bonesBuffer = device->CreateBuffer(bonesDesc, nullptr);
+    rhi::BufferDesc fallbackDesc;
+    fallbackDesc.sizeInBytes = 64u;
+    fallbackDesc.usage = rhi::BufferUsage::Storage;
+    fallbackDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    m_sceneFallbackBuffer = device->CreateBuffer(fallbackDesc, nullptr);
     if (m_frameUBO) {
         m_frameSet->UpdateUniformBuffer(0, m_frameUBO, 0, 128);
         m_frameSet->UpdateUniformBuffer(1, m_frameUBO, 128, 128);
         m_shadowPassSet->UpdateUniformBuffer(0, m_frameUBO, 0, 128);
+    }
+    rhi::IBuffer* sceneFallback = m_sceneFallbackBuffer ? m_sceneFallbackBuffer : m_bonesBuffer;
+    if (sceneFallback) {
+        m_sceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
+        m_sceneBuffersSet->UpdateStorageBuffer(1, sceneFallback, 0, 0);
+        m_sceneBuffersSet->UpdateStorageBuffer(2, sceneFallback, 0, 0);
+        m_sceneBuffersSet->UpdateStorageBuffer(3, sceneFallback, 0, 0);
     }
     if (m_bonesBuffer)
         m_sceneBuffersSet->UpdateStorageBuffer(1, m_bonesBuffer, 0, static_cast<uint32_t>(bonesDesc.sizeInBytes));
@@ -71,6 +83,7 @@ void ShadowPass::Shutdown() {
     if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
     if (m_frameUBO) { m_device->DestroyBuffer(m_frameUBO); m_frameUBO = nullptr; }
     if (m_bonesBuffer) { m_device->DestroyBuffer(m_bonesBuffer); m_bonesBuffer = nullptr; }
+    if (m_sceneFallbackBuffer) { m_device->DestroyBuffer(m_sceneFallbackBuffer); m_sceneFallbackBuffer = nullptr; }
     m_device = nullptr;
 }
 

@@ -15,6 +15,7 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanPipelineHash.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanBindingUtils.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
+#include "eyelib/render/rhi/ResourceSetLayoutDesc.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
@@ -75,7 +76,14 @@ DeviceVK::~DeviceVK() {
         for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
             DestroyDescriptorSetVK(this, set);
         m_pendingDescriptorSetsToFree.clear();
-        // Enqueued pipelines were just destroyed in Tick; clear cache to avoid double-destroy in loop below.
+        // Destroy any VkPipeline still tracked in the graphics cache (handles not yet released via refcount).
+        for (auto& kv : m_graphicsPipelineCache) {
+            void* pl = kv.second.vkPipeline;
+            if (pl && !alreadyDestroyedPipelines.count(pl)) {
+                vkDestroyPipeline(device, static_cast<VkPipeline>(pl), nullptr);
+                alreadyDestroyedPipelines.insert(pl);
+            }
+        }
         m_graphicsPipelineCache.clear();
     }
 
@@ -90,6 +98,11 @@ DeviceVK::~DeviceVK() {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             FrameContextVK::Destroy(&m_frameContexts[i], device);
     }
+    VkSampler nearestSampler = static_cast<VkSampler>(m_nearestSampler);
+    if (nearestSampler != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+        vkDestroySampler(device, nearestSampler, nullptr);
+        m_nearestSampler = nullptr;
+    }
     VkSampler defaultSampler = static_cast<VkSampler>(m_defaultSampler);
     if (defaultSampler != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         vkDestroySampler(device, defaultSampler, nullptr);
@@ -102,10 +115,7 @@ DeviceVK::~DeviceVK() {
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
         m_descriptorPool = nullptr;
     }
-    for (auto& kv : m_graphicsPipelineCache) {
-        if (kv.second != VK_NULL_HANDLE && device != VK_NULL_HANDLE)
-            vkDestroyPipeline(device, static_cast<VkPipeline>(kv.second), nullptr);
-    }
+    // Graphics pipelines were destroyed above (first destructor block) or cache is empty.
     m_graphicsPipelineCache.clear();
     VkPipelineCache pipelineCache = static_cast<VkPipelineCache>(m_pipelineCache);
     if (pipelineCache != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
@@ -357,11 +367,21 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
     dynamicRendering.dynamicRendering = VK_TRUE;
     timelineSemaphoreFeatures.pNext = &dynamicRendering;
-    dynamicRendering.pNext = nullptr;
+
+    VkPhysicalDeviceVulkan11Features vulkan11Features = {};
+    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    dynamicRendering.pNext = &vulkan11Features;
+    vulkan11Features.pNext = nullptr;
 
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     if (dynamicRendering.dynamicRendering != VK_TRUE) {
         core::Log::Error("DeviceVK::Initialize: dynamicRendering feature is not supported by the selected physical device.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (vulkan11Features.shaderDrawParameters != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: shaderDrawParameters (Vulkan 1.1) is not supported; required for gl_BaseVertex/gl_BaseInstance in shaders.");
         InstanceVK::Destroy(&m_instanceVK);
         PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
         return false;
@@ -846,16 +866,26 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_outlinePostSetLayout = outlinePostLayout;
         m_outlinePostPipelineLayout = outlinePostPl;
 
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] = CreatePipelineLayoutWrapperVK(this, frameLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::PostPass)] = CreatePipelineLayoutWrapperVK(this, postPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ForwardPass)] = CreatePipelineLayoutWrapperVK(this, forwardPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ShadowPass)] = CreatePipelineLayoutWrapperVK(this, shadowPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::LightCullPass)] = CreatePipelineLayoutWrapperVK(this, lightCullPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Material)] = CreatePipelineLayoutWrapperVK(this, materialLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::SceneBuffers)] = CreatePipelineLayoutWrapperVK(this, sceneLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::DeferredLightingPass)] = CreatePipelineLayoutWrapperVK(this, deferredLightingPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::IBLPass)] = CreatePipelineLayoutWrapperVK(this, iblPassLayout);
-        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::OutlinePost)] = CreatePipelineLayoutWrapperVK(this, outlinePostLayout);
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] =
+            CreatePipelineLayoutWrapperVK(this, frameLayout, MakeResourceSetDesc(IDevice::ResourceSetType::Frame));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::PostPass)] =
+            CreatePipelineLayoutWrapperVK(this, postPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::PostPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ForwardPass)] =
+            CreatePipelineLayoutWrapperVK(this, forwardPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::ForwardPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::ShadowPass)] =
+            CreatePipelineLayoutWrapperVK(this, shadowPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::ShadowPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::LightCullPass)] =
+            CreatePipelineLayoutWrapperVK(this, lightCullPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::LightCullPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Material)] =
+            CreatePipelineLayoutWrapperVK(this, materialLayout, MakeResourceSetDesc(IDevice::ResourceSetType::Material));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::SceneBuffers)] =
+            CreatePipelineLayoutWrapperVK(this, sceneLayout, MakeResourceSetDesc(IDevice::ResourceSetType::SceneBuffers));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::DeferredLightingPass)] =
+            CreatePipelineLayoutWrapperVK(this, deferredLightingPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::DeferredLightingPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::IBLPass)] =
+            CreatePipelineLayoutWrapperVK(this, iblPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::IBLPass));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::OutlinePost)] =
+            CreatePipelineLayoutWrapperVK(this, outlinePostLayout, MakeResourceSetDesc(IDevice::ResourceSetType::OutlinePost));
         m_emptyResourceSetLayoutWrapper = CreatePipelineLayoutWrapperVK(this, emptyLayout);
         m_emptyResourceSet = CreateDescriptorSet(m_emptyResourceSetLayoutWrapper);
     }
@@ -927,12 +957,31 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         }
     }
 
+    // Integer textures (e.g. entity ID R32UI) cannot be linearly filtered.
+    VkSamplerCreateInfo pointSamplerInfo = {};
+    pointSamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    pointSamplerInfo.magFilter = VK_FILTER_NEAREST;
+    pointSamplerInfo.minFilter = VK_FILTER_NEAREST;
+    pointSamplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    pointSamplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    pointSamplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    pointSamplerInfo.anisotropyEnable = VK_FALSE;
+    pointSamplerInfo.maxAnisotropy = 1.0f;
+    pointSamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    pointSamplerInfo.unnormalizedCoordinates = VK_FALSE;
+    VkSampler nearestSamplerCreated = VK_NULL_HANDLE;
+    if (vkCreateSampler(device, &pointSamplerInfo, nullptr, &nearestSamplerCreated) == VK_SUCCESS)
+        m_nearestSampler = nearestSamplerCreated;
+    else
+        core::Log::Warn("DeviceVK::Initialize: failed to create nearest sampler, falling back to default linear sampler for all textures.");
+
     core::Log::Info("Vulkan device initialized");
     return true;
 }
 
 void DeviceVK::QueryCapabilities() {
     m_caps = RHICapabilities{};
+    m_caps.supportsResourceSpaceBindPath = true;
     m_caps.supportsCompute = true;
     m_caps.supportsMultiDrawIndirect = true;
     m_caps.supportsMultiDrawIndirectCount = true;
@@ -1004,12 +1053,44 @@ bool DeviceVK::ResolveShaderPath(const char* logicalName, ShaderStage stage, std
 
 void* DeviceVK::GetCachedGraphicsPipeline(uint64_t hash) const {
     auto it = m_graphicsPipelineCache.find(hash);
-    return (it != m_graphicsPipelineCache.end()) ? it->second : nullptr;
+    return (it != m_graphicsPipelineCache.end()) ? it->second.vkPipeline : nullptr;
 }
 
 void DeviceVK::RegisterGraphicsPipeline(uint64_t hash, void* pipeline) {
-    if (pipeline)
-        m_graphicsPipelineCache[hash] = pipeline;
+    if (!pipeline) return;
+    m_graphicsPipelineCache[hash] = GraphicsPipelineCacheEntry{pipeline, 0};
+}
+
+void DeviceVK::RetainGraphicsPipeline(uint64_t hash) {
+    auto it = m_graphicsPipelineCache.find(hash);
+    if (it == m_graphicsPipelineCache.end() || !it->second.vkPipeline) {
+        core::Log::Error("RetainGraphicsPipeline: hash not registered (internal error).");
+        return;
+    }
+    ++it->second.refCount;
+}
+
+void DeviceVK::ReleaseGraphicsPipeline(uint64_t hash, void* vkPipeline) {
+    if (!vkPipeline) return;
+    auto it = m_graphicsPipelineCache.find(hash);
+    if (it == m_graphicsPipelineCache.end()) {
+        // Cache already cleared (e.g. device teardown) or unknown hash — do not vkDestroy (may already be freed).
+        core::Log::Warn("ReleaseGraphicsPipeline: hash not in cache (skip release).");
+        return;
+    }
+    if (it->second.vkPipeline != vkPipeline) {
+        core::Log::Warn("ReleaseGraphicsPipeline: handle mismatch (skip release).");
+        return;
+    }
+    if (it->second.refCount == 0) {
+        core::Log::Warn("ReleaseGraphicsPipeline: refcount underflow (internal error).");
+        return;
+    }
+    --it->second.refCount;
+    if (it->second.refCount == 0) {
+        m_deletionQueue.EnqueuePipeline(GetCurrentFrameIndex(), m_device, it->second.vkPipeline);
+        m_graphicsPipelineCache.erase(it);
+    }
 }
 
 void DeviceVK::FreeCommandBuffer(void* cmdBuf, void* commandPool) {
@@ -1287,8 +1368,8 @@ IPipeline* DeviceVK::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return CreateGraphicsPipelineVK(this, desc);
 }
 
-IPipeline* DeviceVK::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
-    return CreateGraphicsPipelineFromNameVK(this, shaderName, layout, topology, depthStencilOverride, layoutKind);
+IPipeline* DeviceVK::CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) {
+    return CreateGraphicsPipelineFromShaderAssetVK(this, info);
 }
 
 IPipeline* DeviceVK::CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) {
@@ -1314,13 +1395,13 @@ void DeviceVK::DestroyPipeline(IPipeline* pipeline) {
     PipelineVK* p = static_cast<PipelineVK*>(pipeline);
     if (p->m_pipeline) {
         void* handle = p->m_pipeline;
-        for (auto it = m_graphicsPipelineCache.begin(); it != m_graphicsPipelineCache.end(); ) {
-            if (it->second == handle) { it = m_graphicsPipelineCache.erase(it); break; }
-            else ++it;
-        }
-        m_deletionQueue.EnqueuePipeline(GetCurrentFrameIndex(), m_device, handle);
+        if (!p->m_isCompute && p->m_graphicsCacheHash != 0)
+            ReleaseGraphicsPipeline(p->m_graphicsCacheHash, handle);
+        else
+            m_deletionQueue.EnqueuePipeline(GetCurrentFrameIndex(), m_device, handle);
         p->m_pipeline = nullptr;
     }
+    p->m_graphicsCacheHash = 0;
     delete p;
 }
 
@@ -1384,8 +1465,14 @@ IPipelineLayout* DeviceVK::GetResourceSetLayout(ResourceSetType type) {
 
 IPipelineLayout* DeviceVK::GetBindlessPipelineLayout() const {
     if (!m_bindlessSetLayout) return nullptr;
-    if (!m_bindlessPipelineLayoutWrapper)
-        m_bindlessPipelineLayoutWrapper = CreatePipelineLayoutWrapperVK(const_cast<DeviceVK*>(this), m_bindlessSetLayout);
+    if (!m_bindlessPipelineLayoutWrapper) {
+        PipelineLayoutDesc bindlessDesc;
+        bindlessDesc.bindings = {
+            {0, BindingType::Texture},
+            {1, BindingType::StorageBuffer},
+        };
+        m_bindlessPipelineLayoutWrapper = CreatePipelineLayoutWrapperVK(const_cast<DeviceVK*>(this), m_bindlessSetLayout, bindlessDesc);
+    }
     return m_bindlessPipelineLayoutWrapper;
 }
 

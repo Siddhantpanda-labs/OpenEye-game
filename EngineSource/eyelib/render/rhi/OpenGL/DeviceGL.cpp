@@ -1,5 +1,6 @@
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
 #include "eyelib/render/rhi/OpenGL/DeferredCommandListGL.h"
+#include "eyelib/render/rhi/ResourceSetLayoutDesc.h"
 #include "eyelib/render/rhi/OpenGL/BindlessHeapGL.h"
 #include "eyelib/render/rhi/OpenGL/BufferGL.h"
 #include "eyelib/render/rhi/OpenGL/TextureGL.h"
@@ -20,10 +21,25 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+namespace {
+static std::string ApplyKeywordDefinesGL(const std::string& source, const std::vector<std::string>& keywords) {
+    if (keywords.empty()) return source;
+    std::string prefix;
+    for (const auto& k : keywords) {
+        if (k.empty()) continue;
+        prefix += "#define ";
+        prefix += k;
+        prefix += " 1\n";
+    }
+    return prefix + source;
+}
+} // namespace
 
 DeviceGL::DeviceGL() : m_caps{} {
     m_immediateCommandList = std::make_unique<CommandListGL>(this);
@@ -31,6 +47,14 @@ DeviceGL::DeviceGL() : m_caps{} {
 }
 
 DeviceGL::~DeviceGL() {
+    if (m_emptyResourceSet) { DestroyDescriptorSet(m_emptyResourceSet); m_emptyResourceSet = nullptr; }
+    if (m_emptyPipelineLayout) { DestroyPipelineLayout(m_emptyPipelineLayout); m_emptyPipelineLayout = nullptr; }
+    for (size_t i = 0; i < kResourceSetTypeCount; ++i) {
+        if (m_resourceSetLayouts[i]) {
+            DestroyPipelineLayout(m_resourceSetLayouts[i]);
+            m_resourceSetLayouts[i] = nullptr;
+        }
+    }
     if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
     if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
     m_immediateCommandList.reset();
@@ -86,6 +110,8 @@ void DeviceGL::QueryCapabilities() {
     m_caps.supportsSparseBuffer = has("GL_ARB_sparse_buffer");
     m_caps.supportsAtomicCounters = has("GL_ARB_shader_atomic_counters");
     m_caps.supportsShaderSubroutines = has("GL_ARB_shader_subroutine");
+    // OpenGL: false until GLSL shaders use layout(binding=N) per descriptor_binding_table.md
+    m_caps.supportsResourceSpaceBindPath = true;
 }
 
 const RHICapabilities& DeviceGL::GetCapabilities() const {
@@ -511,21 +537,29 @@ IPipeline* DeviceGL::CreateGraphicsPipeline(const PipelineDesc& desc) {
     return p;
 }
 
-IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind) {
-    (void)layoutKind;
-    if (!shaderName || !shaderName[0]) return nullptr;
-    const std::string logicalName = ShaderPathToLogicalName(shaderName);
-    if (logicalName.empty()) return nullptr;
-    // Load from Engine/assets/shaders/opengl (no copy to exe dir)
-    std::string root = eyelib::platform::filesystem::GetEngineAssetsRoot();
-    std::string baseDir = root.empty() ? "assets/shaders/opengl/" : eyelib::platform::filesystem::NormalizePath(root + "/assets/shaders/opengl/");
-    std::string vertPath = baseDir + logicalName + ".vert";
-    std::string fragPath = baseDir + logicalName + ".frag";
+IPipeline* DeviceGL::CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) {
+    const bool fromOverrides = !info.vertexSourceOverride.empty() && !info.fragmentSourceOverride.empty();
+    if (!fromOverrides && info.assetPath.empty()) return nullptr;
 
     std::string vertexSrc;
-    if (!eyelib::render::LoadShaderSource(vertPath, vertexSrc)) return nullptr;
     std::string fragmentSrc;
-    if (!eyelib::render::LoadShaderSource(fragPath, fragmentSrc)) return nullptr;
+    if (fromOverrides) {
+        vertexSrc = ApplyKeywordDefinesGL(info.vertexSourceOverride, info.keywordDefines);
+        fragmentSrc = ApplyKeywordDefinesGL(info.fragmentSourceOverride, info.keywordDefines);
+    } else {
+        const std::string logicalName = ShaderPathToLogicalName(info.assetPath);
+        if (logicalName.empty()) return nullptr;
+        std::string root = eyelib::platform::filesystem::GetEngineAssetsRoot();
+        std::string baseDir =
+            root.empty() ? "assets/shaders/opengl/"
+                         : eyelib::platform::filesystem::NormalizePath(root + "/assets/shaders/opengl/");
+        std::string vertPath = baseDir + logicalName + ".vert";
+        std::string fragPath = baseDir + logicalName + ".frag";
+        if (!eyelib::render::LoadShaderSource(vertPath, vertexSrc)) return nullptr;
+        if (!eyelib::render::LoadShaderSource(fragPath, fragmentSrc)) return nullptr;
+        vertexSrc = ApplyKeywordDefinesGL(vertexSrc, info.keywordDefines);
+        fragmentSrc = ApplyKeywordDefinesGL(fragmentSrc, info.keywordDefines);
+    }
 
     IShader* vs = CreateShader(ShaderStage::Vertex, vertexSrc.c_str(), vertexSrc.size());
     IShader* fs = CreateShader(ShaderStage::Fragment, fragmentSrc.c_str(), fragmentSrc.size());
@@ -538,11 +572,13 @@ IPipeline* DeviceGL::CreateGraphicsPipelineFromName(const char* shaderName, cons
     PipelineDesc desc;
     desc.vertexShader = vs;
     desc.fragmentShader = fs;
-    desc.vertexLayout = layout;
-    desc.topology = topology;
-    if (depthStencilOverride) {
-        desc.depthStencil = *depthStencilOverride;
-    } else {
+    desc.vertexLayout = info.vertexLayout;
+    desc.topology = info.topology;
+    desc.layoutKind = info.layoutKind;
+    desc.attachmentFormats = info.attachmentFormats;
+    if (info.useDepthStencilOverride)
+        desc.depthStencil = info.depthStencilOverride;
+    else {
         desc.depthStencil.depthTest = true;
         desc.depthStencil.depthWrite = true;
     }
@@ -941,6 +977,30 @@ IDescriptorSet* DeviceGL::CreateDescriptorSet(IPipelineLayout* layout) {
     auto* set = new DescriptorSetGL();
     set->layout = pl;
     return set;
+}
+
+IPipelineLayout* DeviceGL::GetResourceSetLayout(ResourceSetType type) {
+    if (!m_caps.supportsResourceSpaceBindPath) return nullptr;
+    const size_t i = static_cast<size_t>(type);
+    if (i >= kResourceSetTypeCount) return nullptr;
+    if (!m_resourceSetLayouts[i]) {
+        auto* pl = new PipelineLayoutGL();
+        pl->desc = MakeResourceSetDesc(type);
+        pl->resourceSetType = type;
+        m_resourceSetLayouts[i] = pl;
+    }
+    return m_resourceSetLayouts[i];
+}
+
+IDescriptorSet* DeviceGL::GetEmptyResourceSet() {
+    if (!m_caps.supportsResourceSpaceBindPath) return nullptr;
+    if (!m_emptyResourceSet) {
+        PipelineLayoutDesc emptyDesc;
+        m_emptyPipelineLayout = CreatePipelineLayout(emptyDesc);
+        if (m_emptyPipelineLayout)
+            m_emptyResourceSet = CreateDescriptorSet(m_emptyPipelineLayout);
+    }
+    return m_emptyResourceSet;
 }
 
 void DeviceGL::DestroyDescriptorSet(IDescriptorSet* set) {

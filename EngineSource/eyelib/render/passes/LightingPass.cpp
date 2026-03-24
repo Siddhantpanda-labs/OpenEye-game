@@ -3,8 +3,10 @@
 #include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -30,12 +32,13 @@ void LightingPass::EnsureDefaultShader(rhi::IDevice* device) {
     if (!device) return;
     m_lightingShader = std::make_shared<Shader>();
     const rhi::VertexLayout fullscreenLayout = GetFullscreenVertexLayout();
-    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::PushOnly;
     if (device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::DeferredLightingPass))
         layoutKind = rhi::PipelineLayoutKind::DeferredLighting;
-    if (!m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, layoutKind)) {
-        if (layoutKind != rhi::PipelineLayoutKind::Legacy &&
-            !m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Legacy)) {
+    const std::optional<rhi::PipelineAttachmentFormats> lightingFormats = std::optional{rhi::StandardAttachmentFormats::DeferredLightingAccumulation()};
+    if (!m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, layoutKind, lightingFormats)) {
+        if (layoutKind != rhi::PipelineLayoutKind::PushOnly &&
+            !m_lightingShader->Load(device, "passes/deferred/lighting", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly, lightingFormats)) {
             core::Log::Warn("LightingPass: deferred lighting shader load failed");
             return;
         }

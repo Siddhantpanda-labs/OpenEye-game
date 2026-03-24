@@ -8,6 +8,8 @@
 #include "eyelib/render/rhi/OpenGL/QueryPoolGL.h"
 #include "eyelib/render/rhi/OpenGL/FenceGL.h"
 #include "eyelib/render/rhi/OpenGL/GLEnums.h"
+#include "eyelib/render/rhi/OpenGL/OpenGLResourceSpaceBindings.h"
+#include "eyelib/render/rhi/OpenGL/PipelineLayoutGL.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/debug/Validation.h"
 #include <glad/glad.h>
@@ -16,6 +18,16 @@
 namespace eyelib {
 namespace render {
 namespace rhi {
+
+namespace {
+BindingType LookupBindingType(const PipelineLayoutGL* layout, uint32_t logical) {
+    if (!layout) return BindingType::Texture;
+    for (const auto& b : layout->desc.bindings) {
+        if (b.binding == logical) return b.type;
+    }
+    return BindingType::Texture;
+}
+} // namespace
 
 CommandListGL::CommandListGL(DeviceGL* device) : m_device(device), m_blendSrc(GL_SRC_ALPHA), m_blendDst(GL_ONE_MINUS_SRC_ALPHA) {
 }
@@ -384,23 +396,45 @@ void CommandListGL::UnbindTexture(uint32_t binding) {
 void CommandListGL::BindDescriptorSet(IDescriptorSet* set) {
     if (!set) return;
     auto* ds = static_cast<DescriptorSetGL*>(set);
+    const PipelineLayoutGL* layout = ds->layout;
+    const bool translate = layout && layout->resourceSetType.has_value();
+
     for (const auto& t : ds->textures) {
+        uint32_t bind = t.binding;
+        if (translate)
+            bind = GLBindingForResourceSet(*layout->resourceSetType, LookupBindingType(layout, t.binding), t.binding);
         if (t.texture) {
             auto* tex = static_cast<TextureGL*>(t.texture);
-            glBindTextureUnit(t.binding, tex->m_handle);
+            glBindTextureUnit(bind, tex->m_handle);
         } else {
-            glBindTextureUnit(t.binding, 0);
+            glBindTextureUnit(bind, 0);
         }
     }
     for (const auto& b : ds->buffers) {
         if (!b.buffer) continue;
         auto* buf = static_cast<BufferGL*>(b.buffer);
         GLsizeiptr sz = b.size > 0 ? static_cast<GLsizeiptr>(b.size) : static_cast<GLsizeiptr>(buf->GetSize());
+        uint32_t bind = b.binding;
+        if (translate) {
+            const BindingType bt = b.isStorage ? BindingType::StorageBuffer : BindingType::UniformBuffer;
+            bind = GLBindingForResourceSet(*layout->resourceSetType, bt, b.binding);
+        }
         if (b.isStorage)
-            glBindBufferRange(GL_SHADER_STORAGE_BUFFER, b.binding, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
+            glBindBufferRange(GL_SHADER_STORAGE_BUFFER, bind, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
         else
-            glBindBufferRange(GL_UNIFORM_BUFFER, b.binding, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
+            glBindBufferRange(GL_UNIFORM_BUFFER, bind, buf->m_handle, static_cast<GLintptr>(b.offset), sz);
     }
+}
+
+void CommandListGL::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets,
+                                       const uint32_t* dynamicOffsets, uint32_t dynamicOffsetCount) {
+    (void)firstSet;
+    (void)dynamicOffsets;
+    (void)dynamicOffsetCount;
+    if (!sets || count == 0) return;
+    for (uint32_t i = 0; i < count; ++i)
+        if (sets[i])
+            BindDescriptorSet(sets[i]);
 }
 
 void CommandListGL::BindBindlessHeap(IBindlessHeap* heap) {

@@ -2,8 +2,10 @@
 #include "eyelib/render/2d/Sprite.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -51,7 +53,8 @@ void SpriteRenderer::EnsureShader() {
     m_shader = std::make_shared<Shader>();
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : m_deviceRHI;
     if (!device) return;
-    m_shader->Load(device, "passes/2d/sprite", GetVertexLayout(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Post);
+    m_shader->Load(device, "passes/2d/sprite", GetVertexLayout(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Post,
+                     std::optional{rhi::StandardAttachmentFormats::PostLDR8()});
     if (!m_spriteSet) {
         rhi::IPipelineLayout* postPassLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
         if (postPassLayout) m_spriteSet = device->CreateDescriptorSet(postPassLayout);

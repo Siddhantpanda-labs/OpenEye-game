@@ -7,7 +7,7 @@ namespace render {
 
 /**
  * Single place that resolves any shader name or path to the logical name
- * (e.g. passes/forward/forward). Used by RHI CreateGraphicsPipelineFromName and
+ * (e.g. passes/forward/forward). Used by RHI CreateGraphicsPipelineFromShaderAsset and
  * Shader::LoadFromFile so every shader goes through one resolver.
  *
  * Accepts:
@@ -38,7 +38,7 @@ inline std::string ShaderPathToLogicalName(const std::string& nameOrPath) {
     return name;
 }
 
-/** Overload for const char* (e.g. from CreateGraphicsPipelineFromName). */
+/** Overload for const char* (e.g. from CreateGraphicsPipelineFromShaderAsset). */
 inline std::string ShaderPathToLogicalName(const char* nameOrPath) {
     if (!nameOrPath || !nameOrPath[0]) return std::string();
     return ShaderPathToLogicalName(std::string(nameOrPath));

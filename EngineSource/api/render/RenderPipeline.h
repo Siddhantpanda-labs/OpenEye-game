@@ -37,6 +37,8 @@ public:
                     ::eyelib::render::RenderBackend backend = ::eyelib::render::RenderBackend::Default);
     /** Initialize with a shared RHI device (caller owns device; use for multiple pipelines per window). */
     bool InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height);
+    /** Initialize with shared device and reuse shaders from another pipeline. shareFrom must be already initialized. */
+    bool InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height, RenderPipeline* shareFrom);
     void Resize(uint32_t width, uint32_t height);
     void Resize(const RenderTarget& target);
     void Shutdown();

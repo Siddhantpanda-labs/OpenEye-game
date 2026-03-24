@@ -68,6 +68,29 @@ bool RenderPipeline::InitializeWithSharedDevice(RenderDevice device, uint32_t wi
     return true;
 }
 
+bool RenderPipeline::InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height, RenderPipeline* shareFrom) {
+    if (!device) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice(shareFrom): device is null");
+        return false;
+    }
+    if (!shareFrom || !shareFrom->m_impl->pipeline) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice(shareFrom): shareFrom is null or not initialized");
+        return false;
+    }
+    auto* shared = shareFrom->m_impl->pipeline->GetSharedResources();
+    if (!shared || !shared->shaderCache) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice(shareFrom): shareFrom has no shared resources");
+        return false;
+    }
+    auto* rhiDevice = static_cast<::eyelib::render::rhi::IDevice*>(device.Get());
+    if (!m_impl->pipeline->Initialize(rhiDevice, width, height, shared)) {
+        core::Log::Error("RenderPipeline::InitializeWithSharedDevice(shareFrom): pipeline init failed");
+        return false;
+    }
+    core::Log::Info("RenderPipeline::InitializeWithSharedDevice: success (shared)");
+    return true;
+}
+
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     m_impl->pipeline->Resize(width, height);
 }

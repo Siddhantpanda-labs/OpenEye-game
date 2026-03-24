@@ -3,6 +3,7 @@
 set(RENDER_SOURCES
     # RHI (graphics backend abstraction)
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/RHIUtils.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/ResourceSetLayoutDesc.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/GLEnums.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BindlessHeapGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/BufferGL.cpp
@@ -14,6 +15,7 @@ set(RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/CommandListGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeferredCommandListGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DescriptorSetGL.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/OpenGLResourceSpaceBindings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/OpenGL/DeviceGL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rhi/CreateDevice.cpp
 )
@@ -46,6 +48,7 @@ if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/DescriptorSetVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/descriptors/BindlessHeapVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/PipelineVK.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanGlslToSpirv.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/ShaderVK.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanPipelineHash.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/rhi/Vulkan/pipelines/VulkanBindingUtils.cpp
@@ -202,6 +205,27 @@ if(Vulkan_FOUND)
     target_include_directories(EyelibRender PRIVATE ${Vulkan_INCLUDE_DIRS})
     target_link_libraries(EyelibRender PRIVATE Vulkan::Vulkan)
     target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_AVAILABLE=1)
+    # Runtime GLSL→SPIR-V (shaderc from Vulkan SDK Lib/)
+    get_filename_component(_OPENEYE_VULKAN_SDK_ROOT "${Vulkan_INCLUDE_DIRS}" DIRECTORY)
+    if(WIN32)
+        set(_OPENEYE_SHADERC_REL_LIB "${_OPENEYE_VULKAN_SDK_ROOT}/Lib/shaderc_combined.lib")
+        set(_OPENEYE_SHADERC_DBG_LIB "${_OPENEYE_VULKAN_SDK_ROOT}/Lib/shaderc_combinedd.lib")
+        if(EXISTS "${_OPENEYE_SHADERC_DBG_LIB}" AND EXISTS "${_OPENEYE_SHADERC_REL_LIB}")
+            target_link_libraries(EyelibRender PRIVATE
+                "$<$<CONFIG:Debug>:${_OPENEYE_SHADERC_DBG_LIB}>"
+                "$<$<NOT:$<CONFIG:Debug>>:${_OPENEYE_SHADERC_REL_LIB}>")
+            target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_SHADERC=1)
+        elseif(EXISTS "${_OPENEYE_SHADERC_REL_LIB}")
+            target_link_libraries(EyelibRender PRIVATE "${_OPENEYE_SHADERC_REL_LIB}")
+            target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_SHADERC=1)
+        endif()
+    else()
+        find_library(_OPENEYE_SHADERC_LIB shaderc_combined PATHS "${_OPENEYE_VULKAN_SDK_ROOT}/lib" NO_DEFAULT_PATH)
+        if(_OPENEYE_SHADERC_LIB)
+            target_link_libraries(EyelibRender PRIVATE "${_OPENEYE_SHADERC_LIB}")
+            target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_SHADERC=1)
+        endif()
+    endif()
     if(OPENEYE_VULKAN_DEBUG_CLEAR_RED)
         target_compile_definitions(EyelibRender PRIVATE OPENEYE_VULKAN_DEBUG_CLEAR_RED=1)
     endif()

@@ -1,4 +1,5 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/ShaderVK.h"
+#include "eyelib/render/rhi/Vulkan/pipelines/VulkanGlslToSpirv.h"
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
@@ -23,11 +24,20 @@ ShaderStage ShaderVK::GetStage() const { return m_stage; }
 bool ShaderVK::IsValid() const { return m_module != nullptr; }
 
 IShader* CreateShaderVK(DeviceVK* device, ShaderStage stage, const char* source, size_t sourceLen) {
-    (void)source;
-    (void)sourceLen;
-    auto* s = new ShaderVK(device);
-    s->m_stage = stage;
-    return s;
+    if (!device || !source || sourceLen == 0) return nullptr;
+    if (stage != ShaderStage::Vertex && stage != ShaderStage::Fragment && stage != ShaderStage::Compute) {
+        core::Log::ErrorF("CreateShaderVK: unsupported stage %u", static_cast<unsigned>(static_cast<uint32_t>(stage)));
+        return nullptr;
+    }
+    const char* fname = "shader.comp";
+    if (stage == ShaderStage::Vertex)
+        fname = "shader.vert";
+    else if (stage == ShaderStage::Fragment)
+        fname = "shader.frag";
+    std::vector<uint32_t> spirv;
+    if (!VulkanCompileGlslToSpirv(source, sourceLen, stage, fname, spirv) || spirv.empty())
+        return nullptr;
+    return CreateShaderFromBinaryVK(device, stage, spirv.data(), spirv.size() * sizeof(uint32_t));
 }
 
 IShader* CreateShaderFromBinaryVK(DeviceVK* device, ShaderStage stage, const void* data, size_t size) {

@@ -18,11 +18,11 @@ std::string GetPipelineCacheDirectory() {
     return s_cacheDir;
 }
 
-std::string PipelineCacheKey(const std::string& shaderName,
+std::string PipelineCacheKey(const std::string& assetPath,
                               rhi::PrimitiveTopology topology,
                               const std::vector<std::string>& keywords) {
     std::ostringstream o;
-    o << shaderName << "_" << static_cast<int>(topology);
+    o << assetPath << "_" << static_cast<int>(topology);
     std::vector<std::string> sorted = keywords;
     std::sort(sorted.begin(), sorted.end());
     for (const auto& k : sorted) {

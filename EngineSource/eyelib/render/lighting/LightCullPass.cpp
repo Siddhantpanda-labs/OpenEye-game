@@ -177,8 +177,12 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
             rhi::IDescriptorSet* sets[5] = { m_frameSet, m_lightCullPassSet, emptySet, emptySet, m_sceneBuffersSet };
             cmd->BindDescriptorSets(0, 5, sets);
         } else {
-            rhi::IDescriptorSet* sets[3] = { m_frameSet, m_lightCullPassSet, m_sceneBuffersSet };
-            cmd->BindDescriptorSets(0, 3, sets);
+            static bool loggedMissingEmptySet = false;
+            if (!loggedMissingEmptySet) {
+                core::Log::Error("LightCullPass: empty resource descriptor set is required for ComputeLightCull layout (sets 2-3 placeholders). Dispatch skipped.");
+                loggedMissingEmptySet = true;
+            }
+            return;
         }
     } else {
         cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);

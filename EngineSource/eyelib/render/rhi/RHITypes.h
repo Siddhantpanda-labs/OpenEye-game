@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace eyelib {
@@ -225,6 +227,38 @@ enum class PipelineLayoutKind : uint32_t {
     OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
 };
 
+/** Vulkan: how to obtain SPIR-V for a shader asset. OpenGL/Diligent ignore where not applicable. */
+enum class ShaderSourcePolicy : uint32_t {
+    PreferSpirv = 0,      ///< Try precompiled .spv on disk first; if missing, compile GLSL from disk or overrides.
+    SpirvOnly,            ///< Only load precompiled SPIR-V (fails if missing).
+    CompileFromSource,    ///< Compile GLSL from disk or from non-empty vertex/fragment source overrides.
+};
+
+/** Color + depth/stencil formats for dynamic rendering (Vulkan VkPipelineRenderingCreateInfo). Empty color + depth None = depth-only pass (e.g. shadow map). */
+struct PipelineAttachmentFormats {
+    std::vector<RHITextureFormat> color;
+    RHITextureFormat depthStencil = RHITextureFormat::None;
+};
+
+/** Create a graphics pipeline from one logical shader asset (path without extension, e.g. passes/sky/skybox). */
+struct ShaderGraphicsPipelineCreateInfo {
+    /** Logical path under assets/shaders/{backend}/; may be empty only when both source overrides are set. */
+    std::string assetPath;
+    VertexLayout vertexLayout;
+    PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+    PipelineLayoutKind layoutKind = PipelineLayoutKind::PushOnly;
+    bool useDepthStencilOverride = false;
+    DepthStencilState depthStencilOverride{};
+    ShaderSourcePolicy sourcePolicy = ShaderSourcePolicy::PreferSpirv;
+    /** Prepended as #define KEY 1 when loading/compiling GLSL (not applied to SPIR-V-only path). */
+    std::vector<std::string> keywordDefines;
+    /** When both overrides are non-empty, GLSL is taken from here instead of disk (e.g. MaterialCompiler). */
+    std::string vertexSourceOverride;
+    std::string fragmentSourceOverride;
+    /** When set, Vulkan uses these for VkPipelineRenderingCreateInfo (must match BeginRendering attachments). When unset, formats are inferred from layoutKind only. */
+    std::optional<PipelineAttachmentFormats> attachmentFormats;
+};
+
 struct PipelineDesc {
     void* vertexShader = nullptr;    // IShader* (typed in RHI.h)
     void* fragmentShader = nullptr;
@@ -245,6 +279,8 @@ struct PipelineDesc {
     const char* debugName = nullptr;
     /** Which descriptor set layout to use. Legacy = current path; other kinds use resource-space layouts (set0 Frame, set1 Pass, etc.). Default Legacy. */
     PipelineLayoutKind layoutKind = PipelineLayoutKind::PushOnly;
+    /** Vulkan dynamic rendering: when set, must match the attachments used with this pipeline. When unset, inferred from layoutKind (Post should usually be set explicitly). */
+    std::optional<PipelineAttachmentFormats> attachmentFormats;
 };
 
 // ---- Render target ----
@@ -344,6 +380,9 @@ struct RHICapabilities {
     bool supportsSparseBuffer = false;      ///< Sparse buffers (ARB_sparse_buffer)
     bool supportsAtomicCounters = false;    ///< Atomic counter buffers (ARB_shader_atomic_counters)
     bool supportsShaderSubroutines = false; ///< Shader subroutines (ARB_shader_subroutine)
+    /** When true, GetResourceSetLayout returns valid layouts and BindDescriptorSets applies correctly.
+     *  Vulkan: true. OpenGL: false until shaders use descriptor_binding_table layout(binding=N). */
+    bool supportsResourceSpaceBindPath = false;
 };
 
 } // namespace rhi

@@ -118,8 +118,18 @@ struct CommandListVK : ICommandList {
     void ClearPendingTimelineValue() { m_pendingTimelineValue = 0; }
 
     void EndRenderingIfActive();
+    /** Begin dynamic rendering with given RT. */
+    void BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions);
+    /** Push current graphics constants for the currently bound pipeline layout (if available). */
+    void PushGraphicsConstantsIfPossible();
     /** Called by DeviceVK::BeginFrame() after reset+begin so the list is marked recording. Do not call from application code. */
-    void SetRecordingState(bool recording) { m_isRecording = recording; }
+    void SetRecordingState(bool recording) {
+        m_isRecording = recording;
+        if (!recording) {
+            m_isRenderingActive = false;
+            m_currentRenderTarget = nullptr;
+        }
+    }
     /** After vkResetCommandPool + vkBeginCommandBuffer: GPU CB has no RT/pipeline/bind state; CPU must match. */
     void ResetCpuRecordingStateAfterPoolReset();
 
@@ -129,6 +139,7 @@ private:
     void* m_commandPool = nullptr;     // VkCommandPool (for deferred list free only)
     bool m_isImmediate = false;
     bool m_isRecording = false;
+    bool m_isRenderingActive = false;
     RenderTargetVK* m_currentRenderTarget = nullptr;  // active dynamic rendering RT
     uint64_t m_pendingTimelineValue = 0;  // signal this value on next submit (0 = none)
     void* m_currentVertexBuffer = nullptr;  // VkBuffer

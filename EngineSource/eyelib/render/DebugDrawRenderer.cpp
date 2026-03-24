@@ -6,8 +6,10 @@
 #include "eyelib/render/2d/Font.h"
 #include "eyelib/render/2d/TextRenderer.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/debug/Validation.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -53,7 +55,8 @@ static PerDeviceResources& EnsureResources(rhi::IDevice* device) {
     if (it != s_perDevice.end() && it->second.valid) return it->second;
     PerDeviceResources res;
     res.shader = std::make_shared<Shader>();
-    if (device && res.shader->Load(device, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList)) {
+    if (device && res.shader->Load(device, "debug/lines", GetLineLayout(), rhi::PrimitiveTopology::LineList, rhi::PipelineLayoutKind::PushOnly,
+                                   std::optional{rhi::StandardAttachmentFormats::ForwardColorDepth()})) {
         res.valid = true;
     } else {
         if (!s_shaderLoadLogged) {

@@ -34,6 +34,11 @@ void BarrierTextureForRenderTarget(ICommandList* cmd, ITexture* texture) {
     cmd->BarrierTexture(texture, ResourceState::ShaderResource, ResourceState::RenderTarget);
 }
 
+void BarrierDepthTextureForShaderSampling(ICommandList* cmd, ITexture* depthTexture) {
+    if (!cmd || !depthTexture) return;
+    cmd->BarrierTexture(depthTexture, ResourceState::DepthWrite, ResourceState::ShaderResource);
+}
+
 void BarrierBufferForIndirectDraw(ICommandList* cmd, IBuffer* buffer) {
     if (!cmd || !buffer) return;
     cmd->BarrierBuffer(buffer, ResourceState::ShaderResource, ResourceState::IndirectDraw);

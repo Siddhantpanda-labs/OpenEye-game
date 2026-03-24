@@ -204,7 +204,7 @@ Forward frame graph is similar but with a single forward pass instead of GBuffer
 
 ### 7.2 Shader
 
-- **Shader** (resources/Shader.h): GPU pipeline. Load(device, shaderName, layout, topology) or LoadFromFile(device, vertPath, fragPath, layout). BuildFromSource(device, ...). Bind(device). No SetDevice/GetDevice; device passed explicitly.
+- **Shader** (resources/Shader.h): GPU pipeline. Load(device, assetPath, layout, topology) or LoadFromFile(device, vertPath, fragPath, layout). BuildFromSource(device, ...). Bind(device). No SetDevice/GetDevice; device passed explicitly.
 - **ShaderDescriptor**: CPU representation for serialization / creating another instance; LoadFromDescriptor(device, desc).
 
 ### 7.3 Textures

@@ -16,6 +16,11 @@ void ClearAndSetRenderTargetWithViewport(ICommandList* cmd, IRenderTarget* rt,
 void DrawFullscreenQuad(ICommandList* cmd, IPipeline* pipeline);
 void BarrierTextureForShaderRead(ICommandList* cmd, ITexture* texture);
 void BarrierTextureForRenderTarget(ICommandList* cmd, ITexture* texture);
+/**
+ * After rendering to a depth/stencil image as an attachment, call before it is bound for shader sampling
+ * (e.g. shadow map). Vulkan: matches descriptor layout (SHADER_READ_ONLY_OPTIMAL) vs attachment layout.
+ */
+void BarrierDepthTextureForShaderSampling(ICommandList* cmd, ITexture* depthTexture);
 /** Transition indirect buffer from ShaderResource (after compute write) to IndirectDraw for Draw*Indirect. Call before MultiDrawIndexedIndirect etc. */
 void BarrierBufferForIndirectDraw(ICommandList* cmd, IBuffer* buffer);
 

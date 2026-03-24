@@ -3,12 +3,15 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/ShaderSourceLoader.h"
+#include "eyelib/render/ShaderTemplateName.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -16,22 +19,8 @@ namespace render {
 namespace {
 
 std::string getTemplateNameForStage(PipelineStage stage, InstanceType instanceType) {
-    switch (stage) {
-    case PipelineStage::GBuffer:
-        if (instanceType == InstanceType::Instanced) return "passes/deferred/gbuffer_instanced";
-        return "passes/deferred/gbuffer_skinned";
-    case PipelineStage::Depth:
-        if (instanceType == InstanceType::Instanced) return "passes/shadow/shadow_instanced";
-        return (instanceType == InstanceType::Skinned) ? "passes/shadow/shadow_skinned" : "passes/shadow/shadow";
-    case PipelineStage::Forward:
-        if (instanceType == InstanceType::Instanced) return {};  // no forward_instanced template; use ForwardPlus for instanced
-        return (instanceType == InstanceType::Skinned) ? "passes/forward/forward_skinned" : "passes/forward/forward";
-    case PipelineStage::ForwardPlus:
-        if (instanceType == InstanceType::Instanced) return "passes/forward/forwardplus_instanced";
-        return (instanceType == InstanceType::Skinned) ? "passes/forward/forwardplus_skinned" : "passes/forward/forwardplus";
-    default:
-        return {};
-    }
+    // Material templates keep legacy static->gbuffer_skinned behavior.
+    return ResolveShaderTemplateName(stage, instanceType, false);
 }
 
 std::string getMaterialDefines(const Material* material) {
@@ -90,20 +79,54 @@ std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Ma
     std::string vertexPath = basePath + vertExt;
     std::string fragmentPath = basePath + fragExt;
 
+    rhi::IShader* vs = nullptr;
     std::string vertexSrc, fragmentSrc;
     std::vector<std::string> vertDeps, fragDeps;
-    bool okVert = outDependencies
-        ? LoadShaderSourceWithDependencies(vertexPath, vertexSrc, &vertDeps)
-        : LoadShaderSource(vertexPath, vertexSrc);
+
+    const bool isVulkan = (std::strcmp(backend, "vulkan") == 0);
+    if (isVulkan) {
+        const std::string vertSpvPath = basePath + ".vert.spv";
+        std::vector<uint8_t> vertSpv = platform::filesystem::ReadFile(vertSpvPath);
+        const uint32_t spirvMagic = 0x07230203u;
+        if (vertSpv.size() >= 4 && *reinterpret_cast<uint32_t*>(vertSpv.data()) == spirvMagic) {
+            vs = device->CreateShaderFromBinary(rhi::ShaderStage::Vertex, vertSpv.data(), vertSpv.size());
+            if (vs && vs->IsValid()) {
+                /* vertex from precompiled .spv */
+            } else {
+                if (vs) { device->DestroyShader(vs); vs = nullptr; }
+            }
+        }
+    }
+    if (!vs) {
+        bool okVert = outDependencies
+            ? LoadShaderSourceWithDependencies(vertexPath, vertexSrc, &vertDeps)
+            : LoadShaderSource(vertexPath, vertexSrc);
+        if (!okVert) {
+            core::Log::ErrorF("MaterialCompiler: failed to load vertex template %s", logicalName.c_str());
+            return nullptr;
+        }
+        vs = device->CreateShader(rhi::ShaderStage::Vertex, vertexSrc.c_str(), vertexSrc.size());
+        if (!vs || !vs->IsValid()) {
+            if (vs) device->DestroyShader(vs);
+            core::Log::ErrorF("MaterialCompiler: failed to create vertex shader for %s", logicalName.c_str());
+            return nullptr;
+        }
+    }
+
     bool okFrag = outDependencies
         ? LoadShaderSourceWithDependencies(fragmentPath, fragmentSrc, &fragDeps)
         : LoadShaderSource(fragmentPath, fragmentSrc);
-    if (!okVert || !okFrag) {
-        core::Log::ErrorF("MaterialCompiler: failed to load template %s", logicalName.c_str());
+    if (!okFrag) {
+        if (vs) device->DestroyShader(vs);
+        core::Log::ErrorF("MaterialCompiler: failed to load fragment template %s", logicalName.c_str());
         return nullptr;
     }
     if (outDependencies) {
-        *outDependencies = std::move(vertDeps);
+        outDependencies->clear();
+        if (!vertDeps.empty())
+            *outDependencies = std::move(vertDeps);
+        else if (isVulkan)
+            outDependencies->push_back(basePath + ".vert.spv");
         for (const std::string& p : fragDeps) {
             if (std::find(outDependencies->begin(), outDependencies->end(), p) == outDependencies->end())
                 outDependencies->push_back(p);
@@ -115,15 +138,42 @@ std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Ma
     replacePlaceholder(fragmentSrc, "@MATERIAL_FRAGMENT_SNIPPET@", material->GetFragmentSnippet());
     replacePlaceholder(fragmentSrc, "@MATERIAL_SHADING_SNIPPET@", material->GetShadingSnippet());
 
-    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
+    rhi::IShader* fs = device->CreateShader(rhi::ShaderStage::Fragment, fragmentSrc.c_str(), fragmentSrc.size());
+    if (!fs || !fs->IsValid()) {
+        if (vs) device->DestroyShader(vs);
+        if (fs) device->DestroyShader(fs);
+        core::Log::ErrorF("MaterialCompiler: failed to create fragment shader for %s", logicalName.c_str());
+        return nullptr;
+    }
+
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::PushOnly;
     if (stage == PipelineStage::Depth) layoutKind = rhi::PipelineLayoutKind::Shadow;
     if (stage == PipelineStage::GBuffer) layoutKind = rhi::PipelineLayoutKind::GBuffer;
     if (stage == PipelineStage::Forward || stage == PipelineStage::ForwardPlus)
         layoutKind = rhi::PipelineLayoutKind::Forward;
 
+    std::optional<rhi::PipelineAttachmentFormats> attachmentFormats;
+    switch (stage) {
+    case PipelineStage::GBuffer:
+        attachmentFormats = rhi::StandardAttachmentFormats::GBufferMRT();
+        break;
+    case PipelineStage::Depth:
+        attachmentFormats = rhi::StandardAttachmentFormats::ShadowDepthOnly();
+        break;
+    case PipelineStage::Forward:
+    case PipelineStage::ForwardPlus:
+        attachmentFormats = rhi::StandardAttachmentFormats::ForwardColorDepth();
+        break;
+    default:
+        break;
+    }
+
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vertexSrc, fragmentSrc, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, layoutKind)) {
-        core::Log::ErrorF("MaterialCompiler: BuildFromSource failed for %s (materialTypeId=%llu)", logicalName.c_str(), static_cast<unsigned long long>(material->GetShaderIndex()));
+    if (!shader->BuildFromShaders(device, vs, fs, Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList,
+                                  layoutKind, attachmentFormats)) {
+        if (vs) device->DestroyShader(vs);
+        if (fs) device->DestroyShader(fs);
+        core::Log::ErrorF("MaterialCompiler: BuildFromShaders failed for %s (materialTypeId=%llu)", logicalName.c_str(), static_cast<unsigned long long>(material->GetShaderIndex()));
         return nullptr;
     }
     return shader;

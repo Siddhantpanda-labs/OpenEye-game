@@ -9,8 +9,8 @@
 namespace eyelib {
 namespace render {
 
-/** E5.3: Pipeline cache key from shader name, topology, and optional keywords. */
-std::string PipelineCacheKey(const std::string& shaderName,
+/** E5.3: Pipeline cache key from shader asset path, topology, and optional keywords. */
+std::string PipelineCacheKey(const std::string& assetPath,
                              rhi::PrimitiveTopology topology,
                              const std::vector<std::string>& keywords);
 

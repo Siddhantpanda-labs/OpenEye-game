@@ -13,7 +13,7 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
 /** Build VkComputePipeline from a shader module. Returns VkPipeline or nullptr. */
 void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipelineCache, void* shaderModule);
 IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc);
-IPipeline* CreateGraphicsPipelineFromNameVK(DeviceVK* device, const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy);
+IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const ShaderGraphicsPipelineCreateInfo& info);
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader);
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader, PipelineLayoutKind layoutKind);
 
@@ -33,11 +33,13 @@ struct PipelineVK : IPipeline {
     ComputeBlockPresence m_computeBlockPresence{};
     bool m_isCompute = false;
     void* m_pipeline = nullptr;           // VkPipeline
-    /** Layout kind used to create this pipeline. PushOnly/Legacy = 0 sets, push constants only; Compute may use UpdateComputeSet0; other = caller uses BindDescriptorSets. */
-    PipelineLayoutKind m_layoutKind = PipelineLayoutKind::Legacy;
-    /** When m_layoutKind != Legacy, this is the VkPipelineLayout (resource-space). Used for BindDescriptorSets and push constants. */
+    /** Non-zero for graphics pipelines in device cache (shared VkPipeline refcounted by DeviceVK). */
+    uint64_t m_graphicsCacheHash = 0;
+    /** Layout kind used to create this pipeline. PushOnly = 0 sets, push constants only; Compute may use UpdateComputeSet0; other = caller uses BindDescriptorSets. */
+    PipelineLayoutKind m_layoutKind = PipelineLayoutKind::PushOnly;
+    /** When m_layoutKind is resource-space (non-PushOnly), this is the VkPipelineLayout. Used for BindDescriptorSets and push constants. */
     void* m_nativePipelineLayout = nullptr;
-    /** Number of descriptor sets required when binding from set 0 (0 = Legacy, no validation). Used for debug assert in BindDescriptorSets. */
+    /** Number of descriptor sets required when binding from set 0 (0 = PushOnly). */
     uint8_t m_requiredSetCount = 0;
 };
 

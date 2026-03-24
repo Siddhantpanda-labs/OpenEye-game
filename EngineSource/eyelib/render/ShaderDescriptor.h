@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHITypes.h"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,9 +14,9 @@ namespace render {
  * Use with Shader::LoadFromDescriptor(device, desc) to create a GPU instance.
  */
 struct ShaderDescriptor {
-    /** Logical shader name (e.g. "pbr"); used when loadByName is true. */
-    std::string shaderName;
-    /** Vertex/fragment paths when loading by path instead of name. */
+    /** Logical shader asset path without extension (e.g. passes/forward/forward); used when loadFromAsset is true. */
+    std::string assetPath;
+    /** Vertex/fragment paths when loading by path instead of asset path. */
     std::string vertexPath;
     std::string fragmentPath;
     /** Keyword defines (e.g. "SKINNED", "SHADOWS") applied to source. */
@@ -23,10 +24,12 @@ struct ShaderDescriptor {
     /** Vertex layout and topology for pipeline creation. */
     rhi::VertexLayout layout{};
     rhi::PrimitiveTopology topology = rhi::PrimitiveTopology::TriangleList;
-    /** True if this was loaded by name (Reload uses shaderName). */
-    bool loadByName = false;
-    /** Pipeline layout kind (Legacy, Post, Forward, etc.). Used when creating pipeline from name. */
-    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::Legacy;
+    /** True if Reload should use assetPath + layout/topology/keywords. */
+    bool loadFromAsset = false;
+    /** Pipeline layout kind (PushOnly, Post, Forward, etc.). Used when creating pipeline from name. */
+    rhi::PipelineLayoutKind layoutKind = rhi::PipelineLayoutKind::PushOnly;
+    /** Vulkan dynamic rendering attachment formats; unset = infer from layoutKind at create time. */
+    std::optional<rhi::PipelineAttachmentFormats> attachmentFormats;
 };
 
 } // namespace render

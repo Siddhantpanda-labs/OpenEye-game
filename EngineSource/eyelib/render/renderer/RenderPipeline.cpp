@@ -33,6 +33,8 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/core/Time.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
+#include <optional>
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIUtils.h"
@@ -63,6 +65,25 @@ bool IsForwardDrawableVisible(const Drawable& d, const math::Frustum& frustum) {
     if (d.bones && d.boneCount > 0) return true;
     const math::AABB worldAabb = d.mesh->GetAABB().Transform(d.transform);
     return frustum.Contains(worldAabb) != 0;
+}
+
+/** Forward/Forward+ PBR uses bindless heap + five resource-space sets + frame UBO only (no legacy bind path). */
+bool ForwardPbrResourceBindingsReady(rhi::IDevice* device, rhi::ICommandList* cmd, rhi::IDescriptorSet* frameSet,
+    rhi::IDescriptorSet* passSet, rhi::IDescriptorSet* materialSet, rhi::IDescriptorSet* sceneBuffersSet,
+    rhi::IBuffer* frameUbo, rhi::IBindlessHeap* bindlessHeap) {
+    if (!device || !cmd || !frameSet || !passSet || !materialSet || !sceneBuffersSet || !frameUbo || !bindlessHeap)
+        return false;
+    return bindlessHeap->GetDescriptorSet() != nullptr;
+}
+
+/** Forward fragment matches Vulkan push/flags via uniform int u_UseAlbedoTexture (resource-set path). */
+void SetForwardShaderUseAlbedoFlag(Shader* sh, const Material* mat, const MaterialInstance* mi) {
+    if (!sh) return;
+    auto hasTex = [&](const char* name) -> bool {
+        if (mi) return mi->GetTextureRHI(name) != nullptr;
+        return mat && mat->GetTextureRHI(name) != nullptr;
+    };
+    sh->SetInt("u_UseAlbedoTexture", hasTex("u_AlbedoTexture") ? 1 : 0);
 }
 }
 
@@ -100,22 +121,37 @@ void RenderPipeline::Shutdown() {
     if (m_lightCullPass && m_device) m_lightCullPass->Shutdown();
     m_lightCullPass.reset();
     if (m_device) {
-        if (m_forwardFrameSet) { m_device->DestroyDescriptorSet(m_forwardFrameSet); m_forwardFrameSet = nullptr; }
-        if (m_forwardPassSet) { m_device->DestroyDescriptorSet(m_forwardPassSet); m_forwardPassSet = nullptr; }
-        if (m_forwardMaterialSet) { m_device->DestroyDescriptorSet(m_forwardMaterialSet); m_forwardMaterialSet = nullptr; }
-        if (m_forwardSceneBuffersSet) { m_device->DestroyDescriptorSet(m_forwardSceneBuffersSet); m_forwardSceneBuffersSet = nullptr; }
-        if (m_deferredLightingPassSet) { m_device->DestroyDescriptorSet(m_deferredLightingPassSet); m_deferredLightingPassSet = nullptr; }
+        for (rhi::IDescriptorSet*& s : m_forwardFrameSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_forwardPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_forwardMaterialSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_forwardSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_deferredLightingPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        m_forwardFrameSet = nullptr;
+        m_forwardPassSet = nullptr;
+        m_forwardMaterialSet = nullptr;
+        m_forwardSceneBuffersSet = nullptr;
+        m_deferredLightingPassSet = nullptr;
         for (rhi::IDescriptorSet*& set : m_skyboxPostSets) {
             if (set) { m_device->EnqueueDestroyDescriptorSet(set); set = nullptr; }
         }
         m_cachedSkyboxTexture = nullptr;
         if (m_skyboxDummyTexture) { m_device->DestroyTexture(m_skyboxDummyTexture); m_skyboxDummyTexture = nullptr; }
-        if (m_outlinePostSet) { m_device->DestroyDescriptorSet(m_outlinePostSet); m_outlinePostSet = nullptr; }
-        if (m_forwardFrameUBO) { m_device->DestroyBuffer(m_forwardFrameUBO); m_forwardFrameUBO = nullptr; }
+        if (m_forwardFallbackAlbedoTexture) { m_device->DestroyTexture(m_forwardFallbackAlbedoTexture); m_forwardFallbackAlbedoTexture = nullptr; }
+        if (m_forwardFallbackNormalTexture) { m_device->DestroyTexture(m_forwardFallbackNormalTexture); m_forwardFallbackNormalTexture = nullptr; }
+        if (m_forwardFallbackMetalRoughTexture) { m_device->DestroyTexture(m_forwardFallbackMetalRoughTexture); m_forwardFallbackMetalRoughTexture = nullptr; }
+        for (rhi::IDescriptorSet*& s : m_outlinePostSets) {
+            if (s) { m_device->EnqueueDestroyDescriptorSet(s); s = nullptr; }
+        }
+        for (rhi::IBuffer*& b : m_forwardFrameUBOs) { if (b) { m_device->DestroyBuffer(b); b = nullptr; } }
+        for (rhi::IBuffer*& b : m_forwardBonesBuffers) { if (b) { m_device->DestroyBuffer(b); b = nullptr; } }
+        m_forwardFrameUBO = nullptr;
+        m_forwardBonesBuffer = nullptr;
     }
     m_gpuCullPass.reset();
     m_gbufferPass.reset();
-    m_shaderCache.reset();
+    m_shaderCache = nullptr;
+    m_usingShared = nullptr;
+    m_sharedResources.reset();
     m_cascadeShadowMap.reset();
     m_gbuffer.reset();
     if (m_device) {
@@ -144,7 +180,7 @@ bool RenderPipeline::Initialize(std::unique_ptr<rhi::IDevice> device, uint32_t w
     m_height = height;
     m_ownedDevice = std::move(device);
     m_device = m_ownedDevice.get();
-    return InitializeDeviceResources(width, height);
+    return InitializeDeviceResources(width, height, nullptr);
 }
 
 bool RenderPipeline::Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height) {
@@ -155,11 +191,33 @@ bool RenderPipeline::Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint
     m_width = width;
     m_height = height;
     m_device = sharedDevice;
-    return InitializeDeviceResources(width, height);
+    return InitializeDeviceResources(width, height, nullptr);
 }
 
-bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) {
+bool RenderPipeline::Initialize(rhi::IDevice* sharedDevice, uint32_t width, uint32_t height, PipelineSharedResources* shareFrom) {
+    if (!sharedDevice) {
+        core::Log::Error("RenderPipeline::Initialize(shared, shareFrom): device is null");
+        return false;
+    }
+    if (!shareFrom || !shareFrom->shaderCache) {
+        core::Log::Error("RenderPipeline::Initialize(shareFrom): shareFrom or shaderCache is null");
+        return false;
+    }
+    m_width = width;
+    m_height = height;
+    m_device = sharedDevice;
+    m_usingShared = shareFrom;
+    return InitializeDeviceResources(width, height, shareFrom);
+}
+
+bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height, PipelineSharedResources* shareFrom) {
     Primitives::SetStaticDevice(m_device);
+    if (!shareFrom) {
+        m_sharedResources = std::make_unique<PipelineSharedResources>();
+        m_sharedResources->shaderCache = std::make_unique<ShaderCache>();
+    }
+    m_shaderCache = shareFrom ? shareFrom->shaderCache.get() : m_sharedResources->shaderCache.get();
+
     m_gbuffer = std::make_unique<GBuffer>();
     if (!m_gbuffer->Initialize(m_device, width, height)) {
         core::Log::Error("RenderPipeline::Initialize: GBuffer::Initialize failed");
@@ -172,9 +230,8 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
         return false;
     }
 
-    m_shaderCache = std::make_unique<ShaderCache>();
     m_gbufferPass = std::make_unique<GBufferPass>();
-    m_gbufferPass->SetShaderCache(m_shaderCache.get());
+    m_gbufferPass->SetShaderCache(m_shaderCache);
     if (m_device->GetCapabilities().supportsBindless)
         m_bindlessHeap = m_device->CreateBindlessHeap();
     if (m_bindlessHeap)
@@ -223,7 +280,7 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height) 
     }
     m_shadowPass = std::make_unique<ShadowPass>();
     if (m_shadowPass && m_shaderCache)
-        m_shadowPass->SetShaderCache(m_shaderCache.get());
+        m_shadowPass->SetShaderCache(m_shaderCache);
     m_lightingPass = std::make_unique<LightingPass>();
     // Lighting pass owns its shader: created on first Render() via EnsureDefaultShader(device) with correct layout kind.
     {
@@ -514,9 +571,31 @@ IBL* RenderPipeline::EnsureIBLFromFrameData(const RenderFrameData& frameData) {
         m_ibl->SetDevice(m_device);
     }
     if (m_iblEnvironmentTexture != skyTex) {
-        if (m_ibl->Initialize(skyTex, 32, 512)) m_iblEnvironmentTexture = skyTex;
+        m_ibl->Initialize(skyTex, 32, 512);
+        // Record attempt so we do not re-run Initialize every frame when shader/asset init fails (was causing shaderc spam + hitch).
+        m_iblEnvironmentTexture = skyTex;
     }
     return m_ibl->IsValid() ? m_ibl.get() : nullptr;
+}
+
+void RenderPipeline::PreparePersistentShaderReadInputs(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    if (!cmd) return;
+    if (frameData.skybox && frameData.skybox->IsValid()) {
+        if (rhi::ITexture* sky = frameData.skybox->GetTextureRHI())
+            rhi::BarrierTextureForShaderRead(cmd, sky);
+    }
+    IBL* iblPtr = EnsureIBLFromFrameData(frameData);
+    if (iblPtr && iblPtr->IsValid()) {
+        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, ir);
+        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, pf);
+        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, brdf);
+    }
+    const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(frameData.camera.viewPos) : nullptr;
+    if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+    if (envProbe && envProbe->IsValid()) {
+        if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(cmd, ir);
+        if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(cmd, pf);
+    }
 }
 
 uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam) {
@@ -757,15 +836,11 @@ void RenderPipeline::BuildDeferredGraph() {
             if (name == "Lighting")
                 return [this](const FGPassResources&) {
                     if (!m_currentFrameData) return;
+                    EnsureForwardResourceSets();
                     RenderContext c = RenderContext::FromDevice(m_device);
                     const CameraView& camView = m_currentFrameData->camera;
                     const LightParams& lightParams = m_currentFrameData->light;
                     IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                    if (c.cmd && iblPtr && iblPtr->IsValid()) {
-                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
-                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
-                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
-                    }
                     const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
                     if (c.cmd && m_hdrRenderTarget)
                         rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
@@ -823,7 +898,8 @@ void RenderPipeline::BuildDeferredGraph() {
                         c.cmd->SetRenderTarget(m_hdrRenderTarget);
                         c.cmd->SetViewport(0, 0, m_width, m_height);
                     }
-                    TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
+                    TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
+                    if (c.cmd) c.cmd->SetRenderTarget(nullptr);
                 };
         return [](const FGPassResources&) {};
     };
@@ -839,8 +915,10 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     debug::Profiler::SetFrameCounter("visibleMeshes",
         static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
+    if (ctx.cmd) ctx.cmd->SetRenderTarget(nullptr);
     m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
     m_currentFrameData = &m_frameData;
+    PreparePersistentShaderReadInputs(ctx.cmd, m_frameData);
 
     CompileFrameGraphIfNeeded(PipelineMode::Deferred, false);
     m_frameGraph->Execute(ctx);
@@ -877,19 +955,6 @@ void RenderPipeline::BuildForwardGraph() {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
                 IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(m_currentFrameData->camera.viewPos) : nullptr;
-                if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
-                if (c.cmd) {
-                    if (iblPtr && iblPtr->IsValid()) {
-                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
-                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
-                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
-                    }
-                    if (envProbe && envProbe->IsValid()) {
-                        if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
-                        if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
-                    }
-                }
                 const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
@@ -913,7 +978,8 @@ void RenderPipeline::BuildForwardGraph() {
                     c.cmd->SetRenderTarget(m_hdrRenderTarget);
                     c.cmd->SetViewport(0, 0, m_width, m_height);
                 }
-                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
+                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
             };
         return [](const FGPassResources&) {};
     };
@@ -957,7 +1023,7 @@ void RenderPipeline::BuildForwardPlusGraph() {
                     c.cmd->SetRenderTarget(m_hdrRenderTarget);
                     c.cmd->SetViewport(0, 0, m_width, m_height);
                 }
-                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache.get());
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
             };
         return [](const FGPassResources&) {};
     };
@@ -973,8 +1039,10 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraph(const IRenderSceneView& vi
     debug::Profiler::SetFrameCounter("visibleMeshes",
         static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
+    if (ctx.cmd) ctx.cmd->SetRenderTarget(nullptr);
     m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
     m_currentFrameData = &m_frameData;
+    PreparePersistentShaderReadInputs(ctx.cmd, m_frameData);
 
     CompileFrameGraphIfNeeded(PipelineMode::Forward, false);
     m_frameGraph->Execute(ctx);
@@ -988,14 +1056,20 @@ void RenderPipeline::BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView
     debug::Profiler::SetFrameCounter("visibleMeshes",
         static_cast<uint64_t>(m_frameData.visibleOpaque.size() + m_frameData.visibleTransparent.size()));
     RenderContext ctx = RenderContext::FromDevice(m_device);
+    if (ctx.cmd) ctx.cmd->SetRenderTarget(nullptr);
     m_currentFrameData = &m_frameData;
+    PreparePersistentShaderReadInputs(ctx.cmd, m_frameData);
 
     CompileFrameGraphIfNeeded(PipelineMode::ForwardPlus, false);
     m_frameGraph->Execute(ctx);
 }
 
 void RenderPipeline::EnsureForwardResourceSets() {
-    if (!m_device || m_forwardFrameSet) return;
+    if (!m_device) return;
+    if (m_forwardFrameSets[0]) {
+        SelectForwardResourceSetFrame();
+        return;
+    }
     using RT = rhi::IDevice::ResourceSetType;
     rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(RT::Frame);
     rhi::IPipelineLayout* forwardPassLayout = m_device->GetResourceSetLayout(RT::ForwardPass);
@@ -1003,41 +1077,127 @@ void RenderPipeline::EnsureForwardResourceSets() {
     rhi::IPipelineLayout* sceneLayout = m_device->GetResourceSetLayout(RT::SceneBuffers);
     rhi::IPipelineLayout* deferredLightingLayout = m_device->GetResourceSetLayout(RT::DeferredLightingPass);
     if (!frameLayout || !forwardPassLayout || !materialLayout || !sceneLayout) return;
-    m_forwardFrameSet = m_device->CreateDescriptorSet(frameLayout);
-    m_forwardPassSet = m_device->CreateDescriptorSet(forwardPassLayout);
-    m_forwardMaterialSet = m_device->CreateDescriptorSet(materialLayout);
-    m_forwardSceneBuffersSet = m_device->CreateDescriptorSet(sceneLayout);
-    if (!m_forwardFrameSet || !m_forwardPassSet || !m_forwardMaterialSet || !m_forwardSceneBuffersSet) {
-        if (m_forwardFrameSet) { m_device->DestroyDescriptorSet(m_forwardFrameSet); m_forwardFrameSet = nullptr; }
-        if (m_forwardPassSet) { m_device->DestroyDescriptorSet(m_forwardPassSet); m_forwardPassSet = nullptr; }
-        if (m_forwardMaterialSet) { m_device->DestroyDescriptorSet(m_forwardMaterialSet); m_forwardMaterialSet = nullptr; }
-        if (m_forwardSceneBuffersSet) { m_device->DestroyDescriptorSet(m_forwardSceneBuffersSet); m_forwardSceneBuffersSet = nullptr; }
-        if (m_deferredLightingPassSet) { m_device->DestroyDescriptorSet(m_deferredLightingPassSet); m_deferredLightingPassSet = nullptr; }
-        return;
-    }
     rhi::BufferDesc uboDesc;
     uboDesc.sizeInBytes = 320;  // view, projection, viewProj, prevView, prevProjection (5 mat4) for GBuffer velocity
     uboDesc.usage = rhi::BufferUsage::Uniform;
     uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-    m_forwardFrameUBO = m_device->CreateBuffer(uboDesc, nullptr);
-    if (m_forwardFrameUBO) {
-        m_forwardFrameSet->UpdateUniformBuffer(0, m_forwardFrameUBO, 0, 320);
-        m_forwardFrameSet->UpdateUniformBuffer(1, m_forwardFrameUBO, 0, 320);
-    }
     rhi::BufferDesc bonesDesc;
     bonesDesc.sizeInBytes = 128 * 64;  // 128 mat4 for skinned
     bonesDesc.usage = rhi::BufferUsage::Storage;
     bonesDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-    m_forwardBonesBuffer = m_device->CreateBuffer(bonesDesc, nullptr);
+
+    for (uint32_t i = 0; i < kForwardResourceSetsFrames; ++i) {
+        m_forwardFrameSets[i] = m_device->CreateDescriptorSet(frameLayout);
+        m_forwardPassSets[i] = m_device->CreateDescriptorSet(forwardPassLayout);
+        m_forwardMaterialSets[i] = m_device->CreateDescriptorSet(materialLayout);
+        m_forwardSceneBuffersSets[i] = m_device->CreateDescriptorSet(sceneLayout);
+        if (!m_forwardFrameSets[i] || !m_forwardPassSets[i] || !m_forwardMaterialSets[i] || !m_forwardSceneBuffersSets[i]) {
+            for (rhi::IDescriptorSet*& s : m_forwardFrameSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            for (rhi::IDescriptorSet*& s : m_forwardPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            for (rhi::IDescriptorSet*& s : m_forwardMaterialSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            for (rhi::IDescriptorSet*& s : m_forwardSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            return;
+        }
+
+        m_forwardFrameUBOs[i] = m_device->CreateBuffer(uboDesc, nullptr);
+        if (m_forwardFrameUBOs[i]) {
+            m_forwardFrameSets[i]->UpdateUniformBuffer(0, m_forwardFrameUBOs[i], 0, 320);
+            m_forwardFrameSets[i]->UpdateUniformBuffer(1, m_forwardFrameUBOs[i], 0, 320);
+        }
+        m_forwardBonesBuffers[i] = m_device->CreateBuffer(bonesDesc, nullptr);
+
+        if (deferredLightingLayout)
+            m_deferredLightingPassSets[i] = m_device->CreateDescriptorSet(deferredLightingLayout);
+    }
+
+    SelectForwardResourceSetFrame();
     if (m_gbufferPass) {
         m_gbufferPass->SetResourceSpaceSets(m_forwardFrameSet, m_forwardMaterialSet, m_forwardSceneBuffersSet);
         if (m_forwardBonesBuffer) m_gbufferPass->SetBonesBuffer(m_forwardBonesBuffer);
     }
-    if (deferredLightingLayout) {
-        m_deferredLightingPassSet = m_device->CreateDescriptorSet(deferredLightingLayout);
-        if (m_lightingPass)
-            m_lightingPass->SetResourceSpaceSets(m_forwardFrameSet, m_deferredLightingPassSet);
+    if (m_lightingPass)
+        m_lightingPass->SetResourceSpaceSets(m_forwardFrameSet, m_deferredLightingPassSet);
+}
+
+void RenderPipeline::SelectForwardResourceSetFrame() {
+    if (!m_device) return;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kForwardResourceSetsFrames;
+    m_forwardFrameSet = m_forwardFrameSets[frameIndex];
+    m_forwardPassSet = m_forwardPassSets[frameIndex];
+    m_forwardMaterialSet = m_forwardMaterialSets[frameIndex];
+    m_forwardSceneBuffersSet = m_forwardSceneBuffersSets[frameIndex];
+    m_deferredLightingPassSet = m_deferredLightingPassSets[frameIndex];
+    m_forwardFrameUBO = m_forwardFrameUBOs[frameIndex];
+    m_forwardBonesBuffer = m_forwardBonesBuffers[frameIndex];
+    if (m_gbufferPass) {
+        m_gbufferPass->SetResourceSpaceSets(m_forwardFrameSet, m_forwardMaterialSet, m_forwardSceneBuffersSet);
+        if (m_forwardBonesBuffer) m_gbufferPass->SetBonesBuffer(m_forwardBonesBuffer);
     }
+    if (m_lightingPass)
+        m_lightingPass->SetResourceSpaceSets(m_forwardFrameSet, m_deferredLightingPassSet);
+}
+
+void RenderPipeline::EnsureForwardMaterialFallbackTextures() {
+    if (!m_device) return;
+    if (!m_forwardFallbackAlbedoTexture) {
+        rhi::TextureDesc desc = {};
+        desc.type = rhi::TextureType::Texture2D;
+        desc.width = 1;
+        desc.height = 1;
+        desc.format = rhi::RHITextureFormat::RGBA8;
+        desc.usage = rhi::TextureUsage::ShaderResource;
+        desc.mipLevels = 1;
+        static const uint8_t white[4] = { 255, 255, 255, 255 };
+        m_forwardFallbackAlbedoTexture = m_device->CreateTexture(desc, white);
+    }
+    if (!m_forwardFallbackNormalTexture) {
+        rhi::TextureDesc desc = {};
+        desc.type = rhi::TextureType::Texture2D;
+        desc.width = 1;
+        desc.height = 1;
+        desc.format = rhi::RHITextureFormat::RGBA8;
+        desc.usage = rhi::TextureUsage::ShaderResource;
+        desc.mipLevels = 1;
+        static const uint8_t normal[4] = { 128, 128, 255, 255 };
+        m_forwardFallbackNormalTexture = m_device->CreateTexture(desc, normal);
+    }
+    if (!m_forwardFallbackMetalRoughTexture) {
+        rhi::TextureDesc desc = {};
+        desc.type = rhi::TextureType::Texture2D;
+        desc.width = 1;
+        desc.height = 1;
+        desc.format = rhi::RHITextureFormat::RGBA8;
+        desc.usage = rhi::TextureUsage::ShaderResource;
+        desc.mipLevels = 1;
+        // R=metallic(0), G=roughness(0.5), B/A unused for fallback.
+        static const uint8_t mr[4] = { 0, 128, 0, 255 };
+        m_forwardFallbackMetalRoughTexture = m_device->CreateTexture(desc, mr);
+    }
+}
+
+void RenderPipeline::UpdateForwardMaterialSetWithFallback(const Material* material, const MaterialInstance* materialInstance) {
+    if (!m_device || !m_forwardMaterialSet) return;
+    EnsureForwardMaterialFallbackTextures();
+    if (!material && !materialInstance) return;
+
+    rhi::IBuffer* matBuf = materialInstance ? materialInstance->GetMaterialBufferRHI(m_device)
+                                            : material->GetMaterialBufferRHI(m_device);
+    if (matBuf)
+        m_forwardMaterialSet->UpdateUniformBuffer(0, matBuf, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+
+    auto getTex = [&](const std::string& name) -> rhi::ITexture* {
+        if (materialInstance) return materialInstance->GetTextureRHI(name);
+        return material ? material->GetTextureRHI(name) : nullptr;
+    };
+
+    rhi::ITexture* albedo = getTex("u_AlbedoTexture");
+    rhi::ITexture* normal = getTex("u_NormalTexture");
+    rhi::ITexture* metalRough = getTex("u_MetallicRoughnessTexture");
+    if (!metalRough) metalRough = getTex("u_MetallicTexture");
+
+    m_forwardMaterialSet->UpdateTexture(1, albedo ? albedo : m_forwardFallbackAlbedoTexture);
+    m_forwardMaterialSet->UpdateTexture(2, normal ? normal : m_forwardFallbackNormalTexture);
+    m_forwardMaterialSet->UpdateTexture(3, metalRough ? metalRough : m_forwardFallbackMetalRoughTexture);
 }
 
 void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
@@ -1047,28 +1207,27 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
     const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
     if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
     EnsureForwardResourceSets();
-    const int kShadowMapUnit = 6;
-    const int kAlbedoTextureUnit = 0;
-    const int kNormalTextureUnit = 1;
-    const int kMetallicRoughnessTextureUnit = 2;
-    const int kMetallicTextureUnit = 3;
-    const int kRoughnessTextureUnit = 4;
-    const int kAOTextureUnit = 7;   // 5=SSBO, 6=shadow
-    const int kEmissiveTextureUnit = 8;
-    const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
-    if (useShadows && cmd) {
-        rhi::ITexture* shadowTex = m_cascadeShadowMap->GetDepthTextureRHI();
-        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
+    rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
+    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet,
+            m_forwardSceneBuffersSet, m_forwardFrameUBO, m_bindlessHeap)) {
+        static bool s_loggedForwardSkip = false;
+        if (!s_loggedForwardSkip) {
+            core::Log::WarnF(
+                "RenderForwardOpaque: skipped (need command list, bindless heap, and forward resource-space sets). "
+                "Ensure supportsBindless, supportsResourceSpaceBindPath, and successful EnsureForwardResourceSets.");
+            s_loggedForwardSkip = true;
+        }
+        return;
     }
+
+    const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
     math::Mat4 lightSpaceMatrix(1.0f);
     if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
         light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-    rhi::IDescriptorSet* bindlessSet = (m_bindlessHeap) ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    const bool useForwardResourceSets = (m_forwardFrameSet && m_forwardPassSet && m_forwardMaterialSet && m_forwardSceneBuffersSet && m_forwardFrameUBO && bindlessSet && cmd);
 
-    if (useForwardResourceSets) {
+    {
         math::Mat4 viewProj = cam.projection * cam.view;
         float frameUbo[5 * 16];
         std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
@@ -1080,7 +1239,14 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         if (useShadows && m_cascadeShadowMap) m_forwardPassSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
         if (m_sceneLightingBuffer) {
             m_forwardPassSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
+            rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+            m_forwardPassSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
+            rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
+            rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
             m_forwardSceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
         }
         rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
         rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
@@ -1088,16 +1254,9 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         if (irradiance) m_forwardPassSet->UpdateTexture(3, irradiance);
         if (prefilter) m_forwardPassSet->UpdateTexture(4, prefilter);
         if (brdfLut) m_forwardPassSet->UpdateTexture(5, brdfLut);
-    } else {
-        if (cmd && m_sceneLightingBuffer)
-            cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
-        if (useShadows && cmd) {
-            rhi::ITexture* shadowTex = m_cascadeShadowMap->GetDepthTextureRHI();
-            if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
-        }
     }
 
-    if (!m_shaderCache) { if (!useForwardResourceSets && useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit); return; }
+    if (!m_shaderCache) return;
     std::map<ShaderKey, std::vector<Drawable>> buckets;
     for (const Drawable& d : frameData.visibleOpaque) {
         if (!d.mesh || !d.material) continue;
@@ -1113,19 +1272,6 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         Shader* sh = shader.get();
         sh->Bind(m_device);
         debug::Profiler::AddFrameCounter("stateChanges", 1);
-        if (useForwardResourceSets) {
-            rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
-            cmd->BindDescriptorSets(0, 5, sets);
-        } else {
-            sh->SetMat4("u_View", cam.view);
-            sh->SetMat4("u_Projection", cam.projection);
-            if (cmd) {
-                if (envProbe && envProbe->IsValid())
-                    envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
-                else if (iblPtr && iblPtr->IsValid())
-                    iblPtr->BindForLighting(cmd, 11, 12, 13);
-            }
-        }
         sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
         for (const Drawable& d : drawables) {
             const math::Mat4* bonePtr = d.bones;
@@ -1141,24 +1287,17 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
             }
             if (bonePtr && boneCount > 0) boneCount = std::min(boneCount, kMaxBones);
 
-            if (useForwardResourceSets) {
-                if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                else d.material->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
-                    const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
-                    m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
-                    m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
-                }
-                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
-                cmd->BindDescriptorSets(0, 5, sets);
-            } else {
-                if (d.materialInstance) d.materialInstance->ApplyToShader(m_device, sh, cmd);
-                else d.material->ApplyToShader(m_device, sh, cmd);
+            UpdateForwardMaterialSetWithFallback(d.material.get(), d.materialInstance.get());
+            SetForwardShaderUseAlbedoFlag(sh, d.material.get(), d.materialInstance.get());
+            if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
+                const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
+                m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
+                m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
             }
+            rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+            cmd->BindDescriptorSets(0, 5, sets);
             sh->SetMat4("u_Model", d.transform);
             sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
-            if (!useForwardResourceSets && bonePtr && boneCount > 0)
-                sh->SetMat4Array("u_Bones", bonePtr, boneCount);
             debug::Profiler::AddFrameCounter("drawCalls", 1);
             debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
             d.mesh->Bind(m_device);
@@ -1167,8 +1306,6 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
         }
         sh->Unbind();
     }
-
-    if (!useForwardResourceSets && useShadows && cmd) cmd->UnbindTexture(kShadowMapUnit);
 }
 
 void RenderPipeline::RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& leftCam, const CameraView& rightCam) {
@@ -1289,19 +1426,6 @@ void RenderPipeline::BuildForwardStereoGraph() {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
                 IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(m_currentFrameData->camera.viewPos) : nullptr;
-                if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
-                if (c.cmd) {
-                    if (iblPtr && iblPtr->IsValid()) {
-                        if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
-                        if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
-                        if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(c.cmd, brdf);
-                    }
-                    if (envProbe && envProbe->IsValid()) {
-                        if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(c.cmd, ir);
-                        if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(c.cmd, pf);
-                    }
-                }
                 const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
@@ -1317,12 +1441,13 @@ void RenderPipeline::BuildForwardStereoGraph() {
                     const uint32_t halfW = m_width / 2;
                     c.cmd->SetViewport(0, 0, halfW, m_height);
                 }
-                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentLeftCam.view, m_currentLeftCam.projection, m_currentLeftCam.viewPos, m_shaderCache.get());
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentLeftCam.view, m_currentLeftCam.projection, m_currentLeftCam.viewPos, m_shaderCache);
                 if (c.cmd && m_hdrRenderTarget) {
                     const uint32_t halfW = m_width / 2;
                     c.cmd->SetViewport(halfW, 0, halfW, m_height);
                 }
-                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentRightCam.view, m_currentRightCam.projection, m_currentRightCam.viewPos, m_shaderCache.get());
+                TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, m_currentRightCam.view, m_currentRightCam.projection, m_currentRightCam.viewPos, m_shaderCache);
+                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
             };
         return [](const FGPassResources&) {};
     };
@@ -1359,6 +1484,8 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneVi
     m_currentFrameData = &m_frameData;
 
     RenderContext ctx = RenderContext::FromDevice(m_device);
+    if (ctx.cmd) ctx.cmd->SetRenderTarget(nullptr);
+    PreparePersistentShaderReadInputs(ctx.cmd, m_frameData);
 
     CompileFrameGraphIfNeeded(PipelineMode::Forward, true);
     m_frameGraph->Execute(ctx);
@@ -1437,7 +1564,7 @@ void RenderPipeline::RenderForward(const IRenderSceneView& view) {
 
     const CameraView& cam = m_frameData.camera;
     RenderContext ctx = RenderContext::FromDevice(m_device);
-    TransparencyPass::Render(ctx, m_frameData.visibleTransparent, cam.view, cam.projection, cam.viewPos, m_shaderCache.get());
+    TransparencyPass::Render(ctx, m_frameData.visibleTransparent, cam.view, cam.projection, cam.viewPos, m_shaderCache);
     if (cmd) { cmd->SetCullFace(true); cmd->SetRenderTarget(nullptr); }
 }
 
@@ -1446,21 +1573,6 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
     const LightParams& light = frameData.light;
     const std::vector<PointLight>& pointLights = frameData.pointLights;
     const std::vector<SpotLight>& spotLights = frameData.spotLights;
-
-    if (cmd) {
-        IBL* iblPtr = EnsureIBLFromFrameData(frameData);
-        const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
-        if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
-        if (iblPtr && iblPtr->IsValid()) {
-            if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, ir);
-            if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, pf);
-            if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) rhi::BarrierTextureForShaderRead(cmd, brdf);
-        }
-        if (envProbe && envProbe->IsValid()) {
-            if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(cmd, ir);
-            if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(cmd, pf);
-        }
-    }
 
     if (m_clusteredLightGrid->GetNearPlane() != cam.nearPlane ||
         m_clusteredLightGrid->GetFarPlane() != cam.farPlane) {
@@ -1534,36 +1646,22 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
                                              cam.view, cam.projection, cam.viewPos);
         m_clusteredLightGrid->UploadToGPU(m_lightIndexBuffer);
     }
-    if (cmd && m_lightIndexBuffer) {
-        cmd->BindStorageBuffer(m_lightIndexBuffer, 2);
-    }
-
     if (cmd && m_hdrRenderTarget) {
         rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
         rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, cv);
     }
     if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
-    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
-    if (light.castShadows && m_cascadeShadowMap && cmd) {
-        rhi::ITexture* shadowTex = m_cascadeShadowMap->GetDepthTextureRHI();
-        if (shadowTex) cmd->BindTexture(shadowTex, kShadowMapUnit);
-    }
     math::Mat4 lightSpaceMatrix(1.0f);
     if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
         light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-    if (cmd && m_sceneLightingBuffer) {
-        cmd->BindStorageBuffer(m_sceneLightingBuffer, 5, 0, 0);
-    }
 }
 
 void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
     const CameraView& cam = frameData.camera;
     const LightParams& light = frameData.light;
-    const std::vector<PointLight>& pointLights = frameData.pointLights;
-    const std::vector<SpotLight>& spotLights = frameData.spotLights;
 
     if (!m_shaderCache) return;
 
@@ -1573,13 +1671,22 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
         lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
     FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
         light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-    rhi::IDescriptorSet* bindlessSet = (m_bindlessHeap) ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    const bool useForwardResourceSets = (m_forwardFrameSet && m_forwardPassSet && m_forwardMaterialSet && m_forwardSceneBuffersSet && m_forwardFrameUBO && bindlessSet && cmd);
+    rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
+    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet,
+            m_forwardSceneBuffersSet, m_forwardFrameUBO, m_bindlessHeap)) {
+        static bool s_loggedForwardPlusSkip = false;
+        if (!s_loggedForwardPlusSkip) {
+            core::Log::WarnF(
+                "RenderForwardPlusOpaqueBatched: skipped (need command list, bindless heap, and forward resource-space sets).");
+            s_loggedForwardPlusSkip = true;
+        }
+        return;
+    }
     IBL* iblPtr = EnsureIBLFromFrameData(frameData);
     const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
     if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
 
-    if (useForwardResourceSets) {
+    {
         math::Mat4 viewProj = cam.projection * cam.view;
         float frameUbo[5 * 16];
         std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
@@ -1591,7 +1698,14 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
         if (light.castShadows && m_cascadeShadowMap) m_forwardPassSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
         if (m_sceneLightingBuffer) {
             m_forwardPassSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
+            rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+            m_forwardPassSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
+            rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
+            rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
             m_forwardSceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+            m_forwardSceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
         }
         rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
         rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
@@ -1601,61 +1715,7 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
         if (brdfLut) m_forwardPassSet->UpdateTexture(5, brdfLut);
     }
 
-    const int kShadowMapUnit = static_cast<int>(rhi::PassBindings::ShadowMap);
-    auto setCommonForwardPlusUniforms = [&](Shader* sh) {
-        sh->SetMat4("u_View", cam.view);
-        sh->SetMat4("u_Projection", cam.projection);
-        sh->SetInt("u_ScreenWidth", static_cast<int>(m_width));
-        sh->SetInt("u_ScreenHeight", static_cast<int>(m_height));
-        sh->SetInt("u_TileCountX", static_cast<int>(m_clusteredLightGrid->GetTileCountX()));
-        sh->SetInt("u_TileCountY", static_cast<int>(m_clusteredLightGrid->GetTileCountY()));
-        sh->SetInt("u_SliceCount", static_cast<int>(m_clusteredLightGrid->GetSliceCount()));
-        sh->SetFloat("u_LogNear", m_clusteredLightGrid->GetLogNear());
-        sh->SetFloat("u_LogFar", m_clusteredLightGrid->GetLogFar());
-        sh->SetFloat("u_NearPlane", m_clusteredLightGrid->GetNearPlane());
-        sh->SetFloat("u_FarPlane", m_clusteredLightGrid->GetFarPlane());
-        sh->SetInt("u_PointLightCount", static_cast<int>(pointLights.size()));
-        sh->SetInt("u_SpotLightCount", static_cast<int>(spotLights.size()));
-        sh->SetInt("u_ShadowMap", kShadowMapUnit);
-    };
-
-    const int kAlbedoTextureUnit = 0;
-    const int kNormalTextureUnit = 1;
-    const int kMetallicRoughnessTextureUnit = 2;
-    const int kAOTextureUnit = 3;
-    const int kEmissiveTextureUnit = 4;
-    const math::Vec4 kDefaultUVTransform(0.0f, 0.0f, 1.0f, 1.0f);
-    constexpr uint32_t kForwardPlusInstanceBinding = 6u;
-
-    auto drawOneForwardPlus = [&](Shader* sh, const Drawable& d) {
-        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
-        if (!d.mesh || !material) return;
-        if (d.materialInstance)
-            d.materialInstance->ApplyToShader(m_device, sh, cmd);
-        else
-            d.material->ApplyToShader(m_device, sh, cmd);
-        sh->SetMat4("u_Model", d.transform);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
-        const math::Mat4* bonePtr = d.bones;
-        size_t boneCount = d.boneCount;
-        auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
-            if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
-        };
-        if ((!bonePtr || boneCount == 0) && d.materialInstance) d.materialInstance->ForEachMat4Array(collectBones);
-        else if (!bonePtr || boneCount == 0) material->ForEachMat4Array(collectBones);
-        if (bonePtr && boneCount > 0) {
-            boneCount = std::min(boneCount, kMaxBones);
-            sh->SetMat4Array("u_Bones", bonePtr, boneCount);
-        }
-        d.mesh->Bind(m_device);
-        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
-        d.mesh->Unbind();
-    };
-
     std::vector<DrawBatch> batches = BuildBatches(frameData.visibleOpaque);
-    bool commonSetInstanced = false;
-    bool commonSetNonSkinned = false;
-    bool commonSetSkinned = false;
 
     for (DrawBatch& batch : batches) {
         if (batch.IsInstanced() && m_instanceMatrixBuffer && batch.transforms.size() <= kMaxInstanceBatchSize && batch.material) {
@@ -1665,30 +1725,13 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                 Shader* sh = shader.get();
                 sh->Bind(m_device);
                 debug::Profiler::AddFrameCounter("stateChanges", 1);
-                if (useForwardResourceSets) {
-                    if (batch.materialInstance) batch.materialInstance->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                    else batch.material->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                    const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
-                    m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
-                    m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_instanceMatrixBuffer, 0, static_cast<uint32_t>(byteSize));
-                    rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
-                    cmd->BindDescriptorSets(0, 5, sets);
-                } else {
-                    if (!commonSetInstanced) { setCommonForwardPlusUniforms(sh); commonSetInstanced = true; }
-                    if (cmd) {
-                        if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
-                        else if (iblPtr && iblPtr->IsValid()) iblPtr->BindForLighting(cmd, 11, 12, 13);
-                        sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
-                    } else { sh->SetInt("u_UseIBL", 0); }
-                    if (batch.materialInstance)
-                        batch.materialInstance->ApplyToShader(m_device, sh, cmd);
-                    else
-                        batch.material->ApplyToShader(m_device, sh, cmd);
-                    const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
-                    m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
-                    if (cmd)
-                        cmd->BindStorageBuffer(m_instanceMatrixBuffer, kForwardPlusInstanceBinding, 0, static_cast<uint32_t>(batch.transforms.size() * 64u));
-                }
+                UpdateForwardMaterialSetWithFallback(batch.material.get(), batch.materialInstance.get());
+                SetForwardShaderUseAlbedoFlag(sh, batch.material.get(), batch.materialInstance.get());
+                const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
+                m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
+                m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_instanceMatrixBuffer, 0, static_cast<uint32_t>(byteSize));
+                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+                cmd->BindDescriptorSets(0, 5, sets);
                 sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
                 debug::Profiler::AddFrameCounter("drawCalls", 1);
                 debug::Profiler::AddFrameCounter("triangles", (GetIndexCountForDraw(batch.mesh.get(), batch.submeshIndex) / 3u) * static_cast<uint32_t>(batch.transforms.size()));
@@ -1711,46 +1754,25 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                 debug::Profiler::AddFrameCounter("stateChanges", 1);
                 sh->SetInt("u_UseIBL", (envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid()) ? 1 : 0);
 
-                if (useForwardResourceSets) {
-                    if (single.materialInstance) single.materialInstance->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                    else single.material->UpdateForwardResourceSet(m_device, m_forwardMaterialSet);
-                    const math::Mat4* bonePtr = single.bones;
-                    size_t boneCount = single.boneCount;
-                    auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
-                        if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
-                    };
-                    if ((!bonePtr || boneCount == 0) && single.materialInstance) single.materialInstance->ForEachMat4Array(collectBones);
-                    else if (!bonePtr || boneCount == 0) baseMat->ForEachMat4Array(collectBones);
-                    if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
-                        boneCount = std::min(boneCount, kMaxBones);
-                        const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
-                        m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
-                        m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
-                    }
-                    rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
-                    cmd->BindDescriptorSets(0, 5, sets);
-                } else {
-                    if (useSkinned) { if (!commonSetSkinned) { setCommonForwardPlusUniforms(sh); commonSetSkinned = true; } } else { if (!commonSetNonSkinned) { setCommonForwardPlusUniforms(sh); commonSetNonSkinned = true; } }
-                    if (cmd) {
-                        if (envProbe && envProbe->IsValid()) envProbe->BindForLighting(cmd, 11, 12, 13, iblPtr && iblPtr->IsValid() ? iblPtr->GetBRDFLUTTextureRHI() : nullptr);
-                        else if (iblPtr && iblPtr->IsValid()) iblPtr->BindForLighting(cmd, 11, 12, 13);
-                    }
+                UpdateForwardMaterialSetWithFallback(single.material.get(), single.materialInstance.get());
+                SetForwardShaderUseAlbedoFlag(sh, single.material.get(), single.materialInstance.get());
+                const math::Mat4* bonePtr = single.bones;
+                size_t boneCount = single.boneCount;
+                auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
+                    if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+                };
+                if ((!bonePtr || boneCount == 0) && single.materialInstance) single.materialInstance->ForEachMat4Array(collectBones);
+                else if (!bonePtr || boneCount == 0) baseMat->ForEachMat4Array(collectBones);
+                if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
+                    boneCount = std::min(boneCount, kMaxBones);
+                    const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
+                    m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
+                    m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
                 }
+                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+                cmd->BindDescriptorSets(0, 5, sets);
                 sh->SetMat4("u_Model", single.transform);
                 sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(single.transform)));
-                if (!useForwardResourceSets) {
-                    const math::Mat4* bonePtr = single.bones;
-                    size_t boneCount = single.boneCount;
-                    auto collectBones = [&](const std::string& name, const math::Mat4* values, size_t count) {
-                        if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
-                    };
-                    if ((!bonePtr || boneCount == 0) && single.materialInstance) single.materialInstance->ForEachMat4Array(collectBones);
-                    else if (!bonePtr || boneCount == 0) baseMat->ForEachMat4Array(collectBones);
-                    if (bonePtr && boneCount > 0) {
-                        boneCount = std::min(boneCount, kMaxBones);
-                        sh->SetMat4Array("u_Bones", bonePtr, boneCount);
-                    }
-                }
                 debug::Profiler::AddFrameCounter("drawCalls", 1);
                 debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(single.mesh.get(), single.submeshIndex) / 3u);
                 single.mesh->Bind(m_device);
@@ -1760,7 +1782,6 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
             }
         }
     }
-    if (!useForwardResourceSets && light.castShadows && m_cascadeShadowMap && cmd) cmd->UnbindTexture(kShadowMapUnit);
 }
 
 void RenderPipeline::RenderForwardPlus(const IRenderSceneView& view) {
@@ -1870,6 +1891,7 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
 
     } // !kDebugBypassAllPasses
 
+    if (cmd) cmd->SetRenderTarget(nullptr);
     rhi::ITexture* outputTex = GetCurrentFrameOutputColorTextureRHI();
     if (cmd && outputTex)
         rhi::BarrierTextureForShaderRead(cmd, outputTex);
@@ -1946,23 +1968,35 @@ bool RenderPipeline::HasValidOutput() const {
 void RenderPipeline::EnsureStereoForwardShader() {
     if (m_stereoForwardShader && m_stereoForwardShader->IsValid()) return;
     if (!m_device) return;
+    if (m_usingShared && m_usingShared->stereoForwardShader && m_usingShared->stereoForwardShader->IsValid()) {
+        m_stereoForwardShader = m_usingShared->stereoForwardShader;
+        return;
+    }
     m_stereoForwardShader = std::make_shared<Shader>();
-    if (!m_stereoForwardShader->Load(m_device, "passes/forward/forward_stereo", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Forward)) {
+    if (!m_stereoForwardShader->Load(m_device, "passes/forward/forward_stereo", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::Forward,
+                                     std::optional{rhi::StandardAttachmentFormats::ForwardColorDepth()})) {
         core::Log::WarnF("Stereo forward shader failed to load (passes/forward/forward_stereo). Stereo preview will fall back to dual pass.");
         m_stereoForwardShader.reset();
+        return;
     }
+    if (m_sharedResources) m_sharedResources->stereoForwardShader = m_stereoForwardShader;
 }
 
 void RenderPipeline::EnsureSkyboxShader() {
     if (m_skyboxShader && m_skyboxShader->IsValid()) return;
     if (!m_device) return;
+    if (m_usingShared && m_usingShared->skyboxShader && m_usingShared->skyboxShader->IsValid()) {
+        m_skyboxShader = m_usingShared->skyboxShader;
+        m_cachedSkyboxTexture = nullptr;
+        return;
+    }
     m_skyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
-    skyboxDepth.depthTest = false;  // TEST: disable to isolate depth — if skybox appears, depth was the cause
-    skyboxDepth.depthWrite = false;
+    skyboxDepth.depthTest = true;
+    skyboxDepth.depthWrite = true;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
-    core::Log::InfoF("Skybox: TEST depth test disabled (cubemap pipeline)");
-    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
+    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
+                              std::optional{rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
         core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
@@ -1970,19 +2004,24 @@ void RenderPipeline::EnsureSkyboxShader() {
         core::Log::Warn("Skybox shader invalid after load.");
         return;
     }
+    if (m_sharedResources) m_sharedResources->skyboxShader = m_skyboxShader;
     m_cachedSkyboxTexture = nullptr;
 }
 
 void RenderPipeline::EnsureProceduralSkyboxShader() {
     if (m_proceduralSkyboxShader && m_proceduralSkyboxShader->IsValid()) return;
     if (!m_device) return;
+    if (m_usingShared && m_usingShared->proceduralSkyboxShader && m_usingShared->proceduralSkyboxShader->IsValid()) {
+        m_proceduralSkyboxShader = m_usingShared->proceduralSkyboxShader;
+        return;
+    }
     m_proceduralSkyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
-    skyboxDepth.depthTest = false;  // TEST: disable to isolate depth
-    skyboxDepth.depthWrite = false;
+    skyboxDepth.depthTest = true;  // TEST: disable to isolate depth
+    skyboxDepth.depthWrite = true;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
-    core::Log::InfoF("Skybox: TEST depth test disabled (procedural pipeline)");
-    if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post)) {
+    if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
+                                        std::optional{rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
         core::Log::WarnF("Procedural skybox shader failed to load (passes/sky/skybox_procedural).");
         return;
     }
@@ -1990,6 +2029,7 @@ void RenderPipeline::EnsureProceduralSkyboxShader() {
         core::Log::Warn("Procedural skybox shader invalid after load.");
         return;
     }
+    if (m_sharedResources) m_sharedResources->proceduralSkyboxShader = m_proceduralSkyboxShader;
 }
 
 static constexpr uint32_t kPostPassBindingCount = 7;
@@ -2091,8 +2131,6 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     const uint32_t vpH = rt ? rt->GetHeight() : m_height;
     rhi::ICommandList* cmdSky = GetRHICommandList();
     rhi::ITexture* skyboxTex = skybox->GetTextureRHI();
-    if (cmdSky && skyboxTex)
-        rhi::BarrierTextureForShaderRead(cmdSky, skyboxTex);
     if (cmdSky && rt) {
         cmdSky->SetRenderTarget(rt);
         cmdSky->SetViewport(0, 0, vpW, vpH);
@@ -2101,11 +2139,7 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
         m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
     if (cmdSky && rt)
         cmdSky->SetRenderTarget(rt);
-    // Debug: clear to magenta at start of Skybox pass; if panel shows magenta, pass ran but draw didn't overwrite; if skybox, draw worked.
-    if (cmdSky && rt) {
-        const rhi::ClearValue clearMagenta = { 1.f, 0.f, 1.f, 1.f };
-        rhi::ClearAndSetRenderTargetWithViewport(cmdSky, rt, 0, 0, vpW, vpH, clearMagenta);
-    }
+    // Keep prior passes (forward/transparency) intact; skybox should fill only background pixels.
 
     if (cmdSky) {
         cmdSky->SetCullFace(false);
@@ -2246,33 +2280,47 @@ void RenderPipeline::RenderSceneToTarget(rhi::ICommandList* cmd, const RenderFra
 void RenderPipeline::EnsureOutlinePostShader() {
     if (m_outlinePostShader && m_outlinePostShader->IsValid()) return;
     if (!m_device) return;
-    m_outlinePostShader = std::make_shared<Shader>();
-    rhi::DepthStencilState postDepth;
-    postDepth.depthTest = false;
-    postDepth.depthWrite = false;
-    if (!m_outlinePostShader->Load(m_device, "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth, rhi::PipelineLayoutKind::OutlinePost)) {
-        core::Log::WarnF("Outline post shader failed to load (passes/outline_post/outline_post). Run from project root or ensure assets/shaders/opengl/ is available.");
-        return;
+    if (m_usingShared && m_usingShared->outlinePostShader && m_usingShared->outlinePostShader->IsValid()) {
+        m_outlinePostShader = m_usingShared->outlinePostShader;
+    } else {
+        m_outlinePostShader = std::make_shared<Shader>();
+        rhi::DepthStencilState postDepth;
+        postDepth.depthTest = false;
+        postDepth.depthWrite = false;
+        if (!m_outlinePostShader->Load(m_device, "passes/outline_post/outline_post", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &postDepth, rhi::PipelineLayoutKind::OutlinePost,
+                                       std::optional{rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
+            core::Log::WarnF("Outline post shader failed to load (passes/outline_post/outline_post). Run from project root or ensure assets/shaders/opengl/ is available.");
+            return;
+        }
+        if (m_sharedResources) m_sharedResources->outlinePostShader = m_outlinePostShader;
     }
-    if (!m_outlinePostSet) {
-        rhi::IPipelineLayout* outlineLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::OutlinePost);
-        if (outlineLayout) m_outlinePostSet = m_device->CreateDescriptorSet(outlineLayout);
+    rhi::IPipelineLayout* outlineLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::OutlinePost);
+    if (outlineLayout) {
+        for (rhi::IDescriptorSet*& set : m_outlinePostSets) {
+            if (!set) set = m_device->CreateDescriptorSet(outlineLayout);
+        }
     }
 }
 
 void RenderPipeline::EnsureEntityIdShader() {
     if (m_entityIdShader && m_entityIdShader->IsValid()) return;
     if (!m_device) return;
+    if (m_usingShared && m_usingShared->entityIdShader && m_usingShared->entityIdShader->IsValid()) {
+        m_entityIdShader = m_usingShared->entityIdShader;
+        return;
+    }
     m_entityIdShader = std::make_shared<Shader>();
     rhi::DepthStencilState entityIdDepth{};
     entityIdDepth.depthTest = true;
     entityIdDepth.depthWrite = false;
     entityIdDepth.depthCompare = rhi::DepthCompare::Less;
     if (!m_entityIdShader->Load(m_device, "passes/entityid/entityid", Mesh::GetVertexLayoutRHI(),
-                                rhi::PrimitiveTopology::TriangleList, &entityIdDepth)) {
+                                rhi::PrimitiveTopology::TriangleList, &entityIdDepth, rhi::PipelineLayoutKind::PushOnly,
+                                std::optional{rhi::StandardAttachmentFormats::EntityId()})) {
         core::Log::WarnF("EntityID shader failed to load (passes/entityid/entityid). Run from project root or ensure assets/shaders/opengl/ is available.");
         return;
     }
+    if (m_sharedResources) m_sharedResources->entityIdShader = m_entityIdShader;
 }
 
 void RenderPipeline::EnsureStreamingNV12Pass() {
@@ -2372,6 +2420,11 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     rhi::ICommandList* cmd = GetRHICommandList();
     if (!cmd) return;
 
+    rhi::ITexture* sceneTex = m_outlineCompositeTemp->GetColorTexture(0);
+    rhi::ITexture* idTex = m_entityIdRenderTarget->GetColorTexture(0);
+    if (sceneTex) rhi::BarrierTextureForShaderRead(cmd, sceneTex);
+    if (idTex) rhi::BarrierTextureForShaderRead(cmd, idTex);
+
     cmd->SetRenderTarget(m_hdrRenderTarget);
     cmd->SetViewport(0, 0, m_width, m_height);
     cmd->SetDepthTest(false);
@@ -2379,12 +2432,11 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     cmd->SetCullFace(false);
 
     m_outlinePostShader->Bind(m_device);
-    rhi::ITexture* sceneTex = m_outlineCompositeTemp->GetColorTexture(0);
-    rhi::ITexture* idTex = m_entityIdRenderTarget->GetColorTexture(0);
-    if (m_outlinePostSet && sceneTex && idTex) {
-        m_outlinePostSet->UpdateTexture(0, sceneTex);
-        m_outlinePostSet->UpdateTexture(1, idTex);
-        cmd->BindDescriptorSets(0, 1, &m_outlinePostSet);
+    rhi::IDescriptorSet* outlineSet = m_outlinePostSets[m_device->GetCurrentFrameIndex() % kOutlinePostSetsFrames];
+    if (outlineSet && sceneTex && idTex) {
+        outlineSet->UpdateTexture(0, sceneTex);
+        outlineSet->UpdateTexture(1, idTex);
+        cmd->BindDescriptorSets(0, 1, &outlineSet);
     } else {
         if (sceneTex) cmd->BindTexture(sceneTex, 0);
         if (idTex) cmd->BindTexture(idTex, 1);

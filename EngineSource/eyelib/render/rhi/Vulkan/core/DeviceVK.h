@@ -73,7 +73,7 @@ struct DeviceVK : IDevice {
     void DestroyShader(IShader* shader) override;
 
     IPipeline* CreateGraphicsPipeline(const PipelineDesc& desc) override;
-    IPipeline* CreateGraphicsPipelineFromName(const char* shaderName, const VertexLayout& layout, PrimitiveTopology topology, const DepthStencilState* depthStencilOverride = nullptr, PipelineLayoutKind layoutKind = PipelineLayoutKind::Legacy) override;
+    IPipeline* CreateGraphicsPipelineFromShaderAsset(const ShaderGraphicsPipelineCreateInfo& info) override;
     IPipeline* CreateGraphicsPipelineFromBinary(const void* data, size_t size, uint32_t binaryFormat, const VertexLayout& layout, PrimitiveTopology topology) override;
     bool GetPipelineBinary(IPipeline* pipeline, std::vector<uint8_t>& outData, uint32_t& outFormat) override;
     IPipeline* CreateComputePipeline(void* computeShader) override;
@@ -153,8 +153,10 @@ struct DeviceVK : IDevice {
     void* GetGraphicsQueue() const { return m_queues.GetGraphicsQueue(); }
     /** Opaque descriptor pool (VkDescriptorPool). */
     void* GetDescriptorPool() const { return m_descriptorPool; }
-    /** Opaque default sampler (VkSampler) for combined image sampler bindings. */
+    /** Opaque default linear sampler (VkSampler) for color textures. */
     void* GetDefaultSampler() const { return m_defaultSampler; }
+    /** Opaque nearest sampler (VkSampler), used for integer/ID textures. Falls back to default sampler when unavailable. */
+    void* GetNearestSampler() const { return m_nearestSampler ? m_nearestSampler : m_defaultSampler; }
     /** Opaque pipeline cache (VkPipelineCache) for pipeline creation. */
     void* GetPipelineCache() const { return m_pipelineCache; }
     /** Default pipeline layout: PushOnly (0 sets, push constants only). Used for graphics pipelines without a resource-space layout (e.g. BRDF LUT, fullscreen quads). */
@@ -180,8 +182,12 @@ struct DeviceVK : IDevice {
     uint64_t ReserveTimelineValue() { return ++m_timelineValue; }
     /** Look up or register graphics pipeline by hash (used when creating pipelines). Returns existing VkPipeline or VK_NULL_HANDLE. */
     void* GetCachedGraphicsPipeline(uint64_t hash) const;
-    /** Register a created graphics pipeline in the cache. Called after vkCreateGraphicsPipeline. */
+    /** Register a created graphics pipeline in the cache (refCount 0 until RetainGraphicsPipeline). */
     void RegisterGraphicsPipeline(uint64_t hash, void* pipeline);
+    /** Increment refcount for a cached graphics VkPipeline (one per IPipeline wrapper). */
+    void RetainGraphicsPipeline(uint64_t hash);
+    /** Decrement refcount; when zero, enqueue VkPipeline destruction and remove from cache. */
+    void ReleaseGraphicsPipeline(uint64_t hash, void* vkPipeline);
     /** Fullscreen quad VBO/IBO for DrawFullscreenQuad (lazy-created). */
     IBuffer* GetFullscreenQuadVBO() const { return m_fullscreenQuadVBO; }
     IBuffer* GetFullscreenQuadIBO() const { return m_fullscreenQuadIBO; }
@@ -217,7 +223,8 @@ private:
     uint32_t m_currentFrameIndex = 0;   // ring index 0..kMaxFrames-1
     uint32_t m_frameNumber = 0;          // monotonic (for DeletionQueue, FrameGraph, etc.)
     void* m_descriptorPool = nullptr;  // VkDescriptorPool
-    void* m_defaultSampler = nullptr;  // VkSampler
+    void* m_defaultSampler = nullptr;  // VkSampler (linear)
+    void* m_nearestSampler = nullptr;  // VkSampler (nearest)
     void* m_pipelineCache = nullptr;  // VkPipelineCache
     void* m_defaultPipelineLayout = nullptr;  // VkPipelineLayout (PushOnly: 0 sets, push constants only)
     void* m_bindlessSetLayout = nullptr;      // VkDescriptorSetLayout for bindless heap (set 1)
@@ -258,7 +265,11 @@ private:
     void* m_surface = nullptr;              // VkSurfaceKHR
     SwapchainVK m_swapchain;                 // swapchain, images, views, framebuffers, render pass
     bool m_pendingPresent = false;           // set by BeginFrame when Acquire succeeds; cleared by Present (submit uses imageAvailable/renderFinished)
-    std::unordered_map<uint64_t, void*> m_graphicsPipelineCache;  // hash -> VkPipeline
+    struct GraphicsPipelineCacheEntry {
+        void* vkPipeline = nullptr;
+        uint32_t refCount = 0;
+    };
+    std::unordered_map<uint64_t, GraphicsPipelineCacheEntry> m_graphicsPipelineCache;
     std::unique_ptr<CommandListVK> m_immediateCommandList;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;

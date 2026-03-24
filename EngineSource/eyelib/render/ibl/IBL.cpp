@@ -3,9 +3,11 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <optional>
 
 namespace eyelib {
 namespace render {
@@ -62,7 +64,8 @@ std::shared_ptr<Mesh> CreateCubeMesh(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL)) {
+    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL,
+                      std::optional{rhi::StandardAttachmentFormats::IBLFaceCapture()})) {
         return nullptr;
     }
     return shader;
@@ -70,7 +73,8 @@ std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreatePrefilterShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL)) {
+    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL,
+                      std::optional{rhi::StandardAttachmentFormats::IBLFaceCapture()})) {
         return nullptr;
     }
     return shader;
@@ -81,7 +85,7 @@ std::shared_ptr<Shader> CreateBRDFShader(rhi::IDevice* device) {
 #version 460 core
 layout(location = 0) in vec2 a_Position;
 layout(location = 1) in vec2 a_TexCoord;
-out vec2 v_TexCoord;
+layout(location = 0) out vec2 v_TexCoord;
 void main() {
     v_TexCoord = a_TexCoord;
     gl_Position = vec4(a_Position, 0.0, 1.0);
@@ -89,7 +93,7 @@ void main() {
 )";
     const char* frag = R"(
 #version 460 core
-in vec2 v_TexCoord;
+layout(location = 0) in vec2 v_TexCoord;
 layout(location = 0) out vec4 FragColor;
 
 const float PI = 3.14159265359;
@@ -170,7 +174,8 @@ void main() {
 }
 )";
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly))
+    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly,
+                                 std::optional{rhi::StandardAttachmentFormats::BrdfLutRGBA16F()}))
         return nullptr;
     return shader;
 }
@@ -298,6 +303,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         irradianceShader->SetMat4("u_Projection", captureProjection);
         cubeMesh->Draw(m_deviceRHI);
         irradianceShader->Unbind();
+        cmd->SetRenderTarget(nullptr);
         m_deviceRHI->DestroyRenderTarget(rt);
     }
 
@@ -329,6 +335,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             prefilterShader->SetMat4("u_Projection", captureProjection);
             cubeMesh->Draw(m_deviceRHI);
             prefilterShader->Unbind();
+            cmd->SetRenderTarget(nullptr);
             m_deviceRHI->DestroyRenderTarget(rt);
         }
     }
@@ -346,6 +353,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetCullFace(false);
             if (brdfShader->GetPipelineRHI())
                 cmd->DrawFullscreenQuad(brdfShader->GetPipelineRHI());
+            cmd->SetRenderTarget(nullptr);
             m_deviceRHI->DestroyRenderTarget(rt);
         }
     }
@@ -424,6 +432,7 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
         cmd->BindTexture(environmentCubemap, 0);
         cubeMesh->Draw(device);
         irradianceShader->Unbind();
+        cmd->SetRenderTarget(nullptr);
         device->DestroyRenderTarget(rt);
     }
 
@@ -449,6 +458,7 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             cmd->BindTexture(environmentCubemap, 0);
             cubeMesh->Draw(device);
             prefilterShader->Unbind();
+            cmd->SetRenderTarget(nullptr);
             device->DestroyRenderTarget(rt);
         }
     }

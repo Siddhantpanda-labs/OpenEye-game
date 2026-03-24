@@ -52,6 +52,16 @@ uint64_t HashPipelineDesc(const PipelineDesc& desc) {
     for (const char* p : desc.transformFeedbackVaryings)
         h = HashCombine(h, p ? reinterpret_cast<uintptr_t>(p) : 0);
     h = HashCombine(h, static_cast<uint64_t>(static_cast<uint32_t>(desc.layoutKind)));
+    if (desc.attachmentFormats.has_value()) {
+        h = HashCombine(h, 1ull);
+        const PipelineAttachmentFormats& af = *desc.attachmentFormats;
+        h = HashCombine(h, static_cast<uint64_t>(af.color.size()));
+        for (RHITextureFormat cf : af.color)
+            h = HashCombine(h, static_cast<uint64_t>(static_cast<uint32_t>(cf)));
+        h = HashCombine(h, static_cast<uint64_t>(static_cast<uint32_t>(af.depthStencil)));
+    } else {
+        h = HashCombine(h, 0ull);
+    }
     return h;
 }
 

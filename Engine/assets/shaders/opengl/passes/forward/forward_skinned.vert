@@ -1,6 +1,6 @@
 #version 460 core
+// Frame UBO 0; SceneBuffers bone SSBO 1; model + UV via uniforms.
 
-// Canonical mesh layout (all declared)
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec2 a_TexCoord;
@@ -10,23 +10,27 @@ layout(location = 4) in vec4 a_Color;
 layout(location = 5) in ivec4 a_BoneIndices;
 layout(location = 6) in vec4 a_BoneWeights;
 
-uniform mat4 u_Model;
-uniform mat4 u_View;
-uniform mat4 u_Projection;
-uniform vec4 u_UVTransform; // xy = offset, zw = scale
-uniform float u_UVRotation; // radians
-uniform float u_TexCoordIndex; // 0 = UV0, 1 = UV1
-uniform float u_FlipV; // 1 = flip V
+layout(location = 0) out vec3 v_Position;
+layout(location = 1) out vec3 v_Normal;
+layout(location = 2) out vec2 v_TexCoord;
+layout(location = 3) out mat3 v_TBN;
 
-#define MAX_BONES 128
-layout(std140, binding = 3) uniform Bones {
-    mat4 u_Bones[MAX_BONES];
+layout(std140, binding = 0) uniform FrameBlock {
+    mat4 u_View;
+    mat4 u_Projection;
+    mat4 u_ViewProj;
 };
 
-out vec3 v_Position;
-out vec3 v_Normal;
-out vec2 v_TexCoord;
-out mat3 v_TBN;
+#define MAX_BONES 128
+layout(std430, binding = 1) readonly buffer BoneBlock {
+    mat4 u_Bones[MAX_BONES];
+} boneData;
+
+uniform mat4 u_Model;
+uniform vec4 u_UVTransform = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float u_UVRotation = 0.0;
+uniform float u_TexCoordIndex = 0.0;
+uniform float u_FlipV = 0.0;
 
 void main() {
     vec4 pos = vec4(a_Position, 1.0);
@@ -38,7 +42,7 @@ void main() {
         int idx = a_BoneIndices[i];
         float w = a_BoneWeights[i];
         if (w > 0.0 && idx >= 0 && idx < MAX_BONES) {
-            skin += u_Bones[idx] * w;
+            skin += boneData.u_Bones[idx] * w;
         }
     }
 
