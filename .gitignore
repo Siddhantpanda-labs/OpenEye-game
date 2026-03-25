@@ -22,7 +22,7 @@ EngineSource/thirdparty/bgfx.cmake/
 EngineSource/thirdparty/diligent/
 EngineSource/thirdparty/OpenXR-SDK/
 EngineSource/thirdparty/libjpeg-turbo/
-EngineSource/thirdparty/limitless-engine/
+EngineSource/thirdparty/Aespinosa_vulkan/
 *.user
 *.suo
 *.sdf

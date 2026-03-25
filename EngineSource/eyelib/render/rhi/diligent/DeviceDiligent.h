@@ -28,6 +28,7 @@ struct DeviceDiligent : IDevice {
     void* GetLinearSampler();
 
     const RHICapabilities& GetCapabilities() const override;
+    ::eyelib::render::RenderBackend GetRenderBackend() const override { return ::eyelib::render::RenderBackend::Diligent; }
     const char* GetShaderBackendName() const override;
     const char* GetShaderVertexExtension() const override;
     const char* GetShaderFragmentExtension() const override;

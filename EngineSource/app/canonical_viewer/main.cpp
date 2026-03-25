@@ -7,6 +7,7 @@
 #include "api/core/All.h"
 #include "api/platform/All.h"
 #include "api/render/All.h"
+#include "api/render/CameraConventions.h"
 #include "asset/readers/mesh_reader.h"
 #include "asset/readers/prefab_reader.h"
 #include "asset/readers/material_reader.h"
@@ -314,12 +315,17 @@ struct FreeFlyCamera {
 
 // Same as editor BuildViewProjection: forward = (cy*st, sy, -cy*ct), target = position + forward
 static void ApplyFreeFlyCamera(eyelib::api::RenderScene& scene, const FreeFlyCamera& cam) {
-    float cy = std::cos(cam.pitch), sy = std::sin(cam.pitch);
-    float ct = std::cos(cam.yaw), st = std::sin(cam.yaw);
-    glm::vec3 forward(cy * st, sy, -cy * ct);
-    glm::vec3 target = cam.position + forward;
-    scene.camera.view = glm::lookAt(cam.position, target, glm::vec3(0.f, 1.f, 0.f));
-    scene.camera.viewPos = eyelib::math::Vec3(cam.position.x, cam.position.y, cam.position.z);
+    eyelib::api::camera::FreeFlyCameraDesc cameraDesc;
+    cameraDesc.position = eyelib::math::Vec3(cam.position.x, cam.position.y, cam.position.z);
+    cameraDesc.yaw = cam.yaw;
+    cameraDesc.pitch = cam.pitch;
+    cameraDesc.fovDegrees = cam.fovDegrees;
+    cameraDesc.nearPlane = scene.camera.nearPlane;
+    cameraDesc.farPlane = scene.camera.farPlane;
+    const auto cameraView = eyelib::api::camera::BuildFreeFlyCameraView(
+        cameraDesc, static_cast<float>(kWidth), static_cast<float>(kHeight));
+    scene.camera.view = cameraView.view;
+    scene.camera.viewPos = cameraView.viewPos;
 }
 
 void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AABB& sceneAABB, float radius, FreeFlyCamera& cam) {
@@ -332,9 +338,17 @@ void SetupCameraAndLight(eyelib::api::RenderScene& scene, const eyelib::math::AA
     cam.position = glm::vec3(center.x, center.y, center.z) + glm::vec3(0.f, 0.f, radius * 1.5f);
     cam.yaw = 0.f;
     cam.pitch = 0.2f;
-    scene.camera.projection = glm::perspective(glm::radians(cam.fovDegrees), static_cast<float>(kWidth) / static_cast<float>(kHeight), 0.1f, 1000.f);
     scene.camera.nearPlane = 0.1f;
     scene.camera.farPlane = 1000.f;
+    eyelib::api::camera::FreeFlyCameraDesc cameraDesc;
+    cameraDesc.position = eyelib::math::Vec3(cam.position.x, cam.position.y, cam.position.z);
+    cameraDesc.yaw = cam.yaw;
+    cameraDesc.pitch = cam.pitch;
+    cameraDesc.fovDegrees = cam.fovDegrees;
+    cameraDesc.nearPlane = scene.camera.nearPlane;
+    cameraDesc.farPlane = scene.camera.farPlane;
+    scene.camera.projection = eyelib::api::camera::BuildFreeFlyCameraView(
+        cameraDesc, static_cast<float>(kWidth), static_cast<float>(kHeight)).projection;
     scene.light.direction = glm::normalize(eyelib::math::Vec3(0.5f, 1.f, 0.3f));
     scene.light.color = eyelib::math::Vec3(1.f, 0.98f, 0.95f);
     scene.light.intensity = 2.f;

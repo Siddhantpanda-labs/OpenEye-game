@@ -20,9 +20,11 @@ math::Vec3 getCameraUp(const math::Mat4& view) {
     return math::Vec3(view[0][1], view[1][1], view[2][1]);
 }
 void deriveFovAspectFromProjection(const math::Mat4& proj, float& outFov, float& outAspect) {
-    const float tanHalfFov = 1.0f / proj[1][1];
+    const float projY = std::abs(proj[1][1]);
+    const float projX = std::abs(proj[0][0]);
+    const float tanHalfFov = (projY > 1e-6f) ? (1.0f / projY) : 1.0f;
     outFov = 2.0f * std::atan(tanHalfFov);
-    outAspect = proj[1][1] / proj[0][0];
+    outAspect = (projX > 1e-6f) ? (projY / projX) : 1.0f;
 }
 } // namespace
 

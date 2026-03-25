@@ -12,6 +12,7 @@
 #include "api/render/Shader.h"
 #include "api/render/ShaderLoader.h"
 #include "api/render/RenderPipeline.h"
+#include "api/render/CameraConventions.h"
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
 #include "api/render/LODManager.h"

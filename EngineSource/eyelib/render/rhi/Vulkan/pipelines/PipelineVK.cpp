@@ -244,11 +244,17 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     renderingInfo.stencilAttachmentFormat = selectedFormats.stencilFormat;
     assert(colorBlend.attachmentCount == renderingInfo.colorAttachmentCount);
 
-    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    if (device->SupportsExtendedDynamicState()) {
+        dynamicStates.push_back(VK_DYNAMIC_STATE_CULL_MODE);
+        dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE);
+        dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE);
+        dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP);
+    }
     VkPipelineDynamicStateCreateInfo dynamicState = {};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = 2;
-    dynamicState.pDynamicStates = dynamicStates;
+    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+    dynamicState.pDynamicStates = dynamicStates.data();
 
     VkGraphicsPipelineCreateInfo gpInfo = {};
     gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

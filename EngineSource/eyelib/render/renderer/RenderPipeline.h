@@ -356,6 +356,8 @@ private:
     /** Phase 1: stereo path only; set before Execute when building stereo graph. */
     CameraView m_currentLeftCam{};
     CameraView m_currentRightCam{};
+    CameraView m_currentLeftCamRaw{};
+    CameraView m_currentRightCamRaw{};
 
 #ifndef NDEBUG
     /** Debug guard: set during Render() to catch invalid Resize() mid-frame. */

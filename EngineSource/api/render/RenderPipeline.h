@@ -80,6 +80,10 @@ public:
     bool OwnsDevice() const;
     /** Device handle for asset loading, other pipelines, etc. Null if not initialized. */
     RenderDevice GetDevice() const;
+    /** Active shader backend name (e.g. "vulkan", "opengl"), or null when unavailable. */
+    const char* GetBackendName() const;
+    /** Typed backend identity (avoid string matching). */
+    ::eyelib::render::RenderBackend GetBackend() const;
 
     /** Native texture handle of pipeline output (after Render). For ImGui: use as ImTextureID. OpenGL: texture ID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;

@@ -10,6 +10,7 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/math/Frustum.h"
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace eyelib {
@@ -103,7 +104,7 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
-        aspect = projection[1][1] / projection[0][0];
+        aspect = std::abs(projection[1][1] / projection[0][0]);
 
     cascadeMap.Update(lightDir, view, projection, cameraPos, nearPlane, farPlane, aspect);
     cascadeMap.MapLightSpaceToBuffer();
@@ -222,7 +223,7 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
-        aspect = projection[1][1] / projection[0][0];
+        aspect = std::abs(projection[1][1] / projection[0][0]);
 
     cascadeMap.Update(lightDir, view, projection, cameraPos, nearPlane, farPlane, aspect);
     cascadeMap.MapLightSpaceToBuffer();

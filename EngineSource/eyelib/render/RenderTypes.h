@@ -90,7 +90,10 @@ struct RenderScene {
  * Passes and submission use this instead of re-querying the view.
  */
 struct RenderFrameData {
+    /** Backend-adjusted camera used for GPU rendering and shader consumption. */
     CameraView camera;
+    /** Source camera before backend-specific clip-space adjustment; use for CPU-side camera math (culling, cascade setup). */
+    CameraView cameraRaw;
     LightParams light;
     std::shared_ptr<TextureCube> skybox;
     std::vector<PointLight> pointLights;

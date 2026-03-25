@@ -74,6 +74,11 @@ void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
     }
     std::memset(m_computeParamsData, 0, sizeof(m_computeParamsData));
     m_pendingTimelineValue = 0;
+    m_depthTestEnabled = true;
+    m_depthWriteEnabled = true;
+    m_depthFuncLess = true;
+    m_cullFaceEnabled = false;
+    m_cullFrontFace = false;
 }
 
 void CommandListVK::Begin() {
@@ -249,11 +254,42 @@ void CommandListVK::SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, u
     VkRect2D scissor = { { static_cast<int32_t>(x), static_cast<int32_t>(y) }, { width, height } };
     vkCmdSetScissor(static_cast<VkCommandBuffer>(m_commandBuffer), index, 1, &scissor);
 }
-void CommandListVK::SetDepthTest(bool enable) { (void)enable; }
-void CommandListVK::SetDepthWrite(bool enable) { (void)enable; }
-void CommandListVK::SetDepthFuncLess(bool less) { (void)less; }
-void CommandListVK::SetCullFace(bool enable) { (void)enable; }
-void CommandListVK::SetCullFrontFace(bool cullFront) { (void)cullFront; }
+void CommandListVK::SetDepthTest(bool enable) {
+    m_depthTestEnabled = enable;
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsExtendedDynamicState()) return;
+    vkCmdSetDepthTestEnable(static_cast<VkCommandBuffer>(m_commandBuffer), enable ? VK_TRUE : VK_FALSE);
+}
+
+void CommandListVK::SetDepthWrite(bool enable) {
+    m_depthWriteEnabled = enable;
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsExtendedDynamicState()) return;
+    vkCmdSetDepthWriteEnable(static_cast<VkCommandBuffer>(m_commandBuffer), enable ? VK_TRUE : VK_FALSE);
+}
+
+void CommandListVK::SetDepthFuncLess(bool less) {
+    m_depthFuncLess = less;
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsExtendedDynamicState()) return;
+    const VkCompareOp compareOp = less ? VK_COMPARE_OP_LESS : VK_COMPARE_OP_LESS_OR_EQUAL;
+    vkCmdSetDepthCompareOp(static_cast<VkCommandBuffer>(m_commandBuffer), compareOp);
+}
+
+void CommandListVK::SetCullFace(bool enable) {
+    m_cullFaceEnabled = enable;
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsExtendedDynamicState()) return;
+    VkCullModeFlags mode = VK_CULL_MODE_NONE;
+    if (enable)
+        mode = m_cullFrontFace ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
+    vkCmdSetCullMode(static_cast<VkCommandBuffer>(m_commandBuffer), mode);
+}
+
+void CommandListVK::SetCullFrontFace(bool cullFront) {
+    m_cullFrontFace = cullFront;
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsExtendedDynamicState()) return;
+    VkCullModeFlags mode = VK_CULL_MODE_NONE;
+    if (m_cullFaceEnabled)
+        mode = cullFront ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
+    vkCmdSetCullMode(static_cast<VkCommandBuffer>(m_commandBuffer), mode);
+}
 void CommandListVK::SetBlend(bool enable) { (void)enable; }
 void CommandListVK::SetBlendFunc(BlendFactor src, BlendFactor dst) { (void)src; (void)dst; }
 void CommandListVK::SetPolygonOffsetLine(bool enable, float factor, float units) { (void)enable; (void)factor; (void)units; }
@@ -339,6 +375,16 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     m_currentPipeline = pipeline;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
+    if (!pVK->m_isCompute && m_device->SupportsExtendedDynamicState()) {
+        VkCommandBuffer cb = static_cast<VkCommandBuffer>(m_commandBuffer);
+        vkCmdSetDepthTestEnable(cb, m_depthTestEnabled ? VK_TRUE : VK_FALSE);
+        vkCmdSetDepthWriteEnable(cb, m_depthWriteEnabled ? VK_TRUE : VK_FALSE);
+        vkCmdSetDepthCompareOp(cb, m_depthFuncLess ? VK_COMPARE_OP_LESS : VK_COMPARE_OP_LESS_OR_EQUAL);
+        VkCullModeFlags mode = VK_CULL_MODE_NONE;
+        if (m_cullFaceEnabled)
+            mode = m_cullFrontFace ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
+        vkCmdSetCullMode(cb, mode);
+    }
     // Push at bind for immediate validity; draws also push to capture post-bind SetUniform* updates.
     PushGraphicsConstantsIfPossible();
 }
@@ -516,6 +562,8 @@ void CommandListVK::SetUniformInt(const char* name, int value) {
     if (!name) return;
     if (std::strcmp(name, "u_UseIBL") == 0)
         *reinterpret_cast<int*>(m_pushConstants + 0) = value;
+    else if (std::strcmp(name, "u_UseAlbedoTexture") == 0)
+        *reinterpret_cast<int*>(m_pushConstants + 4) = value;
     else if (std::strcmp(name, "u_UseOcclusionCull") == 0)
         *reinterpret_cast<int*>(m_pushConstants + 4) = value;
     else if (std::strcmp(name, "u_PointLightCount") == 0)
@@ -559,7 +607,14 @@ void CommandListVK::SetUniformVec4(const char* name, const float* data) { (void)
 void CommandListVK::SetUniformMat4(const char* name, const float* data) {
     if (!name || !data) return;
     const size_t mat4Bytes = 16 * sizeof(float);
-    if (std::strcmp(name, "u_ViewProj") == 0)
+    if (std::strcmp(name, "u_Model") == 0)
+        std::memcpy(m_pushConstants + 0, data, mat4Bytes);
+    else if (std::strcmp(name, "u_NormalMatrix") == 0) {
+        // Vulkan forward/gbuffer shaders derive normal matrix from u_Model in-shader.
+        // Keep this setter as a recognized no-op for API parity with OpenGL.
+        (void)mat4Bytes;
+    }
+    else if (std::strcmp(name, "u_ViewProj") == 0)
         std::memcpy(m_pushConstants + 16, data, mat4Bytes);
     else if (std::strcmp(name, "u_InverseViewMatrix") == 0)
         std::memcpy(m_pushConstants + 0, data, mat4Bytes);

@@ -14,6 +14,7 @@
 #include "api/render/RenderScene.h"
 #include "api/render/Shader.h"
 #include "api/render/TextureCube.h"
+#include "api/render/CameraConventions.h"
 #include "api/asset/AssetManager.h"
 
 #include <cmath>
@@ -22,7 +23,6 @@
 
 namespace {
 const float kPi = 3.14159265f;
-/** Default skybox when none is set: horizontal-cross cubemap (2048x1536, 512 per face). */
 const char* kDefaultSkyboxCrossPath = "Skybox/SkyMap/Cubemap_Sky_512x512.png";
 }
 
@@ -56,22 +56,17 @@ eyelib::math::Vec3 DirectionFromTransform(const eyelib::math::Mat4& m) {
 /** Editor free-fly camera: position + yaw/pitch -> view matrix. */
 void EditorCameraToView(const EditorCamera& cam, uint32_t viewportWidth, uint32_t viewportHeight,
                        eyelib::api::CameraView& out) {
-    const float aspect = (viewportHeight > 0) ? static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight) : 1.0f;
-    out.nearPlane = 0.1f;
-    out.farPlane = 1000.0f;
-    out.projection = eyelib::math::Perspective(
-        static_cast<float>(cam.fovDegrees * 3.14159265 / 180.0), aspect, out.nearPlane, out.farPlane);
-
-    eyelib::math::Vec3 position(cam.position[0], cam.position[1], cam.position[2]);
-    float cy = std::cos(cam.pitch);
-    float sy = std::sin(cam.pitch);
-    float ct = std::cos(cam.yaw);
-    float st = std::sin(cam.yaw);
-    // Forward direction: -Z when yaw=0 pitch=0 (match player/render convention so scene at origin is visible)
-    eyelib::math::Vec3 forward(cy * st, sy, -cy * ct);
-    eyelib::math::Vec3 target = position + forward;
-    out.viewPos = position;
-    out.view = eyelib::math::LookAt(position, target, eyelib::math::Vec3(0.0f, 1.0f, 0.0f));
+    eyelib::api::camera::FreeFlyCameraDesc cameraDesc;
+    cameraDesc.position = eyelib::math::Vec3(cam.position[0], cam.position[1], cam.position[2]);
+    cameraDesc.yaw = cam.yaw;
+    cameraDesc.pitch = cam.pitch;
+    cameraDesc.fovDegrees = cam.fovDegrees;
+    cameraDesc.nearPlane = 0.1f;
+    cameraDesc.farPlane = 1000.0f;
+    out = eyelib::api::camera::BuildFreeFlyCameraView(
+        cameraDesc,
+        static_cast<float>(viewportWidth),
+        static_cast<float>(viewportHeight));
 }
 
 } // namespace
@@ -360,6 +355,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.castShadows = true;
 
     scene.skybox.reset();
+    // Default to procedural sky when scene has no explicit skybox asset.
     const std::string skyboxId = (world && !world->GetSkyboxAssetId().empty())
         ? world->GetSkyboxAssetId()
         : std::string(kDefaultSkyboxCrossPath);

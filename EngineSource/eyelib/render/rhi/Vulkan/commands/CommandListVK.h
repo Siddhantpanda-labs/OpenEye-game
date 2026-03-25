@@ -116,6 +116,11 @@ struct CommandListVK : ICommandList {
     /** Timeline value to signal on next submit (0 = none). Set by InsertFence; read/cleared by DeviceVK::SubmitCommandList. */
     uint64_t GetPendingTimelineValue() const { return m_pendingTimelineValue; }
     void ClearPendingTimelineValue() { m_pendingTimelineValue = 0; }
+    bool GetDepthTestEnabled() const { return m_depthTestEnabled; }
+    bool GetDepthWriteEnabled() const { return m_depthWriteEnabled; }
+    bool GetDepthFuncLess() const { return m_depthFuncLess; }
+    bool GetCullFaceEnabled() const { return m_cullFaceEnabled; }
+    bool GetCullFrontFace() const { return m_cullFrontFace; }
 
     void EndRenderingIfActive();
     /** Begin dynamic rendering with given RT. */
@@ -159,6 +164,11 @@ private:
     uint32_t m_boundUniformSizes[kMaxLegacyBindings] = {};
     /** ParamsBlock for light_cull (binding 1). Written by SetUniform*; flushed before compute dispatch. */
     uint8_t m_computeParamsData[256] = {};
+    bool m_depthTestEnabled = true;
+    bool m_depthWriteEnabled = true;
+    bool m_depthFuncLess = true;
+    bool m_cullFaceEnabled = false;
+    bool m_cullFrontFace = false;
 };
 
 } // namespace rhi

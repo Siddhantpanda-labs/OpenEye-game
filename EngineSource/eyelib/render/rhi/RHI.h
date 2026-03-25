@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/RenderBackend.h"
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -47,6 +48,9 @@ struct IDevice {
 
     /** Backend capabilities; use these instead of branching on backend type. */
     virtual const RHICapabilities& GetCapabilities() const = 0;
+
+    /** Typed backend identity (avoid string matching). */
+    virtual ::eyelib::render::RenderBackend GetRenderBackend() const = 0;
 
     /** Shader path resolution: base path is assets/shaders/{backendName}/{shaderLogicalPath}. Extensions are backend-specific (e.g. OpenGL: .vert/.frag; Diligent: .vsh/.psh). */
     virtual const char* GetShaderBackendName() const = 0;

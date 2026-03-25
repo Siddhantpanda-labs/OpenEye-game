@@ -320,6 +320,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &availableExtCount, availableExts.data());
     const bool hasDynamicRenderingExt = std::any_of(availableExts.begin(), availableExts.end(),
         [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_KHR_dynamic_rendering") == 0; });
+    const bool hasExtendedDynamicStateExt = std::any_of(availableExts.begin(), availableExts.end(),
+        [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_extended_dynamic_state") == 0; });
 
     std::vector<const char*> deviceExtensions = {
         "VK_KHR_swapchain",
@@ -333,6 +335,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         }
         deviceExtensions.push_back("VK_KHR_dynamic_rendering");
     }
+    if (hasExtendedDynamicStateExt)
+        deviceExtensions.push_back("VK_EXT_extended_dynamic_state");
     uint32_t deviceExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 
     float queuePriority = 1.0f;
@@ -371,7 +375,11 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     VkPhysicalDeviceVulkan11Features vulkan11Features = {};
     vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     dynamicRendering.pNext = &vulkan11Features;
-    vulkan11Features.pNext = nullptr;
+
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extendedDynamicState = {};
+    extendedDynamicState.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+    vulkan11Features.pNext = hasExtendedDynamicStateExt ? &extendedDynamicState : nullptr;
+    extendedDynamicState.pNext = nullptr;
 
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     if (dynamicRendering.dynamicRendering != VK_TRUE) {
@@ -386,6 +394,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
         return false;
     }
+    m_supportsExtendedDynamicState = hasExtendedDynamicStateExt && (extendedDynamicState.extendedDynamicState == VK_TRUE);
+    core::Log::InfoF("Vulkan features: extendedDynamicState extPresent=%d enabled=%d",
+                     hasExtendedDynamicStateExt ? 1 : 0,
+                     m_supportsExtendedDynamicState ? 1 : 0);
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

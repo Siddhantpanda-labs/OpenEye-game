@@ -38,11 +38,15 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIUtils.h"
+#include "eyelib/render/rhi/Vulkan/commands/CommandListVK.h"
+#include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/render/ShaderSourceLoader.h"
+#include "eyelib/render/CameraConventions.h"
 
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/math/Frustum.h"
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -480,34 +484,18 @@ uint32_t GetIndexCountForDraw(const Mesh* mesh, int32_t submeshIndex) {
     return static_cast<uint32_t>(mesh->GetIndexCount());
 }
 
-math::Mat4 AdjustProjectionForBackend(rhi::IDevice* device, const math::Mat4& projection) {
-    if (!device) return projection;
-    const char* backend = device->GetShaderBackendName();
-    if (!backend || std::strcmp(backend, "vulkan") != 0)
-        return projection;
-
-    // GL-style clip-space depth is [-1, 1]; Vulkan expects [0, 1].
-    // Also flip clip-space Y to keep a single explicit Vulkan convention.
-    // Apply correction in the renderer backend boundary.
-    math::Mat4 depthRangeFix(1.0f);
-    depthRangeFix[1][1] = -1.0f;
-    depthRangeFix[2][2] = 0.5f;
-    depthRangeFix[3][2] = 0.5f;
-    return depthRangeFix * projection;
-}
-
 CameraView AdjustCameraForBackend(rhi::IDevice* device, const CameraView& inCamera) {
-    CameraView out = inCamera;
-    out.projection = AdjustProjectionForBackend(device, inCamera.projection);
-    return out;
+    const auto backend = device ? device->GetRenderBackend() : ::eyelib::render::RenderBackend::Default;
+    return camera::AdjustCameraForBackend(inCamera, backend);
 }
 } // namespace
 
-/** When false, all opaque drawables are treated as visible (CPU frustum test skipped). */
-constexpr bool kEnableCpuFrustumCulling = false;
+/** Enable CPU frustum culling once CPU uses raw (unadjusted) camera clip-space math. */
+constexpr bool kEnableCpuFrustumCulling = true;
 
 void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
-    m_frameData.camera = AdjustCameraForBackend(m_device, view.GetCamera());
+    m_frameData.cameraRaw = view.GetCamera();
+    m_frameData.camera = AdjustCameraForBackend(m_device, m_frameData.cameraRaw);
     m_frameData.light = view.GetLight();
     m_frameData.skybox = view.GetSkybox();
     m_frameData.pointLights.clear();
@@ -519,7 +507,8 @@ void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
     m_frameData.visibleOpaque.clear();
     if constexpr (kEnableCpuFrustumCulling) {
         math::Frustum cameraFrustum;
-        cameraFrustum.FromMatrix(m_frameData.camera.projection * m_frameData.camera.view);
+        // CPU culling uses source camera conventions. Backend-adjusted projection is for GPU clip-space only.
+        cameraFrustum.FromMatrix(m_frameData.cameraRaw.projection * m_frameData.cameraRaw.view);
         view.ForEachOpaqueDrawable([this, &cameraFrustum](const Drawable& d) {
             m_frameData.allOpaque.push_back(d);
             if (!d.mesh) return;
@@ -542,15 +531,6 @@ void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
     m_frameData.visibleTransparent.clear();
     view.ForEachTransparentDrawable([this](const Drawable& d) { m_frameData.visibleTransparent.push_back(d); });
 
-    static uint32_t s_cullDiagFrame = 0;
-    ++s_cullDiagFrame;
-    const size_t nAll = m_frameData.allOpaque.size();
-    const size_t nVis = m_frameData.visibleOpaque.size();
-    if (s_cullDiagFrame <= 3u || (s_cullDiagFrame % 120u) == 0u) {
-        const char* backend = m_device ? m_device->GetShaderBackendName() : nullptr;
-        core::Log::InfoF("RenderCull: allOpaque=%zu visibleOpaque=%zu cpuFrustum=%s backend=%s",
-                         nAll, nVis, kEnableCpuFrustumCulling ? "on" : "off", backend ? backend : "(null)");
-    }
 }
 
 uint32_t RenderPipeline::PrepareGpuCullFromFrameData(const RenderFrameData& frameData, const CameraView& cam) {
@@ -774,7 +754,9 @@ void RenderPipeline::RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const
 
 void RenderPipeline::RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView) {
     if (!m_shadowPass || !frameData.light.castShadows) return;
-    const float aspect = (camView.projection[0][0] != 0.0f) ? (camView.projection[1][1] / camView.projection[0][0]) : 1.0f;
+    const float aspect = (camView.projection[0][0] != 0.0f)
+        ? std::abs(camView.projection[1][1] / camView.projection[0][0])
+        : 1.0f;
     const float shadowFar = std::min(camView.farPlane, kMaxDirectionalShadowDistance);
     std::vector<DrawBatch> batches = BuildBatches(frameData.allOpaque);
     std::vector<Drawable> singles;
@@ -865,7 +847,7 @@ void RenderPipeline::BuildDeferredGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
             };
         if (name == "GBuffer")
             return [this](const FGPassResources&) {
@@ -995,14 +977,14 @@ void RenderPipeline::BuildForwardGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
             };
         if (name == "Forward Opaque")
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
                 IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
+                const rhi::ClearValue clearFwd = { 0.f, 0.f, 0.f, 1.f };
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
                 if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
@@ -1050,7 +1032,7 @@ void RenderPipeline::BuildForwardPlusGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->camera);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
             };
         if (name == "Forward+ Opaque")
             return [this](const FGPassResources&) {
@@ -1339,10 +1321,78 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
                              frameData.visibleOpaque.size(), withMeshMat, buckets.size());
         }
     }
+    {
+        static uint32_t s_fwdStateDiag = 0;
+        ++s_fwdStateDiag;
+        const char* backend = m_device ? m_device->GetShaderBackendName() : nullptr;
+        if (s_fwdStateDiag <= 3u || (s_fwdStateDiag % 120u) == 0u) {
+            if (backend && std::strcmp(backend, "vulkan") == 0) {
+                auto* vkCmd = dynamic_cast<rhi::CommandListVK*>(cmd);
+                auto* vkDev = dynamic_cast<rhi::DeviceVK*>(m_device);
+                if (vkCmd && vkDev) {
+                    core::Log::InfoF(
+                        "ForwardOpaqueStateVK: depthTest=%d depthWrite=%d depthFunc=%s cull=%d cullFront=%d extDynState=%d",
+                        vkCmd->GetDepthTestEnabled() ? 1 : 0,
+                        vkCmd->GetDepthWriteEnabled() ? 1 : 0,
+                        vkCmd->GetDepthFuncLess() ? "Less" : "LessEqual",
+                        vkCmd->GetCullFaceEnabled() ? 1 : 0,
+                        vkCmd->GetCullFrontFace() ? 1 : 0,
+                        vkDev->SupportsExtendedDynamicState() ? 1 : 0);
+                }
+            }
+        }
+        static bool s_loggedOcclusionProbeUnavailable = false;
+        if (!s_loggedOcclusionProbeUnavailable && backend && std::strcmp(backend, "vulkan") == 0) {
+            core::Log::Info(
+                "ForwardOpaqueOcclusionProbe: Vulkan query path unavailable (QueryPoolVK and BeginQuery/EndQuery are stubbed); sample-pass logging disabled.");
+            s_loggedOcclusionProbeUnavailable = true;
+        }
+    }
+    {
+        static uint32_t s_fwdClipDiag = 0;
+        ++s_fwdClipDiag;
+        if (s_fwdClipDiag <= 3u || (s_fwdClipDiag % 120u) == 0u) {
+            for (const Drawable& d : frameData.visibleOpaque) {
+                if (!d.mesh) continue;
+                math::AABB local = d.mesh->GetAABB();
+                if (!local.IsValid()) continue;
+                const math::AABB world = local.Transform(d.transform);
+                const math::Vec3 center = 0.5f * (world.min + world.max);
+                const math::Vec4 clip = cam.projection * cam.view * math::Vec4(center, 1.0f);
+                const float invW = (std::abs(clip.w) > 1e-6f) ? (1.0f / clip.w) : 0.0f;
+                const math::Vec3 ndc = math::Vec3(clip) * invW;
+                core::Log::InfoF(
+                    "ForwardOpaqueClip: center=(%.3f,%.3f,%.3f) clip=(%.3f,%.3f,%.3f,%.3f) ndc=(%.3f,%.3f,%.3f)",
+                    center.x, center.y, center.z,
+                    clip.x, clip.y, clip.z, clip.w,
+                    ndc.x, ndc.y, ndc.z);
+                break;
+            }
+        }
+    }
+    size_t shaderCompileMiss = 0;
+    size_t shaderInvalid = 0;
+    size_t pipelineInvalid = 0;
+    size_t drawMaterialSetMiss = 0;
+    size_t meshHandleInvalid = 0;
+    size_t drawSubmitted = 0;
+
     for (auto& [key, drawables] : buckets) {
         const Material* matForCompile = drawables[0].materialInstance ? drawables[0].materialInstance->GetMaterial().get() : drawables[0].material.get();
         auto shader = m_shaderCache->getOrCompile(m_device, key, matForCompile);
-        if (!shader || !shader->IsValid()) continue;
+        if (!shader) {
+            ++shaderCompileMiss;
+            continue;
+        }
+        if (!shader->IsValid()) {
+            ++shaderInvalid;
+            continue;
+        }
+        rhi::IPipeline* pipe = shader->GetPipelineRHI();
+        if (pipe && !pipe->HasValidProgram()) {
+            ++pipelineInvalid;
+            continue;
+        }
         Shader* sh = shader.get();
         sh->Bind(m_device);
         debug::Profiler::AddFrameCounter("stateChanges", 1);
@@ -1362,7 +1412,10 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
             if (bonePtr && boneCount > 0) boneCount = std::min(boneCount, kMaxBones);
 
             rhi::IDescriptorSet* drawMaterialSet = AcquireForwardDrawMaterialSet();
-            if (!drawMaterialSet) continue;
+            if (!drawMaterialSet) {
+                ++drawMaterialSetMiss;
+                continue;
+            }
             UpdateForwardMaterialSetWithFallback(drawMaterialSet, d.material.get(), d.materialInstance.get());
             SetForwardShaderUseAlbedoFlag(sh, d.material.get(), d.materialInstance.get());
             if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
@@ -1377,10 +1430,31 @@ void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFra
             debug::Profiler::AddFrameCounter("drawCalls", 1);
             debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
             d.mesh->Bind(m_device);
-            { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
+            {
+                MeshHandle h = d.mesh->GetHandle();
+                if (h.IsValid()) {
+                    h.Draw(m_device, d.submeshIndex);
+                    ++drawSubmitted;
+                } else {
+                    ++meshHandleInvalid;
+                }
+            }
             d.mesh->Unbind();
         }
         sh->Unbind();
+    }
+
+    {
+        static uint32_t s_fwdSubmitDiag = 0;
+        ++s_fwdSubmitDiag;
+        const bool hasVisible = !frameData.visibleOpaque.empty();
+        const bool suspicious = hasVisible && drawSubmitted == 0;
+        if (suspicious || s_fwdSubmitDiag <= 3u || (s_fwdSubmitDiag % 120u) == 0u) {
+            core::Log::InfoF(
+                "ForwardOpaqueSubmit: visible=%zu buckets=%zu draws=%zu shaderMiss=%zu shaderInvalid=%zu pipeInvalid=%zu drawSetMiss=%zu meshHandleInvalid=%zu",
+                frameData.visibleOpaque.size(), buckets.size(), drawSubmitted,
+                shaderCompileMiss, shaderInvalid, pipelineInvalid, drawMaterialSetMiss, meshHandleInvalid);
+        }
     }
 }
 
@@ -1495,14 +1569,14 @@ void RenderPipeline::BuildForwardStereoGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentLeftCam);
+                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentLeftCamRaw);
             };
         if (name == "Forward Opaque")
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
                 IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                const rhi::ClearValue clearFwd = { 0.f, 0.f, 1.f, 1.f };  // debug: blue to isolate pass
+                const rhi::ClearValue clearFwd = { 0.f, 0.f, 0.f, 1.f };
                 if (c.cmd && m_hdrRenderTarget)
                     rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearFwd);
                 if (c.cmd) { c.cmd->SetDepthTest(true); c.cmd->SetCullFace(false); }
@@ -1554,8 +1628,10 @@ void RenderPipeline::BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneVi
     if (!m_frameGraph || !m_cascadeShadowMap || !m_shadowPass || !m_hdrRenderTarget) return;
 
     m_currentView = &view;
-    m_currentLeftCam = AdjustCameraForBackend(m_device, leftCam);
-    m_currentRightCam = AdjustCameraForBackend(m_device, rightCam);
+    m_currentLeftCamRaw = leftCam;
+    m_currentRightCamRaw = rightCam;
+    m_currentLeftCam = AdjustCameraForBackend(m_device, m_currentLeftCamRaw);
+    m_currentRightCam = AdjustCameraForBackend(m_device, m_currentRightCamRaw);
     PrepareFrameData(view);
     m_currentFrameData = &m_frameData;
 
@@ -2191,7 +2267,8 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
         cmdSky->SetCullFace(false);
         cmdSky->SetDepthTest(true);
         cmdSky->SetDepthWrite(true);
-        cmdSky->SetDepthFuncLess(true);
+        // Skybox draws at far depth; use <= so clear-depth background (1.0) is still drawable.
+        cmdSky->SetDepthFuncLess(false);
     }
     m_skyboxShader->Bind(m_device);
     m_skyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));
@@ -2257,6 +2334,12 @@ void RenderPipeline::RenderProceduralSkyboxImpl(const CameraView& camera, bool u
 
     if (cmdSky)
         cmdSky->SetCullFace(false);
+    if (cmdSky) {
+        cmdSky->SetDepthTest(true);
+        cmdSky->SetDepthWrite(true);
+        // Same as cubemap skybox path: allow depth == 1.0 background.
+        cmdSky->SetDepthFuncLess(false);
+    }
 
     m_proceduralSkyboxShader->Bind(m_device);
     m_proceduralSkyboxShader->SetMat4("u_InverseViewMatrix", glm::inverse(camera.view));

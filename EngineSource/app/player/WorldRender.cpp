@@ -10,6 +10,7 @@
 #include "api/math/TransformUtils.h"
 #include "api/platform/All.h"
 #include "api/render/Material.h"
+#include "api/render/CameraConventions.h"
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
 #include "WorldAnimation.h"
@@ -775,26 +776,15 @@ void WorldRenderBridge::BuildSceneFromViews(
                 ? cameraComponent.aspect
                 : (m_height > 0 ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f);
             if (cameraComponent.isPerspective) {
-                scene.camera.projection = eyelib::math::Perspective(
-                    DegreesToRadians(cameraComponent.fov),
-                    aspect,
-                    cameraComponent.nearPlane,
-                    cameraComponent.farPlane
-                );
+                scene.camera.projection = eyelib::api::camera::BuildPerspectiveProjectionDegrees(
+                    cameraComponent.fov, aspect, cameraComponent.nearPlane, cameraComponent.farPlane);
             } else {
-                const float half = cameraComponent.orthoSize * 0.5f;
-                scene.camera.projection = eyelib::math::Orthographic(
-                    -half * aspect,
-                    half * aspect,
-                    -half,
-                    half,
-                    cameraComponent.nearPlane,
-                    cameraComponent.farPlane
-                );
+                scene.camera.projection = eyelib::api::camera::BuildOrthographicProjection(
+                    cameraComponent.orthoSize, aspect, cameraComponent.nearPlane, cameraComponent.farPlane);
             }
 
-            const auto worldMatrix = TransformToMatrix(cameraTransform);
-            scene.camera.view = eyelib::math::Inverse(worldMatrix);
+            scene.camera.view = eyelib::api::camera::BuildViewFromWorldTransform(
+                cameraTransform.position, cameraTransform.rotation, cameraTransform.scale);
             scene.camera.viewPos = cameraTransform.position;
             scene.camera.nearPlane = cameraComponent.nearPlane;
             scene.camera.farPlane = cameraComponent.farPlane;
@@ -803,8 +793,9 @@ void WorldRenderBridge::BuildSceneFromViews(
 
     if (!cameraFound) {
         const float aspect = (m_height > 0) ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f;
-        scene.camera.projection = eyelib::math::Perspective(DegreesToRadians(60.0f), aspect, 0.1f, 1000.0f);
-        scene.camera.view = eyelib::math::LookAt({0.0f, 2.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+        scene.camera.projection = eyelib::api::camera::BuildPerspectiveProjectionDegrees(60.0f, aspect, 0.1f, 1000.0f);
+        scene.camera.view = eyelib::api::camera::BuildLookAtView(
+            {0.0f, 2.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
         scene.camera.viewPos = {0.0f, 2.0f, 5.0f};
     }
 

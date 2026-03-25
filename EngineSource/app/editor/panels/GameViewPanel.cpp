@@ -4,6 +4,7 @@
 #include "GameRuntime.h"
 
 #include "api/math/TransformUtils.h"
+#include "api/render/CameraConventions.h"
 #include "api/render/RenderScene.h"
 #include "api/world/All.h"
 #include "api/debug/Profiler.h"
@@ -29,11 +30,10 @@ void SceneCameraToView(const ::eyelib::world::components::Transform& transform,
     const float aspect = (viewportHeight > 0) ? static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight) : (16.f / 9.f);
     out.nearPlane = cam.nearPlane;
     out.farPlane = cam.farPlane;
-    const float fovRad = cam.fov * (3.14159265f / 180.f);
-    out.projection = eyelib::math::Perspective(fovRad, aspect, out.nearPlane, out.farPlane);
-
-    eyelib::math::Mat4 world = eyelib::math::Compose(transform.position, transform.rotation, transform.scale);
-    out.view = eyelib::math::Inverse(world);
+    out.projection = eyelib::api::camera::BuildPerspectiveProjectionDegrees(
+        cam.fov, aspect, out.nearPlane, out.farPlane);
+    out.view = eyelib::api::camera::BuildViewFromWorldTransform(
+        transform.position, transform.rotation, transform.scale);
     out.viewPos = transform.position;
 }
 

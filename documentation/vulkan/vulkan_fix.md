@@ -1,77 +1,113 @@
-# Vulkan Fix Plan and Implementation
+# Vulkan Fix Plan (Industry-Level Robustness)
 
-## Objective
+This document defines the production path for Vulkan rendering correctness and long-term maintainability, aligned with patterns used in robust engines (Unity/Unreal style architecture) and informed by reference behavior in `Aespinosa_vulkan`.
 
-Fix Vulkan mesh invisibility and layout/descriptor instability with an explicit, backend-correct rendering contract:
+## Current Status (What Is Already Improved)
 
-- Correct Vulkan clip/depth conventions for camera projection.
-- Prevent descriptor lifetime hazards during multi-mesh drawing.
-- Ensure post/outline image layout transitions are deterministic and valid.
-- Keep OpenGL behavior unchanged.
+- Forward draw path is now confirmed alive:
+  - visible drawables are collected,
+  - shaders/pipelines are valid,
+  - descriptor sets are acquired,
+  - mesh handles submit draw calls.
+- Skybox visibility path was repaired (depth compare handling and clear-path cleanup).
+- Vulkan dynamic state support is detected and logged (`VK_EXT_extended_dynamic_state`).
+- Forward diagnostics now report drop-off reasons (shader/pipeline/descriptor/mesh handle counters).
+- CPU frustum culling was re-enabled with raw camera use for culling-side math.
 
-## Root Causes Identified
+## Remaining Problem Statement
 
-1. Descriptor update-after-bind hazard in forward/forward+ material binding (single material set updated per draw).
-2. Render target copy path missing transfer destination capability on Vulkan color RTs used as copy destinations.
-3. Outline/post image layout mismatches around `RT_Color0` and sampled descriptor expectations.
-4. Backend convention mismatch: Vulkan camera projection consumed with GL clip-space assumptions.
+Meshes can still be invisible even when forward submits valid draws. This means the issue is now likely in GPU visibility stages (clip/depth/convention), not in scene collection or draw submission.
 
-## Implemented Changes
+## Architectural Target (What “Done” Means)
 
-### 1) Descriptor Lifetime Safety (Forward/Forward+)
+1. One canonical camera/projection convention per backend.
+2. No hidden renderer-side projection hacks as permanent behavior.
+3. Pass state deterministic and observable.
+4. No silent no-op behavior in critical backend APIs.
+5. Reproducible verification via logs/tests (not manual guesswork).
 
-- Replaced single mutable material descriptor usage in draw loops with per-frame per-draw descriptor sets.
-- Added a frame-local descriptor pool/cursor and draw-time acquisition path.
-- Bound the draw-local material set for each draw call.
+## Phased Execution Plan
 
-Result: no update-after-bind invalidation when multiple meshes/materials are rendered in one command buffer.
+### Phase 1: Projection Ownership and Clip-Space Contract
 
-### 2) Vulkan Render Target Copy Usage Contract
+Goal: camera projection is produced in a backend-correct way at source; renderer does not permanently patch matrix semantics.
 
-- Added `TransferDst` usage to non-transient Vulkan render-target color textures (including shared-depth color RT path).
+Tasks:
+- Introduce explicit camera projection contract for Vulkan (`RH + ZO + explicit Y policy`) and document it in code.
+- Migrate camera producers (editor/player/api paths) to the contract.
+- Keep renderer boundary adjustment only as temporary compatibility path; remove once all producers are migrated.
+- Add runtime diagnostic: project first visible mesh center to clip/NDC and log values (to prove/deny clip rejection).
 
-Result: `vkCmdCopyImage` and `TRANSFER_DST_OPTIMAL` transitions are legal for RT color copies/blits.
+Exit criteria:
+- NDC values for visible mesh centers are sane (w > 0, x/y roughly in range when in view, z in backend expected range).
+- No pass requires ad-hoc projection post-fix to be visible.
 
-### 3) Outline/Post Layout Determinism
+### Phase 2: Depth/Cull Determinism
 
-- Ensured `RenderOutlineFromIdBuffer()` transitions final HDR output back to shader-read before UI sampling.
-- Updated Vulkan blit restore policy so destination copy target is restored to shader-read for post/outline consumption.
+Goal: draw visibility is not dependent on accidental state carry-over.
 
-Result: descriptor image layout and actual image layout remain consistent at sampling time.
+Tasks:
+- Ensure effective depth/cull state is explicitly set at pass entry and before draws where policy differs.
+- Keep dynamic state path gated by feature support and log active mode in debug builds.
+- Normalize skybox depth policy (`LessEqual`) and mesh depth policy (`Less`) as explicit pass policy.
 
-### 4) Vulkan Camera Convention Normalization
+Exit criteria:
+- Forward opaque/skybox visibility remains stable across scene changes and frame transitions.
+- State logs match expected per-pass policy.
 
-- Added backend-normalization in renderer boundary:
-  - Vulkan only: apply projection correction matrix for explicit clip/depth convention.
-  - OpenGL and others: unchanged.
-- Normalization now applied in:
-  - `PrepareFrameData()` camera pipeline path.
-  - Stereo camera setup (`m_currentLeftCam`, `m_currentRightCam`).
-  - Direct skybox rendering entry path (`RenderSkybox(view, ...)`).
-  - Stereo post/debug draw camera usage.
+### Phase 3: Stub Elimination / Feature Gating
 
-Result: forward/deferred/stereo/skybox paths consume a consistent Vulkan projection convention from a single renderer boundary policy.
+Goal: no critical debug/profiling path depends on stubs.
 
-## Design Notes
+Tasks:
+- Implement Vulkan query path (`QueryPoolVK`, begin/end query, result read) OR fully gate and label unsupported workflows.
+- Keep one-time explicit logs when unsupported features are requested.
 
-- Convention policy is centralized in renderer code rather than scattered in gameplay/editor camera builders.
-- Vulkan-specific behavior is isolated by backend check (`GetShaderBackendName()`), preserving OpenGL parity.
-- Passes continue to use the same camera data model (`CameraView`) while backend correction is applied once in render path.
+Exit criteria:
+- Occlusion/sample-pass diagnostics either produce real values or are clearly disabled by capability.
 
-## Verification Checklist
+### Phase 4: Regression Safety Net
 
-Use this checklist per build:
+Goal: prevent reintroduction of invisible-mesh regressions.
 
-- [ ] Add first mesh: visible in final image.
-- [ ] Add second mesh: remains visible; no descriptor update/recording invalidation.
-- [ ] No repeated `VUID-VkDescriptorImageInfo-imageLayout-00344` / `08114`.
-- [ ] Outline selection renders correctly with no layout errors.
-- [ ] Skybox and meshes coexist correctly (no full-sky overwrite when opaque exists).
-- [ ] Stereo path renders geometry in both eyes.
-- [ ] OpenGL path behavior unchanged.
+Tasks:
+- Add golden scenes and backend checks:
+  - one opaque mesh,
+  - two opaque meshes,
+  - skybox-only,
+  - opaque + skybox + post.
+- Add counters/assert-like checks in debug builds for:
+  - visible > 0 with draws == 0,
+  - persistent invalid descriptor/pipeline cases,
+  - impossible clip-space values.
 
-## Remaining Follow-up (Optional Hardening)
+Exit criteria:
+- Automated/local validation catches regressions before manual QA.
 
-- Move all ad-hoc texture state changes into stricter framegraph-declared read/write transitions where practical.
-- Add debug assertions for backend camera normalization and expected output texture state before UI sampling.
-- Add cross-backend visibility/depth regression test scenes (opaque overlap, skybox, shadowed mesh).
+## Implementation Tracking
+
+### Completed
+
+- Forward submission diagnostics (`ForwardOpaqueSubmit` counters).
+- Vulkan extended dynamic state feature detection log.
+- Forward Vulkan state log (`ForwardOpaqueStateVK`).
+- Skybox visibility baseline fixes and debug-clear cleanup.
+
+### In Progress
+
+- Phase 1 clip-space contract verification (NDC logging).
+
+### Pending
+
+- Camera-source canonical Vulkan projection migration.
+- Renderer projection-adjustment retirement.
+- Vulkan query path implementation or strict capability gating.
+- Golden-scene regression checks.
+
+## Immediate Next Actions
+
+1. Use NDC logging to confirm whether current invisible meshes are clip/depth rejected.
+2. If confirmed, migrate camera projection generation to canonical Vulkan convention at source.
+3. Remove renderer-side projection fix once migration completes.
+4. Implement/gate Vulkan query diagnostics to close observability gaps.
+

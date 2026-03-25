@@ -7,6 +7,7 @@
 #include "api/core/Log.h"
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
+#include "api/render/CameraConventions.h"
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/debug/Profiler.h"
@@ -49,17 +50,20 @@ inline EntityId UnpackEntityId(uint32_t id) {
     return e;
 }
 
-void BuildViewProjection(const EditorCamera& cam, float viewportW, float viewportH,
+void BuildViewProjection(const EditorCamera& cam, float viewportW, float viewportH, ::eyelib::render::RenderBackend backend,
                          Mat4& outView, Mat4& outProj) {
-    const float aspect = (viewportH > 0.f) ? (viewportW / viewportH) : 1.f;
-    outProj = eyelib::math::Perspective(
-        static_cast<float>(cam.fovDegrees * 3.14159265 / 180.0), aspect, 0.1f, 1000.f);
-    Vec3 position(cam.position[0], cam.position[1], cam.position[2]);
-    float cy = std::cos(cam.pitch), sy = std::sin(cam.pitch);
-    float ct = std::cos(cam.yaw), st = std::sin(cam.yaw);
-    Vec3 forward(cy * st, sy, -cy * ct);
-    Vec3 target = position + forward;
-    outView = eyelib::math::LookAt(position, target, Vec3(0.f, 1.f, 0.f));
+    eyelib::api::camera::FreeFlyCameraDesc cameraDesc;
+    cameraDesc.position = Vec3(cam.position[0], cam.position[1], cam.position[2]);
+    cameraDesc.yaw = cam.yaw;
+    cameraDesc.pitch = cam.pitch;
+    cameraDesc.fovDegrees = cam.fovDegrees;
+    cameraDesc.nearPlane = 0.1f;
+    cameraDesc.farPlane = 1000.0f;
+
+    const auto baseCamera = eyelib::api::camera::BuildFreeFlyCameraView(cameraDesc, viewportW, viewportH);
+    const auto adjustedCamera = eyelib::api::camera::AdjustCameraForBackend(baseCamera, backend);
+    outView = adjustedCamera.view;
+    outProj = adjustedCamera.projection;
 }
 
 bool WorldToScreen(const Vec3& world, const Mat4& view, const Mat4& proj,
@@ -258,6 +262,9 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         const uint32_t w = static_cast<uint32_t>(size.x);
         const uint32_t h = static_cast<uint32_t>(size.y);
         const bool canRender = ctx->sceneViewPipeline && ctx->assetRegistry && w > 0 && h > 0;
+        const ::eyelib::render::RenderBackend backend = ctx->sceneViewPipeline
+            ? ctx->sceneViewPipeline->GetBackend()
+            : ::eyelib::render::RenderBackend::Default;
 
         eyelib::api::world::World::RenderSnapshot snapshot;
         if (canRender) {
@@ -280,7 +287,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             ctx->sceneViewPipeline->Resize(w, h);
             {
                 Mat4 view, proj;
-                BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
+                BuildViewProjection(ctx->editorCamera, size.x, size.y, backend, view, proj);
                 ColoredLines colored;
                 CollectGridAndAxisLinesColored(ctx->editorCamera, colored);
                 if (!snapshot.colliders.empty()) {
@@ -327,7 +334,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             EntityId sel = ctx->selectedEntity;
             if (sel != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(sel)) {
                 Mat4 view, proj;
-                BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
+                BuildViewProjection(ctx->editorCamera, size.x, size.y, backend, view, proj);
                 static LightGizmoIcons lightIcons;
                 if (lightIcons.EnsureLoaded()) {
                     ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -374,7 +381,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             if (worldOpt) {
                 const auto& worldTr = *worldOpt;
                 Mat4 view, proj;
-                BuildViewProjection(ctx->editorCamera, size.x, size.y, view, proj);
+                BuildViewProjection(ctx->editorCamera, size.x, size.y, backend, view, proj);
                 Mat4 model = eyelib::math::Compose(worldTr.position, worldTr.rotation, worldTr.scale);
                 float modelMatrix[16];
                 std::memcpy(modelMatrix, &model[0][0], sizeof(modelMatrix));

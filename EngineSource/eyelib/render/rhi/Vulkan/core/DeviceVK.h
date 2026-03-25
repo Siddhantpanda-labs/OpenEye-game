@@ -41,6 +41,7 @@ struct DeviceVK : IDevice {
     ~DeviceVK() override;
 
     const RHICapabilities& GetCapabilities() const override;
+    ::eyelib::render::RenderBackend GetRenderBackend() const override { return ::eyelib::render::RenderBackend::Vulkan; }
     const char* GetShaderBackendName() const override;
     const char* GetShaderVertexExtension() const override;
     const char* GetShaderFragmentExtension() const override;
@@ -159,6 +160,8 @@ struct DeviceVK : IDevice {
     void* GetNearestSampler() const { return m_nearestSampler ? m_nearestSampler : m_defaultSampler; }
     /** Opaque pipeline cache (VkPipelineCache) for pipeline creation. */
     void* GetPipelineCache() const { return m_pipelineCache; }
+    /** True when VK_EXT_extended_dynamic_state is enabled on the device. */
+    bool SupportsExtendedDynamicState() const { return m_supportsExtendedDynamicState; }
     /** Default pipeline layout: PushOnly (0 sets, push constants only). Used for graphics pipelines without a resource-space layout (e.g. BRDF LUT, fullscreen quads). */
     void* GetDefaultPipelineLayout() const { return m_defaultPipelineLayout; }
     /** Bindless descriptor set layout (set 1: textures binding 0, buffers binding 1). */
@@ -282,6 +285,7 @@ private:
     bool m_frameOpen = false;               // true between BeginFrame() and EndFrame()
     void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui
     DeletionQueueVK m_deletionQueue;
+    bool m_supportsExtendedDynamicState = false;
     /** Descriptor sets to free after 3 frame boundaries (so no CB still references them). */
     std::vector<IDescriptorSet*> m_pendingDescriptorSetsToFree;
     uint32_t m_ticksUntilDescriptorSetFree = 0;

@@ -103,6 +103,18 @@ RenderDevice RenderPipeline::GetDevice() const {
     return m_impl->pipeline ? RenderDevice(m_impl->pipeline->GetRHIDevice()) : RenderDevice();
 }
 
+const char* RenderPipeline::GetBackendName() const {
+    if (!m_impl || !m_impl->pipeline) return nullptr;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    return device ? device->GetShaderBackendName() : nullptr;
+}
+
+::eyelib::render::RenderBackend RenderPipeline::GetBackend() const {
+    if (!m_impl || !m_impl->pipeline) return ::eyelib::render::RenderBackend::Default;
+    auto* device = m_impl->pipeline->GetRHIDevice();
+    return device ? device->GetRenderBackend() : ::eyelib::render::RenderBackend::Default;
+}
+
 void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
     if (!m_impl->pipeline) return nullptr;
     ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetCurrentFrameOutputColorTextureRHI();
