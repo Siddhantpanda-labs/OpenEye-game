@@ -3,7 +3,7 @@
 layout(location = 0) out uint outEntityID;
 
 layout(push_constant, std430) uniform EntityIdFragPush {
-    uint u_EntityID;
+    layout(offset = 192) uint u_EntityID;
 } pc;
 
 void main() {

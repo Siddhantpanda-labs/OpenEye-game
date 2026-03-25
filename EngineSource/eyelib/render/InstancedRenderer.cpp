@@ -1,5 +1,8 @@
 #include "eyelib/render/InstancedRenderer.h"
 #include "eyelib/render/ShaderCache.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/math/TransformUtils.h"
@@ -105,12 +108,18 @@ void InstancedRenderer::Render(std::shared_ptr<Mesh> mesh, std::shared_ptr<Mater
     if (!shader || !shader->IsValid()) return;
     Shader* sh = shader.get();
     sh->Bind(m_device);
-    batch.material->ApplyToShader(m_device, sh, m_cmd);
-    for (size_t i = 0; i < instanceCount; ++i) {
-        sh->SetMat4("u_Model", batch.instances[i].modelMatrix);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(batch.instances[i].modelMatrix)));
-        { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
-    }
+        batch.material->ApplyToShader(m_device, sh, m_cmd);
+        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const int albedoFlag = ComputeForwardAlbedoTextureFlag(batch.material.get(), nullptr);
+        for (size_t i = 0; i < instanceCount; ++i) {
+            if (vkFwd)
+                abi::WriteForwardPushConstants(m_cmd, batch.instances[i].modelMatrix, 0, albedoFlag);
+            else {
+                sh->SetMat4("u_Model", batch.instances[i].modelMatrix);
+                sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(batch.instances[i].modelMatrix)));
+            }
+            { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
+        }
     sh->Unbind();
 }
 
@@ -124,9 +133,15 @@ void InstancedRenderer::RenderAll() {
         Shader* sh = shader.get();
         sh->Bind(m_device);
         batch.material->ApplyToShader(m_device, sh, m_cmd);
+        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const int albedoFlag = ComputeForwardAlbedoTextureFlag(batch.material.get(), nullptr);
         for (const auto& inst : batch.instances) {
-            sh->SetMat4("u_Model", inst.modelMatrix);
-            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(inst.modelMatrix)));
+            if (vkFwd)
+                abi::WriteForwardPushConstants(m_cmd, inst.modelMatrix, 0, albedoFlag);
+            else {
+                sh->SetMat4("u_Model", inst.modelMatrix);
+                sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(inst.modelMatrix)));
+            }
             { MeshHandle h = batch.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         }
         sh->Unbind();

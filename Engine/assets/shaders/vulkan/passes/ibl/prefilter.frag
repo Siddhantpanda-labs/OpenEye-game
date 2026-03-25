@@ -8,7 +8,7 @@ layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform samplerCube u_EnvironmentMap;
 
 layout(push_constant, std430) uniform PrefilterPush {
-    float u_Roughness;
+    layout(offset = 128) float u_Roughness;
 } pc;
 
 const float PI = 3.14159265359;

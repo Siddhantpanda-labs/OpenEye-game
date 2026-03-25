@@ -17,6 +17,7 @@ namespace render {
 namespace rhi { struct IDevice; struct ITexture; struct IBuffer; struct ICommandList; struct IDescriptorSet; }
 class Shader;
 class Texture2D;
+class MaterialInstance;
 
 /** Refractor Phase 4: surface shading model for pass template branching. */
 enum class ShadingModel : uint8_t {
@@ -173,6 +174,9 @@ private:
 
 /** std140 layout for MaterialBlock UBO (binding 2). Must match GLSL. */
 constexpr size_t kMaterialBlockStd140Size = 48u;
+
+/** Vulkan forward fragment push: 1 when `u_AlbedoTexture` has an RHI binding. */
+int ComputeForwardAlbedoTextureFlag(const Material* mat, const MaterialInstance* mi = nullptr);
 
 } // namespace render
 } // namespace eyelib

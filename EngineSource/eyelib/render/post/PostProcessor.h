@@ -112,7 +112,8 @@ public:
     rhi::ITexture* ApplyGeneralBlur(rhi::ITexture* texture, float intensity, int iterations);
     rhi::ITexture* ApplyChromaticAberration(rhi::ITexture* texture, float intensity);
     rhi::ITexture* ApplyFXAA(rhi::ITexture* texture);
-    rhi::ITexture* ApplySSAO(const GBuffer& gbuffer, const Settings& settings);
+    rhi::ITexture* ApplySSAO(const GBuffer& gbuffer, const Settings& settings, const math::Mat4& viewMatrix,
+                             const math::Mat4& projectionMatrix);
     /** When outputRT is non-null, SSR renders to it (e.g. ping-pong for HDR chain); when null, uses internal output RT.
      *  reflectionProbeTexture: optional cubemap for fallback when SSR misses (1=SSR hit, 2=probe, 3=skybox). */
     rhi::ITexture* ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,

@@ -2,6 +2,8 @@
 #include "eyelib/render/2d/Sprite.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
@@ -156,8 +158,12 @@ void SpriteRenderer::Render(const math::Mat4& view, const math::Mat4& projection
     m_indexBufferRHI->Update(m_indices.data(), 0, m_indices.size() * sizeof(unsigned int));
 
     m_shader->Bind(device);
-    m_shader->SetMat4("u_View", view);
-    m_shader->SetMat4("u_Projection", projection);
+    if (device->GetRenderBackend() == RenderBackend::Vulkan) {
+        abi::WriteViewProjectionPairPushConstants(cmd, view, projection);
+    } else {
+        m_shader->SetMat4("u_View", view);
+        m_shader->SetMat4("u_Projection", projection);
+    }
     if (!m_spriteSet) m_shader->SetInt("u_Texture", 0);
     cmd->BindVertexBuffer(m_vertexBufferRHI, 0);
     cmd->BindIndexBuffer(m_indexBufferRHI, rhi::IndexType::UInt32);

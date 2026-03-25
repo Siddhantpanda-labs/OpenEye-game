@@ -1,4 +1,5 @@
 #include "eyelib/render/post/PostProcessor.h"
+#include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/renderer/GBuffer.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/resources/Shader.h"
@@ -365,7 +366,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     // SSAO (applied before tone mapping, in linear space)
     rhi::ITexture* ssaoTexture = nullptr;
     if (settings.enableSSAO) {
-        ssaoTexture = ApplySSAO(gbuffer, settings);
+        ssaoTexture = ApplySSAO(gbuffer, settings, viewMatrix, projectionMatrix);
     }
 
     // Bloom extraction and blur (if enabled) — from HDR before SSR
@@ -429,10 +430,12 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
             if (m_postPassLayout) {
                 rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, toneMappedTexture}, {1u, bloomTexture}});
-                if (postSet) {
-                    if (rhi::IPipeline* pipe = m_bloomCompositeShader->GetPipelineRHI())
-                        cmd->BindPipeline(pipe);
-                    cmd->BindDescriptorSets(1, 1, &postSet);
+            if (postSet) {
+                if (rhi::IPipeline* pipe = m_bloomCompositeShader->GetPipelineRHI())
+                    cmd->BindPipeline(pipe);
+                cmd->BindDescriptorSets(1, 1, &postSet);
+                float bloomI = settings.bloomIntensity;
+                cmd->SetPushConstants(0u, sizeof(float), &bloomI);
                 } else {
                     m_bloomCompositeShader->Unbind();
                     return toneMappedTexture;
@@ -551,6 +554,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_bloomExtractShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            float th = threshold;
+            cmd->SetPushConstants(0u, sizeof(float), &th);
         } else {
             m_bloomExtractShader->Unbind();
             return nullptr;
@@ -596,6 +601,16 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
                 if (rhi::IPipeline* pipe = m_bloomBlurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
                 cmd->BindDescriptorSets(1, 1, &postSet);
+                struct BloomBlurPush {
+                    float resolution[2];
+                    int32_t horiz;
+                    float intensity;
+                } bb{};
+                bb.resolution[0] = static_cast<float>(m_width);
+                bb.resolution[1] = static_cast<float>(m_height);
+                bb.horiz = horizontal ? 1 : 0;
+                bb.intensity = 1.0f;
+                cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bb)), &bb);
             } else {
                 break;
             }
@@ -643,6 +658,16 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
                 if (rhi::IPipeline* pipe = m_blurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
                 cmd->BindDescriptorSets(1, 1, &postSet);
+                struct BloomBlurPush {
+                    float resolution[2];
+                    int32_t horiz;
+                    float intensity;
+                } bb{};
+                bb.resolution[0] = static_cast<float>(m_width);
+                bb.resolution[1] = static_cast<float>(m_height);
+                bb.horiz = horizontal ? 1 : 0;
+                bb.intensity = intensity;
+                cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bb)), &bb);
             } else {
                 break;
             }
@@ -682,6 +707,14 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_chromaticAberrationShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            struct ChromaticPush {
+                float resolution[2];
+                float intensity;
+            } cp{};
+            cp.resolution[0] = static_cast<float>(m_width);
+            cp.resolution[1] = static_cast<float>(m_height);
+            cp.intensity = intensity;
+            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(cp)), &cp);
         } else {
             m_chromaticAberrationShader->Unbind();
             return texture;
@@ -719,6 +752,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_fxaaShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            float res[2] = { static_cast<float>(m_width), static_cast<float>(m_height) };
+            cmd->SetPushConstants(0u, sizeof(res), res);
         } else {
             m_fxaaShader->Unbind();
             return texture;
@@ -747,7 +782,8 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
 }
 } // namespace
 
- rhi::ITexture* PostProcessor::ApplySSAO(const GBuffer& gbuffer, const Settings& settings) {
+ rhi::ITexture* PostProcessor::ApplySSAO(const GBuffer& gbuffer, const Settings& settings, const math::Mat4& viewMatrix,
+                                         const math::Mat4& projectionMatrix) {
     if (!m_ssaoShader || !m_ssaoShader->IsValid()) {
         return nullptr;
     }
@@ -761,16 +797,44 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
     cmd->SetBlend(false);
 
     m_ssaoShader->Bind(m_deviceRHI);
-    m_ssaoShader->SetInt("g_Position", 0);
-    m_ssaoShader->SetInt("g_Normal", 1);
-    m_ssaoShader->SetInt("g_Depth", 2);
-    m_ssaoShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-    m_ssaoShader->SetFloat("u_Radius", settings.ssaoRadius);
-    m_ssaoShader->SetFloat("u_Bias", settings.ssaoBias);
-    m_ssaoShader->SetInt("u_SampleCount", settings.ssaoSamples);
-    cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
-    cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
-    cmd->BindTexture(gbuffer.GetDepthTextureRHI(), 2);
+    if (m_postPassLayout) {
+        rhi::ITexture* posT = gbuffer.GetPositionTextureRHI();
+        rhi::ITexture* nrmT = gbuffer.GetNormalTextureRHI();
+        rhi::ITexture* depT = gbuffer.GetDepthTextureRHI();
+        rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, posT}, {1u, nrmT}, {2u, depT}});
+        if (postSet && m_ssaoShader->GetPipelineRHI()) {
+            cmd->BindPipeline(m_ssaoShader->GetPipelineRHI());
+            cmd->BindDescriptorSets(1, 1, &postSet);
+            struct SsaoPushStd430 {
+                math::Mat4 view;
+                math::Mat4 projection;
+                float resolution[2];
+                float radius;
+                float bias;
+                int32_t sampleCount;
+            } sp{};
+            sp.view = viewMatrix;
+            sp.projection = projectionMatrix;
+            sp.resolution[0] = static_cast<float>(m_width);
+            sp.resolution[1] = static_cast<float>(m_height);
+            sp.radius = settings.ssaoRadius;
+            sp.bias = settings.ssaoBias;
+            sp.sampleCount = settings.ssaoSamples;
+            static_assert(sizeof(SsaoPushStd430) == 148u, "SSAO push ABI");
+            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(sp)), &sp);
+        }
+    } else {
+        m_ssaoShader->SetInt("g_Position", 0);
+        m_ssaoShader->SetInt("g_Normal", 1);
+        m_ssaoShader->SetInt("g_Depth", 2);
+        m_ssaoShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
+        m_ssaoShader->SetFloat("u_Radius", settings.ssaoRadius);
+        m_ssaoShader->SetFloat("u_Bias", settings.ssaoBias);
+        m_ssaoShader->SetInt("u_SampleCount", settings.ssaoSamples);
+        cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
+        cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
+        cmd->BindTexture(gbuffer.GetDepthTextureRHI(), 2);
+    }
     if (m_ssaoShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssaoShader->GetPipelineRHI()); }
     m_ssaoShader->Unbind();
 
@@ -792,19 +856,48 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
             cmd->SetBlend(false);
 
             m_ssaoBlurShader->Bind(m_deviceRHI);
-            m_ssaoBlurShader->SetInt("u_SSAO", 0);
-            m_ssaoBlurShader->SetInt("u_Depth", 1);
-            m_ssaoBlurShader->SetVec2("u_Axis", (pass == 0) ? math::Vec2(1.0f, 0.0f) : math::Vec2(0.0f, 1.0f));
-            m_ssaoBlurShader->SetVec2("u_Resolution", res);
-            m_ssaoBlurShader->SetFloat("u_NearPlane", 0.1f);
-            m_ssaoBlurShader->SetFloat("u_FarPlane", 1000.0f);
-            m_ssaoBlurShader->SetFloat("u_FarPlaneOverEdgeDistance", farOverEdge);
-            m_ssaoBlurShader->SetInt("u_SampleCount", kSSAOBlurSampleCount);
-            for (int i = 0; i < kSSAOBlurSampleCount; ++i) {
-                m_ssaoBlurShader->SetFloat(std::string("u_Kernel[") + std::to_string(i) + "]", kernel[i]);
+            if (m_postPassLayout) {
+                rhi::IDescriptorSet* blurSet = CreateTransientPostSet({{0u, srcTex}, {1u, depthTex}});
+                if (blurSet && m_ssaoBlurShader->GetPipelineRHI()) {
+                    cmd->BindPipeline(m_ssaoBlurShader->GetPipelineRHI());
+                    cmd->BindDescriptorSets(1, 1, &blurSet);
+                    struct SsaoBlurPushStd430 {
+                        float axis[2];
+                        float resolution[2];
+                        float nearPlane;
+                        float farPlane;
+                        float farOverEdgeDistance;
+                        int32_t sampleCount;
+                        float kernel[16];
+                    } bp{};
+                    bp.axis[0] = (pass == 0) ? 1.0f : 0.0f;
+                    bp.axis[1] = (pass == 0) ? 0.0f : 1.0f;
+                    bp.resolution[0] = res.x;
+                    bp.resolution[1] = res.y;
+                    bp.nearPlane = 0.1f;
+                    bp.farPlane = 1000.0f;
+                    bp.farOverEdgeDistance = farOverEdge;
+                    bp.sampleCount = kSSAOBlurSampleCount;
+                    for (int i = 0; i < kSSAOBlurSampleCount; ++i)
+                        bp.kernel[i] = kernel[i];
+                    static_assert(sizeof(SsaoBlurPushStd430) == 96u, "SSAO blur push ABI");
+                    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bp)), &bp);
+                }
+            } else {
+                m_ssaoBlurShader->SetInt("u_SSAO", 0);
+                m_ssaoBlurShader->SetInt("u_Depth", 1);
+                m_ssaoBlurShader->SetVec2("u_Axis", (pass == 0) ? math::Vec2(1.0f, 0.0f) : math::Vec2(0.0f, 1.0f));
+                m_ssaoBlurShader->SetVec2("u_Resolution", res);
+                m_ssaoBlurShader->SetFloat("u_NearPlane", 0.1f);
+                m_ssaoBlurShader->SetFloat("u_FarPlane", 1000.0f);
+                m_ssaoBlurShader->SetFloat("u_FarPlaneOverEdgeDistance", farOverEdge);
+                m_ssaoBlurShader->SetInt("u_SampleCount", kSSAOBlurSampleCount);
+                for (int i = 0; i < kSSAOBlurSampleCount; ++i) {
+                    m_ssaoBlurShader->SetFloat(std::string("u_Kernel[") + std::to_string(i) + "]", kernel[i]);
+                }
+                cmd->BindTexture(srcTex, 0);
+                cmd->BindTexture(depthTex, 1);
             }
-            cmd->BindTexture(srcTex, 0);
-            cmd->BindTexture(depthTex, 1);
             if (m_ssaoBlurShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssaoBlurShader->GetPipelineRHI()); }
             m_ssaoBlurShader->Unbind();
         }
@@ -822,16 +915,31 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     cmd->SetDepthTest(false);
     cmd->SetDepthWrite(false);
     m_depthPyramidShader->Bind(m_deviceRHI);
-    m_depthPyramidShader->SetFloat("u_NearPlane", nearPlane);
-    m_depthPyramidShader->SetFloat("u_FarPlane", farPlane);
+
+    const bool usePostLayout = (m_postPassLayout != nullptr);
+    if (!usePostLayout) {
+        m_depthPyramidShader->SetFloat("u_NearPlane", nearPlane);
+        m_depthPyramidShader->SetFloat("u_FarPlane", farPlane);
+    }
 
     // Level 0: copy linearized depth from gbuffer
-    m_depthPyramidShader->SetInt("u_SourceDepth", 0);
-    m_depthPyramidShader->SetInt("u_Pyramid", 1);
-    m_depthPyramidShader->SetInt("u_Level", 0);
-    m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-    cmd->BindTexture(depthTex, 0);
-    if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 1);
+    if (!usePostLayout) {
+        m_depthPyramidShader->SetInt("u_SourceDepth", 0);
+        m_depthPyramidShader->SetInt("u_Pyramid", 1);
+        m_depthPyramidShader->SetInt("u_Level", 0);
+        m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
+    }
+    if (usePostLayout && m_depthPyramidTexture) {
+        rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, depthTex}, {1u, m_depthPyramidTexture}});
+        if (postSet && m_depthPyramidShader->GetPipelineRHI()) {
+            cmd->BindPipeline(m_depthPyramidShader->GetPipelineRHI());
+            cmd->BindDescriptorSets(1, 1, &postSet);
+            abi::WriteDepthPyramidPushConstants(cmd, 0, static_cast<float>(m_width), static_cast<float>(m_height), nearPlane, farPlane);
+        }
+    } else {
+        cmd->BindTexture(depthTex, 0);
+        if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 1);
+    }
     cmd->SetRenderTarget(m_depthPyramidRTs[0]);
     cmd->SetViewport(0, 0, m_width, m_height);
     if (m_depthPyramidShader->GetPipelineRHI()) cmd->DrawFullscreenQuad(m_depthPyramidShader->GetPipelineRHI());
@@ -845,9 +953,21 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         uint32_t prevH = std::max(1u, m_height >> (mip - 1));
         uint32_t currW = std::max(1u, m_width >> mip);
         uint32_t currH = std::max(1u, m_height >> mip);
-        m_depthPyramidShader->SetInt("u_Level", static_cast<int>(mip));
-        m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(prevW), static_cast<float>(prevH)));
-        cmd->BindTexture(m_depthPyramidTexture, 1);
+        if (!usePostLayout) {
+            m_depthPyramidShader->SetInt("u_Level", static_cast<int>(mip));
+            m_depthPyramidShader->SetVec2("u_SourceSize", math::Vec2(static_cast<float>(prevW), static_cast<float>(prevH)));
+        }
+        if (usePostLayout && m_depthPyramidTexture) {
+            rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, depthTex}, {1u, m_depthPyramidTexture}});
+            if (postSet && m_depthPyramidShader->GetPipelineRHI()) {
+                cmd->BindPipeline(m_depthPyramidShader->GetPipelineRHI());
+                cmd->BindDescriptorSets(1, 1, &postSet);
+                abi::WriteDepthPyramidPushConstants(cmd, static_cast<int>(mip), static_cast<float>(prevW), static_cast<float>(prevH), nearPlane,
+                                                      farPlane);
+            }
+        } else {
+            cmd->BindTexture(m_depthPyramidTexture, 1);
+        }
         cmd->SetRenderTarget(m_depthPyramidRTs[mip]);
         cmd->SetViewport(0, 0, currW, currH);
         if (m_depthPyramidShader->GetPipelineRHI()) cmd->DrawFullscreenQuad(m_depthPyramidShader->GetPipelineRHI());
@@ -883,46 +1003,69 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     cmd->SetBlend(false);
 
     m_ssrShader->Bind(m_deviceRHI);
-    m_ssrShader->SetInt("g_Position", 0);
-    m_ssrShader->SetInt("g_Normal", 1);
-    m_ssrShader->SetInt("g_Albedo", 2);
-    m_ssrShader->SetInt("g_PBRParams", 3);
-    m_ssrShader->SetInt("g_Depth", 4);
-    m_ssrShader->SetInt("u_SceneTexture", 5);
-    m_ssrShader->SetInt("u_Skybox", 6);
-    m_ssrShader->SetInt("u_ReflectionProbe", 7);
-    m_ssrShader->SetInt("u_PrevSSR", 8);
-    m_ssrShader->SetInt("u_DepthPyramid", 9);
-    m_ssrShader->SetInt("u_HasReflectionProbe", reflectionProbeTexture ? 1 : 0);
-    m_ssrShader->SetInt("u_TemporalEnabled", m_ssrHasPrevFrame && m_ssrPrevRT ? 1 : 0);
-    m_ssrShader->SetInt("u_HasDepthPyramid", m_depthPyramidTexture ? 1 : 0);
-    m_ssrShader->SetInt("u_PyramidLevels", static_cast<int>(kDepthPyramidLevels));
-    m_ssrShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
-    m_ssrShader->SetFloat("u_StepSize", settings.ssrStepSize);
-    m_ssrShader->SetInt("u_MaxSteps", settings.ssrMaxSteps);
-    m_ssrShader->SetFloat("u_Thickness", settings.ssrThickness);
-    m_ssrShader->SetFloat("u_NearPlane", settings.ssrNearPlane);
-    m_ssrShader->SetFloat("u_FarPlane", settings.ssrFarPlane);
-    m_ssrShader->SetMat4("u_ViewMatrix", viewMatrix);
-    m_ssrShader->SetMat4("u_ProjectionMatrix", projectionMatrix);
-    m_ssrShader->SetMat4("u_InverseViewMatrix", invViewMatrix);
-    m_ssrShader->SetMat4("u_InverseProjectionMatrix", invProjectionMatrix);
-    m_ssrShader->SetVec3("u_ViewPos", viewPos);
-    cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
-    cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
-    cmd->BindTexture(gbuffer.GetAlbedoTextureRHI(), 2);
-    if (rhi::ITexture* pbrTex = gbuffer.GetPBRParamsTextureRHI())
-        cmd->BindTexture(pbrTex, 3);
-    rhi::ITexture* depthTex = gbuffer.GetDepthTextureRHI();
-    if (depthTex) cmd->BindTexture(depthTex, 4);
-    cmd->BindTexture(sceneTexture, 5);
-    if (skyboxTexture) cmd->BindTexture(skyboxTexture, 6);
-    if (reflectionProbeTexture) cmd->BindTexture(reflectionProbeTexture, 7);
-    if (m_ssrHasPrevFrame && m_ssrPrevRT) {
-        rhi::ITexture* prevTex = GetColorTexture(m_ssrPrevRT);
-        if (prevTex) cmd->BindTexture(prevTex, 8);
+    if (m_postPassLayout) {
+        rhi::ITexture* posT = gbuffer.GetPositionTextureRHI();
+        rhi::ITexture* nrmT = gbuffer.GetNormalTextureRHI();
+        rhi::ITexture* albT = gbuffer.GetAlbedoTextureRHI();
+        rhi::ITexture* depT = gbuffer.GetDepthTextureRHI();
+        rhi::ITexture* pbrT = gbuffer.GetPBRParamsTextureRHI() ? gbuffer.GetPBRParamsTextureRHI() : albT;
+        if (!posT || !nrmT || !albT || !depT || !skyboxTexture || !m_ssrShader->GetPipelineRHI()) {
+            m_ssrShader->Unbind();
+            return sceneTexture;
+        }
+        rhi::IDescriptorSet* postSet =
+            CreateTransientPostSet({{0u, posT}, {1u, nrmT}, {2u, albT}, {3u, pbrT}, {4u, depT}, {5u, sceneTexture}, {6u, skyboxTexture}});
+        if (!postSet) {
+            m_ssrShader->Unbind();
+            return sceneTexture;
+        }
+        cmd->BindPipeline(m_ssrShader->GetPipelineRHI());
+        cmd->BindDescriptorSets(1, 1, &postSet);
+        abi::WriteSSRPushConstants(cmd, viewMatrix, projectionMatrix, invViewMatrix, viewPos, settings.ssrNearPlane, settings.ssrFarPlane,
+                                   static_cast<float>(m_width), static_cast<float>(m_height), settings.ssrStepSize, settings.ssrThickness,
+                                   settings.ssrMaxSteps);
+    } else {
+        m_ssrShader->SetInt("g_Position", 0);
+        m_ssrShader->SetInt("g_Normal", 1);
+        m_ssrShader->SetInt("g_Albedo", 2);
+        m_ssrShader->SetInt("g_PBRParams", 3);
+        m_ssrShader->SetInt("g_Depth", 4);
+        m_ssrShader->SetInt("u_SceneTexture", 5);
+        m_ssrShader->SetInt("u_Skybox", 6);
+        m_ssrShader->SetInt("u_ReflectionProbe", 7);
+        m_ssrShader->SetInt("u_PrevSSR", 8);
+        m_ssrShader->SetInt("u_DepthPyramid", 9);
+        m_ssrShader->SetInt("u_HasReflectionProbe", reflectionProbeTexture ? 1 : 0);
+        m_ssrShader->SetInt("u_TemporalEnabled", m_ssrHasPrevFrame && m_ssrPrevRT ? 1 : 0);
+        m_ssrShader->SetInt("u_HasDepthPyramid", m_depthPyramidTexture ? 1 : 0);
+        m_ssrShader->SetInt("u_PyramidLevels", static_cast<int>(kDepthPyramidLevels));
+        m_ssrShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(m_width), static_cast<float>(m_height)));
+        m_ssrShader->SetFloat("u_StepSize", settings.ssrStepSize);
+        m_ssrShader->SetInt("u_MaxSteps", settings.ssrMaxSteps);
+        m_ssrShader->SetFloat("u_Thickness", settings.ssrThickness);
+        m_ssrShader->SetFloat("u_NearPlane", settings.ssrNearPlane);
+        m_ssrShader->SetFloat("u_FarPlane", settings.ssrFarPlane);
+        m_ssrShader->SetMat4("u_ViewMatrix", viewMatrix);
+        m_ssrShader->SetMat4("u_ProjectionMatrix", projectionMatrix);
+        m_ssrShader->SetMat4("u_InverseViewMatrix", invViewMatrix);
+        m_ssrShader->SetMat4("u_InverseProjectionMatrix", invProjectionMatrix);
+        m_ssrShader->SetVec3("u_ViewPos", viewPos);
+        cmd->BindTexture(gbuffer.GetPositionTextureRHI(), 0);
+        cmd->BindTexture(gbuffer.GetNormalTextureRHI(), 1);
+        cmd->BindTexture(gbuffer.GetAlbedoTextureRHI(), 2);
+        if (rhi::ITexture* pbrTex = gbuffer.GetPBRParamsTextureRHI())
+            cmd->BindTexture(pbrTex, 3);
+        rhi::ITexture* depthTex = gbuffer.GetDepthTextureRHI();
+        if (depthTex) cmd->BindTexture(depthTex, 4);
+        cmd->BindTexture(sceneTexture, 5);
+        if (skyboxTexture) cmd->BindTexture(skyboxTexture, 6);
+        if (reflectionProbeTexture) cmd->BindTexture(reflectionProbeTexture, 7);
+        if (m_ssrHasPrevFrame && m_ssrPrevRT) {
+            rhi::ITexture* prevTex = GetColorTexture(m_ssrPrevRT);
+            if (prevTex) cmd->BindTexture(prevTex, 8);
+        }
+        if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 9);
     }
-    if (m_depthPyramidTexture) cmd->BindTexture(m_depthPyramidTexture, 9);
     if (m_ssrShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssrShader->GetPipelineRHI()); }
     m_ssrShader->Unbind();
 
@@ -986,6 +1129,16 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_motionBlurShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            struct MotionBlurPush {
+                float resolution[2];
+                float intensity;
+                int32_t samples;
+            } mb{};
+            mb.resolution[0] = static_cast<float>(m_width);
+            mb.resolution[1] = static_cast<float>(m_height);
+            mb.intensity = settings.motionBlurIntensity;
+            mb.samples = settings.motionBlurSamples;
+            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(mb)), &mb);
         } else {
             m_motionBlurShader->Unbind();
             return texture;
@@ -1026,6 +1179,12 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_vignetteShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            struct VignettePush {
+                float intensity;
+                float radius;
+                float softness;
+            } vp{ settings.vignetteIntensity, settings.vignetteRadius, settings.vignetteSoftness };
+            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(vp)), &vp);
         } else {
             m_vignetteShader->Unbind();
             return texture;
@@ -1064,6 +1223,11 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_filmGrainShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
+            struct FilmGrainPush {
+                float intensity;
+                float time;
+            } fp{ settings.filmGrainIntensity, time };
+            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(fp)), &fp);
         } else {
             m_filmGrainShader->Unbind();
             return texture;

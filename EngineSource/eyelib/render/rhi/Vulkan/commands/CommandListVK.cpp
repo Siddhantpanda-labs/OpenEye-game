@@ -79,6 +79,7 @@ void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
     m_depthFuncLess = true;
     m_cullFaceEnabled = false;
     m_cullFrontFace = false;
+    m_pushModelSet = false;
 }
 
 void CommandListVK::Begin() {
@@ -373,6 +374,7 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
         return;
     }
     m_currentPipeline = pipeline;
+    m_pushModelSet = false;
     VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
     vkCmdBindPipeline(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, vkPipe);
     if (!pVK->m_isCompute && m_device->SupportsExtendedDynamicState()) {
@@ -543,90 +545,27 @@ void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void*
         std::memcpy(m_pushConstants + offset, data, size);
 }
 
-// ParamsBlock (light_cull) offsets in m_computeParamsData
-static constexpr uint32_t kOffsetView = 0;
-static constexpr uint32_t kOffsetProjection = 64;
-static constexpr uint32_t kOffsetTileCountX = 128;
-static constexpr uint32_t kOffsetTileCountY = 132;
-static constexpr uint32_t kOffsetSliceCount = 136;
-static constexpr uint32_t kOffsetLogNear = 140;
-static constexpr uint32_t kOffsetLogFar = 144;
-static constexpr uint32_t kOffsetNearPlane = 148;
-static constexpr uint32_t kOffsetFarPlane = 152;
-static constexpr uint32_t kOffsetScreenWidth = 156;
-static constexpr uint32_t kOffsetScreenHeight = 160;
-static constexpr uint32_t kOffsetPointLightCount = 164;
-static constexpr uint32_t kOffsetSpotLightCount = 168;
-
 void CommandListVK::SetUniformInt(const char* name, int value) {
-    if (!name) return;
-    if (std::strcmp(name, "u_UseIBL") == 0)
-        *reinterpret_cast<int*>(m_pushConstants + 0) = value;
-    else if (std::strcmp(name, "u_UseAlbedoTexture") == 0)
-        *reinterpret_cast<int*>(m_pushConstants + 4) = value;
-    else if (std::strcmp(name, "u_UseOcclusionCull") == 0)
-        *reinterpret_cast<int*>(m_pushConstants + 4) = value;
-    else if (std::strcmp(name, "u_PointLightCount") == 0)
-        *reinterpret_cast<int*>(m_computeParamsData + kOffsetPointLightCount) = value;
-    else if (std::strcmp(name, "u_SpotLightCount") == 0)
-        *reinterpret_cast<int*>(m_computeParamsData + kOffsetSpotLightCount) = value;
+    (void)name;
+    (void)value;
 }
 void CommandListVK::SetUniformUint(const char* name, uint32_t value) {
-    if (!name) return;
-    if (std::strcmp(name, "u_NumDraws") == 0)
-        *reinterpret_cast<uint32_t*>(m_pushConstants + 0) = value;
-    else if (std::strcmp(name, "u_TileCountX") == 0)
-        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetTileCountX) = value;
-    else if (std::strcmp(name, "u_TileCountY") == 0)
-        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetTileCountY) = value;
-    else if (std::strcmp(name, "u_SliceCount") == 0)
-        *reinterpret_cast<uint32_t*>(m_computeParamsData + kOffsetSliceCount) = value;
+    (void)name;
+    (void)value;
 }
 void CommandListVK::SetUniformFloat(const char* name, float value) {
-    if (!name) return;
-    if (std::strcmp(name, "u_LogNear") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetLogNear) = value;
-    else if (std::strcmp(name, "u_LogFar") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetLogFar) = value;
-    else if (std::strcmp(name, "u_NearPlane") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetNearPlane) = value;
-    else if (std::strcmp(name, "u_FarPlane") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetFarPlane) = value;
-    else if (std::strcmp(name, "u_ScreenWidth") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetScreenWidth) = value;
-    else if (std::strcmp(name, "u_ScreenHeight") == 0)
-        *reinterpret_cast<float*>(m_computeParamsData + kOffsetScreenHeight) = value;
+    (void)name;
+    (void)value;
 }
 void CommandListVK::SetUniformVec2(const char* name, const float* data) {
-    if (!name || !data) return;
-    if (std::strcmp(name, "u_DepthSize") == 0)
-        std::memcpy(m_pushConstants + 8, data, 8);
+    (void)name;
+    (void)data;
 }
 void CommandListVK::SetUniformVec3(const char* name, const float* data) { (void)name; (void)data; }
 void CommandListVK::SetUniformVec4(const char* name, const float* data) { (void)name; (void)data; }
 void CommandListVK::SetUniformMat4(const char* name, const float* data) {
-    if (!name || !data) return;
-    const size_t mat4Bytes = 16 * sizeof(float);
-    if (std::strcmp(name, "u_Model") == 0)
-        std::memcpy(m_pushConstants + 0, data, mat4Bytes);
-    else if (std::strcmp(name, "u_NormalMatrix") == 0) {
-        // Vulkan forward/gbuffer shaders derive normal matrix from u_Model in-shader.
-        // Keep this setter as a recognized no-op for API parity with OpenGL.
-        (void)mat4Bytes;
-    }
-    else if (std::strcmp(name, "u_ViewProj") == 0)
-        std::memcpy(m_pushConstants + 16, data, mat4Bytes);
-    else if (std::strcmp(name, "u_InverseViewMatrix") == 0)
-        std::memcpy(m_pushConstants + 0, data, mat4Bytes);
-    else if (std::strcmp(name, "u_InverseProjectionMatrix") == 0)
-        std::memcpy(m_pushConstants + 64, data, mat4Bytes);
-    else if (std::strcmp(name, "u_View") == 0) {
-        std::memcpy(m_computeParamsData + kOffsetView, data, mat4Bytes);
-        std::memcpy(m_pushConstants + 64, data, mat4Bytes);  // IBL push: u_View at 64
-    } else if (std::strcmp(name, "u_Projection") == 0) {
-        std::memcpy(m_computeParamsData + kOffsetProjection, data, mat4Bytes);
-        std::memcpy(m_pushConstants + 0, data, mat4Bytes);   // IBL push: u_Projection at 0
-    }
+    (void)name;
+    (void)data;
 }
 void CommandListVK::SetUniformMat4Array(const char* name, const float* data, size_t count) { (void)name; (void)data; (void)count; }
 void CommandListVK::SetUniformHandle64(const char* name, uint64_t handle) { (void)name; (void)handle; }

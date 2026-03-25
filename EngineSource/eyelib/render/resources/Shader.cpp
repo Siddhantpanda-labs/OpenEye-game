@@ -10,6 +10,14 @@
 namespace eyelib {
 namespace render {
 
+namespace {
+bool VulkanDisablesLegacyUniforms(rhi::IDevice* device) {
+    if (!device) return false;
+    const char* b = device->GetShaderBackendName();
+    return b && std::strcmp(b, "vulkan") == 0;
+}
+} // namespace
+
 Shader::Shader() = default;
 
 Shader::~Shader() {
@@ -325,6 +333,7 @@ void Shader::SetBool(const std::string& name, bool value) const {
 void Shader::SetInt(const std::string& name, int value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformInt(name.c_str(), value);
 }
@@ -332,6 +341,7 @@ void Shader::SetInt(const std::string& name, int value) const {
 void Shader::SetUint(const std::string& name, uint32_t value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformUint(name.c_str(), value);
 }
@@ -346,6 +356,7 @@ void Shader::SetFloat(const std::string& name, float value) const {
 void Shader::SetVec2(const std::string& name, const math::Vec2& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformVec2(name.c_str(), &value.x);
 }
@@ -353,6 +364,7 @@ void Shader::SetVec2(const std::string& name, const math::Vec2& value) const {
 void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformVec3(name.c_str(), &value.x);
 }
@@ -360,6 +372,7 @@ void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {
 void Shader::SetVec4(const std::string& name, const math::Vec4& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformVec4(name.c_str(), &value.x);
 }
@@ -367,6 +380,7 @@ void Shader::SetVec4(const std::string& name, const math::Vec4& value) const {
 void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformMat4(name.c_str(), &value[0][0]);
 }
@@ -375,6 +389,7 @@ void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, siz
     if (!values || count == 0) return;
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformMat4Array(name.c_str(), &values[0][0][0], count);
 }
@@ -382,6 +397,7 @@ void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, siz
 void Shader::SetHandle64(const std::string& name, uint64_t value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
+    if (VulkanDisablesLegacyUniforms(device)) return;
     rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (cmd) cmd->SetUniformHandle64(name.c_str(), value);
 }

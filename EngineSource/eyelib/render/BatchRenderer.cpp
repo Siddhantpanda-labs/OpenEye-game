@@ -1,5 +1,8 @@
 #include "eyelib/render/BatchRenderer.h"
 #include "eyelib/render/ShaderCache.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/math/TransformUtils.h"
 #include <algorithm>
@@ -72,8 +75,14 @@ void BatchRenderer::Flush() {
         Shader* sh = shader.get();
         sh->Bind(m_device);
         e.material->ApplyToShader(m_device, sh, m_cmd);
-        sh->SetMat4("u_Model", e.transform);
-        sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
+        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const int albedoFlag = ComputeForwardAlbedoTextureFlag(e.material.get(), nullptr);
+        if (vkFwd)
+            abi::WriteForwardPushConstants(m_cmd, e.transform, 0, albedoFlag);
+        else {
+            sh->SetMat4("u_Model", e.transform);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(e.transform)));
+        }
         e.mesh->Bind(m_device);
         { MeshHandle h = e.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device); }
         e.mesh->Unbind();

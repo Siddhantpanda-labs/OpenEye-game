@@ -36,7 +36,7 @@ layout(set = 4, binding = 2, std140) buffer SceneLightingBlock {
 } sceneLight;
 
 layout(push_constant, std430) uniform ForwardPlusFragPush {
-    int u_UseIBL;
+    layout(offset = 128) int u_UseIBL;
 } pc;
 
 #include "../../common/forward_lighting_common.glsl"

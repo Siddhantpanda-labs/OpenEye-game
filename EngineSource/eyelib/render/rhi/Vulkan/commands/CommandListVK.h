@@ -162,13 +162,14 @@ private:
     rhi::IBuffer* m_boundUniformBuffers[kMaxLegacyBindings] = {};
     uint32_t m_boundUniformOffsets[kMaxLegacyBindings] = {};
     uint32_t m_boundUniformSizes[kMaxLegacyBindings] = {};
-    /** ParamsBlock for light_cull (binding 1). Written by SetUniform*; flushed before compute dispatch. */
+    /** Staging for PushOnly compute legacy UBO upload (see DeviceVK::UpdateComputeSet0); not used by resource-space passes. */
     uint8_t m_computeParamsData[256] = {};
     bool m_depthTestEnabled = true;
     bool m_depthWriteEnabled = true;
     bool m_depthFuncLess = true;
     bool m_cullFaceEnabled = false;
     bool m_cullFrontFace = false;
+    bool m_pushModelSet = false;
 };
 
 } // namespace rhi

@@ -1,4 +1,5 @@
 #include "eyelib/render/shadows/ShadowPass.h"
+#include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
@@ -134,6 +135,7 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
 
     const uint32_t splitCount = cascadeMap.GetSplitCount();
 
+    const bool useTypedShadowPush = (device && device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan);
     for (uint32_t i = 0; i < splitCount; ++i) {
         cascadeMap.BindForShadowPass(cmd, i);
         cmd->SetDepthTest(true);
@@ -167,7 +169,10 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                     if (name == "u_Bones" && count > 0) { bonePtr = values; boneCount = count; }
                 });
             }
-            shader->SetMat4("u_Model", d.transform);
+            if (useTypedShadowPush)
+                abi::WriteShadowPushConstants(cmd, d.transform);
+            else
+                shader->SetMat4("u_Model", d.transform);
             if (bonePtr && boneCount > 0) {
                 boneCount = std::min(boneCount, kMaxBones);
                 if (useResourceSpace && m_bonesBuffer)

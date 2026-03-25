@@ -38,8 +38,8 @@ layout(set = 4, binding = 2, std140) buffer SceneLightingBlock {
 } sceneLight;
 
 layout(push_constant, std430) uniform ForwardFragPush {
-    int u_UseIBL;
-    int u_UseAlbedoTexture;
+    layout(offset = 128) int u_UseIBL;
+    layout(offset = 132) int u_UseAlbedoTexture;
 } pc;
 
 #include "../../common/forward_lighting_common.glsl"

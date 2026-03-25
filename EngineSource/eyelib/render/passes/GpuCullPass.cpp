@@ -1,4 +1,6 @@
 #include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
@@ -285,15 +287,25 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
     }
 
     if (useWithDrawListPipeline) {
-        cmd->SetUniformUint("u_NumDraws", effectiveCount);
         const bool useOcclusion = !m_useResourceSpace && (m_occlusionDepthTex != nullptr && m_occlusionDepthWidth > 0 && m_occlusionDepthHeight > 0);
-        cmd->SetUniformInt("u_UseOcclusionCull", useOcclusion ? 1 : 0);
+        float depthW = 0.f;
+        float depthH = 0.f;
         if (useOcclusion) {
             cmd->BindTexture(m_occlusionDepthTex, 4);
-            float depthSize[2] = { static_cast<float>(m_occlusionDepthWidth), static_cast<float>(m_occlusionDepthHeight) };
-            cmd->SetUniformVec2("u_DepthSize", depthSize);
+            depthW = static_cast<float>(m_occlusionDepthWidth);
+            depthH = static_cast<float>(m_occlusionDepthHeight);
         }
-    } else {
+        if (m_device->GetRenderBackend() == RenderBackend::Vulkan) {
+            abi::WriteGpuCullPushConstants(cmd, effectiveCount, useOcclusion ? 1 : 0, depthW, depthH);
+        } else {
+            cmd->SetUniformUint("u_NumDraws", effectiveCount);
+            cmd->SetUniformInt("u_UseOcclusionCull", useOcclusion ? 1 : 0);
+            if (useOcclusion) {
+                float depthSize[2] = { depthW, depthH };
+                cmd->SetUniformVec2("u_DepthSize", depthSize);
+            }
+        }
+    } else if (m_device->GetRenderBackend() != RenderBackend::Vulkan) {
         cmd->SetUniformUint("u_NumDraws", 0);
     }
     if (!m_useResourceSpace && useWithDrawListPipeline) {

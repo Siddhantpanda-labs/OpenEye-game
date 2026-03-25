@@ -2,6 +2,8 @@
 #include "eyelib/render/shadows/CascadeShadowMap.h"
 #include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
@@ -95,7 +97,12 @@ void LightingPass::Render(GBuffer& gbuffer,
     if (!m_lightingFrameSet || !m_lightingDeferredPassSet || !cmd) return;
 
     m_lightingShader->Bind(device);
-    m_lightingShader->SetInt("u_UseIBL", (ibl && ibl->IsValid()) ? 1 : 0);
+    const int useIBL = (ibl && ibl->IsValid()) ? 1 : 0;
+    if (device && device->GetRenderBackend() == RenderBackend::Vulkan) {
+        if (cmd) abi::WriteDeferredLightingUseIBL(cmd, useIBL);
+    } else {
+        m_lightingShader->SetInt("u_UseIBL", useIBL);
+    }
 
     rhi::IDescriptorSet* sets[2] = { m_lightingFrameSet, m_lightingDeferredPassSet };
     cmd->BindDescriptorSets(0, 2, sets);

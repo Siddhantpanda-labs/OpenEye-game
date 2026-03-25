@@ -3,6 +3,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/materials/MaterialDescriptor.h"
+#include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHITypes.h"
@@ -249,6 +250,14 @@ std::shared_ptr<Material> CreateMaterialFromDescriptor(
     mat->SetAO(desc.ao);
     mat->SetAlpha(desc.alpha);
     return mat;
+}
+
+int ComputeForwardAlbedoTextureFlag(const Material* mat, const MaterialInstance* mi) {
+    auto hasAlbedo = [&](const char* name) -> bool {
+        if (mi) return mi->GetTextureRHI(name) != nullptr;
+        return mat && mat->GetTextureRHI(name) != nullptr;
+    };
+    return hasAlbedo("u_AlbedoTexture") ? 1 : 0;
 }
 
 } // namespace render

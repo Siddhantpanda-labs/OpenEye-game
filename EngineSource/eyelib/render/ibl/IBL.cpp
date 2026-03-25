@@ -1,5 +1,7 @@
 #include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/MeshDescriptor.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHIUtils.h"
@@ -13,6 +15,10 @@ namespace eyelib {
 namespace render {
 
 namespace {
+bool UseVulkanTypedIblPush(rhi::IDevice* device) {
+    return device && device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan;
+}
+
 unsigned int NativeId(rhi::ITexture* texture) {
     if (!texture) return 0;
     void* native = texture->GetNativeTexture();
@@ -299,8 +305,12 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         } else {
             cmd->BindTexture(m_environmentRHI, 0);
         }
-        irradianceShader->SetMat4("u_View", captureViews[face]);
-        irradianceShader->SetMat4("u_Projection", captureProjection);
+        if (UseVulkanTypedIblPush(m_deviceRHI))
+            abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
+        else {
+            irradianceShader->SetMat4("u_View", captureViews[face]);
+            irradianceShader->SetMat4("u_Projection", captureProjection);
+        }
         cubeMesh->Draw(m_deviceRHI);
         irradianceShader->Unbind();
         cmd->SetRenderTarget(nullptr);
@@ -330,9 +340,14 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             } else {
                 cmd->BindTexture(m_environmentRHI, 0);
             }
-            prefilterShader->SetFloat("u_Roughness", roughness);
-            prefilterShader->SetMat4("u_View", captureViews[face]);
-            prefilterShader->SetMat4("u_Projection", captureProjection);
+            if (UseVulkanTypedIblPush(m_deviceRHI)) {
+                abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
+                abi::WriteIblPrefilterRoughnessPushConstant(cmd, roughness);
+            } else {
+                prefilterShader->SetFloat("u_Roughness", roughness);
+                prefilterShader->SetMat4("u_View", captureViews[face]);
+                prefilterShader->SetMat4("u_Projection", captureProjection);
+            }
             cubeMesh->Draw(m_deviceRHI);
             prefilterShader->Unbind();
             cmd->SetRenderTarget(nullptr);
@@ -427,8 +442,12 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
         cmd->SetCullFace(false);
         irradianceShader->Bind(device);
         irradianceShader->SetInt("u_EnvironmentMap", 0);
-        irradianceShader->SetMat4("u_View", captureViews[face]);
-        irradianceShader->SetMat4("u_Projection", captureProjection);
+        if (UseVulkanTypedIblPush(device))
+            abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
+        else {
+            irradianceShader->SetMat4("u_View", captureViews[face]);
+            irradianceShader->SetMat4("u_Projection", captureProjection);
+        }
         cmd->BindTexture(environmentCubemap, 0);
         cubeMesh->Draw(device);
         irradianceShader->Unbind();
@@ -452,9 +471,14 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             cmd->SetCullFace(false);
             prefilterShader->Bind(device);
             prefilterShader->SetInt("u_EnvironmentMap", 0);
-            prefilterShader->SetFloat("u_Roughness", roughness);
-            prefilterShader->SetMat4("u_View", captureViews[face]);
-            prefilterShader->SetMat4("u_Projection", captureProjection);
+            if (UseVulkanTypedIblPush(device)) {
+                abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
+                abi::WriteIblPrefilterRoughnessPushConstant(cmd, roughness);
+            } else {
+                prefilterShader->SetFloat("u_Roughness", roughness);
+                prefilterShader->SetMat4("u_View", captureViews[face]);
+                prefilterShader->SetMat4("u_Projection", captureProjection);
+            }
             cmd->BindTexture(environmentCubemap, 0);
             cubeMesh->Draw(device);
             prefilterShader->Unbind();

@@ -3,9 +3,9 @@
 layout(location = 0) in vec3 a_Position;
 
 layout(push_constant, std430) uniform EntityIdPush {
-    mat4 u_Model;
-    mat4 u_View;
-    mat4 u_Projection;
+    layout(offset = 0) mat4 u_Model;
+    layout(offset = 64) mat4 u_View;
+    layout(offset = 128) mat4 u_Projection;
 } pc;
 
 void main() {

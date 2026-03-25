@@ -166,7 +166,12 @@ private:
     void RenderForward(const IRenderSceneView& view);
     /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
     void RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData);
-    /** Single-pass stereo opaque: two viewports, stereo shader, DrawInstanced(..., 2). */
+    /** Same as RenderForwardOpaque but uses an explicit camera and drawable list (stereo per-eye). */
+    void RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
+                                      const std::vector<Drawable>& opaqueDrawables);
+    /** Vulkan resource-space forward transparency (bindless + push); OpenGL uses TransparencyPass. */
+    void RenderForwardTransparent(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam);
+    /** Stereo opaque: Vulkan uses two viewports + forward shader cache + typed push; OpenGL may use forward_stereo + DrawInstanced(2). */
     void RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& leftCam, const CameraView& rightCam);
     void BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
     void RenderForwardPlus(const IRenderSceneView& view);

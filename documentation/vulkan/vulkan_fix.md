@@ -1,113 +1,240 @@
-# Vulkan Fix Plan (Industry-Level Robustness)
+# Vulkan Refactor Master Plan (Unity/Unreal-Level Robustness)
 
-This document defines the production path for Vulkan rendering correctness and long-term maintainability, aligned with patterns used in robust engines (Unity/Unreal style architecture) and informed by reference behavior in `Aespinosa_vulkan`.
+This document is the single execution plan for Vulkan renderer hardening in OpenEye.
+Goal is not "works on my machine", but deterministic, debuggable, cross-pass correctness with explicit contracts.
 
-## Current Status (What Is Already Improved)
+## North-Star Architecture
 
-- Forward draw path is now confirmed alive:
-  - visible drawables are collected,
-  - shaders/pipelines are valid,
-  - descriptor sets are acquired,
-  - mesh handles submit draw calls.
-- Skybox visibility path was repaired (depth compare handling and clear-path cleanup).
-- Vulkan dynamic state support is detected and logged (`VK_EXT_extended_dynamic_state`).
-- Forward diagnostics now report drop-off reasons (shader/pipeline/descriptor/mesh handle counters).
-- CPU frustum culling was re-enabled with raw camera use for culling-side math.
+- Single source of truth for render contracts:
+  - camera policy by backend
+  - descriptor-space ABI
+  - push-constant ABI
+  - depth policy and clear/compare semantics
+- No string-based ABI routing on critical paths.
+- Passes own typed data contracts (CPU structs mirror shader layouts).
+- Validation clean in Vulkan layers for all shipping passes.
+- RenderDoc pass-by-pass invariants are documented and reproducible.
 
-## Remaining Problem Statement
+## Scope
 
-Meshes can still be invisible even when forward submits valid draws. This means the issue is now likely in GPU visibility stages (clip/depth/convention), not in scene collection or draw submission.
+- In scope:
+  - Typed push-constant migration
+  - Descriptor set ownership and update lifetime correctness
+  - Dynamic/static state policy cleanup (depth/cull/blend)
+  - Camera/depth/frustum convention stabilization
+  - Regression harness and golden-scene checks
+- Out of scope (separate projects):
+  - New renderer features (RTGI/path tracing/etc.)
+  - Major material system redesign unrelated to ABI correctness
 
-## Architectural Target (What “Done” Means)
+## Phase 0 - Baseline and Guardrails (Immediate)
 
-1. One canonical camera/projection convention per backend.
-2. No hidden renderer-side projection hacks as permanent behavior.
-3. Pass state deterministic and observable.
-4. No silent no-op behavior in critical backend APIs.
-5. Reproducible verification via logs/tests (not manual guesswork).
+Objective: lock current behavior and prevent regressions while refactoring.
 
-## Phased Execution Plan
+- Freeze baseline scene set:
+  - skybox-only scene
+  - single opaque mesh scene
+  - mixed opaque + transparent + outline scene
+  - shadowed scene (directional + point/spot)
+- Enable strict runtime checks:
+  - assert on invalid pipeline layout kind usage
+  - assert push constant writes stay in declared ranges
+  - log-once warnings for legacy uniform string path use
+- Add "known-good" evidence per scene:
+  - screenshot
+  - frame logs (visibility counts + draw counts)
 
-### Phase 1: Projection Ownership and Clip-Space Contract
+Acceptance criteria:
 
-Goal: camera projection is produced in a backend-correct way at source; renderer does not permanently patch matrix semantics.
+- Baseline scenes render correctly in Vulkan and OpenGL.
+- No new validation errors introduced by guardrails.
 
-Tasks:
-- Introduce explicit camera projection contract for Vulkan (`RH + ZO + explicit Y policy`) and document it in code.
-- Migrate camera producers (editor/player/api paths) to the contract.
-- Keep renderer boundary adjustment only as temporary compatibility path; remove once all producers are migrated.
-- Add runtime diagnostic: project first visible mesh center to clip/NDC and log values (to prove/deny clip rejection).
+## Phase 1 - Typed Push-Constant ABI (Highest Priority)
 
-Exit criteria:
-- NDC values for visible mesh centers are sane (w > 0, x/y roughly in range when in view, z in backend expected range).
-- No pass requires ad-hoc projection post-fix to be visible.
+Objective: eliminate fragile name-based Vulkan push routing.
 
-### Phase 2: Depth/Cull Determinism
+### 1.1 Define canonical push structs (CPU side)
 
-Goal: draw visibility is not dependent on accidental state carry-over.
+Create one typed struct per pass contract, e.g.:
 
-Tasks:
-- Ensure effective depth/cull state is explicitly set at pass entry and before draws where policy differs.
-- Keep dynamic state path gated by feature support and log active mode in debug builds.
-- Normalize skybox depth policy (`LessEqual`) and mesh depth policy (`Less`) as explicit pass policy.
+- `ForwardVsPush`
+- `ForwardFsPush`
+- `ShadowPush`
+- `EntityIdPush`
+- `IBLPush`
+- `OutlinePostPush`
 
-Exit criteria:
-- Forward opaque/skybox visibility remains stable across scene changes and frame transitions.
-- State logs match expected per-pass policy.
+Rules:
 
-### Phase 3: Stub Elimination / Feature Gating
+- Struct field order and alignment explicitly match shader block layout.
+- `static_assert(sizeof(...))` for expected ranges and max push size.
+- One authoritative header for these contracts (engine-side, not app-side).
 
-Goal: no critical debug/profiling path depends on stubs.
+### 1.2 Add typed command-list API
 
-Tasks:
-- Implement Vulkan query path (`QueryPoolVK`, begin/end query, result read) OR fully gate and label unsupported workflows.
-- Keep one-time explicit logs when unsupported features are requested.
+Add typed entry points for graphics push updates, for example:
 
-Exit criteria:
-- Occlusion/sample-pass diagnostics either produce real values or are clearly disabled by capability.
+- `SetForwardVsPush(...)`
+- `SetForwardFsPush(...)`
+- `SetShadowPush(...)`
+- `SetEntityIdPush(...)`
 
-### Phase 4: Regression Safety Net
+or a generic templated route constrained by `PipelineLayoutKind`.
 
-Goal: prevent reintroduction of invisible-mesh regressions.
+Rules:
 
-Tasks:
-- Add golden scenes and backend checks:
-  - one opaque mesh,
-  - two opaque meshes,
-  - skybox-only,
-  - opaque + skybox + post.
-- Add counters/assert-like checks in debug builds for:
-  - visible > 0 with draws == 0,
-  - persistent invalid descriptor/pipeline cases,
-  - impossible clip-space values.
+- No string parsing in Vulkan push path.
+- Stage mask is explicit per push type.
+- Range/offset validation occurs centrally.
 
-Exit criteria:
-- Automated/local validation catches regressions before manual QA.
+### 1.3 Migrate passes in safe order
 
-## Implementation Tracking
+1. Forward (already proven problematic)
+2. Shadow
+3. Entity ID
+4. IBL
+5. Outline/Post and remaining push-only paths
 
-### Completed
+### 1.4 Deprecate legacy path
 
-- Forward submission diagnostics (`ForwardOpaqueSubmit` counters).
-- Vulkan extended dynamic state feature detection log.
-- Forward Vulkan state log (`ForwardOpaqueStateVK`).
-- Skybox visibility baseline fixes and debug-clear cleanup.
+- Keep legacy `SetUniform*("name", ...)` temporarily with warning logs.
+- Remove legacy Vulkan string path after all passes migrated.
 
-### In Progress
+Acceptance criteria:
 
-- Phase 1 clip-space contract verification (NDC logging).
+- No Vulkan pass depends on uniform-name string matching for push data.
+- Forward/Shadow/EntityID/IBL render equivalently before/after migration.
+- Validation and RenderDoc show correct push values for each pass.
 
-### Pending
+## Phase 2 - Descriptor ABI and Lifetime Hardening
 
-- Camera-source canonical Vulkan projection migration.
-- Renderer projection-adjustment retirement.
-- Vulkan query path implementation or strict capability gating.
-- Golden-scene regression checks.
+Objective: formalize descriptor contracts and eliminate update/bind hazards.
 
-## Immediate Next Actions
+- Enforce descriptor-space contracts per `PipelineLayoutKind`.
+- Keep per-frame/per-draw ownership explicit (no in-flight rewrites).
+- Validate all descriptor sets are complete before bind.
+- Add debug labels for set binds by pass and set index.
+- Normalize transition policy around passes that sample prior outputs.
 
-1. Use NDC logging to confirm whether current invisible meshes are clip/depth rejected.
-2. If confirmed, migrate camera projection generation to canonical Vulkan convention at source.
-3. Remove renderer-side projection fix once migration completes.
-4. Implement/gate Vulkan query diagnostics to close observability gaps.
+Acceptance criteria:
 
+- Zero descriptor update-while-in-flight errors.
+- Zero image-layout mismatches in post/outline/forward chains.
+
+## Phase 3 - Dynamic State and Depth/Cull Policy Convergence
+
+Objective: remove hidden state divergence and make depth/cull deterministic.
+
+- Decide policy per backend:
+  - dynamic depth/cull state vs pipeline-baked state
+  - if dynamic, always reapply at pipeline bind
+- Formal depth policy table:
+  - clear depth values
+  - compare op for each pass
+  - reverse-Z decision (current: off unless explicitly enabled)
+- Skybox and fullscreen-pass depth semantics documented and fixed.
+
+Acceptance criteria:
+
+- No pass relies on stale dynamic state.
+- Depth behavior matches policy table in both mono and stereo paths.
+
+## Phase 4 - Camera/Frustum Convention Stability
+
+Objective: keep camera math centralized and culling convention-safe.
+
+- Keep backend camera policy (`depth range`, `clip-Y`, `reverse-Z`) authoritative.
+- Ensure frustum culling uses raw camera/frustum source compatible with extraction math.
+- Ban ad-hoc projection tweaks outside camera policy helpers.
+
+Acceptance criteria:
+
+- Gizmo/projected overlays and rendered geometry remain aligned.
+- CPU culling matches actual visibility across representative camera poses.
+
+## Phase 5 - Verification Harness (Golden Scenes)
+
+Objective: make regression detection fast and objective.
+
+- Define golden checks per scene:
+  - visible mesh count
+  - draw count per pass
+  - non-empty color/depth targets
+  - optional image diff thresholds
+- Add CI/automation hook to run Vulkan golden checks.
+- Store expected metrics snapshot with versioned update process.
+
+Acceptance criteria:
+
+- Refactors can be validated by running golden harness, not manual guesswork.
+- Regressions are caught with clear pass-level failure signal.
+
+## Engineering Standards (Unity/Unreal-Level Expectations)
+
+- Explicit contracts over implicit conventions.
+- Strong typing over string routing for shader ABI.
+- One owner per system contract:
+  - camera policy owner
+  - push ABI owner
+  - descriptor ABI owner
+  - depth policy owner
+- Every migration step ships with:
+  - invariants/assertions
+  - validation cleanliness
+  - before/after evidence
+
+## Risks and Mitigation
+
+- Risk: ABI mismatch between CPU struct and shader layout.
+  - Mitigation: static asserts, centralized layout docs, RenderDoc spot checks.
+- Risk: mixed legacy + typed paths causing temporary drift.
+  - Mitigation: warning-on-legacy, phased retirement deadline.
+- Risk: hidden dependence on dynamic state.
+  - Mitigation: state replay at bind + pass policy tests.
+
+## Execution Order (Strict)
+
+1. Phase 0 (baseline + guardrails)
+2. Phase 1 (typed push ABI)
+3. Phase 3 (depth/cull state policy)
+4. Phase 2 (descriptor cleanup finalization)
+5. Phase 4 (camera/frustum hardening pass)
+6. Phase 5 (golden-scene automation)
+
+Note: Phase 2 and Phase 3 can partially overlap, but typed push ABI (Phase 1) is the hard gate first.
+
+---
+
+## Progress Tracker (Update This Section Every Work Session)
+
+Legend: `[ ]` not started, `[-]` in progress, `[x]` done, `[!]` blocked
+
+### Global Status
+
+- Current phase: `Phase 1 - Typed Push-Constant ABI`
+- Overall completion: `~50%` (estimate)
+- Last updated: `2026-03-25`
+
+### Checklist
+
+- [x] Mesh visibility unblock: Vulkan now receives `u_Model` and `u_UseAlbedoTexture` push values.
+- [x] Centralized camera policy exists and is backend-typed (no string-only backend identity in core path).
+- [x] Forward push-constant ABI conflict fixed: fragment flags moved to dedicated offsets (`128+`) so they no longer overlap vertex `u_Model`.
+- [x] Define canonical typed push structs for major passes (Forward, Shadow, EntityID, IBL, OutlinePost) in `PassPushConstants.h`.
+- [-] Add typed push APIs in Vulkan command list and route per `PipelineLayoutKind` (legacy compatibility mapping still present for non-migrated callers).
+- [-] Migrate Forward pass to typed push API (remove string dependence).
+- [x] Migrate Shadow, EntityID, IBL, and OutlinePost Vulkan paths to shared `abi::Write*` helpers (non-Vulkan keeps `Shader::Set*`).
+- [ ] Add legacy-path warning and retirement switch.
+- [ ] Validate descriptor lifetime/layout correctness across forward->outline->post chain.
+- [ ] Finalize dynamic depth/cull policy and enforce at bind.
+- [ ] Run golden-scene regression checklist and capture evidence.
+
+### Session Notes
+
+- 2026-03-25: Forward mesh invisibility fixed by wiring missing Vulkan push-constant uniform routes (`u_Model`, `u_UseAlbedoTexture`) and preserving `u_NormalMatrix` as Vulkan no-op parity path. Next target is full typed push ABI migration.
+- 2026-03-25: Fixed structural Forward ABI issue: forward/forward+ fragment push constants now use explicit offsets (`u_UseIBL` at 128, `u_UseAlbedoTexture` at 132 where applicable), and Vulkan command routing now writes those offsets for `PipelineLayoutKind::Forward`. This prevents fragment flags from clobbering vertex `u_Model` push data.
+- 2026-03-25: Began typed push migration in renderer callsites: Forward and Forward+ now use typed C++ push payloads (`ForwardVsPushData`, `ForwardFsPushData`) and direct `SetPushConstants` on Vulkan, while non-Vulkan paths keep legacy uniform setters for compatibility. Remaining work is to promote these local structs into a shared canonical header and finish removing Vulkan string-based push routing.
+- 2026-03-25: Promoted forward push ABI out of `RenderPipeline.cpp` into engine-level `eyelib/render/PassPushConstants.h` (`ForwardVsPush`, `ForwardFsPush`, canonical offsets + writer helper). `RenderPipeline` now consumes this shared contract (`abi::WriteForwardPushConstants`) instead of local ad-hoc structs/functions, keeping orchestration and ABI definition separated.
+- 2026-03-25: Extended shared push ABI for `Shadow` and `EntityID` in `PassPushConstants.h` and migrated Vulkan callsites to typed writes. Also fixed `EntityID` push overlap by assigning explicit shader offsets (`model=0`, `view=64`, `projection=128`, `entityId=192`) so vertex and fragment push data no longer alias.
+- 2026-03-25: Added IBL and OutlinePost to `PassPushConstants.h` (`WriteIblVertexPushConstants`, `WriteIblPrefilterRoughnessPushConstant`, `WriteOutlinePostPushConstants`). Migrated `IBL.cpp` and `RenderPipeline::RenderOutlineFromIdBuffer` on Vulkan. Shaders: `prefilter.frag` uses `layout(offset=128)` for `u_Roughness`; `outline_post.frag` uses explicit offsets for std430 packing. `CommandListVK::SetUniformFloat` now maps `u_Roughness` to offset 128 for `PipelineLayoutKind::IBL` as a compatibility fallback.
+- 2026-03-25: Hardened Vulkan legacy mat4 push routing in `CommandListVK` with layout-aware offsets and model-presence tracking (`m_pushModelSet`) to avoid silent clobbering for legacy debug/push-only shaders (`u_View`/`u_Projection` with and without `u_Model`). Reset at pipeline bind/pool reset.

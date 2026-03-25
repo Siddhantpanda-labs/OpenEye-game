@@ -1,4 +1,6 @@
 #include "eyelib/render/2d/TextRenderer.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/2d/Font.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
@@ -99,8 +101,12 @@ void TextRenderer::RenderText(const std::string& text, Font& font, const math::V
     m_vertexBufferRHI->Update(m_vertices.data(), 0, m_vertices.size() * sizeof(Vertex));
     m_indexBufferRHI->Update(m_indices.data(), 0, m_indices.size() * sizeof(unsigned int));
     m_shader->Bind(device);
-    m_shader->SetMat4("u_View", view);
-    m_shader->SetMat4("u_Projection", projection);
+    if (device->GetRenderBackend() == RenderBackend::Vulkan)
+        abi::WriteViewProjectionPairPushConstants(cmd, view, projection);
+    else {
+        m_shader->SetMat4("u_View", view);
+        m_shader->SetMat4("u_Projection", projection);
+    }
     if (m_spriteSet && font.GetAtlasTexture() && font.GetAtlasTexture()->GetTextureRHI()) {
         m_spriteSet->UpdateTexture(0, font.GetAtlasTexture()->GetTextureRHI());
         rhi::IDescriptorSet* sets[2] = { device->GetEmptyResourceSet(), m_spriteSet };

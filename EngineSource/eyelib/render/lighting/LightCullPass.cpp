@@ -1,4 +1,5 @@
 #include "eyelib/render/lighting/LightCullPass.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -185,6 +186,16 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
             return;
         }
     } else {
+        if (m_device->GetRenderBackend() == RenderBackend::Vulkan) {
+            static bool loggedLegacyVulkan = false;
+            if (!loggedLegacyVulkan) {
+                core::Log::Error(
+                    "LightCullPass: Vulkan requires resource-space descriptor sets (Frame, LightCullPass, SceneBuffers) and a params UBO. "
+                    "Legacy uniform/bind path is not supported; skipping light cull dispatch.");
+                loggedLegacyVulkan = true;
+            }
+            return;
+        }
         cmd->BindStorageBuffer(m_outputBuffer, 0, 0, 0);
         if (m_pointLightBuffer) cmd->BindStorageBuffer(m_pointLightBuffer, 2, 0, 0);
         if (m_spotLightBuffer) cmd->BindStorageBuffer(m_spotLightBuffer, 3, 0, 0);

@@ -5,6 +5,8 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/RenderBackend.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
@@ -197,33 +199,40 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
         auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
             return d.materialInstance ? d.materialInstance->GetTextureRHI(name) : material->GetTextureRHI(name);
         };
-        shader->SetMat4("u_Model", d.transform);
-        shader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
-
-        shader->SetVec4("u_UVTransform", getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
-        shader->SetFloat("u_UVRotation", getFloat("u_UVRotation", 0.0f));
-        shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
-        shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
-
-        const char* textureOrder[] = {
-            "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
-            "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
-        };
-        for (const char* texName : textureOrder) {
-            rhi::ITexture* rhiTex = getTextureRHI(texName);
-            rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
-            shader->SetHandle64(texName, static_cast<uint64_t>(h));
-        }
+        const math::Vec4 uvT = getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+        const float uvRot = getFloat("u_UVRotation", 0.0f);
+        const float texIdx = getFloat("u_TexCoordIndex", 0.0f);
+        const float flipV = getFloat("u_FlipV", 1.0f);
         auto hasTex = [&](const std::string& name) {
             auto t = getTexture(name);
             return (t && t->IsValid()) ? 1.0f : 0.0f;
         };
-        shader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
-        shader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
-        shader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
-        shader->SetFloat("u_HasAOTexture", hasTex("u_AOTexture"));
-        shader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
-        shader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
+        if (device && device->GetRenderBackend() == RenderBackend::Vulkan) {
+            if (cmd)
+                abi::WriteGBufferGeometryPushConstants(cmd, d.transform, uvT, uvRot, texIdx, flipV, hasTex("u_AlbedoTexture"));
+        } else {
+            shader->SetMat4("u_Model", d.transform);
+            shader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+            shader->SetVec4("u_UVTransform", uvT);
+            shader->SetFloat("u_UVRotation", uvRot);
+            shader->SetFloat("u_TexCoordIndex", texIdx);
+            shader->SetFloat("u_FlipV", flipV);
+            const char* textureOrder[] = {
+                "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
+                "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
+            };
+            for (const char* texName : textureOrder) {
+                rhi::ITexture* rhiTex = getTextureRHI(texName);
+                rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
+                shader->SetHandle64(texName, static_cast<uint64_t>(h));
+            }
+            shader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
+            shader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
+            shader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
+            shader->SetFloat("u_HasAOTexture", hasTex("u_AOTexture"));
+            shader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
+            shader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
+        }
 
         d.mesh->Bind(device);
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
