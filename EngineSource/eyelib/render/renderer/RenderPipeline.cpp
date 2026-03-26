@@ -1349,67 +1349,6 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
         ShaderKey key{ PipelineStage::Forward, it, baseMat->GetMaterialShaderId() };
         buckets[key].push_back(d);
     }
-    {
-        static uint32_t s_fwdDiag = 0;
-        ++s_fwdDiag;
-        if (s_fwdDiag <= 3u || (s_fwdDiag % 120u) == 0u) {
-            size_t withMeshMat = 0;
-            for (const Drawable& d : opaqueDrawables) {
-                if (d.mesh && d.material) ++withMeshMat;
-            }
-            core::Log::InfoF("ForwardOpaque: visible=%zu withMeshMat=%zu buckets=%zu",
-                             opaqueDrawables.size(), withMeshMat, buckets.size());
-        }
-    }
-    {
-        static uint32_t s_fwdStateDiag = 0;
-        ++s_fwdStateDiag;
-        const char* backend = m_device ? m_device->GetShaderBackendName() : nullptr;
-        if (s_fwdStateDiag <= 3u || (s_fwdStateDiag % 120u) == 0u) {
-            if (backend && std::strcmp(backend, "vulkan") == 0) {
-                auto* vkCmd = dynamic_cast<rhi::CommandListVK*>(cmd);
-                auto* vkDev = dynamic_cast<rhi::DeviceVK*>(m_device);
-                if (vkCmd && vkDev) {
-                    core::Log::InfoF(
-                        "ForwardOpaqueStateVK: depthTest=%d depthWrite=%d depthFunc=%s cull=%d cullFront=%d extDynState=%d",
-                        vkCmd->GetDepthTestEnabled() ? 1 : 0,
-                        vkCmd->GetDepthWriteEnabled() ? 1 : 0,
-                        vkCmd->GetDepthFuncLess() ? "Less" : "LessEqual",
-                        vkCmd->GetCullFaceEnabled() ? 1 : 0,
-                        vkCmd->GetCullFrontFace() ? 1 : 0,
-                        vkDev->SupportsExtendedDynamicState() ? 1 : 0);
-                }
-            }
-        }
-        static bool s_loggedOcclusionProbeUnavailable = false;
-        if (!s_loggedOcclusionProbeUnavailable && backend && std::strcmp(backend, "vulkan") == 0) {
-            core::Log::Info(
-                "ForwardOpaqueOcclusionProbe: Vulkan query path unavailable (QueryPoolVK and BeginQuery/EndQuery are stubbed); sample-pass logging disabled.");
-            s_loggedOcclusionProbeUnavailable = true;
-        }
-    }
-    {
-        static uint32_t s_fwdClipDiag = 0;
-        ++s_fwdClipDiag;
-        if (s_fwdClipDiag <= 3u || (s_fwdClipDiag % 120u) == 0u) {
-            for (const Drawable& d : opaqueDrawables) {
-                if (!d.mesh) continue;
-                math::AABB local = d.mesh->GetAABB();
-                if (!local.IsValid()) continue;
-                const math::AABB world = local.Transform(d.transform);
-                const math::Vec3 center = 0.5f * (world.min + world.max);
-                const math::Vec4 clip = cam.projection * cam.view * math::Vec4(center, 1.0f);
-                const float invW = (std::abs(clip.w) > 1e-6f) ? (1.0f / clip.w) : 0.0f;
-                const math::Vec3 ndc = math::Vec3(clip) * invW;
-                core::Log::InfoF(
-                    "ForwardOpaqueClip: center=(%.3f,%.3f,%.3f) clip=(%.3f,%.3f,%.3f,%.3f) ndc=(%.3f,%.3f,%.3f)",
-                    center.x, center.y, center.z,
-                    clip.x, clip.y, clip.z, clip.w,
-                    ndc.x, ndc.y, ndc.z);
-                break;
-            }
-        }
-    }
     size_t shaderCompileMiss = 0;
     size_t shaderInvalid = 0;
     size_t pipelineInvalid = 0;
@@ -1492,17 +1431,13 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
         sh->Unbind();
     }
 
-    {
-        static uint32_t s_fwdSubmitDiag = 0;
-        ++s_fwdSubmitDiag;
-        const bool hasVisible = !opaqueDrawables.empty();
-        const bool suspicious = hasVisible && drawSubmitted == 0;
-        if (suspicious || s_fwdSubmitDiag <= 3u || (s_fwdSubmitDiag % 120u) == 0u) {
-            core::Log::InfoF(
-                "ForwardOpaqueSubmit: visible=%zu buckets=%zu draws=%zu shaderMiss=%zu shaderInvalid=%zu pipeInvalid=%zu drawSetMiss=%zu meshHandleInvalid=%zu",
-                opaqueDrawables.size(), buckets.size(), drawSubmitted,
-                shaderCompileMiss, shaderInvalid, pipelineInvalid, drawMaterialSetMiss, meshHandleInvalid);
-        }
+    const bool hasVisible = !opaqueDrawables.empty();
+    const bool suspicious = hasVisible && drawSubmitted == 0;
+    if (suspicious) {
+        core::Log::WarnF(
+            "ForwardOpaqueSubmit: visible=%zu buckets=%zu draws=%zu shaderMiss=%zu shaderInvalid=%zu pipeInvalid=%zu drawSetMiss=%zu meshHandleInvalid=%zu",
+            opaqueDrawables.size(), buckets.size(), drawSubmitted,
+            shaderCompileMiss, shaderInvalid, pipelineInvalid, drawMaterialSetMiss, meshHandleInvalid);
     }
 }
 

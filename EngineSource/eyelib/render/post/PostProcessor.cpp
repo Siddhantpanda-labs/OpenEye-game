@@ -434,8 +434,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
                 if (rhi::IPipeline* pipe = m_bloomCompositeShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
                 cmd->BindDescriptorSets(1, 1, &postSet);
-                float bloomI = settings.bloomIntensity;
-                cmd->SetPushConstants(0u, sizeof(float), &bloomI);
+                abi::WriteBloomCompositePushConstant(cmd, settings.bloomIntensity);
                 } else {
                     m_bloomCompositeShader->Unbind();
                     return toneMappedTexture;
@@ -507,9 +506,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_toneMappingShader->Bind(m_deviceRHI);
     if (m_postPassLayout) {
         rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, hdrTexture}});
-        struct TonemapPush { float exposure; int useACES; };
-        TonemapPush push = { settings.exposure, settings.useACES ? 1 : 0 };
-        cmd->SetPushConstants(0, sizeof(push), &push);
+        abi::WriteTonemapPushConstants(cmd, settings.exposure, settings.useACES ? 1 : 0);
         if (postSet) {
             if (rhi::IPipeline* pipe = m_toneMappingShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
@@ -554,8 +551,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_bloomExtractShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            float th = threshold;
-            cmd->SetPushConstants(0u, sizeof(float), &th);
+            abi::WriteBloomExtractPushConstant(cmd, threshold);
         } else {
             m_bloomExtractShader->Unbind();
             return nullptr;
@@ -601,16 +597,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
                 if (rhi::IPipeline* pipe = m_bloomBlurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
                 cmd->BindDescriptorSets(1, 1, &postSet);
-                struct BloomBlurPush {
-                    float resolution[2];
-                    int32_t horiz;
-                    float intensity;
-                } bb{};
-                bb.resolution[0] = static_cast<float>(m_width);
-                bb.resolution[1] = static_cast<float>(m_height);
-                bb.horiz = horizontal ? 1 : 0;
-                bb.intensity = 1.0f;
-                cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bb)), &bb);
+                abi::WriteBloomBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), horizontal ? 1 : 0,
+                                                 1.0f);
             } else {
                 break;
             }
@@ -658,16 +646,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
                 if (rhi::IPipeline* pipe = m_blurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
                 cmd->BindDescriptorSets(1, 1, &postSet);
-                struct BloomBlurPush {
-                    float resolution[2];
-                    int32_t horiz;
-                    float intensity;
-                } bb{};
-                bb.resolution[0] = static_cast<float>(m_width);
-                bb.resolution[1] = static_cast<float>(m_height);
-                bb.horiz = horizontal ? 1 : 0;
-                bb.intensity = intensity;
-                cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bb)), &bb);
+                abi::WriteBloomBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), horizontal ? 1 : 0,
+                                                 intensity);
             } else {
                 break;
             }
@@ -707,14 +687,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_chromaticAberrationShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            struct ChromaticPush {
-                float resolution[2];
-                float intensity;
-            } cp{};
-            cp.resolution[0] = static_cast<float>(m_width);
-            cp.resolution[1] = static_cast<float>(m_height);
-            cp.intensity = intensity;
-            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(cp)), &cp);
+            abi::WriteChromaticAberrationPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), intensity);
         } else {
             m_chromaticAberrationShader->Unbind();
             return texture;
@@ -752,8 +725,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (rhi::IPipeline* pipe = m_fxaaShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            float res[2] = { static_cast<float>(m_width), static_cast<float>(m_height) };
-            cmd->SetPushConstants(0u, sizeof(res), res);
+            abi::WriteFxaaPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height));
         } else {
             m_fxaaShader->Unbind();
             return texture;
@@ -805,23 +777,8 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
         if (postSet && m_ssaoShader->GetPipelineRHI()) {
             cmd->BindPipeline(m_ssaoShader->GetPipelineRHI());
             cmd->BindDescriptorSets(1, 1, &postSet);
-            struct SsaoPushStd430 {
-                math::Mat4 view;
-                math::Mat4 projection;
-                float resolution[2];
-                float radius;
-                float bias;
-                int32_t sampleCount;
-            } sp{};
-            sp.view = viewMatrix;
-            sp.projection = projectionMatrix;
-            sp.resolution[0] = static_cast<float>(m_width);
-            sp.resolution[1] = static_cast<float>(m_height);
-            sp.radius = settings.ssaoRadius;
-            sp.bias = settings.ssaoBias;
-            sp.sampleCount = settings.ssaoSamples;
-            static_assert(sizeof(SsaoPushStd430) == 148u, "SSAO push ABI");
-            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(sp)), &sp);
+            abi::WriteSsaoPushConstants(cmd, viewMatrix, projectionMatrix, static_cast<float>(m_width), static_cast<float>(m_height),
+                                        settings.ssaoRadius, settings.ssaoBias, settings.ssaoSamples);
         }
     } else {
         m_ssaoShader->SetInt("g_Position", 0);
@@ -861,27 +818,8 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
                 if (blurSet && m_ssaoBlurShader->GetPipelineRHI()) {
                     cmd->BindPipeline(m_ssaoBlurShader->GetPipelineRHI());
                     cmd->BindDescriptorSets(1, 1, &blurSet);
-                    struct SsaoBlurPushStd430 {
-                        float axis[2];
-                        float resolution[2];
-                        float nearPlane;
-                        float farPlane;
-                        float farOverEdgeDistance;
-                        int32_t sampleCount;
-                        float kernel[16];
-                    } bp{};
-                    bp.axis[0] = (pass == 0) ? 1.0f : 0.0f;
-                    bp.axis[1] = (pass == 0) ? 0.0f : 1.0f;
-                    bp.resolution[0] = res.x;
-                    bp.resolution[1] = res.y;
-                    bp.nearPlane = 0.1f;
-                    bp.farPlane = 1000.0f;
-                    bp.farOverEdgeDistance = farOverEdge;
-                    bp.sampleCount = kSSAOBlurSampleCount;
-                    for (int i = 0; i < kSSAOBlurSampleCount; ++i)
-                        bp.kernel[i] = kernel[i];
-                    static_assert(sizeof(SsaoBlurPushStd430) == 96u, "SSAO blur push ABI");
-                    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(bp)), &bp);
+                    abi::WriteSsaoBlurPushConstants(cmd, (pass == 0) ? 1.0f : 0.0f, (pass == 0) ? 0.0f : 1.0f, res.x, res.y, 0.1f,
+                                                      1000.0f, farOverEdge, kSSAOBlurSampleCount, kernel, kSSAOBlurKernelSize);
                 }
             } else {
                 m_ssaoBlurShader->SetInt("u_SSAO", 0);
@@ -1129,16 +1067,8 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_motionBlurShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            struct MotionBlurPush {
-                float resolution[2];
-                float intensity;
-                int32_t samples;
-            } mb{};
-            mb.resolution[0] = static_cast<float>(m_width);
-            mb.resolution[1] = static_cast<float>(m_height);
-            mb.intensity = settings.motionBlurIntensity;
-            mb.samples = settings.motionBlurSamples;
-            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(mb)), &mb);
+            abi::WriteMotionBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height),
+                                              settings.motionBlurIntensity, settings.motionBlurSamples);
         } else {
             m_motionBlurShader->Unbind();
             return texture;
@@ -1179,12 +1109,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_vignetteShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            struct VignettePush {
-                float intensity;
-                float radius;
-                float softness;
-            } vp{ settings.vignetteIntensity, settings.vignetteRadius, settings.vignetteSoftness };
-            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(vp)), &vp);
+            abi::WriteVignettePushConstants(cmd, settings.vignetteIntensity, settings.vignetteRadius, settings.vignetteSoftness);
         } else {
             m_vignetteShader->Unbind();
             return texture;
@@ -1223,11 +1148,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             if (rhi::IPipeline* pipe = m_filmGrainShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
             cmd->BindDescriptorSets(1, 1, &postSet);
-            struct FilmGrainPush {
-                float intensity;
-                float time;
-            } fp{ settings.filmGrainIntensity, time };
-            cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(fp)), &fp);
+            abi::WriteFilmGrainPushConstants(cmd, settings.filmGrainIntensity, time);
         } else {
             m_filmGrainShader->Unbind();
             return texture;
@@ -1261,10 +1182,23 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             rhi::ClearValue clearBlack = {0.f, 0.f, 0.f, 1.f};
             cmd->ClearRenderTarget(toneTarget, clearBlack);
             m_toneMappingShader->Bind(m_deviceRHI);
-            m_toneMappingShader->SetInt("u_HDRTexture", 0);
-            m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
-            m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
-            cmd->BindTexture(hdrTex, 0);
+            if (m_postPassLayout) {
+                rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, hdrTex}});
+                if (postSet) {
+                    if (rhi::IPipeline* pipe = m_toneMappingShader->GetPipelineRHI())
+                        cmd->BindPipeline(pipe);
+                    cmd->BindDescriptorSets(1, 1, &postSet);
+                    abi::WriteTonemapPushConstants(cmd, settings.exposure, settings.useACES ? 1 : 0);
+                } else {
+                    m_toneMappingShader->Unbind();
+                    return;
+                }
+            } else {
+                m_toneMappingShader->SetInt("u_HDRTexture", 0);
+                m_toneMappingShader->SetFloat("u_Exposure", settings.exposure);
+                m_toneMappingShader->SetBool("u_UseACES", settings.useACES);
+                cmd->BindTexture(hdrTex, 0);
+            }
             if (m_toneMappingShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_toneMappingShader->GetPipelineRHI()); }
             m_toneMappingShader->Unbind();
             m_lastOutputValid = true;
@@ -1282,9 +1216,22 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             cmd->SetCullFace(false);
             cmd->SetBlend(false);
             m_fxaaShader->Bind(m_deviceRHI);
-            m_fxaaShader->SetInt("u_Texture", 0);
-            m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(res.width), static_cast<float>(res.height)));
-            cmd->BindTexture(toneMappedTex, 0);
+            if (m_postPassLayout) {
+                rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, toneMappedTex}});
+                if (postSet) {
+                    if (rhi::IPipeline* pipe = m_fxaaShader->GetPipelineRHI())
+                        cmd->BindPipeline(pipe);
+                    cmd->BindDescriptorSets(1, 1, &postSet);
+                    abi::WriteFxaaPushConstants(cmd, static_cast<float>(res.width), static_cast<float>(res.height));
+                } else {
+                    m_fxaaShader->Unbind();
+                    return;
+                }
+            } else {
+                m_fxaaShader->SetInt("u_Texture", 0);
+                m_fxaaShader->SetVec2("u_Resolution", math::Vec2(static_cast<float>(res.width), static_cast<float>(res.height)));
+                cmd->BindTexture(toneMappedTex, 0);
+            }
             if (m_fxaaShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_fxaaShader->GetPipelineRHI()); }
             m_fxaaShader->Unbind();
         },

@@ -254,6 +254,198 @@ inline void WriteSSRPushConstants(rhi::ICommandList* cmd, const math::Mat4& view
     cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
 }
 
+/** Post fullscreen passes: resource-space PostPass set + push at offset 0 (`passes/post/*`). */
+
+struct BloomCompositePush {
+    float bloomIntensity = 0.f;
+};
+
+static_assert(sizeof(BloomCompositePush) == 4u, "BloomCompositePush ABI mismatch.");
+
+inline void WriteBloomCompositePushConstant(rhi::ICommandList* cmd, float bloomIntensity) {
+    if (!cmd) return;
+    const BloomCompositePush p{ bloomIntensity };
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct TonemapPushStd430 {
+    float exposure = 0.f;
+    int32_t useACES = 0;
+};
+
+static_assert(sizeof(TonemapPushStd430) == 8u, "TonemapPushStd430 ABI mismatch.");
+
+inline void WriteTonemapPushConstants(rhi::ICommandList* cmd, float exposure, int useACES) {
+    if (!cmd) return;
+    TonemapPushStd430 p{};
+    p.exposure = exposure;
+    p.useACES = useACES ? 1 : 0;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct BloomExtractPush {
+    float threshold = 0.f;
+};
+
+static_assert(sizeof(BloomExtractPush) == 4u, "BloomExtractPush ABI mismatch.");
+
+inline void WriteBloomExtractPushConstant(rhi::ICommandList* cmd, float threshold) {
+    if (!cmd) return;
+    const BloomExtractPush p{ threshold };
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct BloomBlurPushStd430 {
+    float resolution[2] = { 0.f, 0.f };
+    int32_t horiz = 0;
+    float intensity = 0.f;
+};
+
+static_assert(sizeof(BloomBlurPushStd430) == 16u, "BloomBlurPushStd430 ABI mismatch.");
+
+inline void WriteBloomBlurPushConstants(rhi::ICommandList* cmd, float resolutionX, float resolutionY, int horiz01, float intensity) {
+    if (!cmd) return;
+    BloomBlurPushStd430 p{};
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    p.horiz = horiz01 ? 1 : 0;
+    p.intensity = intensity;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct ChromaticAberrationPushStd430 {
+    float resolution[2] = { 0.f, 0.f };
+    float intensity = 0.f;
+};
+
+static_assert(sizeof(ChromaticAberrationPushStd430) == 12u, "ChromaticAberrationPushStd430 ABI mismatch.");
+
+inline void WriteChromaticAberrationPushConstants(rhi::ICommandList* cmd, float resolutionX, float resolutionY, float intensity) {
+    if (!cmd) return;
+    ChromaticAberrationPushStd430 p{};
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    p.intensity = intensity;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct FxaaPushStd430 {
+    float resolution[2] = { 0.f, 0.f };
+};
+
+static_assert(sizeof(FxaaPushStd430) == 8u, "FxaaPushStd430 ABI mismatch.");
+
+inline void WriteFxaaPushConstants(rhi::ICommandList* cmd, float resolutionX, float resolutionY) {
+    if (!cmd) return;
+    FxaaPushStd430 p{};
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct SsaoPushStd430 {
+    math::Mat4 view{};
+    math::Mat4 projection{};
+    float resolution[2] = { 0.f, 0.f };
+    float radius = 0.f;
+    float bias = 0.f;
+    int32_t sampleCount = 0;
+};
+
+static_assert(sizeof(SsaoPushStd430) == 148u, "SsaoPushStd430 ABI mismatch.");
+
+inline void WriteSsaoPushConstants(rhi::ICommandList* cmd, const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                   float resolutionX, float resolutionY, float radius, float bias, int sampleCount) {
+    if (!cmd) return;
+    SsaoPushStd430 p{};
+    p.view = viewMatrix;
+    p.projection = projectionMatrix;
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    p.radius = radius;
+    p.bias = bias;
+    p.sampleCount = sampleCount;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+constexpr uint32_t kSsaoBlurKernelFloats = 16u;
+
+struct SsaoBlurPushStd430 {
+    float axis[2] = { 0.f, 0.f };
+    float resolution[2] = { 0.f, 0.f };
+    float nearPlane = 0.f;
+    float farPlane = 0.f;
+    float farOverEdgeDistance = 0.f;
+    int32_t sampleCount = 0;
+    float kernel[16] = {};
+};
+
+static_assert(sizeof(SsaoBlurPushStd430) == 96u, "SsaoBlurPushStd430 ABI mismatch.");
+
+inline void WriteSsaoBlurPushConstants(rhi::ICommandList* cmd, float axisX, float axisY, float resolutionX, float resolutionY,
+                                       float nearPlane, float farPlane, float farOverEdgeDistance, int32_t sampleCount,
+                                       const float* kernel, int kernelLength) {
+    if (!cmd) return;
+    SsaoBlurPushStd430 p{};
+    p.axis[0] = axisX;
+    p.axis[1] = axisY;
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    p.nearPlane = nearPlane;
+    p.farPlane = farPlane;
+    p.farOverEdgeDistance = farOverEdgeDistance;
+    p.sampleCount = sampleCount;
+    const int maxK = static_cast<int>(kSsaoBlurKernelFloats);
+    for (int i = 0; i < maxK && i < kernelLength; ++i)
+        p.kernel[i] = kernel[i];
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct MotionBlurPushStd430 {
+    float resolution[2] = { 0.f, 0.f };
+    float intensity = 0.f;
+    int32_t samples = 0;
+};
+
+static_assert(sizeof(MotionBlurPushStd430) == 16u, "MotionBlurPushStd430 ABI mismatch.");
+
+inline void WriteMotionBlurPushConstants(rhi::ICommandList* cmd, float resolutionX, float resolutionY, float intensity, int samples) {
+    if (!cmd) return;
+    MotionBlurPushStd430 p{};
+    p.resolution[0] = resolutionX;
+    p.resolution[1] = resolutionY;
+    p.intensity = intensity;
+    p.samples = samples;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct VignettePushStd430 {
+    float intensity = 0.f;
+    float radius = 0.f;
+    float softness = 0.f;
+};
+
+static_assert(sizeof(VignettePushStd430) == 12u, "VignettePushStd430 ABI mismatch.");
+
+inline void WriteVignettePushConstants(rhi::ICommandList* cmd, float intensity, float radius, float softness) {
+    if (!cmd) return;
+    const VignettePushStd430 p{ intensity, radius, softness };
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
+struct FilmGrainPushStd430 {
+    float intensity = 0.f;
+    float time = 0.f;
+};
+
+static_assert(sizeof(FilmGrainPushStd430) == 8u, "FilmGrainPushStd430 ABI mismatch.");
+
+inline void WriteFilmGrainPushConstants(rhi::ICommandList* cmd, float intensity, float time) {
+    if (!cmd) return;
+    const FilmGrainPushStd430 p{ intensity, time };
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(p)), &p);
+}
+
 } // namespace abi
 } // namespace render
 } // namespace eyelib
