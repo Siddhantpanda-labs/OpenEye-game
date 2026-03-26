@@ -195,12 +195,23 @@ private:
     void EnsureForwardMaterialFallbackTextures();
     /** Select current per-frame forward descriptor sets/buffers based on GetCurrentFrameIndex(). */
     void SelectForwardResourceSetFrame();
+    /** Build immutable shared forward bindings for a pass (frame/pass/scene sets) before execute. */
+    void BuildForwardPassSharedState(const RenderFrameData& frameData, const CameraView& cam, rhi::IDescriptorSet* passSet,
+                                     rhi::IDescriptorSet* sceneBuffersSet, bool usePrevViewProj);
     /** Update target forward Material set with guaranteed valid texture bindings 1..3. */
     void UpdateForwardMaterialSetWithFallback(rhi::IDescriptorSet* targetSet, const Material* material, const MaterialInstance* materialInstance);
     /** Acquire a per-draw material descriptor set for the current frame (safe to update before immediate bind). */
     rhi::IDescriptorSet* AcquireForwardDrawMaterialSet();
+    /** Acquire a per-draw/per-pass ForwardPass descriptor set for current frame. */
+    rhi::IDescriptorSet* AcquireForwardDrawPassSet();
+    /** Acquire a per-draw scene-buffers descriptor set for current frame (safe to update before immediate bind). */
+    rhi::IDescriptorSet* AcquireForwardDrawSceneBuffersSet();
+    /** Acquire a per-pass deferred-lighting descriptor set for current frame. */
+    rhi::IDescriptorSet* AcquireDeferredLightingDrawSet();
     /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
     void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
+    /** Fills current frame's outline Post set with scene+id textures (once per frame/input pair). */
+    void EnsureOutlinePostSetFilled(rhi::ITexture* sceneTex, rhi::ITexture* idTex);
     void EnsureOutlinePostShader();
     void EnsureEntityIdShader();
     void EnsureStreamingNV12Pass();
@@ -209,6 +220,45 @@ private:
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, uint32_t gpuCullDrawListCount);
     /** Phase D: Run shadow pass with mesh+material batching (instanced + singles). */
     void RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView);
+    struct ShadowPassParams {
+        const RenderFrameData* frameData = nullptr;
+        CameraView camView{};
+    };
+    struct DeferredLightingPassParams {
+        const RenderFrameData* frameData = nullptr;
+        CameraView camView{};
+        rhi::ClearValue clearColor = { 0.f, 0.f, 0.f, 1.f };
+        LightParams lightParams{};
+        CascadeShadowMap* cascadeForLighting = nullptr;
+        IBL* ibl = nullptr;
+        rhi::IDescriptorSet* lightingSetForCall = nullptr;
+    };
+    struct TransparencyPassParams {
+        const RenderFrameData* frameData = nullptr;
+        CameraView camView{};
+    };
+    struct PostProcessPassParams {
+        CameraView camView{};
+        const IRenderSceneView* sceneView = nullptr;
+        IBL* ibl = nullptr;
+        rhi::ITexture* probeTex = nullptr;
+        rhi::ITexture* skyboxTex = nullptr;
+        rhi::ITexture* hdrTex = nullptr;
+        math::Mat4 invView = math::Mat4(1.0f);
+        math::Mat4 invProj = math::Mat4(1.0f);
+        float time = 0.0f;
+        float ssrNearPlane = 0.0f;
+        float ssrFarPlane = 0.0f;
+    };
+    ShadowPassParams BuildShadowPassParams(const RenderFrameData* frameData, const CameraView& camView);
+    DeferredLightingPassParams BuildDeferredLightingPassParams(const RenderFrameData* frameData, const CameraView& camView,
+                                                               const rhi::ClearValue& clearColor);
+    TransparencyPassParams BuildTransparencyPassParams(const RenderFrameData* frameData, const CameraView& camView);
+    PostProcessPassParams BuildPostProcessPassParams(const IRenderSceneView* sceneView, const CameraView& camView);
+    void ExecuteShadowPass(rhi::ICommandList* cmd, const ShadowPassParams& params);
+    void ExecuteDeferredLightingPass(rhi::ICommandList* cmd, const DeferredLightingPassParams& params);
+    void ExecuteTransparencyPass(rhi::ICommandList* cmd, const TransparencyPassParams& params);
+    void ExecutePostProcessPass(rhi::ICommandList* cmd, const PostProcessPassParams& params);
 
     /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
     uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
@@ -252,6 +302,9 @@ private:
     std::shared_ptr<Shader> m_outlinePostShader;
     static constexpr uint32_t kOutlinePostSetsFrames = 3;
     std::array<rhi::IDescriptorSet*, kOutlinePostSetsFrames> m_outlinePostSets = {};
+    uint32_t m_lastOutlinePostSetFilledFrameNumber = 0xffffffffu;
+    rhi::ITexture* m_cachedOutlineSceneTexture = nullptr;
+    rhi::ITexture* m_cachedOutlineIdTexture = nullptr;
     std::shared_ptr<Shader> m_entityIdShader;
     rhi::IPipeline* m_streamingNV12Pipeline = nullptr;
     rhi::IShader* m_streamingNV12Shader = nullptr;
@@ -304,19 +357,29 @@ private:
     void EnsureForwardResourceSets();
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardFrameSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardPassSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardTransparentPassSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardMaterialSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardSceneBuffersSets = {};
+    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardTransparentSceneBuffersSets = {};
     std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_deferredLightingPassSets = {};
     std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardMaterialDrawSets = {};
     std::array<uint32_t, kForwardResourceSetsFrames> m_forwardMaterialDrawSetCursor = {};
+    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardPassDrawSets = {};
+    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardPassDrawSetCursor = {};
+    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardSceneBuffersDrawSets = {};
+    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardSceneBuffersDrawSetCursor = {};
+    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_deferredLightingDrawSets = {};
+    std::array<uint32_t, kForwardResourceSetsFrames> m_deferredLightingDrawSetCursor = {};
     std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardFrameUBOs = {};
     std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardBonesBuffers = {};
 
     /** Current frame aliases into per-frame arrays (updated by SelectForwardResourceSetFrame). */
     rhi::IDescriptorSet* m_forwardFrameSet = nullptr;
     rhi::IDescriptorSet* m_forwardPassSet = nullptr;
+    rhi::IDescriptorSet* m_forwardTransparentPassSet = nullptr;
     rhi::IDescriptorSet* m_forwardMaterialSet = nullptr;
     rhi::IDescriptorSet* m_forwardSceneBuffersSet = nullptr;
+    rhi::IDescriptorSet* m_forwardTransparentSceneBuffersSet = nullptr;
     rhi::IDescriptorSet* m_deferredLightingPassSet = nullptr;
     rhi::IBuffer* m_forwardFrameUBO = nullptr;
     rhi::IBuffer* m_forwardBonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)

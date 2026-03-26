@@ -152,18 +152,37 @@ void RenderPipeline::Shutdown() {
     if (m_device) {
         for (rhi::IDescriptorSet*& s : m_forwardFrameSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
         for (rhi::IDescriptorSet*& s : m_forwardPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_forwardTransparentPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
         for (rhi::IDescriptorSet*& s : m_forwardMaterialSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
         for (rhi::IDescriptorSet*& s : m_forwardSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+        for (rhi::IDescriptorSet*& s : m_forwardTransparentSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
         for (rhi::IDescriptorSet*& s : m_deferredLightingPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
         for (auto& drawSetsPerFrame : m_forwardMaterialDrawSets) {
             for (rhi::IDescriptorSet*& s : drawSetsPerFrame) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
             drawSetsPerFrame.clear();
         }
+        for (auto& drawSetsPerFrame : m_forwardPassDrawSets) {
+            for (rhi::IDescriptorSet*& s : drawSetsPerFrame) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            drawSetsPerFrame.clear();
+        }
+        for (auto& drawSetsPerFrame : m_forwardSceneBuffersDrawSets) {
+            for (rhi::IDescriptorSet*& s : drawSetsPerFrame) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            drawSetsPerFrame.clear();
+        }
+        for (auto& drawSetsPerFrame : m_deferredLightingDrawSets) {
+            for (rhi::IDescriptorSet*& s : drawSetsPerFrame) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            drawSetsPerFrame.clear();
+        }
         m_forwardMaterialDrawSetCursor = {};
+        m_forwardPassDrawSetCursor = {};
+        m_forwardSceneBuffersDrawSetCursor = {};
+        m_deferredLightingDrawSetCursor = {};
         m_forwardFrameSet = nullptr;
         m_forwardPassSet = nullptr;
+        m_forwardTransparentPassSet = nullptr;
         m_forwardMaterialSet = nullptr;
         m_forwardSceneBuffersSet = nullptr;
+        m_forwardTransparentSceneBuffersSet = nullptr;
         m_deferredLightingPassSet = nullptr;
         for (rhi::IDescriptorSet*& set : m_skyboxPostSets) {
             if (set) { m_device->EnqueueDestroyDescriptorSet(set); set = nullptr; }
@@ -816,6 +835,148 @@ void RenderPipeline::RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFr
     }
 }
 
+RenderPipeline::ShadowPassParams RenderPipeline::BuildShadowPassParams(const RenderFrameData* frameData, const CameraView& camView) {
+    ShadowPassParams p{};
+    p.frameData = frameData;
+    p.camView = camView;
+    return p;
+}
+
+RenderPipeline::DeferredLightingPassParams RenderPipeline::BuildDeferredLightingPassParams(const RenderFrameData* frameData, const CameraView& camView,
+                                                                                           const rhi::ClearValue& clearColor) {
+    DeferredLightingPassParams p{};
+    p.frameData = frameData;
+    p.camView = camView;
+    p.clearColor = clearColor;
+    if (!frameData || !m_lightingPass || !m_gbuffer)
+        return p;
+
+    EnsureForwardResourceSets();
+    p.lightParams = frameData->light;
+    p.ibl = EnsureIBLFromFrameData(*frameData);
+    p.cascadeForLighting = p.lightParams.castShadows ? m_cascadeShadowMap.get() : nullptr;
+
+    math::Mat4 lightSpaceMatrix(1.0f);
+    if (p.cascadeForLighting && p.cascadeForLighting->GetSplitCount() > 0)
+        lightSpaceMatrix = p.cascadeForLighting->GetLightSpaceMatrix(0);
+
+    FillSceneLightingBuffer(m_sceneLightingBuffer, p.lightParams, camView.viewPos, lightSpaceMatrix, 0.005f,
+                            p.lightParams.castShadows, &frameData->pointLights, &frameData->spotLights, p.cascadeForLighting);
+    if (m_forwardFrameUBO) {
+        math::Mat4 viewProj = camView.projection * camView.view;
+        float frameUbo[5 * 16];
+        std::memcpy(frameUbo, &camView.view[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 16, &camView.projection[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 48, &m_prevView[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 64, &m_prevProjection[0][0], 16 * sizeof(float));
+        m_forwardFrameUBO->Update(frameUbo, 0, 320);
+    }
+
+    p.lightingSetForCall = AcquireDeferredLightingDrawSet();
+    if (p.lightingSetForCall) {
+        p.lightingSetForCall->UpdateTexture(0, m_gbuffer->GetPositionTextureRHI());
+        p.lightingSetForCall->UpdateTexture(1, m_gbuffer->GetNormalTextureRHI());
+        p.lightingSetForCall->UpdateTexture(2, m_gbuffer->GetAlbedoTextureRHI());
+        p.lightingSetForCall->UpdateTexture(3, m_gbuffer->GetPBRParamsTextureRHI());
+        if (p.cascadeForLighting)
+            p.lightingSetForCall->UpdateTexture(4, p.cascadeForLighting->GetDepthTextureRHI());
+        if (m_sceneLightingBuffer)
+            p.lightingSetForCall->UpdateStorageBuffer(5, m_sceneLightingBuffer, 0, 0);
+        if (p.cascadeForLighting) {
+            rhi::IBuffer* lightSpaceBuf = p.cascadeForLighting->GetLightSpaceBufferRHI();
+            if (lightSpaceBuf)
+                p.lightingSetForCall->UpdateUniformBuffer(6, lightSpaceBuf, 0, 0);
+        }
+        if (p.ibl && p.ibl->IsValid()) {
+            if (rhi::ITexture* ir = p.ibl->GetIrradianceTextureRHI()) p.lightingSetForCall->UpdateTexture(7, ir);
+            if (rhi::ITexture* pf = p.ibl->GetPrefilterTextureRHI()) p.lightingSetForCall->UpdateTexture(8, pf);
+            if (rhi::ITexture* brdf = p.ibl->GetBRDFLUTTextureRHI()) p.lightingSetForCall->UpdateTexture(9, brdf);
+        }
+        m_lightingPass->SetResourceSpaceSets(m_forwardFrameSet, p.lightingSetForCall);
+    }
+    return p;
+}
+
+RenderPipeline::TransparencyPassParams RenderPipeline::BuildTransparencyPassParams(const RenderFrameData* frameData, const CameraView& camView) {
+    TransparencyPassParams p{};
+    p.frameData = frameData;
+    p.camView = camView;
+    return p;
+}
+
+RenderPipeline::PostProcessPassParams RenderPipeline::BuildPostProcessPassParams(const IRenderSceneView* sceneView, const CameraView& camView) {
+    PostProcessPassParams p{};
+    p.sceneView = sceneView;
+    p.camView = camView;
+    p.ibl = EnsureIBLFromFrameData(m_frameData);
+    if (p.ibl && p.ibl->IsValid() && m_reflectionProbeManager)
+        m_reflectionProbeManager->SetGlobalProbeFromPrefiltered(p.ibl->GetPrefilterTextureRHI(), p.ibl->GetIrradianceTextureRHI());
+    if (m_reflectionProbeManager) {
+        const ReflectionProbe* probe = m_reflectionProbeManager->FindClosestProbe(camView.viewPos);
+        if (!probe) probe = m_reflectionProbeManager->GetGlobalProbe();
+        if (probe && probe->IsValid()) p.probeTex = probe->GetCubemapTexture();
+    }
+    p.invView = glm::inverse(camView.view);
+    p.invProj = glm::inverse(camView.projection);
+    auto skybox = sceneView ? sceneView->GetSkybox() : nullptr;
+    p.skyboxTex = skybox && skybox->IsValid() ? skybox->GetTextureRHI() : nullptr;
+    p.time = core::Time::TotalTime();
+    p.hdrTex = GetHDRColorTextureRHI();
+    p.ssrNearPlane = camView.nearPlane;
+    p.ssrFarPlane = camView.farPlane;
+    return p;
+}
+
+void RenderPipeline::ExecuteShadowPass(rhi::ICommandList* cmd, const ShadowPassParams& params) {
+    if (!params.frameData) return;
+    RunShadowPassBatched(cmd, *params.frameData, params.camView);
+}
+
+void RenderPipeline::ExecuteDeferredLightingPass(rhi::ICommandList* cmd, const DeferredLightingPassParams& params) {
+    if (!params.frameData || !m_lightingPass || !m_gbuffer) return;
+    const CameraView& camView = params.camView;
+    const LightParams& lightParams = params.lightParams;
+    if (cmd && m_hdrRenderTarget)
+        rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, params.clearColor);
+    RenderContext c = RenderContext::FromDevice(m_device);
+    m_lightingPass->Render(*m_gbuffer, c, lightParams, camView.view, camView.projection, camView.viewPos, params.cascadeForLighting,
+                           &params.frameData->pointLights, &params.frameData->spotLights, m_sceneLightingBuffer, params.ibl);
+    debug::Profiler::AddFrameCounter("drawCalls", 1);
+    debug::Profiler::AddFrameCounter("triangles", 2);
+    debug::Profiler::AddFrameCounter("stateChanges", 1);
+    if (cmd) cmd->SetRenderTarget(nullptr);
+}
+
+void RenderPipeline::ExecuteTransparencyPass(rhi::ICommandList* cmd, const TransparencyPassParams& params) {
+    if (!params.frameData) return;
+    if (m_device && m_hdrRenderTarget)
+        m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
+    if (cmd && m_hdrRenderTarget) {
+        cmd->SetRenderTarget(m_hdrRenderTarget);
+        cmd->SetViewport(0, 0, m_width, m_height);
+    }
+    if (m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_shaderCache)
+        RenderForwardTransparent(cmd, *params.frameData, params.camView);
+    else {
+        RenderContext c = RenderContext::FromDevice(m_device);
+        TransparencyPass::Render(c, params.frameData->visibleTransparent, params.camView.view, params.camView.projection, params.camView.viewPos, m_shaderCache);
+    }
+    if (cmd) cmd->SetRenderTarget(nullptr);
+}
+
+void RenderPipeline::ExecutePostProcessPass(rhi::ICommandList* cmd, const PostProcessPassParams& params) {
+    if (!m_postProcessor || !m_gbuffer) return;
+    PostProcessor::Settings settings{};
+    settings.ssrNearPlane = params.ssrNearPlane;
+    settings.ssrFarPlane = params.ssrFarPlane;
+    (void)cmd;
+    (void)m_postProcessor->ApplyPostProcessing(
+        params.hdrTex, *m_gbuffer, settings,
+        params.camView.view, params.camView.projection,
+        params.invView, params.invProj, params.camView.viewPos, params.skyboxTex, params.time, params.probeTex);
+}
+
 void RenderPipeline::CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo) {
     if (!m_frameGraph) return;
     const bool needsCompile = m_frameGraphNeedsCompile
@@ -873,7 +1034,8 @@ void RenderPipeline::BuildDeferredGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
+                ShadowPassParams p = BuildShadowPassParams(m_currentFrameData, m_currentFrameData->cameraRaw);
+                ExecuteShadowPass(c.cmd, p);
             };
         if (name == "GBuffer")
             return [this](const FGPassResources&) {
@@ -891,73 +1053,17 @@ void RenderPipeline::BuildDeferredGraph() {
             if (name == "Lighting")
                 return [this](const FGPassResources&) {
                     if (!m_currentFrameData) return;
-                    EnsureForwardResourceSets();
                     RenderContext c = RenderContext::FromDevice(m_device);
-                    const CameraView& camView = m_currentFrameData->camera;
-                    const LightParams& lightParams = m_currentFrameData->light;
-                    IBL* iblPtr = EnsureIBLFromFrameData(*m_currentFrameData);
-                    const rhi::ClearValue clearBlack = { 0.f, 0.f, 0.f, 1.f };
-                    if (c.cmd && m_hdrRenderTarget)
-                        rhi::ClearAndSetRenderTargetWithViewport(c.cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearBlack);
-                    CascadeShadowMap* cascadeForLighting = lightParams.castShadows ? m_cascadeShadowMap.get() : nullptr;
-                    math::Mat4 lightSpaceMatrix(1.0f);
-                    if (cascadeForLighting && cascadeForLighting->GetSplitCount() > 0)
-                        lightSpaceMatrix = cascadeForLighting->GetLightSpaceMatrix(0);
-                    FillSceneLightingBuffer(m_sceneLightingBuffer, lightParams, camView.viewPos, lightSpaceMatrix, 0.005f,
-                        lightParams.castShadows, &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, cascadeForLighting);
-                    if (m_forwardFrameUBO) {
-                        math::Mat4 viewProj = camView.projection * camView.view;
-                        float frameUbo[5 * 16];
-                        std::memcpy(frameUbo, &camView.view[0][0], 16 * sizeof(float));
-                        std::memcpy(frameUbo + 16, &camView.projection[0][0], 16 * sizeof(float));
-                        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
-                        std::memcpy(frameUbo + 48, &m_prevView[0][0], 16 * sizeof(float));
-                        std::memcpy(frameUbo + 64, &m_prevProjection[0][0], 16 * sizeof(float));
-                        m_forwardFrameUBO->Update(frameUbo, 0, 320);
-                    }
-                    if (m_deferredLightingPassSet) {
-                        m_deferredLightingPassSet->UpdateTexture(0, m_gbuffer->GetPositionTextureRHI());
-                        m_deferredLightingPassSet->UpdateTexture(1, m_gbuffer->GetNormalTextureRHI());
-                        m_deferredLightingPassSet->UpdateTexture(2, m_gbuffer->GetAlbedoTextureRHI());
-                        m_deferredLightingPassSet->UpdateTexture(3, m_gbuffer->GetPBRParamsTextureRHI());
-                        if (cascadeForLighting)
-                            m_deferredLightingPassSet->UpdateTexture(4, cascadeForLighting->GetDepthTextureRHI());
-                        if (m_sceneLightingBuffer)
-                            m_deferredLightingPassSet->UpdateStorageBuffer(5, m_sceneLightingBuffer, 0, 0);
-                        if (cascadeForLighting) {
-                            rhi::IBuffer* lightSpaceBuf = cascadeForLighting->GetLightSpaceBufferRHI();
-                            if (lightSpaceBuf)
-                                m_deferredLightingPassSet->UpdateUniformBuffer(6, lightSpaceBuf, 0, 0);
-                        }
-                        if (iblPtr && iblPtr->IsValid()) {
-                            if (rhi::ITexture* ir = iblPtr->GetIrradianceTextureRHI()) m_deferredLightingPassSet->UpdateTexture(7, ir);
-                            if (rhi::ITexture* pf = iblPtr->GetPrefilterTextureRHI()) m_deferredLightingPassSet->UpdateTexture(8, pf);
-                            if (rhi::ITexture* brdf = iblPtr->GetBRDFLUTTextureRHI()) m_deferredLightingPassSet->UpdateTexture(9, brdf);
-                        }
-                    }
-                    m_lightingPass->Render(*m_gbuffer, c, lightParams, camView.view, camView.projection, camView.viewPos, cascadeForLighting,
-                        &m_currentFrameData->pointLights, &m_currentFrameData->spotLights, m_sceneLightingBuffer, iblPtr);
-                    debug::Profiler::AddFrameCounter("drawCalls", 1);
-                    debug::Profiler::AddFrameCounter("triangles", 2);
-                    debug::Profiler::AddFrameCounter("stateChanges", 1);
-                    if (c.cmd) c.cmd->SetRenderTarget(nullptr);
+                    DeferredLightingPassParams p =
+                        BuildDeferredLightingPassParams(m_currentFrameData, m_currentFrameData->camera, { 0.f, 0.f, 0.f, 1.f });
+                    ExecuteDeferredLightingPass(c.cmd, p);
                 };
             if (name == "Transparency")
                 return [this](const FGPassResources&) {
                     if (!m_currentFrameData) return;
                     RenderContext c = RenderContext::FromDevice(m_device);
-                    const CameraView& camView = m_currentFrameData->camera;
-                    if (m_device && m_hdrRenderTarget)
-                        m_device->BlitDepthOnly(m_gbuffer->GetRenderTargetRHI(), m_hdrRenderTarget);
-                    if (c.cmd && m_hdrRenderTarget) {
-                        c.cmd->SetRenderTarget(m_hdrRenderTarget);
-                        c.cmd->SetViewport(0, 0, m_width, m_height);
-                    }
-                    if (m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_shaderCache)
-                        RenderForwardTransparent(c.cmd, *m_currentFrameData, camView);
-                    else
-                        TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
-                    if (c.cmd) c.cmd->SetRenderTarget(nullptr);
+                    TransparencyPassParams p = BuildTransparencyPassParams(m_currentFrameData, m_currentFrameData->camera);
+                    ExecuteTransparencyPass(c.cmd, p);
                 };
         return [](const FGPassResources&) {};
     };
@@ -1006,7 +1112,8 @@ void RenderPipeline::BuildForwardGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
+                ShadowPassParams p = BuildShadowPassParams(m_currentFrameData, m_currentFrameData->cameraRaw);
+                ExecuteShadowPass(c.cmd, p);
             };
         if (name == "Forward Opaque")
             return [this](const FGPassResources&) {
@@ -1030,16 +1137,8 @@ void RenderPipeline::BuildForwardGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                const CameraView& camView = m_currentFrameData->camera;
-                if (c.cmd && m_hdrRenderTarget) {
-                    c.cmd->SetRenderTarget(m_hdrRenderTarget);
-                    c.cmd->SetViewport(0, 0, m_width, m_height);
-                }
-                if (m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_shaderCache)
-                    RenderForwardTransparent(c.cmd, *m_currentFrameData, camView);
-                else
-                    TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
-                if (c.cmd) c.cmd->SetRenderTarget(nullptr);
+                TransparencyPassParams p = BuildTransparencyPassParams(m_currentFrameData, m_currentFrameData->camera);
+                ExecuteTransparencyPass(c.cmd, p);
             };
         return [](const FGPassResources&) {};
     };
@@ -1064,7 +1163,8 @@ void RenderPipeline::BuildForwardPlusGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                RunShadowPassBatched(c.cmd, *m_currentFrameData, m_currentFrameData->cameraRaw);
+                ShadowPassParams p = BuildShadowPassParams(m_currentFrameData, m_currentFrameData->cameraRaw);
+                ExecuteShadowPass(c.cmd, p);
             };
         if (name == "Forward+ Opaque")
             return [this](const FGPassResources&) {
@@ -1078,15 +1178,8 @@ void RenderPipeline::BuildForwardPlusGraph() {
             return [this](const FGPassResources&) {
                 if (!m_currentFrameData) return;
                 RenderContext c = RenderContext::FromDevice(m_device);
-                const CameraView& camView = m_currentFrameData->camera;
-                if (c.cmd && m_hdrRenderTarget) {
-                    c.cmd->SetRenderTarget(m_hdrRenderTarget);
-                    c.cmd->SetViewport(0, 0, m_width, m_height);
-                }
-                if (m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_shaderCache)
-                    RenderForwardTransparent(c.cmd, *m_currentFrameData, camView);
-                else
-                    TransparencyPass::Render(c, m_currentFrameData->visibleTransparent, camView.view, camView.projection, camView.viewPos, m_shaderCache);
+                TransparencyPassParams p = BuildTransparencyPassParams(m_currentFrameData, m_currentFrameData->camera);
+                ExecuteTransparencyPass(c.cmd, p);
             };
         return [](const FGPassResources&) {};
     };
@@ -1129,7 +1222,8 @@ void RenderPipeline::BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView
 
 void RenderPipeline::EnsureForwardResourceSets() {
     if (!m_device) return;
-    if (m_forwardFrameSets[0]) {
+    if (m_forwardFrameSets[0] && m_forwardPassSets[0] && m_forwardTransparentPassSets[0] && m_forwardSceneBuffersSets[0] &&
+        m_forwardTransparentSceneBuffersSets[0]) {
         SelectForwardResourceSetFrame();
         return;
     }
@@ -1152,13 +1246,18 @@ void RenderPipeline::EnsureForwardResourceSets() {
     for (uint32_t i = 0; i < kForwardResourceSetsFrames; ++i) {
         m_forwardFrameSets[i] = m_device->CreateDescriptorSet(frameLayout);
         m_forwardPassSets[i] = m_device->CreateDescriptorSet(forwardPassLayout);
+        m_forwardTransparentPassSets[i] = m_device->CreateDescriptorSet(forwardPassLayout);
         m_forwardMaterialSets[i] = m_device->CreateDescriptorSet(materialLayout);
         m_forwardSceneBuffersSets[i] = m_device->CreateDescriptorSet(sceneLayout);
-        if (!m_forwardFrameSets[i] || !m_forwardPassSets[i] || !m_forwardMaterialSets[i] || !m_forwardSceneBuffersSets[i]) {
+        m_forwardTransparentSceneBuffersSets[i] = m_device->CreateDescriptorSet(sceneLayout);
+        if (!m_forwardFrameSets[i] || !m_forwardPassSets[i] || !m_forwardTransparentPassSets[i] || !m_forwardMaterialSets[i] ||
+            !m_forwardSceneBuffersSets[i] || !m_forwardTransparentSceneBuffersSets[i]) {
             for (rhi::IDescriptorSet*& s : m_forwardFrameSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
             for (rhi::IDescriptorSet*& s : m_forwardPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            for (rhi::IDescriptorSet*& s : m_forwardTransparentPassSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
             for (rhi::IDescriptorSet*& s : m_forwardMaterialSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
             for (rhi::IDescriptorSet*& s : m_forwardSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
+            for (rhi::IDescriptorSet*& s : m_forwardTransparentSceneBuffersSets) { if (s) { m_device->DestroyDescriptorSet(s); s = nullptr; } }
             return;
         }
 
@@ -1187,12 +1286,17 @@ void RenderPipeline::SelectForwardResourceSetFrame() {
     const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kForwardResourceSetsFrames;
     m_forwardFrameSet = m_forwardFrameSets[frameIndex];
     m_forwardPassSet = m_forwardPassSets[frameIndex];
+    m_forwardTransparentPassSet = m_forwardTransparentPassSets[frameIndex];
     m_forwardMaterialSet = m_forwardMaterialSets[frameIndex];
     m_forwardSceneBuffersSet = m_forwardSceneBuffersSets[frameIndex];
+    m_forwardTransparentSceneBuffersSet = m_forwardTransparentSceneBuffersSets[frameIndex];
     m_deferredLightingPassSet = m_deferredLightingPassSets[frameIndex];
     m_forwardFrameUBO = m_forwardFrameUBOs[frameIndex];
     m_forwardBonesBuffer = m_forwardBonesBuffers[frameIndex];
     m_forwardMaterialDrawSetCursor[frameIndex] = 0;
+    m_forwardPassDrawSetCursor[frameIndex] = 0;
+    m_forwardSceneBuffersDrawSetCursor[frameIndex] = 0;
+    m_deferredLightingDrawSetCursor[frameIndex] = 0;
     if (m_gbufferPass) {
         m_gbufferPass->SetResourceSpaceSets(m_forwardFrameSet, m_forwardMaterialSet, m_forwardSceneBuffersSet);
         if (m_forwardBonesBuffer) m_gbufferPass->SetBonesBuffer(m_forwardBonesBuffer);
@@ -1279,21 +1383,116 @@ rhi::IDescriptorSet* RenderPipeline::AcquireForwardDrawMaterialSet() {
     return drawSets[cursor++];
 }
 
+rhi::IDescriptorSet* RenderPipeline::AcquireForwardDrawPassSet() {
+    if (!m_device) return nullptr;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kForwardResourceSetsFrames;
+    auto& drawSets = m_forwardPassDrawSets[frameIndex];
+    uint32_t& cursor = m_forwardPassDrawSetCursor[frameIndex];
+    if (cursor >= drawSets.size()) {
+        rhi::IPipelineLayout* passLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::ForwardPass);
+        if (!passLayout) return nullptr;
+        rhi::IDescriptorSet* newSet = m_device->CreateDescriptorSet(passLayout);
+        if (!newSet) return nullptr;
+        drawSets.push_back(newSet);
+    }
+    return drawSets[cursor++];
+}
+
+rhi::IDescriptorSet* RenderPipeline::AcquireForwardDrawSceneBuffersSet() {
+    if (!m_device) return nullptr;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kForwardResourceSetsFrames;
+    auto& drawSets = m_forwardSceneBuffersDrawSets[frameIndex];
+    uint32_t& cursor = m_forwardSceneBuffersDrawSetCursor[frameIndex];
+    if (cursor >= drawSets.size()) {
+        rhi::IPipelineLayout* sceneLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
+        if (!sceneLayout) return nullptr;
+        rhi::IDescriptorSet* newSet = m_device->CreateDescriptorSet(sceneLayout);
+        if (!newSet) return nullptr;
+        drawSets.push_back(newSet);
+    }
+    return drawSets[cursor++];
+}
+
+rhi::IDescriptorSet* RenderPipeline::AcquireDeferredLightingDrawSet() {
+    if (!m_device) return nullptr;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kForwardResourceSetsFrames;
+    auto& drawSets = m_deferredLightingDrawSets[frameIndex];
+    uint32_t& cursor = m_deferredLightingDrawSetCursor[frameIndex];
+    if (cursor >= drawSets.size()) {
+        rhi::IPipelineLayout* layout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::DeferredLightingPass);
+        if (!layout) return nullptr;
+        rhi::IDescriptorSet* newSet = m_device->CreateDescriptorSet(layout);
+        if (!newSet) return nullptr;
+        drawSets.push_back(newSet);
+    }
+    return drawSets[cursor++];
+}
+
+void RenderPipeline::BuildForwardPassSharedState(const RenderFrameData& frameData, const CameraView& cam, rhi::IDescriptorSet* passSet,
+                                                 rhi::IDescriptorSet* sceneBuffersSet, bool usePrevViewProj) {
+    if (!passSet || !sceneBuffersSet || !m_forwardFrameUBO) return;
+    const LightParams& light = frameData.light;
+    IBL* iblPtr = EnsureIBLFromFrameData(frameData);
+    const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
+    if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
+    const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
+    math::Mat4 lightSpaceMatrix(1.0f);
+    if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
+        lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
+    FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
+        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
+
+    math::Mat4 viewProj = cam.projection * cam.view;
+    float frameUbo[5 * 16];
+    std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
+    std::memcpy(frameUbo + 16, &cam.projection[0][0], 16 * sizeof(float));
+    std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
+    if (usePrevViewProj) {
+        std::memcpy(frameUbo + 48, &m_prevView[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 64, &m_prevProjection[0][0], 16 * sizeof(float));
+    } else {
+        std::memcpy(frameUbo + 48, &cam.view[0][0], 16 * sizeof(float));
+        std::memcpy(frameUbo + 64, &cam.projection[0][0], 16 * sizeof(float));
+    }
+    m_forwardFrameUBO->Update(frameUbo, 0, 320);
+
+    if (useShadows && m_cascadeShadowMap) passSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
+    if (m_sceneLightingBuffer) {
+        passSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
+        rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+        passSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
+        rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
+        rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
+        sceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
+        sceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
+        sceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+        sceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
+    }
+
+    rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
+    rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
+    rhi::ITexture* brdfLut = (iblPtr && iblPtr->IsValid()) ? iblPtr->GetBRDFLUTTextureRHI() : nullptr;
+    if (irradiance) passSet->UpdateTexture(3, irradiance);
+    if (prefilter) passSet->UpdateTexture(4, prefilter);
+    if (brdfLut) passSet->UpdateTexture(5, brdfLut);
+}
+
 void RenderPipeline::RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
     RenderForwardOpaqueForCamera(cmd, frameData, frameData.camera, frameData.visibleOpaque);
 }
 
 void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
                                                   const std::vector<Drawable>& opaqueDrawables) {
-    const LightParams& light = frameData.light;
     IBL* iblPtr = EnsureIBLFromFrameData(frameData);
     const bool useTypedForwardPush = (m_device && m_device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan);
     const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
     if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
     EnsureForwardResourceSets();
+    rhi::IDescriptorSet* passSetForCall = AcquireForwardDrawPassSet();
+    rhi::IDescriptorSet* sceneSetForCall = AcquireForwardDrawSceneBuffersSet();
     rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet,
-            m_forwardSceneBuffersSet, m_forwardFrameUBO, m_bindlessHeap)) {
+    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, passSetForCall, m_forwardMaterialSet,
+            sceneSetForCall, m_forwardFrameUBO, m_bindlessHeap)) {
         static bool s_loggedForwardSkip = false;
         if (!s_loggedForwardSkip) {
             core::Log::WarnF(
@@ -1304,41 +1503,7 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
         return;
     }
 
-    const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
-    math::Mat4 lightSpaceMatrix(1.0f);
-    if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
-        lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
-    FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-
-    {
-        math::Mat4 viewProj = cam.projection * cam.view;
-        float frameUbo[5 * 16];
-        std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 16, &cam.projection[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 48, &cam.view[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 64, &cam.projection[0][0], 16 * sizeof(float));
-        m_forwardFrameUBO->Update(frameUbo, 0, 320);
-        if (useShadows && m_cascadeShadowMap) m_forwardPassSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
-        if (m_sceneLightingBuffer) {
-            m_forwardPassSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
-            rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
-            m_forwardPassSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
-            rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
-            rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
-        }
-        rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
-        rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
-        rhi::ITexture* brdfLut = (iblPtr && iblPtr->IsValid()) ? iblPtr->GetBRDFLUTTextureRHI() : nullptr;
-        if (irradiance) m_forwardPassSet->UpdateTexture(3, irradiance);
-        if (prefilter) m_forwardPassSet->UpdateTexture(4, prefilter);
-        if (brdfLut) m_forwardPassSet->UpdateTexture(5, brdfLut);
-    }
+    BuildForwardPassSharedState(frameData, cam, passSetForCall, sceneSetForCall, false);
 
     if (!m_shaderCache) return;
     std::map<ShaderKey, std::vector<Drawable>> buckets;
@@ -1401,12 +1566,22 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
             const int useAlbedoTexture = ComputeForwardAlbedoTextureFlag(d.material.get(), d.materialInstance.get());
             if (!useTypedForwardPush)
                 sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
+            rhi::IDescriptorSet* sceneSetForDraw = sceneSetForCall;
             if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
                 const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
                 m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
-                m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+                rhi::IDescriptorSet* drawSceneSet = AcquireForwardDrawSceneBuffersSet();
+                if (drawSceneSet) {
+                    // Clone shared scene-buffers bindings and override bones binding for this draw.
+                    drawSceneSet->UpdateStorageBuffer(0, m_sceneLightingBuffer, 0, 0);
+                    drawSceneSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+                    drawSceneSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+                    rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+                    drawSceneSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
+                    sceneSetForDraw = drawSceneSet;
+                }
             }
-            rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, drawMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+            rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
             cmd->BindDescriptorSets(0, 5, sets);
             if (useTypedForwardPush) {
                 abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture);
@@ -1443,14 +1618,15 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
 
 void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam) {
     if (!cmd || !m_shaderCache) return;
-    const LightParams& light = frameData.light;
     IBL* iblPtr = EnsureIBLFromFrameData(frameData);
     const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
     if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
     EnsureForwardResourceSets();
+    rhi::IDescriptorSet* passSetForCall = AcquireForwardDrawPassSet();
+    rhi::IDescriptorSet* sceneSetForCall = AcquireForwardDrawSceneBuffersSet();
     rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet,
-            m_forwardSceneBuffersSet, m_forwardFrameUBO, m_bindlessHeap)) {
+    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, passSetForCall, m_forwardMaterialSet,
+            sceneSetForCall, m_forwardFrameUBO, m_bindlessHeap)) {
         static bool s_loggedTrSkip = false;
         if (!s_loggedTrSkip) {
             core::Log::WarnF("RenderForwardTransparent: skipped (need bindless + forward resource-space sets).");
@@ -1458,44 +1634,6 @@ void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const Rend
         }
         return;
     }
-
-    const bool useShadows = (m_cascadeShadowMap != nullptr && light.castShadows);
-    math::Mat4 lightSpaceMatrix(1.0f);
-    if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
-        lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
-    FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
-
-    {
-        math::Mat4 viewProj = cam.projection * cam.view;
-        float frameUbo[5 * 16];
-        std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 16, &cam.projection[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 48, &m_prevView[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 64, &m_prevProjection[0][0], 16 * sizeof(float));
-        m_forwardFrameUBO->Update(frameUbo, 0, 320);
-        if (useShadows && m_cascadeShadowMap) m_forwardPassSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
-        if (m_sceneLightingBuffer) {
-            m_forwardPassSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
-            rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
-            m_forwardPassSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
-            rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
-            rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
-        }
-        rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
-        rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
-        rhi::ITexture* brdfLut = (iblPtr && iblPtr->IsValid()) ? iblPtr->GetBRDFLUTTextureRHI() : nullptr;
-        if (irradiance) m_forwardPassSet->UpdateTexture(3, irradiance);
-        if (prefilter) m_forwardPassSet->UpdateTexture(4, prefilter);
-        if (brdfLut) m_forwardPassSet->UpdateTexture(5, brdfLut);
-    }
-
-    const int useIBL = ((envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid())) ? 1 : 0;
 
     struct TEntry {
         size_t idx;
@@ -1512,6 +1650,11 @@ void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const Rend
         sorted.push_back({ i, DistanceToCameraTransparent(d.transform, cam.viewPos) });
     }
     std::sort(sorted.begin(), sorted.end(), [](const TEntry& a, const TEntry& b) { return a.dist > b.dist; });
+    if (sorted.empty()) return;
+
+    BuildForwardPassSharedState(frameData, cam, passSetForCall, sceneSetForCall, true);
+
+    const int useIBL = ((envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid())) ? 1 : 0;
 
     for (const TEntry& e : sorted) {
         const Drawable& d = frameData.visibleTransparent[e.idx];
@@ -1550,12 +1693,21 @@ void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const Rend
         }
         UpdateForwardMaterialSetWithFallback(drawMaterialSet, d.material.get(), d.materialInstance.get());
         const int useAlbedoTexture = ComputeForwardAlbedoTextureFlag(d.material.get(), d.materialInstance.get());
+        rhi::IDescriptorSet* sceneSetForDraw = sceneSetForCall;
         if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
             const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
             m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+            rhi::IDescriptorSet* drawSceneSet = AcquireForwardDrawSceneBuffersSet();
+            if (drawSceneSet) {
+                drawSceneSet->UpdateStorageBuffer(0, m_sceneLightingBuffer, 0, 0);
+                drawSceneSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+                drawSceneSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+                rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+                drawSceneSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
+                sceneSetForDraw = drawSceneSet;
+            }
         }
-        rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, drawMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+        rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
         cmd->BindDescriptorSets(0, 5, sets);
         abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture);
         debug::Profiler::AddFrameCounter("drawCalls", 1);
@@ -1960,19 +2112,15 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
 
 void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
     const CameraView& cam = frameData.camera;
-    const LightParams& light = frameData.light;
 
     if (!m_shaderCache) return;
 
     EnsureForwardResourceSets();
-    math::Mat4 lightSpaceMatrix(1.0f);
-    if (light.castShadows && m_cascadeShadowMap && m_cascadeShadowMap->GetSplitCount() > 0)
-        lightSpaceMatrix = m_cascadeShadowMap->GetLightSpaceMatrix(0);
-    FillSceneLightingBuffer(m_sceneLightingBuffer, light, cam.viewPos, lightSpaceMatrix, 0.005f,
-        light.castShadows, &frameData.pointLights, &frameData.spotLights, m_cascadeShadowMap.get());
+    rhi::IDescriptorSet* passSetForCall = AcquireForwardDrawPassSet();
+    rhi::IDescriptorSet* sceneSetForCall = AcquireForwardDrawSceneBuffersSet();
     rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, m_forwardPassSet, m_forwardMaterialSet,
-            m_forwardSceneBuffersSet, m_forwardFrameUBO, m_bindlessHeap)) {
+    if (!ForwardPbrResourceBindingsReady(m_device, cmd, m_forwardFrameSet, passSetForCall, m_forwardMaterialSet,
+            sceneSetForCall, m_forwardFrameUBO, m_bindlessHeap)) {
         static bool s_loggedForwardPlusSkip = false;
         if (!s_loggedForwardPlusSkip) {
             core::Log::WarnF(
@@ -1985,35 +2133,7 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
     const bool useTypedForwardPush = (m_device && m_device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan);
     const ReflectionProbe* envProbe = m_reflectionProbeManager ? m_reflectionProbeManager->FindClosestProbe(cam.viewPos) : nullptr;
     if (!envProbe && m_reflectionProbeManager) envProbe = m_reflectionProbeManager->GetGlobalProbe();
-
-    {
-        math::Mat4 viewProj = cam.projection * cam.view;
-        float frameUbo[5 * 16];
-        std::memcpy(frameUbo, &cam.view[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 16, &cam.projection[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 48, &m_prevView[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 64, &m_prevProjection[0][0], 16 * sizeof(float));
-        m_forwardFrameUBO->Update(frameUbo, 0, 320);
-        if (light.castShadows && m_cascadeShadowMap) m_forwardPassSet->UpdateTexture(0, m_cascadeShadowMap->GetDepthTextureRHI());
-        if (m_sceneLightingBuffer) {
-            m_forwardPassSet->UpdateStorageBuffer(1, m_sceneLightingBuffer, 0, 0);
-            rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
-            m_forwardPassSet->UpdateStorageBuffer(2, clusterOrDummy, 0, 0);
-            rhi::IBuffer* sceneFallback = m_sceneLightingBuffer;
-            rhi::IBuffer* bonesOrFallback = m_forwardBonesBuffer ? m_forwardBonesBuffer : sceneFallback;
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(0, sceneFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(1, bonesOrFallback, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
-            m_forwardSceneBuffersSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
-        }
-        rhi::ITexture* irradiance = envProbe && envProbe->IsValid() ? envProbe->GetIrradianceMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetIrradianceTextureRHI() : nullptr);
-        rhi::ITexture* prefilter = envProbe && envProbe->IsValid() ? envProbe->GetPrefilteredMap() : (iblPtr && iblPtr->IsValid() ? iblPtr->GetPrefilterTextureRHI() : nullptr);
-        rhi::ITexture* brdfLut = (iblPtr && iblPtr->IsValid()) ? iblPtr->GetBRDFLUTTextureRHI() : nullptr;
-        if (irradiance) m_forwardPassSet->UpdateTexture(3, irradiance);
-        if (prefilter) m_forwardPassSet->UpdateTexture(4, prefilter);
-        if (brdfLut) m_forwardPassSet->UpdateTexture(5, brdfLut);
-    }
+    BuildForwardPassSharedState(frameData, cam, passSetForCall, sceneSetForCall, true);
 
     std::vector<DrawBatch> batches = BuildBatches(frameData.visibleOpaque);
 
@@ -2033,8 +2153,17 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                     sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
                 const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
                 m_instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
-                m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_instanceMatrixBuffer, 0, static_cast<uint32_t>(byteSize));
-                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, drawMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+                rhi::IDescriptorSet* sceneSetForDraw = sceneSetForCall;
+                rhi::IDescriptorSet* drawSceneSet = AcquireForwardDrawSceneBuffersSet();
+                if (drawSceneSet) {
+                    drawSceneSet->UpdateStorageBuffer(0, m_sceneLightingBuffer, 0, 0);
+                    drawSceneSet->UpdateStorageBuffer(1, m_instanceMatrixBuffer, 0, static_cast<uint32_t>(byteSize));
+                    drawSceneSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+                    rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+                    drawSceneSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
+                    sceneSetForDraw = drawSceneSet;
+                }
+                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
                 cmd->BindDescriptorSets(0, 5, sets);
                 const int useIBL = ((envProbe && envProbe->IsValid()) || (iblPtr && iblPtr->IsValid())) ? 1 : 0;
                 if (useTypedForwardPush) {
@@ -2079,13 +2208,22 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
                 };
                 if ((!bonePtr || boneCount == 0) && single.materialInstance) single.materialInstance->ForEachMat4Array(collectBones);
                 else if (!bonePtr || boneCount == 0) baseMat->ForEachMat4Array(collectBones);
+                rhi::IDescriptorSet* sceneSetForDraw = sceneSetForCall;
                 if (bonePtr && boneCount > 0 && m_forwardBonesBuffer) {
                     boneCount = std::min(boneCount, kMaxBones);
                     const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
                     m_forwardBonesBuffer->Update(bonePtr, 0, boneBytes);
-                    m_forwardSceneBuffersSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+                    rhi::IDescriptorSet* drawSceneSet = AcquireForwardDrawSceneBuffersSet();
+                    if (drawSceneSet) {
+                        drawSceneSet->UpdateStorageBuffer(0, m_sceneLightingBuffer, 0, 0);
+                        drawSceneSet->UpdateStorageBuffer(1, m_forwardBonesBuffer, 0, boneBytes);
+                        drawSceneSet->UpdateStorageBuffer(2, m_sceneLightingBuffer, 0, 0);
+                        rhi::IBuffer* clusterOrDummy = m_lightIndexBuffer ? m_lightIndexBuffer : m_sceneLightingBuffer;
+                        drawSceneSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
+                        sceneSetForDraw = drawSceneSet;
+                    }
                 }
-                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, m_forwardPassSet, drawMaterialSet, bindlessSet, m_forwardSceneBuffersSet };
+                rhi::IDescriptorSet* sets[5] = { m_forwardFrameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
                 cmd->BindDescriptorSets(0, 5, sets);
                 if (useTypedForwardPush) {
                     abi::WriteForwardPushConstants(cmd, single.transform, useIBL, useAlbedoTexture);
@@ -2184,29 +2322,8 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
     }
 
     // Post runs exactly once, after all scene and debug passes. One path for all modes.
-    if (m_postProcessor) {
-        IBL* ibl = EnsureIBLFromFrameData(m_frameData);
-        if (ibl && ibl->IsValid())
-            m_reflectionProbeManager->SetGlobalProbeFromPrefiltered(ibl->GetPrefilterTextureRHI(), ibl->GetIrradianceTextureRHI());
-        rhi::ITexture* probeTex = nullptr;
-        const ReflectionProbe* probe = m_reflectionProbeManager->FindClosestProbe(cam.viewPos);
-        if (!probe) probe = m_reflectionProbeManager->GetGlobalProbe();
-        if (probe && probe->IsValid()) probeTex = probe->GetCubemapTexture();
-        PostProcessor::Settings settings;
-        math::Mat4 invView = glm::inverse(cam.view);
-        math::Mat4 invProj = glm::inverse(cam.projection);
-        auto skybox = view.GetSkybox();
-        rhi::ITexture* skyboxTex = skybox && skybox->IsValid() ? skybox->GetTextureRHI() : nullptr;
-        float time = core::Time::TotalTime();
-        rhi::ITexture* hdrTex = GetHDRColorTextureRHI();
-        settings.ssrNearPlane = cam.nearPlane;
-        settings.ssrFarPlane = cam.farPlane;
-        rhi::ITexture* finalTexture = m_postProcessor->ApplyPostProcessing(
-            hdrTex, *m_gbuffer, settings,
-            cam.view, cam.projection,
-            invView, invProj, cam.viewPos, skyboxTex, time, probeTex);
-        (void)finalTexture;
-    }
+    PostProcessPassParams postParams = BuildPostProcessPassParams(&view, cam);
+    ExecutePostProcessPass(cmd, postParams);
 
     } // !kDebugBypassAllPasses
 
@@ -2370,7 +2487,8 @@ void RenderPipeline::EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex) {
         if (!setRef)
             return;
     }
-    if (m_lastSkyboxPostSetFilledFrameNumber == frameNumber)
+    rhi::ITexture* expectedTex = binding0Tex ? binding0Tex : m_skyboxDummyTexture;
+    if (m_lastSkyboxPostSetFilledFrameNumber == frameNumber && m_cachedSkyboxTexture == expectedTex)
         return;
     EnsureSkyboxDummyTexture();
     rhi::ITexture* dummy = m_skyboxDummyTexture;
@@ -2381,6 +2499,25 @@ void RenderPipeline::EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex) {
     for (uint32_t b = 1; b < kPostPassBindingCount; ++b)
         setRef->UpdateTexture(b, dummy);
     m_lastSkyboxPostSetFilledFrameNumber = frameNumber;
+    m_cachedSkyboxTexture = tex0;
+}
+
+void RenderPipeline::EnsureOutlinePostSetFilled(rhi::ITexture* sceneTex, rhi::ITexture* idTex) {
+    if (!m_device || !sceneTex || !idTex) return;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kOutlinePostSetsFrames;
+    const uint32_t frameNumber = m_device->GetFrameNumber();
+    rhi::IDescriptorSet* outlineSet = m_outlinePostSets[frameIndex];
+    if (!outlineSet) return;
+    if (m_lastOutlinePostSetFilledFrameNumber == frameNumber &&
+        m_cachedOutlineSceneTexture == sceneTex &&
+        m_cachedOutlineIdTexture == idTex) {
+        return;
+    }
+    outlineSet->UpdateTexture(0, sceneTex);
+    outlineSet->UpdateTexture(1, idTex);
+    m_lastOutlinePostSetFilledFrameNumber = frameNumber;
+    m_cachedOutlineSceneTexture = sceneTex;
+    m_cachedOutlineIdTexture = idTex;
 }
 
 void RenderPipeline::AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool useGbufferDepth) {
@@ -2450,8 +2587,6 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
         core::Log::InfoF("Skybox cubemap: skip draw (forwardFrameSet=%p skyboxPostSet=%p frameIndex=%u)", (void*)m_forwardFrameSet, (void*)skyboxPostSet, frameIndex);
         return;
     }
-    m_cachedSkyboxTexture = skyboxTex;
-
     rhi::IPipeline* pipe = m_skyboxShader->GetPipelineRHI();
     if (!cmdSky || !pipe) {
         core::Log::InfoF("Skybox cubemap: skip draw (cmdSky=%p pipe=%p)", (void*)cmdSky, (void*)pipe);
@@ -2750,8 +2885,7 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t selectedPackedId, float 
     m_outlinePostShader->Bind(m_device);
     rhi::IDescriptorSet* outlineSet = m_outlinePostSets[m_device->GetCurrentFrameIndex() % kOutlinePostSetsFrames];
     if (outlineSet && sceneTex && idTex) {
-        outlineSet->UpdateTexture(0, sceneTex);
-        outlineSet->UpdateTexture(1, idTex);
+        EnsureOutlinePostSetFilled(sceneTex, idTex);
         cmd->BindDescriptorSets(0, 1, &outlineSet);
     } else {
         if (sceneTex) cmd->BindTexture(sceneTex, 0);

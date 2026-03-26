@@ -255,8 +255,8 @@ so you transition cleanly instead of rewriting everything blindly.
 | PostProcessor immediate path | Done | Post effects use `abi::Write*` helpers instead of ad-hoc `SetPushConstants` blobs. |
 | Post frame-graph ToneMap + FXAA | Done | Frame-graph passes now also use post descriptor-set + push helper path. |
 | Per-frame forward debug log spam | Done | Repeating `ForwardOpaque*` info logs removed; only suspicious submit case warns. |
-| Opaque/transparent descriptor lifetime safety | In progress | Current issue: transparent path can update shared forward sets after opaque uses them. |
-| Pass-isolated immutable descriptor sets (Unreal-style) | Left to do | Split/prepare per-pass descriptor instances upfront; no update-after-bind in execute path. |
-| Full graph-driven pass parameter model | Left to do | Move to explicit pass params/resources ownership and immutable execute phase. |
+| Opaque/transparent descriptor lifetime safety | Done | Per-pass + per-draw set rings isolate updates, eliminating shared-set update-while-in-use hazards. |
+| Pass-isolated immutable descriptor sets (Unreal-style) | Done | Forward/deferred/post helper paths now prepare descriptor updates in setup-style helpers/cached builders before bind+draw dispatch. |
+| Full graph-driven pass parameter model | Done | `Shadow`, `DeferredLighting`, `Transparency`, and `PostProcess` all execute through explicit params structs built via `Build*PassParams(...)`. |
 
-> Note: next critical fix is descriptor lifetime isolation for forward opaque vs transparent (same-frame update is fine, update-while-in-use is not).
+> Note: execute paths are now constrained to bind/dispatch while setup builders own descriptor and resource population.
