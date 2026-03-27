@@ -4,6 +4,7 @@
 #include "eyelib/render/PipelineSharedResources.h"
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
+#include "eyelib/render/renderer/FrameRenderContext.h"
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/lighting/LightCullPass.h"
 #include "eyelib/render/rhi/RHI.h"
@@ -27,6 +28,15 @@ class ShadowPass;
 class LightingPass;
 class ClusteredLightGrid;
 class PostProcessor;
+class SkyboxPassSystem;
+class PostProcessPassSystem;
+class TransparencyPassSystem;
+class DeferredLightingPassSystem;
+class ForwardOpaquePassSystem;
+class ShadowPassSystem;
+struct ShadowPassBuildParams;
+class EditorOverlayPassSystem;
+class StreamingPassSystem;
 class IBL;
 class ReflectionProbeManager;
 class GpuProfilerRHI;
@@ -36,6 +46,9 @@ class TextureCube;
 class FullscreenQuad;
 class Material;
 class MaterialInstance;
+namespace resources {
+class PassResourceBuilder;
+}
 
 /** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Skybox, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Skybox, Post). ForwardPlus: tiled forward (many lights), skybox drawn after; legacy path. */
 enum class PipelineMode { Forward, Deferred, ForwardPlus };
@@ -149,6 +162,19 @@ private:
     void DestroyHDRFramebuffer();
     /** Frame-graph coordination: compile only when needed (size/mode/stereo change), then execute. */
     void CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo);
+    /** Current frame RHI + dimensions for graph passes (uses m_device, m_currentFrameData when set). */
+    FrameRenderContext GetFrameRenderContext() const;
+    /** Named frame-graph steps; each matches a pass name in RenderGraphRecipes. Uses m_currentFrameData / m_currentView. */
+    void GraphExecuteGpuCull();
+    void GraphExecuteShadow();
+    void GraphExecuteGBufferDeferred();
+    void GraphExecuteCopyDepthOcclusionDeferred();
+    void GraphExecuteDeferredLighting();
+    void GraphExecuteTransparency();
+    void GraphExecuteSkybox(bool useGbufferDepth);
+    void GraphExecuteForwardOpaque();
+    void GraphExecuteCopyDepthOcclusionForward();
+    void GraphExecuteForwardPlusOpaque();
     /** Build deferred recipe and add passes (GBuffer, Lighting, etc.). Called from CompileFrameGraphIfNeeded. */
     void BuildDeferredGraph();
     /** Build forward recipe and add passes. Called from CompileFrameGraphIfNeeded. */
@@ -191,23 +217,17 @@ private:
     void EnsureProceduralSkyboxShader();
     /** Ensures m_skyboxDummyTexture exists (1x1 RGBA8). Used to fill unused Post set bindings. */
     void EnsureSkyboxDummyTexture();
-    /** Ensures forward material fallback textures exist (albedo/normal/metal-rough). */
-    void EnsureForwardMaterialFallbackTextures();
-    /** Select current per-frame forward descriptor sets/buffers based on GetCurrentFrameIndex(). */
-    void SelectForwardResourceSetFrame();
     /** Build immutable shared forward bindings for a pass (frame/pass/scene sets) before execute. */
     void BuildForwardPassSharedState(const RenderFrameData& frameData, const CameraView& cam, rhi::IDescriptorSet* passSet,
                                      rhi::IDescriptorSet* sceneBuffersSet, bool usePrevViewProj);
-    /** Update target forward Material set with guaranteed valid texture bindings 1..3. */
-    void UpdateForwardMaterialSetWithFallback(rhi::IDescriptorSet* targetSet, const Material* material, const MaterialInstance* materialInstance);
-    /** Acquire a per-draw material descriptor set for the current frame (safe to update before immediate bind). */
-    rhi::IDescriptorSet* AcquireForwardDrawMaterialSet();
-    /** Acquire a per-draw/per-pass ForwardPass descriptor set for current frame. */
-    rhi::IDescriptorSet* AcquireForwardDrawPassSet();
-    /** Acquire a per-draw scene-buffers descriptor set for current frame (safe to update before immediate bind). */
-    rhi::IDescriptorSet* AcquireForwardDrawSceneBuffersSet();
-    /** Acquire a per-pass deferred-lighting descriptor set for current frame. */
-    rhi::IDescriptorSet* AcquireDeferredLightingDrawSet();
+    /** Acquire a per-draw material descriptor set for the current frame. */
+    rhi::IDescriptorSet* AcquireMaterialDrawSet();
+    /** Acquire a per-draw pass descriptor set for the current frame. */
+    rhi::IDescriptorSet* AcquirePassDrawSet();
+    /** Acquire a per-draw scene descriptor set for the current frame. */
+    rhi::IDescriptorSet* AcquireSceneDrawSet();
+    /** Acquire a per-pass deferred-lighting descriptor set for the current frame. */
+    rhi::IDescriptorSet* AcquireDeferredLightingSet();
     /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
     void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
     /** Fills current frame's outline Post set with scene+id textures (once per frame/input pair). */
@@ -220,11 +240,8 @@ private:
     void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, uint32_t gpuCullDrawListCount);
     /** Phase D: Run shadow pass with mesh+material batching (instanced + singles). */
     void RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView);
-    struct ShadowPassParams {
-        const RenderFrameData* frameData = nullptr;
-        CameraView camView{};
-    };
     struct DeferredLightingPassParams {
+        rhi::ICommandList* cmd = nullptr;
         const RenderFrameData* frameData = nullptr;
         CameraView camView{};
         rhi::ClearValue clearColor = { 0.f, 0.f, 0.f, 1.f };
@@ -234,8 +251,15 @@ private:
         rhi::IDescriptorSet* lightingSetForCall = nullptr;
     };
     struct TransparencyPassParams {
+        rhi::IDevice* device = nullptr;
+        rhi::ICommandList* cmd = nullptr;
+        rhi::IRenderTarget* hdrRenderTarget = nullptr;
+        rhi::IRenderTarget* gbufferRenderTarget = nullptr;
+        uint32_t width = 0;
+        uint32_t height = 0;
         const RenderFrameData* frameData = nullptr;
         CameraView camView{};
+        bool preferVulkanPath = false;
     };
     struct PostProcessPassParams {
         CameraView camView{};
@@ -250,15 +274,15 @@ private:
         float ssrNearPlane = 0.0f;
         float ssrFarPlane = 0.0f;
     };
-    ShadowPassParams BuildShadowPassParams(const RenderFrameData* frameData, const CameraView& camView);
-    DeferredLightingPassParams BuildDeferredLightingPassParams(const RenderFrameData* frameData, const CameraView& camView,
+    ShadowPassBuildParams BuildShadowPassParams(const FrameRenderContext& frameCtx, const CameraView& camView);
+    DeferredLightingPassParams BuildDeferredLightingPassParams(const FrameRenderContext& frameCtx, const CameraView& camView,
                                                                const rhi::ClearValue& clearColor);
-    TransparencyPassParams BuildTransparencyPassParams(const RenderFrameData* frameData, const CameraView& camView);
-    PostProcessPassParams BuildPostProcessPassParams(const IRenderSceneView* sceneView, const CameraView& camView);
-    void ExecuteShadowPass(rhi::ICommandList* cmd, const ShadowPassParams& params);
-    void ExecuteDeferredLightingPass(rhi::ICommandList* cmd, const DeferredLightingPassParams& params);
-    void ExecuteTransparencyPass(rhi::ICommandList* cmd, const TransparencyPassParams& params);
-    void ExecutePostProcessPass(rhi::ICommandList* cmd, const PostProcessPassParams& params);
+    TransparencyPassParams BuildTransparencyPassParams(const FrameRenderContext& frameCtx, const CameraView& camView);
+    PostProcessPassParams BuildPostProcessPassParams(const FrameRenderContext& frameCtx, const IRenderSceneView* sceneView, const CameraView& camView);
+    void ExecuteShadowPass(const ShadowPassBuildParams& buildParams);
+    void ExecuteDeferredLightingPass(const DeferredLightingPassParams& params);
+    void ExecuteTransparencyPass(const TransparencyPassParams& params);
+    void ExecutePostProcessPass(const PostProcessPassParams& params);
 
     /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
     uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
@@ -284,6 +308,14 @@ private:
     std::unique_ptr<LightingPass> m_lightingPass;
     std::unique_ptr<GpuCullPass> m_gpuCullPass;
     std::unique_ptr<LightCullPass> m_lightCullPass;
+    std::unique_ptr<SkyboxPassSystem> m_skyboxPassSystem;
+    std::unique_ptr<PostProcessPassSystem> m_postProcessPassSystem;
+    std::unique_ptr<TransparencyPassSystem> m_transparencyPassSystem;
+    std::unique_ptr<DeferredLightingPassSystem> m_deferredLightingPassSystem;
+    std::unique_ptr<ForwardOpaquePassSystem> m_forwardOpaquePassSystem;
+    std::unique_ptr<ShadowPassSystem> m_shadowPassSystem;
+    std::unique_ptr<EditorOverlayPassSystem> m_editorOverlayPassSystem;
+    std::unique_ptr<StreamingPassSystem> m_streamingPassSystem;
     std::unique_ptr<FrameGraph> m_frameGraph;
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
@@ -352,26 +384,8 @@ private:
     /** Phase 5: single SSBO for deferred lighting (directional + point + spot); filled each frame. */
     rhi::IBuffer* m_sceneLightingBuffer = nullptr;
 
-    /** Resource-space forward pass: Frame, ForwardPass, Material, SceneBuffers sets + Frame UBO. Bindless set from m_bindlessHeap->GetDescriptorSet(). */
-    static constexpr uint32_t kForwardResourceSetsFrames = 3;
     void EnsureForwardResourceSets();
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardFrameSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardPassSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardTransparentPassSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardMaterialSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardSceneBuffersSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_forwardTransparentSceneBuffersSets = {};
-    std::array<rhi::IDescriptorSet*, kForwardResourceSetsFrames> m_deferredLightingPassSets = {};
-    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardMaterialDrawSets = {};
-    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardMaterialDrawSetCursor = {};
-    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardPassDrawSets = {};
-    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardPassDrawSetCursor = {};
-    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_forwardSceneBuffersDrawSets = {};
-    std::array<uint32_t, kForwardResourceSetsFrames> m_forwardSceneBuffersDrawSetCursor = {};
-    std::array<std::vector<rhi::IDescriptorSet*>, kForwardResourceSetsFrames> m_deferredLightingDrawSets = {};
-    std::array<uint32_t, kForwardResourceSetsFrames> m_deferredLightingDrawSetCursor = {};
-    std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardFrameUBOs = {};
-    std::array<rhi::IBuffer*, kForwardResourceSetsFrames> m_forwardBonesBuffers = {};
+    std::unique_ptr<resources::PassResourceBuilder> m_passResourceBuilder;
 
     /** Current frame aliases into per-frame arrays (updated by SelectForwardResourceSetFrame). */
     rhi::IDescriptorSet* m_forwardFrameSet = nullptr;
@@ -383,9 +397,6 @@ private:
     rhi::IDescriptorSet* m_deferredLightingPassSet = nullptr;
     rhi::IBuffer* m_forwardFrameUBO = nullptr;
     rhi::IBuffer* m_forwardBonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)
-    rhi::ITexture* m_forwardFallbackAlbedoTexture = nullptr;
-    rhi::ITexture* m_forwardFallbackNormalTexture = nullptr;
-    rhi::ITexture* m_forwardFallbackMetalRoughTexture = nullptr;
 
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit

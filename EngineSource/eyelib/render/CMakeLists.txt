@@ -94,6 +94,9 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/GBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/FrameRenderContext.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphRecipes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphRecipes.h
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.h
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/ShadowPass.cpp
@@ -133,9 +136,31 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/PostProcessPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/PostProcessPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/DeferredLightingPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/DeferredLightingPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/EditorOverlayPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/EditorOverlayPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/StreamingPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/StreamingPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend/RenderBackendPolicy.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/backend/RenderBackendPolicy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/submission/BatchBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Shader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/PassResourceBuilders.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/PassResourceBuilders.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/common/ForwardSharedStateWriter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/common/ForwardSharedStateWriter.h
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.cpp
