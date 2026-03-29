@@ -7,7 +7,7 @@
 #include "eyelib/render/2d/TextRenderer.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/debug/Validation.h"
 #include <glm/gtc/matrix_transform.hpp>
@@ -160,7 +160,7 @@ void DebugDrawRenderer::Render(rhi::IDevice* device, const CameraView& camera, r
         cmd->SetBlend(true);
         cmd->SetCullFace(false);
         res.shader->Bind(device);
-        if (device->GetRenderBackend() == RenderBackend::Vulkan) {
+        if (backend::IsVulkan(device)) {
             abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
         } else {
             res.shader->SetMat4("u_View", camera.view);
@@ -233,7 +233,7 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     cmd->SetCullFace(false);
     cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
     res.shader->Bind(device);
-    if (device->GetRenderBackend() == RenderBackend::Vulkan) {
+    if (backend::IsVulkan(device)) {
         abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
     } else {
         res.shader->SetMat4("u_View", camera.view);
@@ -285,7 +285,7 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     cmd->SetCullFace(false);
     cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
     res.shader->Bind(device);
-    if (device->GetRenderBackend() == RenderBackend::Vulkan) {
+    if (backend::IsVulkan(device)) {
         abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
     } else {
         res.shader->SetMat4("u_View", camera.view);

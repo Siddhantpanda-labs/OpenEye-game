@@ -95,8 +95,14 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/FrameRenderContext.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphRecipeBuilders.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphRecipeBuilders.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphOrchestrator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphOrchestrator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphRecipes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/RenderGraphRecipes.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipelineMode.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphExecutorSet.h
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/CascadeShadowMap.h
     ${CMAKE_CURRENT_SOURCE_DIR}/shadows/ShadowPass.cpp
@@ -130,12 +136,21 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassOpaqueParams.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPassSystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullScenePrep.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullScenePrep.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/PostProcessPassSystem.cpp
@@ -146,8 +161,10 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/DeferredLightingPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaqueGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassParams.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/EditorOverlayPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/EditorOverlayPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/StreamingPassSystem.cpp
@@ -161,6 +178,7 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/PassResourceBuilders.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/common/ForwardSharedStateWriter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/common/ForwardSharedStateWriter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/common/ForwardSharedEnvironment.h
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MeshDescriptorUtils.h
     ${CMAKE_CURRENT_SOURCE_DIR}/resources/Mesh.cpp

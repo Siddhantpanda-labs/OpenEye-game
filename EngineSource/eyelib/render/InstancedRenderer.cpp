@@ -1,7 +1,7 @@
 #include "eyelib/render/InstancedRenderer.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/core/Log.h"
@@ -109,7 +109,7 @@ void InstancedRenderer::Render(std::shared_ptr<Mesh> mesh, std::shared_ptr<Mater
     Shader* sh = shader.get();
     sh->Bind(m_device);
         batch.material->ApplyToShader(m_device, sh, m_cmd);
-        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const bool vkFwd = m_cmd && backend::UseTypedPushConstants(m_device);
         const int albedoFlag = ComputeForwardAlbedoTextureFlag(batch.material.get(), nullptr);
         for (size_t i = 0; i < instanceCount; ++i) {
             if (vkFwd)
@@ -133,7 +133,7 @@ void InstancedRenderer::RenderAll() {
         Shader* sh = shader.get();
         sh->Bind(m_device);
         batch.material->ApplyToShader(m_device, sh, m_cmd);
-        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const bool vkFwd = m_cmd && backend::UseTypedPushConstants(m_device);
         const int albedoFlag = ComputeForwardAlbedoTextureFlag(batch.material.get(), nullptr);
         for (const auto& inst : batch.instances) {
             if (vkFwd)

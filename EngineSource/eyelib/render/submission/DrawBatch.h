@@ -1,12 +1,25 @@
 #pragma once
 
 #include "eyelib/render/RenderTypes.h"
+#include "eyelib/render/resources/Mesh.h"
 #include "eyelib/math/Types.h"
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 namespace eyelib {
 namespace render {
+
+/** Max instances per instanced draw batch (GPU buffer sized to this in RenderPipeline). */
+inline constexpr uint32_t kMaxInstanceBatchSize = 4096u;
+
+/** Index count for a draw (submesh or full mesh); used by profiling and batch paths. */
+inline uint32_t GetIndexCountForDraw(const Mesh* mesh, int32_t submeshIndex) {
+    if (!mesh || !mesh->IsValid()) return 0;
+    if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < mesh->GetSubmeshCount())
+        return static_cast<uint32_t>(mesh->GetSubmesh(static_cast<size_t>(submeshIndex)).indexCount);
+    return static_cast<uint32_t>(mesh->GetIndexCount());
+}
 
 /**
  * One batch of instances: same mesh + submesh + effective material payload.

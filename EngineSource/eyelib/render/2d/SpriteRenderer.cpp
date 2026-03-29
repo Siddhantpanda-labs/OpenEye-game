@@ -3,7 +3,7 @@
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
 #include <algorithm>
@@ -158,7 +158,7 @@ void SpriteRenderer::Render(const math::Mat4& view, const math::Mat4& projection
     m_indexBufferRHI->Update(m_indices.data(), 0, m_indices.size() * sizeof(unsigned int));
 
     m_shader->Bind(device);
-    if (device->GetRenderBackend() == RenderBackend::Vulkan) {
+    if (backend::IsVulkan(device)) {
         abi::WriteViewProjectionPairPushConstants(cmd, view, projection);
     } else {
         m_shader->SetMat4("u_View", view);

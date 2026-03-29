@@ -1,7 +1,7 @@
 #include "eyelib/render/BatchRenderer.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/math/TransformUtils.h"
@@ -75,7 +75,7 @@ void BatchRenderer::Flush() {
         Shader* sh = shader.get();
         sh->Bind(m_device);
         e.material->ApplyToShader(m_device, sh, m_cmd);
-        const bool vkFwd = m_device && m_device->GetRenderBackend() == RenderBackend::Vulkan && m_cmd;
+        const bool vkFwd = m_cmd && backend::UseTypedPushConstants(m_device);
         const int albedoFlag = ComputeForwardAlbedoTextureFlag(e.material.get(), nullptr);
         if (vkFwd)
             abi::WriteForwardPushConstants(m_cmd, e.transform, 0, albedoFlag);

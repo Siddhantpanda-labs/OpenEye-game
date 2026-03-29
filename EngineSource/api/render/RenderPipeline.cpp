@@ -7,6 +7,7 @@
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/renderer/RenderPipeline.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
 
@@ -112,7 +113,7 @@ const char* RenderPipeline::GetBackendName() const {
 ::eyelib::render::RenderBackend RenderPipeline::GetBackend() const {
     if (!m_impl || !m_impl->pipeline) return ::eyelib::render::RenderBackend::Default;
     auto* device = m_impl->pipeline->GetRHIDevice();
-    return device ? device->GetRenderBackend() : ::eyelib::render::RenderBackend::Default;
+    return ::eyelib::render::backend::ResolveBackend(device);
 }
 
 void* RenderPipeline::GetOutputColorTextureNativeHandle() const {

@@ -31,6 +31,24 @@ bool PreferVulkanTransparencyPath(const rhi::IDevice* device, const ShaderCache*
  * @return Camera adjusted for active backend convention.
  */
 CameraView AdjustCameraForBackend(const rhi::IDevice* device, const CameraView& inCamera);
+/** @return true when device exposes bindless heap / descriptor indexing path. */
+bool SupportsBindless(const rhi::IDevice* device);
+/** @return true when device can run compute shaders (dispatch). */
+bool SupportsCompute(const rhi::IDevice* device);
+/** @return true when device supports multi-draw indirect (MDI). */
+bool SupportsMultiDrawIndirect(const rhi::IDevice* device);
+/** @return true when device supports MDI with GPU-written draw count (indirect parameters). */
+bool SupportsMultiDrawIndirectCount(const rhi::IDevice* device);
+/** @return true when resource-space / descriptor-set bind path is valid (layout + BindDescriptorSets). */
+bool SupportsResourceSpaceBindPath(const rhi::IDevice* device);
+/** @return true when atomic counter buffers are exposed to shaders. */
+bool SupportsAtomicCounters(const rhi::IDevice* device);
+/** @return true when shader subroutines are used for uniform subroutine selection. */
+bool SupportsShaderSubroutines(const rhi::IDevice* device);
+/** @return true when transform feedback capture is supported. */
+bool SupportsTransformFeedback(const rhi::IDevice* device);
+/** @return true when conditional render (predicate queries) is supported. */
+bool SupportsConditionalRender(const rhi::IDevice* device);
 
 }  // namespace backend
 }  // namespace render

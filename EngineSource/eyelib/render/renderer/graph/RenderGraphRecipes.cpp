@@ -39,6 +39,14 @@ FrameGraphRecipe BuildForwardPlusRenderGraphRecipe() {
     return recipe;
 }
 
+FrameGraphRecipe BuildForwardStereoRenderGraphRecipe() {
+    FrameGraphRecipe recipe;
+    recipe.push_back({ "Shadow", {}, { "Shadow" }, true });
+    recipe.push_back({ "Forward Opaque", {}, { "HDR" }, true });
+    recipe.push_back({ "Transparency", {}, { "HDR" }, true });
+    return recipe;
+}
+
 }  // namespace render
 }  // namespace eyelib
 

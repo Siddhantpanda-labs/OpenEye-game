@@ -10,6 +10,7 @@
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/render/ShaderPathResolve.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
@@ -858,7 +859,7 @@ void DeviceDiligent::DestroyDescriptorSet(IDescriptorSet* set) {
 }
 
 IBindlessHeap* DeviceDiligent::CreateBindlessHeap() {
-    if (!GetCapabilities().supportsBindless) return nullptr;
+    if (!backend::SupportsBindless(this)) return nullptr;
     return nullptr;  // Skeleton: full implementation (e.g. descriptor indexing) deferred
 }
 

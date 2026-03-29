@@ -22,7 +22,7 @@ struct DeferredLightingPassBuildParams {
     CascadeShadowMap* cascadeForLighting = nullptr;
     IBL* ibl = nullptr;
     rhi::IBuffer* sceneLightingBuffer = nullptr;
-    rhi::IBuffer* forwardFrameUBO = nullptr;
+    rhi::IBuffer* frameUbo = nullptr;
     math::Mat4 prevView = math::Mat4(1.0f);
     math::Mat4 prevProjection = math::Mat4(1.0f);
     rhi::IRenderTarget* hdrRenderTarget = nullptr;
@@ -30,9 +30,9 @@ struct DeferredLightingPassBuildParams {
     uint32_t height = 0;
     /** G-buffer textures bound into the deferred lighting descriptor set (build stage). */
     GBuffer* gbuffer = nullptr;
-    rhi::IDescriptorSet* forwardFrameSet = nullptr;
+    rhi::IDescriptorSet* frameSet = nullptr;
     /** Per-frame deferred lighting pass set from pipeline resource builder (AcquireDeferredLightingSet). */
-    rhi::IDescriptorSet* deferredLightingPassSet = nullptr;
+    rhi::IDescriptorSet* deferredLightingSet = nullptr;
     LightingPass* lightingPass = nullptr;
 };
 

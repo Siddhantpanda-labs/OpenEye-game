@@ -1,7 +1,7 @@
 #include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/rhi/RHIUtils.h"
@@ -15,10 +15,6 @@ namespace eyelib {
 namespace render {
 
 namespace {
-bool UseVulkanTypedIblPush(rhi::IDevice* device) {
-    return device && device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan;
-}
-
 unsigned int NativeId(rhi::ITexture* texture) {
     if (!texture) return 0;
     void* native = texture->GetNativeTexture();
@@ -305,7 +301,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         } else {
             cmd->BindTexture(m_environmentRHI, 0);
         }
-        if (UseVulkanTypedIblPush(m_deviceRHI))
+        if (backend::UseTypedPushConstants(m_deviceRHI))
             abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
         else {
             irradianceShader->SetMat4("u_View", captureViews[face]);
@@ -340,7 +336,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             } else {
                 cmd->BindTexture(m_environmentRHI, 0);
             }
-            if (UseVulkanTypedIblPush(m_deviceRHI)) {
+            if (backend::UseTypedPushConstants(m_deviceRHI)) {
                 abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
                 abi::WriteIblPrefilterRoughnessPushConstant(cmd, roughness);
             } else {
@@ -442,7 +438,7 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
         cmd->SetCullFace(false);
         irradianceShader->Bind(device);
         irradianceShader->SetInt("u_EnvironmentMap", 0);
-        if (UseVulkanTypedIblPush(device))
+        if (backend::UseTypedPushConstants(device))
             abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
         else {
             irradianceShader->SetMat4("u_View", captureViews[face]);
@@ -471,7 +467,7 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             cmd->SetCullFace(false);
             prefilterShader->Bind(device);
             prefilterShader->SetInt("u_EnvironmentMap", 0);
-            if (UseVulkanTypedIblPush(device)) {
+            if (backend::UseTypedPushConstants(device)) {
                 abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
                 abi::WriteIblPrefilterRoughnessPushConstant(cmd, roughness);
             } else {

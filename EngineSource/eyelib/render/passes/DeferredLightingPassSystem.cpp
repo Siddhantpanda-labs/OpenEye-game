@@ -15,18 +15,18 @@ DeferredLightingPassExecuteParams DeferredLightingPassSystem::BuildParams(const 
     DeferredLightingPassExecuteParams out{};
     out.build = params;
 
-    if (params.forwardFrameUBO) {
+    if (params.frameUbo) {
         const math::Mat4 viewProj = params.camView.projection * params.camView.view;
-        float frameUbo[5 * 16];
-        std::memcpy(frameUbo, &params.camView.view[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 16, &params.camView.projection[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 32, &viewProj[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 48, &params.prevView[0][0], 16 * sizeof(float));
-        std::memcpy(frameUbo + 64, &params.prevProjection[0][0], 16 * sizeof(float));
-        params.forwardFrameUBO->Update(frameUbo, 0, 320);
+        float frameUboData[5 * 16];
+        std::memcpy(frameUboData, &params.camView.view[0][0], 16 * sizeof(float));
+        std::memcpy(frameUboData + 16, &params.camView.projection[0][0], 16 * sizeof(float));
+        std::memcpy(frameUboData + 32, &viewProj[0][0], 16 * sizeof(float));
+        std::memcpy(frameUboData + 48, &params.prevView[0][0], 16 * sizeof(float));
+        std::memcpy(frameUboData + 64, &params.prevProjection[0][0], 16 * sizeof(float));
+        params.frameUbo->Update(frameUboData, 0, 320);
     }
 
-    rhi::IDescriptorSet* const passSet = params.deferredLightingPassSet;
+    rhi::IDescriptorSet* const passSet = params.deferredLightingSet;
     GBuffer* const gbuffer = params.gbuffer;
     LightingPass* const lightingPass = params.lightingPass;
     if (!passSet || !gbuffer || !lightingPass)
@@ -50,7 +50,7 @@ DeferredLightingPassExecuteParams DeferredLightingPassSystem::BuildParams(const 
         if (rhi::ITexture* pf = params.ibl->GetPrefilterTextureRHI()) passSet->UpdateTexture(8, pf);
         if (rhi::ITexture* brdf = params.ibl->GetBRDFLUTTextureRHI()) passSet->UpdateTexture(9, brdf);
     }
-    lightingPass->SetResourceSpaceSets(params.forwardFrameSet, passSet);
+    lightingPass->SetResourceSpaceSets(params.frameSet, passSet);
     return out;
 }
 

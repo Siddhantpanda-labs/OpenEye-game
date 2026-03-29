@@ -1,4 +1,5 @@
 #include "eyelib/render/shadows/ShadowPass.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/ShaderKey.h"
@@ -135,7 +136,7 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
 
     const uint32_t splitCount = cascadeMap.GetSplitCount();
 
-    const bool useTypedShadowPush = (device && device->GetRenderBackend() == ::eyelib::render::RenderBackend::Vulkan);
+    const bool useTypedShadowPush = backend::UseTypedPushConstants(device);
     for (uint32_t i = 0; i < splitCount; ++i) {
         cascadeMap.BindForShadowPass(cmd, i);
         cmd->SetDepthTest(true);

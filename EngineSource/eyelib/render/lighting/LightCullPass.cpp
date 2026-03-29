@@ -1,5 +1,5 @@
 #include "eyelib/render/lighting/LightCullPass.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
@@ -19,7 +19,7 @@ LightCullPass::~LightCullPass() {
 }
 
 bool LightCullPass::IsSupported(rhi::IDevice* device) const {
-    return device != nullptr && device->GetCapabilities().supportsCompute;
+    return backend::SupportsCompute(device);
 }
 
 void LightCullPass::EnsureResources() {
@@ -186,7 +186,7 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
             return;
         }
     } else {
-        if (m_device->GetRenderBackend() == RenderBackend::Vulkan) {
+        if (backend::IsVulkan(m_device)) {
             static bool loggedLegacyVulkan = false;
             if (!loggedLegacyVulkan) {
                 core::Log::Error(

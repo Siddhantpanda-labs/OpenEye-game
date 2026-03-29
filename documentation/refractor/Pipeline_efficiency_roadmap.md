@@ -222,7 +222,7 @@ Update this section as each phase is completed. Use **Done** only when the imple
 
 | Phase | Status | Notes |
 |-------|--------|--------|
-| 1 — Frame graph compile once | Done | Compile only when needsCompile \|\| size/mode/stereo changed; executors use m_currentView and m_lastGpuCullDrawListCount; Resize() sets m_frameGraphNeedsCompile. |
+| 1 — Frame graph compile once | Done | Compile only when needsCompile \|\| size/mode/stereo changed; executors use m_currentView and m_lastGpuCullDrawListCount; Resize() calls `RenderGraphOrchestrator::MarkNeedsCompile()`. |
 | 2 — Incremental scene build | In progress | EditorSceneBuilder now uses incremental per-entity static drawable cache (mesh/material/submesh), cached asset path/material resolution, and stale-cache pruning; transform/material params still refreshed per frame for correctness. |
 | 3 — Async mesh load + deferred upload | Not started | |
 | 4 — GPU instancing | Not started | |

@@ -22,9 +22,9 @@ public:
     void SetLightingShader(std::shared_ptr<Shader> shader);
     std::shared_ptr<Shader> GetLightingShader() const { return m_lightingShader; }
     /** Frame + DeferredLightingPass descriptor sets (required for Render; see descriptor_binding_table.md). */
-    void SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* deferredLightingPassSet) {
+    void SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* deferredLightingSet) {
         m_lightingFrameSet = frameSet;
-        m_lightingDeferredPassSet = deferredLightingPassSet;
+        m_lightingDeferredPassSet = deferredLightingSet;
     }
 
     /** Render to currently bound FBO (context-based). G-buffer and lighting inputs come from descriptor sets (RenderPipeline updates). Sets u_UseIBL from ibl. */

@@ -199,23 +199,23 @@ Editor overlay runs as separate integration stage:
 
 ## 9) Migration State (Current Snapshot)
 
-Already extracted:
+Already extracted / wired:
 
-- `SkyboxPassSystem`
-- `PostProcessPassSystem`
-- `TransparencyPassSystem` (wrapper stage)
+- `renderer/graph/RenderGraphOrchestrator.*` (owns `FrameGraph`, `CompileIfNeeded` / `MarkNeedsCompile` / `Execute`); `renderer/graph/FrameGraphRecipeBuilders.*` (imports + `AddPassesFromRecipe` per mode; executors still from `RenderPipeline`)
+- `SkyboxPassSystem`, `PostProcessPassSystem`, `TransparencyPassSystem`
+- `DeferredLightingPassSystem`, `ForwardOpaquePassSystem`, `ShadowPassSystem`
+- `EditorOverlayPassSystem`, `StreamingPassSystem`
+- `PassResourceBuilder`, `RenderBackendPolicy`, `FrameRenderContext` + graph execution context
+- **`GBufferPassSystem` (opaque body):** `GraphExecuteGBufferDeferred` builds `GBufferPassOpaqueParams` (`passes/GBufferPassOpaqueParams.h`) via `RenderPipeline::BuildGBufferOpaqueParams` and calls `GBufferPassSystem::RenderOpaqueGeometry` (implementation in `GBufferPassSystem.cpp`). `RenderPipeline.h` depends only on the params header, not the system class (forward-declared).
+- **`ShadowPassSystem` (batched body):** `ShadowPassBuildParams` / `ShadowPassBatchedParams` in `passes/ShadowPassParams.h`; `RenderPipeline::BuildShadowBatchedParams` + `ShadowPassSystem::RenderShadowBatched` replace `RunShadowPassBatched` and the old callback-based `ShadowPassSystem::Execute`.
+- **GPU cull prep:** `passes/GpuCullScenePrep.*` (append/finalize/configure + `RunGpuCullScenePrep*`); `passes/GpuCullPassSystem.*` owns `GpuCullPass`, the transform buffer, `GpuCullSceneScratchState`, and `PrepareFromVisibleOpaque` / `PrepareFromView`; `RenderPipeline` only assembles `GpuCullScenePrepUploadParams` (`BuildGpuCullScenePrepUploadParams`), owns `m_gpuCullPassSystem`, and `PrepareGpuCull*` delegates to the system.
+- **Forward+ light cull:** `passes/LightCullPassSystem.*` owns `LightCullPass` lifecycle (`Initialize` / `Shutdown`); `RenderPipeline` keeps `ClusteredLightGrid`, point/spot/light-index buffers, and wires `Set*` + `Execute` on `GetPass()` for the GPU path.
 
-Still to extract/promote to final ownership:
+Still to promote to **full** ownership (per §5 / ownership table):
 
-- `DeferredLightingPassSystem` (full ownership)
-- `ForwardOpaquePassSystem`
-- `ShadowPassSystem`
-- `GBufferPassSystem`
-- `GpuCullPassSystem`
-- `LightCullPassSystem` (or equivalent policy-owned system)
-- `EditorOverlayPassSystem`
-- `StreamingPassSystem`
-- graph orchestrator split from `RenderPipeline`.
+- **`GBufferPassSystem`:** optional follow-ups — narrow `GBufferPassOpaqueParams` further.
+- **Graph orchestration follow-up:** optional **host interface** for tests (swap `ExecutorFor*Pass`); stereo recipe + `ExecutorForForwardStereoSkyboxLeft/Right` live on `RenderPipeline` next to `GraphExecute*`.
+- IBL / probe builders (`LightingEnvironmentBuilder`, `ProbeSelectionBuilder`) as in ownership table.
 
 ---
 
@@ -260,17 +260,17 @@ Legend:
 
 | Domain                          | Current Owner                                                                                               | Target Owner                                                                          | Relation / Dependencies                                                           | Migration Phase         |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------- |
-| Pipeline orchestration          | `renderer/RenderPipeline.`*                                                                                 | `renderer/graph/RenderGraphOrchestrator.`* + thin `RenderPipeline` facade             | owns mode selection, graph compile/execute; depends on all pass systems           | Phase 5-6               |
+| Pipeline orchestration          | `renderer/RenderPipeline.`* + `renderer/graph/RenderGraphOrchestrator.*` (owns `FrameGraph` + compile scheduling) | thin `RenderPipeline` facade + orchestrator-only graph layer                        | mode selection + pass wiring stay on pipeline; orchestrator holds FG + dirty state | Phase 5-6 (partial: orchestrator extracted) |
 | Frame graph core                | `framegraph/FrameGraph.*`, `FrameGraphRecipe.*`                                                             | same (keep) + recipe builders per mode                                                | pass DAG, resource transitions, execution order; pass systems are graph callbacks | Keep + Phase 5          |
-| Deferred geometry               | `passes/GBufferPass.*` + `RenderPipeline::RenderOpaqueGeometryToGBuffer`                                    | `passes/GBufferPassSystem.*`                                                          | reads draw lists + camera, writes GBuffer targets                                 | Phase 2-4               |
+| Deferred geometry               | `passes/GBufferPass.*` + `GBufferPassSystem::RenderOpaqueGeometry` + `RenderPipeline::BuildGBufferOpaqueParams` | tighten params / optional `GpuCullPassSystem`                                       | reads draw lists + camera, writes GBuffer targets                               | Phase 2-4               |
 | Deferred lighting               | `passes/LightingPass.*` + `RenderPipeline::Build/ExecuteDeferredLighting*`                                  | `passes/DeferredLightingPassSystem.*`                                                 | reads GBuffer/shadow/IBL, writes HDR                                              | Phase 2-4               |
 | Forward opaque                  | `RenderPipeline::RenderForwardOpaque*` + shader cache/material bindings                                     | `passes/ForwardOpaquePassSystem.*`                                                    | shared by Forward + Forward+ via config/policy                                    | Phase 4                 |
 | Transparency                    | `RenderPipeline::RenderForwardTransparent` + `passes/TransparencyPass.*` + `TransparencyPassSystem` wrapper | `passes/TransparencyPassSystem.*`                                                     | one graph-facing owner; backend branch internal only                              | In progress (Phase 2-4) |
 | Skybox                          | `RenderPipeline::RenderSkyboxImpl/RenderProceduralSkyboxImpl` + `SkyboxPassSystem`                          | `passes/SkyboxPassSystem.*`                                                           | graph pass reads depth/context, writes HDR                                        | In progress (Phase 1-2) |
 | Post processing                 | `post/PostProcessor.*` + `PostProcessPassSystem` wrapper                                                    | `passes/PostProcessPassSystem.*` (owner) + `PostProcessor` as internal implementation | final stage reads HDR/GBuffer, writes output RT                                   | In progress (Phase 1-2) |
-| Shadow                          | `shadows/ShadowPass.*` + `RunShadowPassBatched` + graph execute helpers                                     | `passes/ShadowPassSystem.*`                                                           | reads visible drawables, writes cascade depth targets                             | Phase 3-4               |
-| GPU culling                     | `passes/GpuCullPass.*` + pipeline prep functions                                                            | `passes/GpuCullPassSystem.*` or promote existing class to system contract             | produces indirect draw list for downstream passes                                 | Phase 4                 |
-| Light culling (Forward+)        | `lighting/LightCullPass.*` + clustered setup in pipeline                                                    | `passes/LightCullPassSystem.*` or policy-owned compute system                         | writes cluster/light index buffer for Forward+                                    | Phase 4                 |
+| Shadow                          | `shadows/ShadowPass.*` + `ShadowPassSystem::RenderShadowBatched` + `RenderPipeline::BuildShadowBatchedParams` | optional further thin pipeline                                                       | reads `allOpaque`, writes cascade depth targets                                   | Phase 3-4               |
+| GPU culling                     | `passes/GpuCullPassSystem.*` (owns `GpuCullPass`, transform buffer, scratch) + `GpuCullScenePrep.*`; `RenderPipeline` (`PrepareGpuCull*`, `BuildGpuCullScenePrepUploadParams`) | `passes/GpuCullPassSystem.*` (graph-facing owner; pipeline orchestrates only) | produces indirect draw list for downstream passes                                 | Phase 4 (partial: ownership consolidated) |
+| Light culling (Forward+)        | `passes/LightCullPassSystem.*` (owns `LightCullPass`) + `lighting/LightCullPass.*`; grid + light SSBOs on `RenderPipeline` | `passes/LightCullPassSystem.*` (graph-facing owner for compute pass; optional policy façade later) | writes cluster/light index buffer for Forward+                                    | Phase 4 (partial: pass owner) |
 | IBL build/use                   | `ibl/IBL.*` + `RenderPipeline::EnsureIBLFromFrameData`                                                      | `passes/resources/LightingEnvironmentBuilder.*`                                       | provides irradiance/prefilter/BRDF inputs for lighting/post                       | Phase 3-5               |
 | Reflection probes               | `reflection/ReflectionProbeManager.*` + post/deferred lookups                                               | `passes/resources/ProbeSelectionBuilder.*`                                            | selects probe textures for deferred/post/sky reflection                           | Phase 3-5               |
 | Editor entity-id                | `RenderPipeline::RenderEntityIDPass`                                                                        | `editor/EditorOverlayPassSystem.*`                                                    | offscreen ID RT for picking                                                       | Phase 3                 |
@@ -305,7 +305,7 @@ Legend:
   - `SkyboxPassSystem`, `PostProcessPassSystem`, `TransparencyPassSystem`.
 3. Extract `DeferredLightingPassSystem` and `ShadowPassSystem`.
 4. Extract `ForwardOpaquePassSystem` + shared forward/forward+ policy.
-5. Promote cull systems (`GpuCull`, `LightCull`) to standard pass-system contracts.
+5. Promote cull systems (`GpuCull`, `LightCull`) to standard pass-system contracts — pass + buffer ownership for GPU cull; `LightCullPass` lifetime under `LightCullPassSystem`; remaining work is unified `Build/Execute` naming and graph-only dispatch where applicable.
 6. Move editor-only paths to `EditorOverlayPassSystem`.
 7. Move streaming path to `StreamingPassSystem`.
 8. Split graph orchestration from `RenderPipeline`.

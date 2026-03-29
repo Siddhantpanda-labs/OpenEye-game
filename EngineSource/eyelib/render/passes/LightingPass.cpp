@@ -3,7 +3,7 @@
 #include "eyelib/render/ibl/IBL.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include "eyelib/core/Log.h"
@@ -98,7 +98,7 @@ void LightingPass::Render(GBuffer& gbuffer,
 
     m_lightingShader->Bind(device);
     const int useIBL = (ibl && ibl->IsValid()) ? 1 : 0;
-    if (device && device->GetRenderBackend() == RenderBackend::Vulkan) {
+    if (device && backend::IsVulkan(device)) {
         if (cmd) abi::WriteDeferredLightingUseIBL(cmd, useIBL);
     } else {
         m_lightingShader->SetInt("u_UseIBL", useIBL);

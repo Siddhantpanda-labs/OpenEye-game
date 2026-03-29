@@ -11,6 +11,7 @@
 #include "eyelib/render/rhi/OpenGL/OpenGLResourceSpaceBindings.h"
 #include "eyelib/render/rhi/OpenGL/PipelineLayoutGL.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/debug/Validation.h"
 #include <glad/glad.h>
 #include <cstring>
@@ -376,7 +377,7 @@ void CommandListGL::BindStorageBuffer(IBuffer* buffer, uint32_t binding, uint32_
 }
 
 void CommandListGL::BindAtomicCounterBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) {
-    if (!m_device->GetCapabilities().supportsAtomicCounters) return;
+    if (!backend::SupportsAtomicCounters(m_device)) return;
     if (!buffer) return;
     auto* b = static_cast<BufferGL*>(buffer);
     GLsizeiptr sz = size > 0 ? static_cast<GLsizeiptr>(size) : static_cast<GLsizeiptr>(b->GetSize());
@@ -500,12 +501,12 @@ void CommandListGL::SetUniformMat4(const char* name, const float* data) {
 }
 
 void CommandListGL::SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) {
-    if (!m_device->GetCapabilities().supportsShaderSubroutines || !m_currentPipeline || !m_currentPipeline->m_program || !indices) return;
+    if (!backend::SupportsShaderSubroutines(m_device) || !m_currentPipeline || !m_currentPipeline->m_program || !indices) return;
     glUniformSubroutinesuiv(GLEnums::ShaderStageToGL(stage), static_cast<GLsizei>(count), indices);
 }
 
 void CommandListGL::SetUniformHandle64(const char* name, uint64_t handle) {
-    if (!m_device->GetCapabilities().supportsBindless) return;
+    if (!backend::SupportsBindless(m_device)) return;
     GLint loc = GetUniformLocation(m_currentPipeline, name);
     if (loc >= 0 && GLAD_GL_ARB_bindless_texture)
         glProgramUniformHandleui64ARB(m_currentPipeline->m_program, loc, static_cast<GLuint64>(handle));
@@ -603,7 +604,7 @@ void CommandListGL::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstInde
 }
 
 void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
-    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(false)) return;
+    if (!indirectBuffer || !backend::SupportsMultiDrawIndirect(m_device) || !ResolveAndBindVAO(false)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -612,7 +613,7 @@ void CommandListGL::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
 }
 
 void CommandListGL::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) {
-    if (!indirectBuffer || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(true)) return;
+    if (!indirectBuffer || !backend::SupportsMultiDrawIndirect(m_device) || !ResolveAndBindVAO(true)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -622,7 +623,7 @@ void CommandListGL::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) 
 }
 
 void CommandListGL::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
-    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(false)) return;
+    if (!indirectBuffer || drawCount == 0 || !backend::SupportsMultiDrawIndirect(m_device) || !ResolveAndBindVAO(false)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -631,7 +632,7 @@ void CommandListGL::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offs
 }
 
 void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
-    if (!indirectBuffer || drawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirect || !ResolveAndBindVAO(true)) return;
+    if (!indirectBuffer || drawCount == 0 || !backend::SupportsMultiDrawIndirect(m_device) || !ResolveAndBindVAO(true)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, b->m_handle);
     GLenum mode = GLEnums::PrimitiveTopologyToGL(m_currentPipeline ? m_currentPipeline->m_topology : PrimitiveTopology::TriangleList);
@@ -641,7 +642,7 @@ void CommandListGL::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t off
 }
 
 void CommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
-    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount || !ResolveAndBindVAO(false)) return;
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !backend::SupportsMultiDrawIndirectCount(m_device) || !ResolveAndBindVAO(false)) return;
     auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
     auto* cntBuf = static_cast<BufferGL*>(countBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);
@@ -653,7 +654,7 @@ void CommandListGL::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t
 }
 
 void CommandListGL::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
-    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !m_device->GetCapabilities().supportsMultiDrawIndirectCount || !ResolveAndBindVAO(true)) return;
+    if (!indirectBuffer || !countBuffer || maxDrawCount == 0 || !backend::SupportsMultiDrawIndirectCount(m_device) || !ResolveAndBindVAO(true)) return;
     auto* indBuf = static_cast<BufferGL*>(indirectBuffer);
     auto* cntBuf = static_cast<BufferGL*>(countBuffer);
     glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indBuf->m_handle);
@@ -674,7 +675,7 @@ void CommandListGL::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
 }
 
 void CommandListGL::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
-    if (!indirectBuffer || !m_device->GetCapabilities().supportsCompute) return;
+    if (!indirectBuffer || !backend::SupportsCompute(m_device)) return;
     auto* b = static_cast<BufferGL*>(indirectBuffer);
     glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, b->m_handle);
     glDispatchComputeIndirect(static_cast<GLintptr>(offset));
@@ -703,7 +704,7 @@ void CommandListGL::BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, 
 }
 
 void CommandListGL::BeginTransformFeedback(PrimitiveTopology primitiveMode) {
-    if (!m_device->GetCapabilities().supportsTransformFeedback) return;
+    if (!backend::SupportsTransformFeedback(m_device)) return;
     for (uint32_t i = 0; i < kMaxTransformFeedbackBuffers; ++i) {
         if (m_tfBuffers[i].buffer && m_tfBuffers[i].buffer->m_handle) {
             GLsizeiptr sz = m_tfBuffers[i].size > 0 ? static_cast<GLsizeiptr>(m_tfBuffers[i].size)
@@ -717,12 +718,12 @@ void CommandListGL::BeginTransformFeedback(PrimitiveTopology primitiveMode) {
 }
 
 void CommandListGL::EndTransformFeedback() {
-    if (!m_device->GetCapabilities().supportsTransformFeedback) return;
+    if (!backend::SupportsTransformFeedback(m_device)) return;
     glEndTransformFeedback();
 }
 
 void CommandListGL::BeginConditionalRender(IQueryPool* pool, uint32_t index) {
-    if (!m_device->GetCapabilities().supportsConditionalRender || !pool || m_inConditionalRender) return;
+    if (!backend::SupportsConditionalRender(m_device) || !pool || m_inConditionalRender) return;
     auto* q = static_cast<QueryPoolGL*>(pool);
     if (index >= q->m_queryIds.size()) return;
     glBeginConditionalRender(q->m_queryIds[index], GL_QUERY_WAIT);

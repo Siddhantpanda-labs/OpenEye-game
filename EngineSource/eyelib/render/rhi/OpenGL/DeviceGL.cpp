@@ -15,6 +15,7 @@
 #include "eyelib/render/GpuCullBlockNames.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/render/ShaderSourceLoader.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <glad/glad.h>
@@ -993,7 +994,7 @@ IPipelineLayout* DeviceGL::GetResourceSetLayout(ResourceSetType type) {
 }
 
 IDescriptorSet* DeviceGL::GetEmptyResourceSet() {
-    if (!m_caps.supportsResourceSpaceBindPath) return nullptr;
+    if (!backend::SupportsResourceSpaceBindPath(this)) return nullptr;
     if (!m_emptyResourceSet) {
         PipelineLayoutDesc emptyDesc;
         m_emptyPipelineLayout = CreatePipelineLayout(emptyDesc);
@@ -1008,7 +1009,7 @@ void DeviceGL::DestroyDescriptorSet(IDescriptorSet* set) {
 }
 
 IBindlessHeap* DeviceGL::CreateBindlessHeap() {
-    if (!GetCapabilities().supportsBindless) return nullptr;
+    if (!backend::SupportsBindless(this)) return nullptr;
     return new BindlessHeapGL();
 }
 

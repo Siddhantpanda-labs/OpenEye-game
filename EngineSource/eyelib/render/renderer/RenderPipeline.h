@@ -5,14 +5,20 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/framegraph/FrameGraph.h"
 #include "eyelib/render/renderer/FrameRenderContext.h"
-#include "eyelib/render/passes/GpuCullPass.h"
-#include "eyelib/render/lighting/LightCullPass.h"
+#include "eyelib/render/renderer/RenderPipelineMode.h"
+#include "eyelib/render/renderer/graph/FrameGraphExecutorSet.h"
+#include "eyelib/render/renderer/graph/RenderGraphOrchestrator.h"
+#include "eyelib/render/passes/GpuCullPassSystem.h"
+#include "eyelib/render/passes/GBufferPassOpaqueParams.h"
+#include "eyelib/render/passes/ShadowPassParams.h"
+#include "eyelib/render/passes/LightCullPassSystem.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -33,8 +39,8 @@ class PostProcessPassSystem;
 class TransparencyPassSystem;
 class DeferredLightingPassSystem;
 class ForwardOpaquePassSystem;
+class GBufferPassSystem;
 class ShadowPassSystem;
-struct ShadowPassBuildParams;
 class EditorOverlayPassSystem;
 class StreamingPassSystem;
 class IBL;
@@ -49,9 +55,6 @@ class MaterialInstance;
 namespace resources {
 class PassResourceBuilder;
 }
-
-/** Forward: frame-graph (GPU Cull, Shadow, Forward Opaque, Transparency, Skybox, Post). Deferred: frame-graph (GPU Cull, Shadow, GBuffer, Lighting, Transparency, Skybox, Post). ForwardPlus: tiled forward (many lights), skybox drawn after; legacy path. */
-enum class PipelineMode { Forward, Deferred, ForwardPlus };
 
 /**
  * Orchestrates render passes via a frame graph for Forward and Deferred.
@@ -123,8 +126,18 @@ public:
     CascadeShadowMap* GetCascadeShadowMap();
     PostProcessor* GetPostProcessor();
     ReflectionProbeManager* GetReflectionProbeManager() { return m_reflectionProbeManager.get(); }
-    FrameGraph* GetFrameGraph() { return m_frameGraph.get(); }
+    FrameGraph* GetFrameGraph() { return m_renderGraphOrchestrator ? m_renderGraphOrchestrator->GetFrameGraph() : nullptr; }
     const std::vector<FrameGraph::PassInfo>& GetFrameGraphPasses() const;
+
+    /**
+     * Replace frame-graph executors for one wiring path (tests / tooling). Pass names match `RenderGraphRecipes`
+     * (`GPU Cull`, `Shadow`, …); for stereo, also `SkyboxLeft` / `SkyboxRight`. Only listed names are overridden;
+     * others keep the built-in `GraphExecute*` behavior.
+     */
+    void SetFrameGraphExecutorOverrides(FrameGraphExecutorSet set,
+                                        std::unordered_map<std::string, FrameGraph::ExecuteFunc> overrides);
+    void ClearFrameGraphExecutorOverrides(FrameGraphExecutorSet set);
+    void ClearFrameGraphExecutorOverrides();
 
     void SetFrameSize(unsigned w, unsigned h);
     void SetPrePostProcessCallback(PrePostCallback cb) { m_prePostCallback = std::move(cb); }
@@ -162,9 +175,9 @@ private:
     void DestroyHDRFramebuffer();
     /** Frame-graph coordination: compile only when needed (size/mode/stereo change), then execute. */
     void CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo);
-    /** Current frame RHI + dimensions for graph passes (uses m_device, m_currentFrameData when set). */
+    /** Current frame RHI + dimensions for pass builders and post-graph work (uses m_device, m_currentFrameData when set). */
     FrameRenderContext GetFrameRenderContext() const;
-    /** Named frame-graph steps; each matches a pass name in RenderGraphRecipes. Uses m_currentFrameData / m_currentView. */
+    /** Named frame-graph steps; each matches a pass name in RenderGraphRecipes. Uses m_frameGraphExecutionContext during Execute. */
     void GraphExecuteGpuCull();
     void GraphExecuteShadow();
     void GraphExecuteGBufferDeferred();
@@ -175,14 +188,20 @@ private:
     void GraphExecuteForwardOpaque();
     void GraphExecuteCopyDepthOcclusionForward();
     void GraphExecuteForwardPlusOpaque();
-    /** Build deferred recipe and add passes (GBuffer, Lighting, etc.). Called from CompileFrameGraphIfNeeded. */
-    void BuildDeferredGraph();
-    /** Build forward recipe and add passes. Called from CompileFrameGraphIfNeeded. */
-    void BuildForwardGraph();
-    /** Build forward-stereo recipe and add passes (SkyboxLeft/Right). Called from CompileFrameGraphIfNeeded. */
-    void BuildForwardStereoGraph();
-    /** Build Forward+ recipe (Shadow, Forward+ Opaque batched, Transparency, Skybox). Called from CompileFrameGraphIfNeeded. */
-    void BuildForwardPlusGraph();
+    /** Pass name → executor for `RenderGraphRecipes` / `FrameGraphRecipeBuilders` (keeps `Build*Graph` thin). */
+    FrameGraph::ExecuteFunc ExecutorForDeferredPass(const std::string& name);
+    FrameGraph::ExecuteFunc ExecutorForForwardPass(const std::string& name);
+    FrameGraph::ExecuteFunc ExecutorForForwardPlusPass(const std::string& name);
+    FrameGraph::ExecuteFunc ExecutorForForwardStereoPass(const std::string& name);
+    FrameGraph::ExecuteFunc ExecutorForForwardStereoSkyboxLeft();
+    FrameGraph::ExecuteFunc ExecutorForForwardStereoSkyboxRight();
+    FrameGraph::ExecuteFunc ResolveFrameGraphExecutor(FrameGraphExecutorSet set, const std::string& name);
+    FrameGraph::ExecuteFunc ResolveForwardStereoSkyboxExecutor(bool rightEye);
+    /** Pass wiring: delegates to `FrameGraphRecipeBuilders` + executor lookup. */
+    void BuildDeferredGraph(FrameGraph& fg);
+    void BuildForwardGraph(FrameGraph& fg);
+    void BuildForwardStereoGraph(FrameGraph& fg);
+    void BuildForwardPlusGraph(FrameGraph& fg);
 
     void BuildAndExecuteFrameGraph(const IRenderSceneView& view);
     /** Forward mode: frame graph with GPU Cull, Shadow, Forward Opaque, Transparency, Post. */
@@ -236,10 +255,12 @@ private:
     void EnsureEntityIdShader();
     void EnsureStreamingNV12Pass();
     void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque);
-    /** C1: Single opaque-geometry entry point for GBuffer. Chooses CPU submit (per-draw) or GPU submit (indirect) by capability + data. */
-    void RenderOpaqueGeometryToGBuffer(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam, uint32_t gpuCullDrawListCount);
-    /** Phase D: Run shadow pass with mesh+material batching (instanced + singles). */
-    void RunShadowPassBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView);
+    /** Build params for deferred GBuffer opaque pass; consumed by GBufferPassSystem::RenderOpaqueGeometry. */
+    GBufferPassOpaqueParams BuildGBufferOpaqueParams(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
+                                                     uint32_t gpuCullDrawListCount);
+    /** Assemble batched shadow payload; consumed by ShadowPassSystem::RenderShadowBatched. */
+    ShadowPassBatchedParams BuildShadowBatchedParams(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& camView) const;
+    ShadowPassBatchedParams BuildShadowBatchedParams(const ShadowPassBuildParams& build) const;
     struct DeferredLightingPassParams {
         rhi::ICommandList* cmd = nullptr;
         const RenderFrameData* frameData = nullptr;
@@ -284,6 +305,7 @@ private:
     void ExecuteTransparencyPass(const TransparencyPassParams& params);
     void ExecutePostProcessPass(const PostProcessPassParams& params);
 
+    GpuCullScenePrepUploadParams BuildGpuCullScenePrepUploadParams(const CameraView& cam) const;
     /** Shared: build draw list from view, upload to GPU, configure GpuCullPass. Returns draw list count. Used by deferred and forward frame graphs. */
     uint32_t PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam);
     /** Fill frame data from view (camera, lights, visible/all opaque, transparent). Call once per frame before graph execute. */
@@ -306,17 +328,21 @@ private:
     std::unique_ptr<GBufferPass> m_gbufferPass;
     std::unique_ptr<ShadowPass> m_shadowPass;
     std::unique_ptr<LightingPass> m_lightingPass;
-    std::unique_ptr<GpuCullPass> m_gpuCullPass;
-    std::unique_ptr<LightCullPass> m_lightCullPass;
+    /** Forward+ GPU light cull compute; grid + light SSBOs stay on pipeline. */
+    std::unique_ptr<LightCullPassSystem> m_lightCullPassSystem;
     std::unique_ptr<SkyboxPassSystem> m_skyboxPassSystem;
     std::unique_ptr<PostProcessPassSystem> m_postProcessPassSystem;
     std::unique_ptr<TransparencyPassSystem> m_transparencyPassSystem;
     std::unique_ptr<DeferredLightingPassSystem> m_deferredLightingPassSystem;
     std::unique_ptr<ForwardOpaquePassSystem> m_forwardOpaquePassSystem;
+    std::unique_ptr<GBufferPassSystem> m_gbufferPassSystem;
+    /** GpuCullPass + transform buffer + CPU scratch for draw list / indirect path. */
+    std::unique_ptr<GpuCullPassSystem> m_gpuCullPassSystem;
     std::unique_ptr<ShadowPassSystem> m_shadowPassSystem;
     std::unique_ptr<EditorOverlayPassSystem> m_editorOverlayPassSystem;
     std::unique_ptr<StreamingPassSystem> m_streamingPassSystem;
-    std::unique_ptr<FrameGraph> m_frameGraph;
+    /** Frame graph + compile scheduling (size / mode / stereo). */
+    std::unique_ptr<RenderGraphOrchestrator> m_renderGraphOrchestrator;
     std::unique_ptr<ClusteredLightGrid> m_clusteredLightGrid;
     std::unique_ptr<PostProcessor> m_postProcessor;
     std::unique_ptr<IBL> m_ibl;
@@ -349,21 +375,8 @@ private:
     /** If true, deferred GBuffer uses RenderIndirect when GpuCullPass is supported (E8). */
     bool m_useGpuDrivenGBuffer = false;
 
-    /** A2: Draw list for GpuCullPass (scene-fed); max 256 entries. */
-    /** Per-draw transforms for GPU-driven path (same order as draw list). */
-    rhi::IBuffer* m_gpuCullTransformBuffer = nullptr;
-    /** Scratch for building draw list each frame (A2). */
-    std::vector<GpuCullDrawEntry> m_scratchGpuCullDrawList;
-    /** Scratch transforms in same order as draw list (for indirect scene path). */
-    std::vector<math::Mat4> m_scratchGpuCullTransforms;
-    /** True when all opaque drawables share the same mesh (enables indirect scene path). */
-    bool m_gpuCullSingleMesh = false;
-    /** Representative mesh when single-mesh; kept alive for GBuffer pass. */
-    std::shared_ptr<Mesh> m_gpuCullRepresentativeMesh;
-
     /** Phase D: instance matrix buffer for batched/instanced GBuffer and shadow (mesh+material batching). */
     rhi::IBuffer* m_instanceMatrixBuffer = nullptr;
-    static constexpr uint32_t kMaxInstanceBatchSize = 4096u;
 
     /** Previous frame depth RT for GPU occlusion culling (same size as GBuffer). */
     rhi::IRenderTarget* m_prevFrameDepthRT = nullptr;
@@ -384,19 +397,19 @@ private:
     /** Phase 5: single SSBO for deferred lighting (directional + point + spot); filled each frame. */
     rhi::IBuffer* m_sceneLightingBuffer = nullptr;
 
-    void EnsureForwardResourceSets();
+    void EnsureCurrentFrameResourceSets();
     std::unique_ptr<resources::PassResourceBuilder> m_passResourceBuilder;
 
-    /** Current frame aliases into per-frame arrays (updated by SelectForwardResourceSetFrame). */
-    rhi::IDescriptorSet* m_forwardFrameSet = nullptr;
-    rhi::IDescriptorSet* m_forwardPassSet = nullptr;
-    rhi::IDescriptorSet* m_forwardTransparentPassSet = nullptr;
-    rhi::IDescriptorSet* m_forwardMaterialSet = nullptr;
-    rhi::IDescriptorSet* m_forwardSceneBuffersSet = nullptr;
-    rhi::IDescriptorSet* m_forwardTransparentSceneBuffersSet = nullptr;
-    rhi::IDescriptorSet* m_deferredLightingPassSet = nullptr;
-    rhi::IBuffer* m_forwardFrameUBO = nullptr;
-    rhi::IBuffer* m_forwardBonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)
+    /** Current frame aliases into per-frame arrays (updated by EnsureCurrentFrameResourceSets from PassResourceBuilder::Current). */
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_passSet = nullptr;
+    rhi::IDescriptorSet* m_transparentPassSet = nullptr;
+    rhi::IDescriptorSet* m_materialSet = nullptr;
+    rhi::IDescriptorSet* m_sceneSet = nullptr;
+    rhi::IDescriptorSet* m_transparentSceneSet = nullptr;
+    rhi::IDescriptorSet* m_deferredLightingSet = nullptr;
+    rhi::IBuffer* m_frameUbo = nullptr;
+    rhi::IBuffer* m_bonesBuffer = nullptr;  // SceneBuffers set binding 1 for skinned draws (128 mat4)
 
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit
@@ -422,16 +435,15 @@ private:
     const IRenderSceneView* m_currentView = nullptr;
     /** Phase B: current frame data for executors (camera, lights, visibleOpaque, etc.). Set before Execute. */
     const RenderFrameData* m_currentFrameData = nullptr;
+    /** Populated immediately before frame graph Execute; consumed by GraphExecute* and stereo graph lambdas. Cleared after Execute. */
+    FrameRenderContext m_frameGraphExecutionContext{};
     /** Phase B: per-frame snapshot filled by PrepareFrameData. */
     RenderFrameData m_frameData;
-    /** Phase 1: compile frame graph only when true (initial, after Resize, or mode/size change). */
-    bool m_frameGraphNeedsCompile = true;
-    uint32_t m_frameGraphLastWidth = 0;
-    uint32_t m_frameGraphLastHeight = 0;
-    PipelineMode m_frameGraphLastMode = PipelineMode::Deferred;
-    bool m_frameGraphLastStereo = false;
-    /** Set each frame by PrepareGpuCullFromView; used by frame-graph GBuffer executor. */
+    /** Set each frame by PrepareGpuCullFromFrameData / PrepareGpuCullFromView; used by GBuffer path. */
     uint32_t m_lastGpuCullDrawListCount = 0;
+    /** Optional per-path overrides for frame-graph pass executors (see SetFrameGraphExecutorOverrides). */
+    std::map<FrameGraphExecutorSet, std::unordered_map<std::string, FrameGraph::ExecuteFunc>> m_frameGraphExecutorOverrides;
+
     /** Phase 1: stereo path only; set before Execute when building stereo graph. */
     CameraView m_currentLeftCam{};
     CameraView m_currentRightCam{};

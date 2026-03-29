@@ -1,6 +1,6 @@
 #include "eyelib/render/passes/GpuCullPass.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/core/Log.h"
@@ -26,9 +26,7 @@ GpuCullPass::~GpuCullPass() {
 }
 
 bool GpuCullPass::IsSupported(rhi::IDevice* device) const {
-    if (!device) return false;
-    const auto& caps = device->GetCapabilities();
-    return caps.supportsCompute && caps.supportsMultiDrawIndirect;
+    return backend::SupportsCompute(device) && backend::SupportsMultiDrawIndirect(device);
 }
 
 static rhi::IShader* LoadComputeShader(rhi::IDevice* device, const char* logicalName, std::string& outPath) {
@@ -295,7 +293,7 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
             depthW = static_cast<float>(m_occlusionDepthWidth);
             depthH = static_cast<float>(m_occlusionDepthHeight);
         }
-        if (m_device->GetRenderBackend() == RenderBackend::Vulkan) {
+        if (backend::IsVulkan(m_device)) {
             abi::WriteGpuCullPushConstants(cmd, effectiveCount, useOcclusion ? 1 : 0, depthW, depthH);
         } else {
             cmd->SetUniformUint("u_NumDraws", effectiveCount);
@@ -305,7 +303,7 @@ void GpuCullPass::Execute(rhi::ICommandList* cmd) {
                 cmd->SetUniformVec2("u_DepthSize", depthSize);
             }
         }
-    } else if (m_device->GetRenderBackend() != RenderBackend::Vulkan) {
+    } else if (!backend::IsVulkan(m_device)) {
         cmd->SetUniformUint("u_NumDraws", 0);
     }
     if (!m_useResourceSpace && useWithDrawListPipeline) {

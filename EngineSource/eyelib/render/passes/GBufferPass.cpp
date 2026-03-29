@@ -6,7 +6,7 @@
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/render/resources/Shader.h"
 #include "eyelib/render/PassPushConstants.h"
-#include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/resources/Mesh.h"
@@ -28,7 +28,7 @@ bool GBufferResourceBindingsReady(rhi::IDevice* device, rhi::ICommandList* cmd,
                                   rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* materialSet,
                                   rhi::IDescriptorSet* sceneSet, rhi::IBindlessHeap* heap) {
     if (!device || !cmd || !frameSet || !materialSet || !sceneSet) return false;
-    if (!device->GetCapabilities().supportsBindless) return false;
+    if (!backend::SupportsBindless(device)) return false;
     if (!heap || !heap->GetDescriptorSet()) return false;
     return true;
 }
@@ -143,7 +143,7 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
     }
 
     rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && device->GetCapabilities().supportsBindless);
+    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && backend::SupportsBindless(device));
     if (!GBufferResourceBindingsReady(device, cmd, m_gbufferFrameSet, m_gbufferMaterialSet, m_gbufferSceneBuffersSet, m_bindlessHeap)) {
         static std::atomic<bool> s_warned{false};
         if (!s_warned.exchange(true) && m_shaderCache)
@@ -207,7 +207,7 @@ void GBufferPass::RenderDrawables(GBuffer& gbuffer,
             auto t = getTexture(name);
             return (t && t->IsValid()) ? 1.0f : 0.0f;
         };
-        if (device && device->GetRenderBackend() == RenderBackend::Vulkan) {
+        if (device && backend::IsVulkan(device)) {
             if (cmd)
                 abi::WriteGBufferGeometryPushConstants(cmd, d.transform, uvT, uvRot, texIdx, flipV, hasTex("u_AlbedoTexture"));
         } else {
@@ -302,7 +302,7 @@ void GBufferPass::RenderIndirect(GBuffer& gbuffer,
                                   const math::Mat4* prevProjection) {
     if (!device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid() || !m_shaderCache)
         return;
-    if (!device->GetCapabilities().supportsMultiDrawIndirect)
+    if (!backend::SupportsMultiDrawIndirect(device))
         return;
 
     ShaderKey key{ PipelineStage::GBuffer, InstanceType::Static, kDefaultMaterialTypeId };
@@ -369,7 +369,7 @@ void GBufferPass::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
     if (!device || !cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid()
         || !perDrawTransformBuffer || transformCount == 0 || !m_shaderCache)
         return;
-    if (!device->GetCapabilities().supportsMultiDrawIndirect)
+    if (!backend::SupportsMultiDrawIndirect(device))
         return;
 
     ShaderKey key{ PipelineStage::GBuffer, InstanceType::Static, kDefaultMaterialTypeId };
@@ -432,7 +432,7 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
         cmd->SetDepthWrite(true);
         for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
     }
-    if (m_bindlessHeap && m_bindlessGetHandle && device->GetCapabilities().supportsBindless && cmd)
+    if (m_bindlessHeap && m_bindlessGetHandle && backend::SupportsBindless(device) && cmd)
         cmd->BindBindlessHeap(m_bindlessHeap);
 
     applyMaterialBlendAndCull(cmd, baseMaterial);
@@ -488,7 +488,7 @@ void GBufferPass::RenderInstanced(GBuffer& gbuffer,
         "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
         "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
     };
-    bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device->GetCapabilities().supportsBindless);
+    bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && backend::SupportsBindless(device));
     if (useBindless) {
         for (const char* texName : textureOrder) {
             rhi::ITexture* rhiTex = getTextureRHI(texName);

@@ -186,7 +186,7 @@ Render(view) dispatches by mode: Deferred → BuildAndExecuteFrameGraph; Forward
 2. Build nameToHandle: ImportTextureRHI for HDR, HDRDepth, GBuffer*, Shadow.
 3. PrepareGpuCullFromView(view, cam) — build draw list, upload to GPU, configure GpuCullPass.
 4. Define FrameGraphRecipe: GPU Cull, Shadow, GBuffer, Copy depth, Lighting, Transparency (and Skybox, Post via AddSkyboxPassToFrameGraph / PostProcessor).
-5. getExecutor(name): each pass gets a lambda that captures pipeline, view, ctx, and runs the corresponding pass (e.g. GBuffer → RenderOpaqueGeometryToGBuffer).
+5. getExecutor(name): each pass gets a lambda that captures pipeline, view, ctx, and runs the corresponding pass (e.g. GBuffer → `BuildGBufferOpaqueParams` + `GBufferPassSystem::RenderOpaqueGeometry`).
 6. AddPassesFromRecipe; then Compile(device), Execute(ctx).
 
 Forward frame graph is similar but with a single forward pass instead of GBuffer + Lighting.
