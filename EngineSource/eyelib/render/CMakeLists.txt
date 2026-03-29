@@ -134,8 +134,6 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/materials/MaterialShader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/StreamingHooks.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GBufferPassOpaqueParams.h
@@ -162,6 +160,10 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaquePassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaqueGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardOpaqueStereoGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardTransparentGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardPlusOpaqueGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/ForwardPlusFramePrep.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/ShadowPassParams.h

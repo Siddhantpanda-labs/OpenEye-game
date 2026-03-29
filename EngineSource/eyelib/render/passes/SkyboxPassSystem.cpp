@@ -2,11 +2,204 @@
 #include "eyelib/core/Log.h"
 #include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/RenderBackend.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
+#include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/resources/TextureCube.h"
+#include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include <glm/gtc/matrix_inverse.hpp>
 
 namespace eyelib {
 namespace render {
+
+void SkyboxPassSystem::SetDevice(rhi::IDevice* device) {
+    m_device = device;
+}
+
+void SkyboxPassSystem::SetSharedResources(PipelineSharedResources* ownedResources, PipelineSharedResources* usingShared) {
+    m_ownedResources = ownedResources;
+    m_usingShared = usingShared;
+}
+
+void SkyboxPassSystem::EnsureCubemapShader() {
+    if (m_skyboxShader && m_skyboxShader->IsValid()) return;
+    if (!m_device) return;
+    if (m_usingShared && m_usingShared->skyboxShader && m_usingShared->skyboxShader->IsValid()) {
+        m_skyboxShader = m_usingShared->skyboxShader;
+        m_cachedSkyboxTexture = nullptr;
+        return;
+    }
+    m_skyboxShader = std::make_shared<Shader>();
+    rhi::DepthStencilState skyboxDepth;
+    skyboxDepth.depthTest = true;
+    skyboxDepth.depthWrite = true;
+    skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
+    if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
+                              std::optional{::eyelib::render::rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
+        core::Log::WarnF("Skybox shader failed to load (passes/sky/skybox). Run from project root or ensure assets/shaders/opengl/ is available.");
+        return;
+    }
+    if (!m_skyboxShader->IsValid()) {
+        core::Log::Warn("Skybox shader invalid after load.");
+        return;
+    }
+    if (m_ownedResources) m_ownedResources->skyboxShader = m_skyboxShader;
+    m_cachedSkyboxTexture = nullptr;
+}
+
+void SkyboxPassSystem::EnsureProceduralShader() {
+    if (m_proceduralSkyboxShader && m_proceduralSkyboxShader->IsValid()) return;
+    if (!m_device) return;
+    if (m_usingShared && m_usingShared->proceduralSkyboxShader && m_usingShared->proceduralSkyboxShader->IsValid()) {
+        m_proceduralSkyboxShader = m_usingShared->proceduralSkyboxShader;
+        return;
+    }
+    m_proceduralSkyboxShader = std::make_shared<Shader>();
+    rhi::DepthStencilState skyboxDepth;
+    skyboxDepth.depthTest = true;
+    skyboxDepth.depthWrite = true;
+    skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
+    if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
+                                        std::optional{::eyelib::render::rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
+        core::Log::WarnF("Procedural skybox shader failed to load (passes/sky/skybox_procedural).");
+        return;
+    }
+    if (!m_proceduralSkyboxShader->IsValid()) {
+        core::Log::Warn("Procedural skybox shader invalid after load.");
+        return;
+    }
+    if (m_ownedResources) m_ownedResources->proceduralSkyboxShader = m_proceduralSkyboxShader;
+}
+
+void SkyboxPassSystem::EnsureShaders() {
+    EnsureCubemapShader();
+    EnsureProceduralShader();
+}
+
+void SkyboxPassSystem::ReloadShaders() {
+    if (m_skyboxShader) m_skyboxShader->Reload();
+    if (m_proceduralSkyboxShader) m_proceduralSkyboxShader->Reload();
+}
+
+void SkyboxPassSystem::Shutdown() {
+    if (m_device) {
+        for (rhi::IDescriptorSet*& set : m_postSets) {
+            if (set) {
+                m_device->EnqueueDestroyDescriptorSet(set);
+                set = nullptr;
+            }
+        }
+    }
+    m_cachedSkyboxTexture = nullptr;
+    if (m_skyboxDummyTexture && m_device) {
+        m_device->DestroyTexture(m_skyboxDummyTexture);
+        m_skyboxDummyTexture = nullptr;
+    }
+    m_lastPostSetFilledFrameNumber = 0xffffffffu;
+}
+
+void SkyboxPassSystem::EnsureDummyTexture() {
+    if (m_skyboxDummyTexture || !m_device) return;
+    rhi::TextureDesc desc = {};
+    desc.type = rhi::TextureType::Texture2D;
+    desc.width = 1;
+    desc.height = 1;
+    desc.format = rhi::RHITextureFormat::RGBA8;
+    desc.usage = rhi::TextureUsage::ShaderResource;
+    desc.mipLevels = 1;
+    static const uint8_t black[4] = { 0, 0, 0, 255 };
+    m_skyboxDummyTexture = m_device->CreateTexture(desc, black);
+}
+
+void SkyboxPassSystem::EnsurePostSetFilled(rhi::ITexture* binding0Tex) {
+    if (!m_device) return;
+    const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kPostSetsFrames;
+    const uint32_t frameNumber = m_device->GetFrameNumber();
+    rhi::IDescriptorSet*& setRef = m_postSets[frameIndex];
+    if (!setRef) {
+        rhi::IPipelineLayout* postLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::PostPass);
+        if (!postLayout) return;
+        setRef = m_device->CreateDescriptorSet(postLayout);
+        if (!setRef) return;
+    }
+    rhi::ITexture* expectedTex = binding0Tex ? binding0Tex : m_skyboxDummyTexture;
+    if (m_lastPostSetFilledFrameNumber == frameNumber && m_cachedSkyboxTexture == expectedTex) return;
+    EnsureDummyTexture();
+    rhi::ITexture* dummy = m_skyboxDummyTexture;
+    if (!dummy) return;
+    rhi::ITexture* tex0 = binding0Tex ? binding0Tex : dummy;
+    setRef->UpdateTexture(0, tex0);
+    for (uint32_t b = 1; b < kPostPassBindingCount; ++b)
+        setRef->UpdateTexture(b, dummy);
+    m_lastPostSetFilledFrameNumber = frameNumber;
+    m_cachedSkyboxTexture = tex0;
+}
+
+bool SkyboxPassSystem::RenderCubemap(const SkyboxDrawContext& ctx, const std::shared_ptr<TextureCube>& skybox) {
+    if (!skybox || !skybox->IsValid()) {
+        static bool logged = false;
+        if (!logged) {
+            core::Log::WarnF("RenderSkybox: skipped (no skybox or texture invalid)");
+            logged = true;
+        }
+        return false;
+    }
+    EnsureCubemapShader();
+    if (!m_skyboxShader || !m_skyboxShader->IsValid()) {
+        static bool logged = false;
+        if (!logged) {
+            core::Log::WarnF("RenderSkybox: skipped (skybox shader not loaded)");
+            logged = true;
+        }
+        return false;
+    }
+    rhi::ITexture* skyboxTex = skybox->GetTextureRHI();
+    EnsurePostSetFilled(skyboxTex);
+    const uint32_t frameIndex = m_device ? m_device->GetCurrentFrameIndex() % kPostSetsFrames : 0u;
+    rhi::IDescriptorSet* skyboxPostSet = m_postSets[frameIndex];
+
+    SkyboxPassBuildParams build{};
+    build.shader = m_skyboxShader.get();
+    build.device = ctx.device;
+    build.cmd = ctx.cmd;
+    build.renderTarget = ctx.renderTarget;
+    build.hdrRenderTarget = ctx.hdrRenderTarget;
+    build.gbufferRenderTarget = ctx.gbufferRenderTarget;
+    build.frameSet = ctx.frameSet;
+    build.postSet = skyboxPostSet;
+    build.camera = ctx.camera;
+    build.viewportWidth = ctx.viewportWidth;
+    build.viewportHeight = ctx.viewportHeight;
+    build.useGbufferDepth = ctx.useGbufferDepth;
+    build.isVulkan = ctx.isVulkan;
+    SkyboxPassExecuteParams params = BuildParams(build);
+    return ExecuteCubemap(params);
+}
+
+bool SkyboxPassSystem::RenderProcedural(const SkyboxDrawContext& ctx) {
+    EnsureProceduralShader();
+    if (!m_proceduralSkyboxShader || !m_proceduralSkyboxShader->IsValid()) return false;
+    EnsurePostSetFilled(nullptr);
+    const uint32_t frameIndex = m_device ? m_device->GetCurrentFrameIndex() % kPostSetsFrames : 0u;
+    rhi::IDescriptorSet* skyboxPostSet = m_postSets[frameIndex];
+
+    SkyboxPassBuildParams build{};
+    build.shader = m_proceduralSkyboxShader.get();
+    build.device = ctx.device;
+    build.cmd = ctx.cmd;
+    build.renderTarget = ctx.renderTarget;
+    build.hdrRenderTarget = ctx.hdrRenderTarget;
+    build.gbufferRenderTarget = ctx.gbufferRenderTarget;
+    build.frameSet = ctx.frameSet;
+    build.postSet = skyboxPostSet;
+    build.camera = ctx.camera;
+    build.viewportWidth = ctx.viewportWidth;
+    build.viewportHeight = ctx.viewportHeight;
+    build.useGbufferDepth = ctx.useGbufferDepth;
+    build.isVulkan = ctx.isVulkan;
+    SkyboxPassExecuteParams params = BuildParams(build);
+    return ExecuteProcedural(params);
+}
 
 SkyboxPassExecuteParams SkyboxPassSystem::BuildParams(const SkyboxPassBuildParams& params) const {
     SkyboxPassExecuteParams out{};
@@ -134,4 +327,3 @@ bool SkyboxPassSystem::ExecuteProcedural(const SkyboxPassExecuteParams& params) 
 
 }  // namespace render
 }  // namespace eyelib
-

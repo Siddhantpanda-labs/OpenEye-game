@@ -1,4 +1,4 @@
-#include "eyelib/render/passes/ForwardOpaquePassSystem.h"
+#include "eyelib/render/passes/ForwardGeometryCommon.h"
 #include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/passes/common/ForwardSharedEnvironment.h"
 #include "eyelib/render/PassPushConstants.h"

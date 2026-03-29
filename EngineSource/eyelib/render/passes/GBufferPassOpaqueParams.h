@@ -10,7 +10,6 @@ namespace eyelib {
 namespace render {
 
 class GBuffer;
-class GBufferPass;
 class GpuCullPass;
 class Mesh;
 
@@ -18,7 +17,6 @@ class Mesh;
 struct GBufferPassOpaqueParams {
     rhi::IDevice* device = nullptr;
     rhi::ICommandList* cmd = nullptr;
-    GBufferPass* gbufferPass = nullptr;
     GBuffer* gbuffer = nullptr;
     std::function<void()> ensureCurrentFrameResourceSets;
     rhi::IBuffer* frameUbo = nullptr;

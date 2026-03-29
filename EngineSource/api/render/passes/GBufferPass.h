@@ -9,7 +9,7 @@
 #include <vector>
 
 namespace eyelib {
-namespace render { class GBufferPass; }
+namespace render { class GBufferPassSystem; }
 namespace api {
 
 class GBufferPass {

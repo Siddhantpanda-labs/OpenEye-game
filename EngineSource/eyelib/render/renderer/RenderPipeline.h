@@ -29,7 +29,6 @@ namespace render {
 class GBuffer;
 class CascadeShadowMap;
 class ShaderCache;
-class GBufferPass;
 class ShadowPass;
 class LightingPass;
 class ClusteredLightGrid;
@@ -208,9 +207,6 @@ private:
     void BuildAndExecuteForwardFrameGraph(const IRenderSceneView& view);
     /** Forward+ mode: frame graph with Shadow, Forward+ Opaque (batched), Transparency, Skybox. */
     void BuildAndExecuteForwardPlusFrameGraph(const IRenderSceneView& view);
-    void RenderForward(const IRenderSceneView& view);
-    /** Opaque draw loop for forward (lighting + optional shadow). Used by Forward frame graph. */
-    void RenderForwardOpaque(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Same as RenderForwardOpaque but uses an explicit camera and drawable list (stereo per-eye). */
     void RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
                                       const std::vector<Drawable>& opaqueDrawables);
@@ -219,7 +215,6 @@ private:
     /** Stereo opaque: Vulkan uses two viewports + forward shader cache + typed push; OpenGL may use forward_stereo + DrawInstanced(2). */
     void RenderForwardOpaqueStereo(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& leftCam, const CameraView& rightCam);
     void BuildAndExecuteForwardFrameGraphStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
-    void RenderForwardPlus(const IRenderSceneView& view);
     /** Forward+ opaque with batching: instanced draw for multi-instance batches, per-draw for singles/skinned. */
     void RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Setup for Forward+ opaque pass: light grid, buffers, clear HDR, bind shadow/scene lighting/light index. */
@@ -232,10 +227,6 @@ private:
     /** Default when no cubemap: procedural gradient (sky / ground / horizon). Same depth/RT setup as cubemap skybox. */
     void RenderProceduralSkyboxImpl(const CameraView& camera, bool useGbufferDepth, rhi::IRenderTarget* targetOverride = nullptr);
     void EnsureStereoForwardShader();
-    void EnsureSkyboxShader();
-    void EnsureProceduralSkyboxShader();
-    /** Ensures m_skyboxDummyTexture exists (1x1 RGBA8). Used to fill unused Post set bindings. */
-    void EnsureSkyboxDummyTexture();
     /** Build immutable shared forward bindings for a pass (frame/pass/scene sets) before execute. */
     void BuildForwardPassSharedState(const RenderFrameData& frameData, const CameraView& cam, rhi::IDescriptorSet* passSet,
                                      rhi::IDescriptorSet* sceneBuffersSet, bool usePrevViewProj);
@@ -247,8 +238,6 @@ private:
     rhi::IDescriptorSet* AcquireSceneDrawSet();
     /** Acquire a per-pass deferred-lighting descriptor set for the current frame. */
     rhi::IDescriptorSet* AcquireDeferredLightingSet();
-    /** Fills the current frame's skybox Post set: binding 0 = binding0Tex (or dummy if null), bindings 1–6 = dummy. Uses GetCurrentFrameIndex() so we never update a set in use. */
-    void EnsureSkyboxPostSetFilled(rhi::ITexture* binding0Tex);
     /** Fills current frame's outline Post set with scene+id textures (once per frame/input pair). */
     void EnsureOutlinePostSetFilled(rhi::ITexture* sceneTex, rhi::ITexture* idTex);
     void EnsureOutlinePostShader();
@@ -325,7 +314,6 @@ private:
     std::unique_ptr<CascadeShadowMap> m_cascadeShadowMap;
     /** Points to our or shared ShaderCache. Use GetShaderCache(). */
     ShaderCache* m_shaderCache = nullptr;
-    std::unique_ptr<GBufferPass> m_gbufferPass;
     std::unique_ptr<ShadowPass> m_shadowPass;
     std::unique_ptr<LightingPass> m_lightingPass;
     /** Forward+ GPU light cull compute; grid + light SSBOs stay on pipeline. */
@@ -350,13 +338,6 @@ private:
     std::unique_ptr<ReflectionProbeManager> m_reflectionProbeManager;
     std::unique_ptr<GpuProfilerRHI> m_gpuProfilerRHI;
     std::shared_ptr<Shader> m_stereoForwardShader;
-    std::shared_ptr<Shader> m_skyboxShader;
-    std::shared_ptr<Shader> m_proceduralSkyboxShader;
-    static constexpr uint32_t kSkyboxPostSetsFrames = 3;
-    std::array<rhi::IDescriptorSet*, kSkyboxPostSetsFrames> m_skyboxPostSets = {};
-    uint32_t m_lastSkyboxPostSetFilledFrameNumber = 0xffffffffu;  // avoid updating same set twice in one frame
-    rhi::ITexture* m_cachedSkyboxTexture = nullptr;
-    rhi::ITexture* m_skyboxDummyTexture = nullptr;
     std::shared_ptr<Shader> m_outlinePostShader;
     static constexpr uint32_t kOutlinePostSetsFrames = 3;
     std::array<rhi::IDescriptorSet*, kOutlinePostSetsFrames> m_outlinePostSets = {};

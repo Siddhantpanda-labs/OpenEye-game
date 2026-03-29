@@ -39,7 +39,7 @@ eyelib/render/
 │   ├── FrameGraph.h/cpp    # DAG-based frame graph: CreateTexture, ImportTextureRHI, AddPass, Compile(device), Execute
 │   └── FrameGraphRecipe.h/cpp  # Declarative pass list (name, reads, writes) + AddPassesFromRecipe()
 ├── passes/
-│   ├── GBufferPass         # Deferred: fill position, normal, albedo, PBR, velocity, depth
+│   ├── GBufferPassSystem   # Deferred geometry system: fill position, normal, albedo, PBR, velocity, depth
 │   ├── ShadowPass          # Cascade directional shadow map
 │   ├── LightingPass        # Full-screen lighting from GBuffer (+ shadow); reads scene lighting from SSBO (binding 5) when provided
 │   ├── TransparencyPass    # Sorted transparent drawables
@@ -227,7 +227,7 @@ Forward frame graph is similar but with a single forward pass instead of GBuffer
 |----------------|----------------------------------------------------------------------|
 | **GpuCullPass**| Build draw list from view; optional GPU culling; indirect draw list.|
 | **ShadowPass** | Render directional shadow map from light view.                       |
-| **GBufferPass**| Deferred: fill position, normal, albedo, PBR, velocity, depth.      |
+| **GBufferPassSystem**| Deferred geometry system: fill position, normal, albedo, PBR, velocity, depth. |
 | **LightingPass**| Full-screen: sample GBuffer + shadow, write HDR.                    |
 | **TransparencyPass**| Sorted transparent drawables over HDR.                             |
 | **Skybox**     | Full-screen quad, depth LEQUAL, sample cubemap; drawn as frame-graph pass. |

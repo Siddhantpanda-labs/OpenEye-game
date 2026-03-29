@@ -1,19 +1,461 @@
 #include "eyelib/render/passes/GBufferPassSystem.h"
-#include "eyelib/render/passes/GBufferPass.h"
 #include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/ShaderCache.h"
+#include "eyelib/render/ShaderKey.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/math/TransformUtils.h"
+#include "eyelib/render/resources/Shader.h"
+#include "eyelib/render/PassPushConstants.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
+#include "eyelib/render/materials/Material.h"
+#include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/renderer/GBuffer.h"
 #include "eyelib/render/resources/Mesh.h"
 #include "eyelib/render/RenderContext.h"
 #include "eyelib/render/submission/DrawBatch.h"
+#include "eyelib/render/resources/Texture2D.h"
+#include "eyelib/core/Log.h"
 #include "eyelib/debug/Profiler.h"
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstring>
+#include <map>
 #include <vector>
 
 namespace eyelib {
 namespace render {
 
+namespace {
+constexpr size_t kMaxBones = 128;
+
+bool GBufferResourceBindingsReady(rhi::IDevice* device, rhi::ICommandList* cmd,
+                                  rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* materialSet,
+                                  rhi::IDescriptorSet* sceneSet, rhi::IBindlessHeap* heap) {
+    if (!device || !cmd || !frameSet || !materialSet || !sceneSet) return false;
+    if (!backend::SupportsBindless(device)) return false;
+    if (!heap || !heap->GetDescriptorSet()) return false;
+    return true;
+}
+
+void ApplyMaterialBlendAndCull(rhi::ICommandList* cmd, const Material* material) {
+    if (!cmd || !material) return;
+    cmd->SetCullFace(!material->GetTwoSided());
+    switch (material->GetBlending()) {
+    case Blending::Opaque:
+        cmd->SetBlend(false);
+        cmd->SetDepthWrite(true);
+        break;
+    case Blending::Translucent:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::SrcAlpha, rhi::BlendFactor::OneMinusSrcAlpha);
+        cmd->SetDepthWrite(false);
+        break;
+    case Blending::Additive:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::One, rhi::BlendFactor::One);
+        cmd->SetDepthWrite(false);
+        break;
+    case Blending::Modulate:
+        cmd->SetBlend(true);
+        cmd->SetBlendFunc(rhi::BlendFactor::DstColor, rhi::BlendFactor::Zero);
+        cmd->SetDepthWrite(false);
+        break;
+    }
+}
+} // namespace
+
+void GBufferPassSystem::SetShaderCache(ShaderCache* cache) {
+    m_shaderCache = cache;
+}
+
+void GBufferPassSystem::SetBindlessHeap(rhi::IBindlessHeap* heap) {
+    m_bindlessHeap = heap;
+}
+
+void GBufferPassSystem::SetBindlessGetHandle(std::function<rhi::BindlessHandle(rhi::ITexture*)> fn) {
+    m_bindlessGetHandle = std::move(fn);
+}
+
+void GBufferPassSystem::SetResourceSpaceSets(rhi::IDescriptorSet* frameSet, rhi::IDescriptorSet* materialSet, rhi::IDescriptorSet* sceneBuffersSet) {
+    m_gbufferFrameSet = frameSet;
+    m_gbufferMaterialSet = materialSet;
+    m_gbufferSceneBuffersSet = sceneBuffersSet;
+}
+
+void GBufferPassSystem::SetBonesBuffer(rhi::IBuffer* buffer) {
+    m_gbufferBonesBuffer = buffer;
+}
+
+void GBufferPassSystem::ReloadShaders() {
+    if (m_shaderCache) m_shaderCache->reloadAll();
+}
+
+void GBufferPassSystem::RenderDrawablesDirect(GBuffer& gbuffer,
+                                              const RenderContext& ctx,
+                                              const std::vector<Drawable>& drawables,
+                                              const math::Mat4& view,
+                                              const math::Mat4& projection,
+                                              const math::Mat4& prevView,
+                                              const math::Mat4& prevProjection) const {
+    RenderDrawables(gbuffer, ctx.cmd, ctx.device,
+                    [&drawables](std::function<void(const Drawable&)> c) {
+                        for (const auto& d : drawables) c(d);
+                    },
+                    view, projection, prevView, prevProjection);
+}
+
+void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
+                                        rhi::ICommandList* cmd,
+                                        rhi::IDevice* device,
+                                        DrawableFeed feedDrawables,
+                                        const math::Mat4& view,
+                                        const math::Mat4& projection,
+                                        const math::Mat4& prevView,
+                                        const math::Mat4& prevProjection) const {
+    gbuffer.BindForGeometryPass(cmd);
+
+    if (cmd) {
+        cmd->SetDepthTest(true);
+        cmd->SetDepthWrite(true);
+        cmd->SetCullFace(false);
+        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+    }
+
+    rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
+    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && backend::SupportsBindless(device));
+    if (!GBufferResourceBindingsReady(device, cmd, m_gbufferFrameSet, m_gbufferMaterialSet, m_gbufferSceneBuffersSet, m_bindlessHeap)) {
+        static std::atomic<bool> s_warned{ false };
+        if (!s_warned.exchange(true) && m_shaderCache)
+            core::Log::WarnF("GBufferPassSystem: descriptor sets + bindless not ready; skipping G-buffer geometry.");
+        gbuffer.Unbind(cmd);
+        if (cmd) {
+            for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+            cmd->SetCullFace(true);
+        }
+        return;
+    }
+    if (useBindless && cmd) cmd->BindBindlessHeap(m_bindlessHeap);
+
+    auto drawOne = [this, device, cmd, bindlessSet](Shader* shader, const Drawable& d) {
+        const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+        if (!d.mesh || !material) return;
+
+        const math::Mat4* bonePtr = d.bones;
+        size_t boneCount = d.boneCount;
+        if ((!bonePtr || boneCount == 0) && d.materialInstance) {
+            d.materialInstance->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        } else if (!bonePtr || boneCount == 0) {
+            material->ForEachMat4Array([&](const std::string& name, const math::Mat4* values, size_t count) {
+                if (name == "u_Bones" && values && count > 0) { bonePtr = values; boneCount = count; }
+            });
+        }
+        if (bonePtr && boneCount > 0) boneCount = std::min(boneCount, kMaxBones);
+
+        ApplyMaterialBlendAndCull(cmd, material.get());
+
+        if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+        else material->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+        if (bonePtr && boneCount > 0 && m_gbufferBonesBuffer) {
+            const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
+            m_gbufferBonesBuffer->Update(bonePtr, 0, boneBytes);
+            m_gbufferSceneBuffersSet->UpdateStorageBuffer(1, m_gbufferBonesBuffer, 0, boneBytes);
+        }
+        rhi::IDescriptorSet* sets[4] = { m_gbufferFrameSet, m_gbufferMaterialSet, bindlessSet, m_gbufferSceneBuffersSet };
+        cmd->BindDescriptorSets(0, 4, sets);
+
+        auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
+            return d.materialInstance ? d.materialInstance->GetVec4(name, def) : material->GetVec4(name, def);
+        };
+        auto getFloat = [&](const std::string& name, float def) {
+            return d.materialInstance ? d.materialInstance->GetFloat(name, def) : material->GetFloat(name, def);
+        };
+        auto getTexture = [&](const std::string& name) {
+            return d.materialInstance ? d.materialInstance->GetTexture(name) : material->GetTexture(name);
+        };
+        auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
+            return d.materialInstance ? d.materialInstance->GetTextureRHI(name) : material->GetTextureRHI(name);
+        };
+        const math::Vec4 uvT = getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+        const float uvRot = getFloat("u_UVRotation", 0.0f);
+        const float texIdx = getFloat("u_TexCoordIndex", 0.0f);
+        const float flipV = getFloat("u_FlipV", 1.0f);
+        auto hasTex = [&](const std::string& name) {
+            auto t = getTexture(name);
+            return (t && t->IsValid()) ? 1.0f : 0.0f;
+        };
+        if (device && backend::IsVulkan(device)) {
+            if (cmd)
+                abi::WriteGBufferGeometryPushConstants(cmd, d.transform, uvT, uvRot, texIdx, flipV, hasTex("u_AlbedoTexture"));
+        } else {
+            shader->SetMat4("u_Model", d.transform);
+            shader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+            shader->SetVec4("u_UVTransform", uvT);
+            shader->SetFloat("u_UVRotation", uvRot);
+            shader->SetFloat("u_TexCoordIndex", texIdx);
+            shader->SetFloat("u_FlipV", flipV);
+            const char* textureOrder[] = {
+                "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
+                "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
+            };
+            for (const char* texName : textureOrder) {
+                rhi::ITexture* rhiTex = getTextureRHI(texName);
+                rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
+                shader->SetHandle64(texName, static_cast<uint64_t>(h));
+            }
+            shader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
+            shader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
+            shader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
+            shader->SetFloat("u_HasAOTexture", hasTex("u_AOTexture"));
+            shader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
+            shader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
+        }
+
+        d.mesh->Bind(device);
+        { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
+        d.mesh->Unbind();
+    };
+
+    if (m_shaderCache) {
+        std::map<ShaderKey, std::vector<Drawable>> buckets;
+        feedDrawables([&](const Drawable& d) {
+            const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
+            if (!d.mesh || !material) return;
+            InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
+            ShaderKey key{ PipelineStage::GBuffer, it, material->GetShaderIndex() };
+            buckets[key].push_back(d);
+        });
+        for (auto& [key, drawables] : buckets) {
+            const Material* matForCompile = (key.materialTypeId != kDefaultMaterialTypeId && !drawables.empty())
+                ? (drawables[0].materialInstance ? drawables[0].materialInstance->GetMaterial().get() : drawables[0].material.get())
+                : nullptr;
+            auto shader = matForCompile ? m_shaderCache->getOrCompile(device, key, matForCompile) : m_shaderCache->getOrCompile(device, key);
+            if (!shader || !shader->IsValid()) continue;
+            rhi::IPipeline* pipe = shader->GetPipelineRHI();
+            if (pipe && !pipe->HasValidProgram()) continue;
+            shader->Bind(device);
+            for (const auto& d : drawables)
+                drawOne(shader.get(), d);
+            shader->Unbind();
+        }
+    } else {
+        gbuffer.Unbind(cmd);
+        if (cmd) { for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u); cmd->SetCullFace(true); }
+        return;
+    }
+
+    gbuffer.Unbind(cmd);
+    if (cmd) {
+        for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+        cmd->SetCullFace(true);
+    }
+}
+
+void GBufferPassSystem::RenderIndirect(GBuffer& gbuffer,
+                                       const RenderContext& ctx,
+                                       rhi::IBuffer* indirectBuffer,
+                                       uint32_t drawCount,
+                                       uint32_t stride,
+                                       const Mesh* mesh,
+                                       const math::Mat4& view,
+                                       const math::Mat4& projection,
+                                       const math::Mat4* prevView,
+                                       const math::Mat4* prevProjection) const {
+    if (!ctx.device || !ctx.cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid() || !m_shaderCache)
+        return;
+    if (!backend::SupportsMultiDrawIndirect(ctx.device))
+        return;
+
+    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Static, kDefaultMaterialTypeId };
+    auto shader = m_shaderCache->getOrCompile(ctx.device, key);
+    if (!shader || !shader->IsValid()) return;
+    rhi::IPipeline* pipe = shader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
+
+    gbuffer.BindForGeometryPass(ctx.cmd);
+    shader->Bind(ctx.device);
+    shader->SetMat4("u_View", view);
+    shader->SetMat4("u_Projection", projection);
+    if (prevView && prevProjection) {
+        shader->SetMat4("u_PrevView", *prevView);
+        shader->SetMat4("u_PrevProjection", *prevProjection);
+    }
+
+    ctx.cmd->SetDepthTest(true);
+    ctx.cmd->SetDepthWrite(true);
+    ctx.cmd->SetCullFace(false);
+    ctx.cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
+    ctx.cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
+    ctx.cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
+
+    shader->Unbind();
+    gbuffer.Unbind(ctx.cmd);
+    ctx.cmd->SetCullFace(true);
+}
+
+void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
+                                                      const RenderContext& ctx,
+                                                      rhi::IBuffer* indirectBuffer,
+                                                      uint32_t drawCount,
+                                                      uint32_t stride,
+                                                      const Mesh* mesh,
+                                                      rhi::IBuffer* perDrawTransformBuffer,
+                                                      uint32_t transformCount,
+                                                      const math::Mat4& view,
+                                                      const math::Mat4& projection,
+                                                      const math::Mat4* prevView,
+                                                      const math::Mat4* prevProjection) const {
+    if (!ctx.device || !ctx.cmd || !indirectBuffer || drawCount == 0 || !mesh || !mesh->IsValid()
+        || !perDrawTransformBuffer || transformCount == 0 || !m_shaderCache)
+        return;
+    if (!backend::SupportsMultiDrawIndirect(ctx.device))
+        return;
+
+    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Static, kDefaultMaterialTypeId };
+    auto shader = m_shaderCache->getOrCompile(ctx.device, key);
+    if (!shader || !shader->IsValid()) return;
+    rhi::IPipeline* pipe = shader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) return;
+
+    gbuffer.BindForGeometryPass(ctx.cmd);
+    shader->Bind(ctx.device);
+    shader->SetMat4("u_View", view);
+    shader->SetMat4("u_Projection", projection);
+    if (prevView && prevProjection) {
+        shader->SetMat4("u_PrevView", *prevView);
+        shader->SetMat4("u_PrevProjection", *prevProjection);
+    }
+    shader->SetInt("u_UsePerDrawTransformBuffer", 1);
+
+    ctx.cmd->SetDepthTest(true);
+    ctx.cmd->SetDepthWrite(true);
+    ctx.cmd->SetCullFace(false);
+    ctx.cmd->BindStorageBuffer(perDrawTransformBuffer, 4, 0, transformCount * 64u);
+    ctx.cmd->BindVertexBuffer(mesh->GetVertexBufferRHI(), 0);
+    ctx.cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
+    ctx.cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
+
+    shader->SetInt("u_UsePerDrawTransformBuffer", 0);
+    shader->Unbind();
+    gbuffer.Unbind(ctx.cmd);
+    ctx.cmd->SetCullFace(true);
+}
+
+void GBufferPassSystem::RenderInstanced(GBuffer& gbuffer,
+                                        rhi::IDevice* device,
+                                        rhi::ICommandList* cmd,
+                                        const Mesh* mesh,
+                                        const Material* material,
+                                        const MaterialInstance* materialInstance,
+                                        rhi::IBuffer* instanceMatrixBuffer,
+                                        uint32_t instanceCount,
+                                        const math::Mat4& view,
+                                        const math::Mat4& projection,
+                                        const math::Mat4& prevView,
+                                        const math::Mat4& prevProjection,
+                                        int32_t submeshIndex) const {
+    if (!device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0 || !m_shaderCache) return;
+    const Material* baseMaterial = materialInstance ? materialInstance->GetMaterial().get() : material;
+    if (!baseMaterial) return;
+
+    gbuffer.BindForGeometryPass(cmd);
+    cmd->SetDepthTest(true);
+    cmd->SetDepthWrite(true);
+    for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+    if (m_bindlessHeap && m_bindlessGetHandle && backend::SupportsBindless(device))
+        cmd->BindBindlessHeap(m_bindlessHeap);
+
+    ApplyMaterialBlendAndCull(cmd, baseMaterial);
+
+    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Instanced, baseMaterial->GetShaderIndex() };
+    auto shader = m_shaderCache->getOrCompile(device, key, baseMaterial);
+    if (!shader || !shader->IsValid()) {
+        gbuffer.Unbind(cmd);
+        cmd->SetCullFace(true);
+        return;
+    }
+    rhi::IPipeline* pipe = shader->GetPipelineRHI();
+    if (pipe && !pipe->HasValidProgram()) {
+        gbuffer.Unbind(cmd);
+        cmd->SetCullFace(true);
+        return;
+    }
+
+    rhi::IBuffer* materialBuffer = materialInstance
+        ? materialInstance->GetMaterialBufferRHI(device)
+        : baseMaterial->GetMaterialBufferRHI(device);
+    if (materialBuffer) cmd->BindUniformBuffer(materialBuffer, rhi::UniformBinding::PerMaterial, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
+
+    shader->Bind(device);
+    shader->SetMat4("u_View", view);
+    shader->SetMat4("u_Projection", projection);
+    shader->SetMat4("u_PrevView", prevView);
+    shader->SetMat4("u_PrevProjection", prevProjection);
+    auto getVec4 = [&](const std::string& name, const math::Vec4& def) {
+        return materialInstance ? materialInstance->GetVec4(name, def) : baseMaterial->GetVec4(name, def);
+    };
+    auto getFloat = [&](const std::string& name, float def) {
+        return materialInstance ? materialInstance->GetFloat(name, def) : baseMaterial->GetFloat(name, def);
+    };
+    auto getTextureRHI = [&](const std::string& name) -> rhi::ITexture* {
+        return materialInstance ? materialInstance->GetTextureRHI(name) : baseMaterial->GetTextureRHI(name);
+    };
+    auto bindTextureToSlot = [&](const std::string& name, int unit) -> bool {
+        return materialInstance ? materialInstance->BindTextureToSlot(name, unit) : baseMaterial->BindTextureToSlot(name, unit);
+    };
+    auto hasTex = [&](const std::string& name) {
+        return getTextureRHI(name) ? 1.0f : 0.0f;
+    };
+
+    shader->SetVec4("u_UVTransform", getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
+    shader->SetFloat("u_UVRotation", getFloat("u_UVRotation", 0.0f));
+    shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
+    shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
+
+    const char* textureOrder[] = {
+        "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",
+        "u_AOTexture", "u_EmissiveTexture", "u_MetallicTexture", "u_RoughnessTexture"
+    };
+    bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && backend::SupportsBindless(device));
+    if (useBindless) {
+        for (const char* texName : textureOrder) {
+            rhi::ITexture* rhiTex = getTextureRHI(texName);
+            rhi::BindlessHandle h = rhiTex && m_bindlessGetHandle ? m_bindlessGetHandle(rhiTex) : rhi::kInvalidBindlessHandle;
+            shader->SetHandle64(texName, static_cast<uint64_t>(h));
+        }
+    } else {
+        int unit = 0;
+        for (const char* texName : textureOrder) {
+            if (bindTextureToSlot(texName, unit)) {
+                shader->SetInt(texName, unit);
+                ++unit;
+            }
+        }
+    }
+    shader->SetFloat("u_HasAlbedoTexture", hasTex("u_AlbedoTexture"));
+    shader->SetFloat("u_HasNormalTexture", hasTex("u_NormalTexture"));
+    shader->SetFloat("u_HasMetallicRoughnessTexture", hasTex("u_MetallicRoughnessTexture"));
+    shader->SetFloat("u_HasAOTexture", hasTex("u_AOTexture"));
+    shader->SetFloat("u_HasMetallicTexture", hasTex("u_MetallicTexture"));
+    shader->SetFloat("u_HasRoughnessTexture", hasTex("u_RoughnessTexture"));
+
+    cmd->BindStorageBuffer(instanceMatrixBuffer, rhi::StorageBinding::InstanceMatrix, 0, instanceCount * 64u);
+    mesh->Bind(device);
+    MeshHandle h = mesh->GetHandle();
+    if (h.IsValid()) h.DrawInstanced(device, submeshIndex, instanceCount);
+    mesh->Unbind();
+    shader->Unbind();
+
+    gbuffer.Unbind(cmd);
+    for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
+    cmd->SetCullFace(true);
+}
+
 void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) const {
-    if (!p.gbufferPass || !p.gbuffer) return;
+    if (!p.gbuffer) return;
     RenderContext ctx{};
     ctx.device = p.device;
     ctx.cmd = p.cmd;
@@ -35,7 +477,7 @@ void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) c
         && p.gpuCullDrawListCount > 0 && p.gpuCullSingleMesh && p.gpuCullRepresentativeMesh && p.gpuCullRepresentativeMesh->IsValid()
         && p.gpuCullTransformBuffer;
     if (useIndirectQuad) {
-        p.gbufferPass->RenderIndirect(*p.gbuffer, ctx,
+        RenderIndirect(*p.gbuffer, ctx,
             p.gpuCullPass->GetIndirectBuffer(),
             p.gpuCullPass->GetDrawCount(),
             p.gpuCullPass->GetIndirectStride(),
@@ -45,7 +487,7 @@ void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) c
         debug::Profiler::AddFrameCounter("triangles", 2);
         debug::Profiler::AddFrameCounter("stateChanges", 1);
     } else if (useIndirectScene) {
-        p.gbufferPass->RenderIndirectWithPerDrawData(*p.gbuffer, ctx,
+        RenderIndirectWithPerDrawData(*p.gbuffer, ctx,
             p.gpuCullPass->GetIndirectBuffer(),
             p.gpuCullPass->GetDrawCount(),
             p.gpuCullPass->GetIndirectStride(),
@@ -65,7 +507,7 @@ void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) c
             if (batch.IsInstanced() && p.instanceMatrixBuffer && batch.transforms.size() <= kMaxInstanceBatchSize) {
                 const size_t byteSize = batch.transforms.size() * sizeof(math::Mat4);
                 p.instanceMatrixBuffer->Update(batch.transforms.data(), 0, static_cast<uint32_t>(byteSize));
-                p.gbufferPass->RenderInstanced(*p.gbuffer, p.device, p.cmd,
+                RenderInstanced(*p.gbuffer, p.device, p.cmd,
                     batch.mesh.get(), batch.material.get(), batch.materialInstance.get(), p.instanceMatrixBuffer,
                     static_cast<uint32_t>(batch.transforms.size()),
                     p.cam.view, p.cam.projection, p.prevView, p.prevProjection, batch.submeshIndex);
@@ -83,7 +525,11 @@ void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) c
                 debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
                 debug::Profiler::AddFrameCounter("stateChanges", 1);
             }
-            p.gbufferPass->Render(*p.gbuffer, ctx, singles, p.cam.view, p.cam.projection, p.prevView, p.prevProjection);
+            RenderDrawables(*p.gbuffer, ctx.cmd, ctx.device,
+                            [&singles](std::function<void(const Drawable&)> c) {
+                                for (const auto& d : singles) c(d);
+                            },
+                            p.cam.view, p.cam.projection, p.prevView, p.prevProjection);
         }
     }
 }

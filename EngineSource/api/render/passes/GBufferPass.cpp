@@ -1,5 +1,5 @@
 #include "api/render/passes/GBufferPass.h"
-#include "eyelib/render/passes/GBufferPass.h"
+#include "eyelib/render/passes/GBufferPassSystem.h"
 #include "eyelib/render/RenderContext.h"
 
 namespace eyelib {
@@ -17,7 +17,7 @@ namespace {
 
 class GBufferPass::Impl {
 public:
-    std::unique_ptr<::eyelib::render::GBufferPass> pass = std::make_unique<::eyelib::render::GBufferPass>();
+    std::unique_ptr<::eyelib::render::GBufferPassSystem> pass = std::make_unique<::eyelib::render::GBufferPassSystem>();
 };
 
 GBufferPass::GBufferPass() : m_impl(std::make_unique<Impl>()) {}
@@ -29,11 +29,12 @@ GBufferPass::GBufferPass(GBufferPass&& other) noexcept = default;
 GBufferPass& GBufferPass::operator=(GBufferPass&& other) noexcept = default;
 
 void GBufferPass::SetGeometryShader(std::shared_ptr<Shader> shader) {
-    m_impl->pass->SetGeometryShader(shader ? shader->GetInternal() : nullptr);
+    (void)shader;
+    /* Deprecated: geometry shader selection is driven by ShaderCache/MaterialCompiler. */
 }
 
 std::shared_ptr<Shader> GBufferPass::GetGeometryShader() const {
-    return Shader::WrapInternal(m_impl->pass->GetGeometryShader());
+    return nullptr;
 }
 
 void GBufferPass::Render(GBuffer& gbuffer,
@@ -48,7 +49,7 @@ void GBufferPass::Render(GBuffer& gbuffer,
         internal.push_back(ToInternal(d));
     }
     auto ctx = m_device ? ::eyelib::render::RenderContext::FromDevice(static_cast<::eyelib::render::rhi::IDevice*>(m_device.Get())) : ::eyelib::render::RenderContext{};
-    m_impl->pass->Render(*gbuffer.GetInternal(), ctx, internal, view, projection, prevView, prevProjection);
+    m_impl->pass->RenderDrawablesDirect(*gbuffer.GetInternal(), ctx, internal, view, projection, prevView, prevProjection);
 }
 
 } // namespace api
