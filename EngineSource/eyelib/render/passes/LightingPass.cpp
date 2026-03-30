@@ -90,11 +90,34 @@ void LightingPass::Render(GBuffer& gbuffer,
     (void)spotLights;
     (void)sceneLightingBuffer;
     EnsureDefaultShader(device);
-    if (!m_lightingShader || !m_lightingShader->IsValid()) return;
+    if (!m_lightingShader || !m_lightingShader->IsValid()) {
+        static bool s_loggedShaderInvalid = false;
+        if (!s_loggedShaderInvalid) {
+            core::Log::Warn("LightingPass::Render skipped: lighting shader is null/invalid.");
+            s_loggedShaderInvalid = true;
+        }
+        return;
+    }
     rhi::IPipeline* pipe = m_lightingShader->GetPipelineRHI();
-    if (pipe && !pipe->HasValidProgram()) return;
+    if (pipe && !pipe->HasValidProgram()) {
+        static bool s_loggedPipelineInvalid = false;
+        if (!s_loggedPipelineInvalid) {
+            core::Log::Warn("LightingPass::Render skipped: deferred lighting pipeline program invalid.");
+            s_loggedPipelineInvalid = true;
+        }
+        return;
+    }
 
-    if (!m_lightingFrameSet || !m_lightingDeferredPassSet || !cmd) return;
+    if (!m_lightingFrameSet || !m_lightingDeferredPassSet || !cmd) {
+        static bool s_loggedMissingSets = false;
+        if (!s_loggedMissingSets) {
+            core::Log::WarnF(
+                "LightingPass::Render skipped: frameSet=%p deferredSet=%p cmd=%p",
+                (void*)m_lightingFrameSet, (void*)m_lightingDeferredPassSet, (void*)cmd);
+            s_loggedMissingSets = true;
+        }
+        return;
+    }
 
     m_lightingShader->Bind(device);
     const int useIBL = (ibl && ibl->IsValid()) ? 1 : 0;
@@ -113,6 +136,11 @@ void LightingPass::Render(GBuffer& gbuffer,
     }
     if (cmd && m_lightingShader->GetPipelineRHI())
         cmd->DrawFullscreenQuad(m_lightingShader->GetPipelineRHI());
+    static bool s_loggedLightingDraw = false;
+    if (!s_loggedLightingDraw) {
+        core::Log::Info("LightingPass::Render: deferred fullscreen lighting draw submitted.");
+        s_loggedLightingDraw = true;
+    }
     if (cmd) cmd->SetDepthTest(true);
 
     m_lightingShader->Unbind();

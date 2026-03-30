@@ -270,6 +270,7 @@ private:
         uint32_t height = 0;
         const RenderFrameData* frameData = nullptr;
         CameraView camView{};
+        bool copyDepthFromGBuffer = false;
         bool preferVulkanPath = false;
     };
     struct PostProcessPassParams {

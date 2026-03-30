@@ -18,7 +18,10 @@ class ShaderCache;
 class GBufferPassSystem {
 public:
     GBufferPassSystem() = default;
-    ~GBufferPassSystem() = default;
+    ~GBufferPassSystem();
+
+    /** Releases the small SceneBuffers fallback SSBO; call before device teardown or pass Reset (optional device matches allocator). */
+    void Shutdown(rhi::IDevice* device = nullptr);
 
     void SetShaderCache(ShaderCache* cache);
     void SetBindlessHeap(rhi::IBindlessHeap* heap);
@@ -38,6 +41,9 @@ public:
     void RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) const;
 
 private:
+    /** SceneBuffers layout (set 3) declares four SSBO bindings; Vulkan requires every binding to be written before bind. */
+    void EnsureSceneBuffersDescriptorWrites(rhi::IDevice* device) const;
+
     using DrawableFeed = std::function<void(std::function<void(const Drawable&)>)>;
 
     void RenderDrawables(GBuffer& gbuffer,
@@ -94,6 +100,9 @@ private:
     rhi::IDescriptorSet* m_gbufferMaterialSet = nullptr;
     rhi::IDescriptorSet* m_gbufferSceneBuffersSet = nullptr;
     rhi::IBuffer* m_gbufferBonesBuffer = nullptr;
+    /** Dummy storage buffer so bindings 0–3 are valid for static meshes (same pattern as ShadowPass / LightCullPass). */
+    mutable rhi::IBuffer* m_gbufferSceneFallbackBuffer = nullptr;
+    mutable rhi::IDevice* m_sceneFallbackDevice = nullptr;
 };
 
 }  // namespace render

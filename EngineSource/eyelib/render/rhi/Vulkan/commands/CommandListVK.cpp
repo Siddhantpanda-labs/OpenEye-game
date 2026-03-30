@@ -10,6 +10,7 @@
 #include "eyelib/render/rhi/Vulkan/utils/VulkanEnums.h"
 #include <vulkan/vulkan.h>
 #include "eyelib/core/Log.h"
+#include <cstdint>
 #include <vector>
 #include <cstring>
 #include <cassert>
@@ -34,7 +35,19 @@ const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     default: return "Unknown";
     }
 }
+
+/** Bindless texture heap set index in layouts from VulkanResourceSpaces CreateForwardPipelineLayout / CreateGBufferPipelineLayout. */
+static uint32_t BindlessHeapDescriptorSetIndex(PipelineLayoutKind kind) {
+    switch (kind) {
+    case PipelineLayoutKind::Forward:
+        return 3u;
+    case PipelineLayoutKind::GBuffer:
+        return 2u;
+    default:
+        return UINT32_MAX;
+    }
 }
+} // namespace
 
 CommandListVK::CommandListVK(DeviceVK* device) : m_device(device) {}
 
@@ -548,31 +561,26 @@ void CommandListVK::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescr
     vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, firstSet, count, vkSets.data(), dynamicOffsetCount, dynamicOffsets ? dynamicOffsets : nullptr);
 }
 void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
-    if (!m_isRecording || !m_commandBuffer || !m_device) return;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    if (m_currentPipeline) {
-        PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
-        layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
-    }
-    if (layout == VK_NULL_HANDLE)
-        layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    // Optional partial update: only Forward and GBuffer pipeline layouts include a dedicated bindless set (see Create*PipelineLayout).
+    // Prefer BindDescriptorSets(0, N, ...) with all resource-space sets; this exists for incremental/tooling use after vkCmdBindPipeline.
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_currentPipeline) return;
+    PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
+    if (pVK->m_isCompute) return;
+    const uint32_t setIndex = BindlessHeapDescriptorSetIndex(pVK->m_layoutKind);
+    if (setIndex == UINT32_MAX) return;
+    if (pVK->m_requiredSetCount == 0 || pVK->m_requiredSetCount <= setIndex) return;
+
+    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
     if (layout == VK_NULL_HANDLE) return;
 
-    // Only bind set=1 for layouts that actually contain at least two descriptor sets.
-    if (m_currentPipeline) {
-        PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
-        if (pVK->m_requiredSetCount < 2)
-            return;
-    }
-
-    VkDescriptorSet set1 = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+    VkDescriptorSet vkHeapSet = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
     if (heap) {
         BindlessHeapVK* heapVK = static_cast<BindlessHeapVK*>(heap);
         if (heapVK->m_descriptorSet != nullptr)
-            set1 = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
+            vkHeapSet = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
     }
-    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 1, 1, &set1, 0, nullptr);
-    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, layout, 1, 1, &set1, 0, nullptr);
+    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, setIndex, 1, &vkHeapSet, 0,
+                            nullptr);
 }
 
 void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {

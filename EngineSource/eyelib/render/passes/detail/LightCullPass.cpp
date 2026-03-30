@@ -22,6 +22,32 @@ bool LightCullPass::IsSupported(rhi::IDevice* device) const {
     return backend::SupportsCompute(device);
 }
 
+void LightCullPass::DestroyDescriptorResources() {
+    if (!m_device) return;
+    for (uint32_t i = 0; i < kDescriptorSetFrames; ++i) {
+        if (m_frameSets[i]) {
+            m_device->DestroyDescriptorSet(m_frameSets[i]);
+            m_frameSets[i] = nullptr;
+        }
+        if (m_lightCullPassSets[i]) {
+            m_device->DestroyDescriptorSet(m_lightCullPassSets[i]);
+            m_lightCullPassSets[i] = nullptr;
+        }
+        if (m_sceneBuffersSets[i]) {
+            m_device->DestroyDescriptorSet(m_sceneBuffersSets[i]);
+            m_sceneBuffersSets[i] = nullptr;
+        }
+        if (m_paramsUBOs[i]) {
+            m_device->DestroyBuffer(m_paramsUBOs[i]);
+            m_paramsUBOs[i] = nullptr;
+        }
+    }
+    if (m_sceneFallbackBuffer) {
+        m_device->DestroyBuffer(m_sceneFallbackBuffer);
+        m_sceneFallbackBuffer = nullptr;
+    }
+}
+
 void LightCullPass::EnsureResources() {
     if (!m_device || m_initialized || m_initAttempted || !IsSupported(m_device)) return;
     m_initAttempted = true;
@@ -71,19 +97,48 @@ create_pipeline:
     rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
     rhi::IPipelineLayout* lightCullLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::LightCullPass);
     rhi::IPipelineLayout* sceneLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
-    if (frameLayout && lightCullLayout && sceneLayout) {
-        m_frameSet = m_device->CreateDescriptorSet(frameLayout);
-        m_lightCullPassSet = m_device->CreateDescriptorSet(lightCullLayout);
-        m_sceneBuffersSet = m_device->CreateDescriptorSet(sceneLayout);
-        rhi::BufferDesc paramsDesc;
-        paramsDesc.sizeInBytes = 256;
-        paramsDesc.usage = rhi::BufferUsage::Uniform;
-        paramsDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        m_paramsUBO = m_device->CreateBuffer(paramsDesc, nullptr);
-        if (m_paramsUBO && m_frameSet) {
-            m_frameSet->UpdateUniformBuffer(0, m_paramsUBO, 0, 128);
-            m_frameSet->UpdateUniformBuffer(1, m_paramsUBO, 128, 128);
+    if (!frameLayout || !lightCullLayout || !sceneLayout) {
+        m_initialized = true;
+        return;
+    }
+
+    rhi::BufferDesc paramsDesc;
+    paramsDesc.sizeInBytes = 256;
+    paramsDesc.usage = rhi::BufferUsage::Uniform;
+    paramsDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+
+    for (uint32_t i = 0; i < kDescriptorSetFrames; ++i) {
+        m_frameSets[i] = m_device->CreateDescriptorSet(frameLayout);
+        m_lightCullPassSets[i] = m_device->CreateDescriptorSet(lightCullLayout);
+        m_sceneBuffersSets[i] = m_device->CreateDescriptorSet(sceneLayout);
+        m_paramsUBOs[i] = m_device->CreateBuffer(paramsDesc, nullptr);
+        if (!m_frameSets[i] || !m_lightCullPassSets[i] || !m_sceneBuffersSets[i] || !m_paramsUBOs[i]) {
+            core::Log::Error("LightCullPass: failed to create per-frame descriptor sets or params UBO.");
+            DestroyDescriptorResources();
+            m_initialized = true;
+            return;
         }
+    }
+
+    rhi::BufferDesc fallbackDesc;
+    fallbackDesc.sizeInBytes = 64u;
+    fallbackDesc.usage = rhi::BufferUsage::Storage;
+    fallbackDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    m_sceneFallbackBuffer = m_device->CreateBuffer(fallbackDesc, nullptr);
+    if (!m_sceneFallbackBuffer) {
+        core::Log::Error("LightCullPass: failed to create SceneBuffers fallback SSBO.");
+        DestroyDescriptorResources();
+        m_initialized = true;
+        return;
+    }
+
+    for (uint32_t i = 0; i < kDescriptorSetFrames; ++i) {
+        m_frameSets[i]->UpdateUniformBuffer(0, m_paramsUBOs[i], 0, 128);
+        m_frameSets[i]->UpdateUniformBuffer(1, m_paramsUBOs[i], 128, 128);
+        m_sceneBuffersSets[i]->UpdateStorageBuffer(0, m_sceneFallbackBuffer, 0, 0);
+        m_sceneBuffersSets[i]->UpdateStorageBuffer(1, m_sceneFallbackBuffer, 0, 0);
+        m_sceneBuffersSets[i]->UpdateStorageBuffer(2, m_sceneFallbackBuffer, 0, 0);
+        m_sceneBuffersSets[i]->UpdateStorageBuffer(3, m_sceneFallbackBuffer, 0, 0);
     }
     m_initialized = true;
 }
@@ -98,10 +153,7 @@ bool LightCullPass::Initialize(rhi::IDevice* device) {
 
 void LightCullPass::Shutdown() {
     if (!m_device) return;
-    if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
-    if (m_lightCullPassSet) { m_device->DestroyDescriptorSet(m_lightCullPassSet); m_lightCullPassSet = nullptr; }
-    if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
-    if (m_paramsUBO) { m_device->DestroyBuffer(m_paramsUBO); m_paramsUBO = nullptr; }
+    DestroyDescriptorResources();
     if (m_computePipeline) {
         m_device->DestroyPipeline(m_computePipeline);
         m_computePipeline = nullptr;
@@ -115,6 +167,7 @@ void LightCullPass::Shutdown() {
     m_outputBuffer = nullptr;
     m_initialized = false;
     m_initAttempted = false;
+    m_device = nullptr;
 }
 
 void LightCullPass::SetViewProj(const float* view16, const float* proj16) {
@@ -146,7 +199,13 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
 
     cmd->BindPipeline(m_computePipeline);
 
-    if (m_frameSet && m_lightCullPassSet && m_sceneBuffersSet && m_paramsUBO) {
+    const uint32_t fi = m_device->GetCurrentFrameIndex() % kDescriptorSetFrames;
+    rhi::IDescriptorSet* frameSet = m_frameSets[fi];
+    rhi::IDescriptorSet* lightCullPassSet = m_lightCullPassSets[fi];
+    rhi::IDescriptorSet* sceneBuffersSet = m_sceneBuffersSets[fi];
+    rhi::IBuffer* paramsUbo = m_paramsUBOs[fi];
+
+    if (frameSet && lightCullPassSet && sceneBuffersSet && paramsUbo && m_sceneFallbackBuffer) {
         struct ParamsBlock {
             float view[16];
             float proj[16];
@@ -168,14 +227,15 @@ void LightCullPass::Execute(rhi::ICommandList* cmd) {
         params.screenHeight = static_cast<float>(m_screenHeight);
         params.pointLightCount = static_cast<int32_t>(m_pointLightCount);
         params.spotLightCount = static_cast<int32_t>(m_spotLightCount);
-        m_paramsUBO->Update(&params, 0, sizeof(params));
-        m_lightCullPassSet->UpdateUniformBuffer(0, m_paramsUBO, 0, sizeof(params));
-        m_lightCullPassSet->UpdateStorageBuffer(1, m_outputBuffer, 0, 0);
-        if (m_pointLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(2, m_pointLightBuffer, 0, 0);
-        if (m_spotLightBuffer) m_sceneBuffersSet->UpdateStorageBuffer(3, m_spotLightBuffer, 0, 0);
+        paramsUbo->Update(&params, 0, sizeof(params));
+        lightCullPassSet->UpdateUniformBuffer(0, paramsUbo, 0, sizeof(params));
+        lightCullPassSet->UpdateStorageBuffer(1, m_outputBuffer, 0, 0);
+        rhi::IBuffer* sceneFb = m_sceneFallbackBuffer;
+        sceneBuffersSet->UpdateStorageBuffer(2, m_pointLightBuffer ? m_pointLightBuffer : sceneFb, 0, 0);
+        sceneBuffersSet->UpdateStorageBuffer(3, m_spotLightBuffer ? m_spotLightBuffer : sceneFb, 0, 0);
         rhi::IDescriptorSet* emptySet = m_device->GetEmptyResourceSet();
         if (emptySet) {
-            rhi::IDescriptorSet* sets[5] = { m_frameSet, m_lightCullPassSet, emptySet, emptySet, m_sceneBuffersSet };
+            rhi::IDescriptorSet* sets[5] = { frameSet, lightCullPassSet, emptySet, emptySet, sceneBuffersSet };
             cmd->BindDescriptorSets(0, 5, sets);
         } else {
             static bool loggedMissingEmptySet = false;

@@ -88,6 +88,49 @@ void GBufferPassSystem::SetBonesBuffer(rhi::IBuffer* buffer) {
     m_gbufferBonesBuffer = buffer;
 }
 
+GBufferPassSystem::~GBufferPassSystem() {
+    Shutdown(m_sceneFallbackDevice);
+}
+
+void GBufferPassSystem::Shutdown(rhi::IDevice* device) {
+    rhi::IDevice* d = device ? device : m_sceneFallbackDevice;
+    if (m_gbufferSceneFallbackBuffer && d) {
+        d->DestroyBuffer(m_gbufferSceneFallbackBuffer);
+        m_gbufferSceneFallbackBuffer = nullptr;
+    }
+    m_sceneFallbackDevice = nullptr;
+}
+
+void GBufferPassSystem::EnsureSceneBuffersDescriptorWrites(rhi::IDevice* device) const {
+    if (!device || !m_gbufferSceneBuffersSet)
+        return;
+
+    if (m_sceneFallbackDevice && m_sceneFallbackDevice != device && m_gbufferSceneFallbackBuffer) {
+        m_sceneFallbackDevice->DestroyBuffer(m_gbufferSceneFallbackBuffer);
+        m_gbufferSceneFallbackBuffer = nullptr;
+    }
+
+    if (!m_gbufferSceneFallbackBuffer) {
+        rhi::BufferDesc fallbackDesc{};
+        fallbackDesc.sizeInBytes = 64u;
+        fallbackDesc.usage = rhi::BufferUsage::Storage;
+        fallbackDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+        m_gbufferSceneFallbackBuffer = device->CreateBuffer(fallbackDesc, nullptr);
+        m_sceneFallbackDevice = device;
+    }
+
+    rhi::IBuffer* const fallback = m_gbufferSceneFallbackBuffer;
+    if (!fallback)
+        return;
+
+    // PassResourceBuilder does not fill SceneBuffers; bind validation requires all four slots.
+    rhi::IBuffer* const forBinding1 = m_gbufferBonesBuffer ? m_gbufferBonesBuffer : fallback;
+    m_gbufferSceneBuffersSet->UpdateStorageBuffer(0, fallback, 0, 0);
+    m_gbufferSceneBuffersSet->UpdateStorageBuffer(1, forBinding1, 0, m_gbufferBonesBuffer ? static_cast<uint32_t>(kMaxBones * sizeof(math::Mat4)) : 0);
+    m_gbufferSceneBuffersSet->UpdateStorageBuffer(2, fallback, 0, 0);
+    m_gbufferSceneBuffersSet->UpdateStorageBuffer(3, fallback, 0, 0);
+}
+
 void GBufferPassSystem::ReloadShaders() {
     if (m_shaderCache) m_shaderCache->reloadAll();
 }
@@ -124,11 +167,14 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
     }
 
     rhi::IDescriptorSet* bindlessSet = m_bindlessHeap ? m_bindlessHeap->GetDescriptorSet() : nullptr;
-    const bool useBindless = (m_bindlessHeap && m_bindlessGetHandle && device && backend::SupportsBindless(device));
     if (!GBufferResourceBindingsReady(device, cmd, m_gbufferFrameSet, m_gbufferMaterialSet, m_gbufferSceneBuffersSet, m_bindlessHeap)) {
         static std::atomic<bool> s_warned{ false };
-        if (!s_warned.exchange(true) && m_shaderCache)
-            core::Log::WarnF("GBufferPassSystem: descriptor sets + bindless not ready; skipping G-buffer geometry.");
+        if (!s_warned.exchange(true)) {
+            core::Log::WarnF(
+                "GBufferPassSystem: skipping G-buffer geometry (device=%p cmd=%p frameSet=%p materialSet=%p sceneSet=%p bindlessHeap=%p bindlessSet=%p supportsBindless=%d).",
+                (void*)device, (void*)cmd, (void*)m_gbufferFrameSet, (void*)m_gbufferMaterialSet, (void*)m_gbufferSceneBuffersSet,
+                (void*)m_bindlessHeap, (void*)bindlessSet, (device && backend::SupportsBindless(device)) ? 1 : 0);
+        }
         gbuffer.Unbind(cmd);
         if (cmd) {
             for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
@@ -136,9 +182,12 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
         }
         return;
     }
-    if (useBindless && cmd) cmd->BindBindlessHeap(m_bindlessHeap);
 
-    auto drawOne = [this, device, cmd, bindlessSet](Shader* shader, const Drawable& d) {
+    // Once per pass: complete set 3 so BindDescriptorSets does not reject the SceneBuffers set (static draws never touch bones).
+    EnsureSceneBuffersDescriptorWrites(device);
+
+    uint32_t submittedDraws = 0;
+    auto drawOne = [this, device, cmd, bindlessSet, &submittedDraws](Shader* shader, const Drawable& d) {
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) return;
 
@@ -159,6 +208,7 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
 
         if (d.materialInstance) d.materialInstance->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
         else material->UpdateForwardResourceSet(device, m_gbufferMaterialSet);
+        // Binding 1 defaults to the shared bones SSBO (or fallback from EnsureSceneBuffersDescriptorWrites); skinned draws upload and narrow the range.
         if (bonePtr && boneCount > 0 && m_gbufferBonesBuffer) {
             const uint32_t boneBytes = static_cast<uint32_t>(boneCount * sizeof(math::Mat4));
             m_gbufferBonesBuffer->Update(bonePtr, 0, boneBytes);
@@ -217,6 +267,7 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
         d.mesh->Bind(device);
         { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(device, d.submeshIndex); }
         d.mesh->Unbind();
+        ++submittedDraws;
     };
 
     if (m_shaderCache) {
@@ -251,6 +302,11 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
     if (cmd) {
         for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
         cmd->SetCullFace(true);
+    }
+    static bool s_loggedSubmission = false;
+    if (!s_loggedSubmission) {
+        core::Log::InfoF("GBufferPassSystem::RenderDrawables submitted draws=%u", submittedDraws);
+        s_loggedSubmission = true;
     }
 }
 
@@ -365,8 +421,6 @@ void GBufferPassSystem::RenderInstanced(GBuffer& gbuffer,
     cmd->SetDepthTest(true);
     cmd->SetDepthWrite(true);
     for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);
-    if (m_bindlessHeap && m_bindlessGetHandle && backend::SupportsBindless(device))
-        cmd->BindBindlessHeap(m_bindlessHeap);
 
     ApplyMaterialBlendAndCull(cmd, baseMaterial);
 

@@ -18,6 +18,8 @@ struct TransparencyPassBuildParams {
     uint32_t height = 0;
     const RenderFrameData* frameData = nullptr;
     CameraView camView{};
+    /** Only deferred should import depth from GBuffer; forward/forward+ already wrote HDR depth. */
+    bool copyDepthFromGBuffer = false;
     bool preferVulkanPath = false;
     ShaderCache* shaderCache = nullptr;
     std::function<void(rhi::ICommandList*, const RenderFrameData&, const CameraView&)> drawVulkan;

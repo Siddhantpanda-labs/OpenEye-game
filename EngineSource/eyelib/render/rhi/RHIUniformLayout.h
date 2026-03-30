@@ -71,7 +71,9 @@ namespace StorageBinding {
  * MultiDraw*IndirectCount: Like MultiDraw*Indirect but draw count is read from countBuffer at countBufferOffset (one uint32_t). Gated by supportsMultiDrawIndirectCount (GL_ARB_indirect_parameters). Use when the GPU writes the draw count (e.g. cull pass writes count then draw).
  *
  * Bindless: When GetCapabilities().supportsBindless is true, CreateBindlessHeap() can return a heap (skeleton currently returns nullptr).
- * Use AllocateTextureHandle/AllocateBufferHandle to get BindlessHandle values for shaders; BindBindlessHeap(cmd, heap) before draw.
+ * Use AllocateTextureHandle/AllocateBufferHandle to get BindlessHandle values for shaders. Prefer BindDescriptorSets with the full
+ * resource-space set list (bindless is set 2 for GBuffer, set 3 for Forward — see VulkanResourceSpaces). BindBindlessHeap may be used
+ * after vkCmdBindPipeline(Forward/GBuffer) to update only the bindless set.
  */
 
 /** Maximum size (bytes) of push constant block. Vulkan minimum is 128; keep <= 256 for portability. */

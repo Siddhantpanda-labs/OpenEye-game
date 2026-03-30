@@ -42,9 +42,22 @@ struct DeferredLightingPassExecuteParams {
 
 class DeferredLightingPassSystem {
 public:
+    DeferredLightingPassSystem() = default;
+    ~DeferredLightingPassSystem();
+
     /** Fills deferred lighting descriptor set and LightingPass::SetResourceSpaceSets; no draws (build-only). */
     DeferredLightingPassExecuteParams BuildParams(const DeferredLightingPassBuildParams& params) const;
     bool Execute(const DeferredLightingPassExecuteParams& params) const;
+    void Shutdown(rhi::IDevice* device = nullptr);
+
+private:
+    void EnsureFallbackResources(rhi::IDevice* device) const;
+
+    mutable rhi::IDevice* m_fallbackDevice = nullptr;
+    mutable rhi::ITexture* m_fallback2DTexture = nullptr;
+    mutable rhi::ITexture* m_fallbackCubeTexture = nullptr;
+    mutable rhi::IBuffer* m_fallbackStorageBuffer = nullptr;
+    mutable rhi::IBuffer* m_fallbackUniformBuffer = nullptr;
 };
 
 }  // namespace render

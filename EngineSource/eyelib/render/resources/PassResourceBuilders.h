@@ -104,13 +104,15 @@ private:
     std::array<uint32_t, kFrames> m_deferredLightingDrawSetCursor = {};
     std::array<rhi::IBuffer*, kFrames> m_frameUbos = {};
     std::array<rhi::IBuffer*, kFrames> m_bonesBuffers = {};
-    rhi::ITexture* m_defaultAlbedoTexture = nullptr;
-    rhi::ITexture* m_defaultNormalTexture = nullptr;
-    rhi::ITexture* m_defaultMetalRoughTexture = nullptr;
     CurrentFrameResources m_current{};
-
-    void EnsureDefaultMaterialTextures(rhi::IDevice* device);
 };
+
+/**
+ * Fills Material resource-space set (UBO 0 + combined samplers 1–3) with material data and 1×1 fallbacks when textures are missing.
+ * Used by GBuffer/forward Material::UpdateForwardResourceSet and by PassResourceBuilder::UpdateMaterialSetWithDefaults.
+ */
+void UpdateMaterialDescriptorSetWithDefaults(rhi::IDevice* device, rhi::IDescriptorSet* targetSet, const Material* material,
+                                           const MaterialInstance* materialInstance);
 
 }  // namespace resources
 }  // namespace render

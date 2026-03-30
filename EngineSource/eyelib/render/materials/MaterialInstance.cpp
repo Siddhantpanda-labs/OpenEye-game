@@ -5,6 +5,7 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHITypes.h"
+#include "eyelib/render/resources/PassResourceBuilders.h"
 #include <algorithm>
 #include <vector>
 
@@ -314,12 +315,7 @@ bool MaterialInstance::IsBatchEquivalent(const MaterialInstance& other) const {
 
 void MaterialInstance::UpdateForwardResourceSet(rhi::IDevice* device, rhi::IDescriptorSet* set) const {
     if (!device || !set || !m_base) return;
-    rhi::IBuffer* buf = GetMaterialBufferRHI(device);
-    if (buf) set->UpdateUniformBuffer(0, buf, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
-    if (rhi::ITexture* t = GetTextureRHI("u_AlbedoTexture")) set->UpdateTexture(1, t);
-    if (rhi::ITexture* t = GetTextureRHI("u_NormalTexture")) set->UpdateTexture(2, t);
-    if (rhi::ITexture* t = GetTextureRHI("u_MetallicRoughnessTexture")) set->UpdateTexture(3, t);
-    else if (rhi::ITexture* t = GetTextureRHI("u_MetallicTexture")) set->UpdateTexture(3, t);
+    resources::UpdateMaterialDescriptorSetWithDefaults(device, set, m_base.get(), this);
 }
 
 void MaterialInstance::ApplyToShader(rhi::IDevice* device, Shader* shader, rhi::ICommandList* cmd) const {

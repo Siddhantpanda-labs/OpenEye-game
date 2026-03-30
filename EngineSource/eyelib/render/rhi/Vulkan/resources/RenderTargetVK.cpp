@@ -85,7 +85,9 @@ IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t h
     }
     if (depthFormat != RHITextureFormat::None) {
         texDesc.format = depthFormat;
-        texDesc.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget);
+        // Depth blits (GBuffer->HDR, HDR/GBuffer->history) require transfer usage on Vulkan.
+        texDesc.usage = transient ? TextureUsage::RenderTarget
+                                  : (TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc | TextureUsage::TransferDst);
         texDesc.transient = transient;
         texDesc.debugName = "RT_Depth";
         ITexture* depthTex = device->CreateTexture(texDesc, nullptr);
@@ -107,7 +109,7 @@ IRenderTarget* CreateDepthOnlyRenderTargetArrayVK(DeviceVK* deviceObj, uint32_t 
     td.height = height;
     td.depthOrArrayLayers = arrayLayers;
     td.format = RHITextureFormat::Depth24;
-    td.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource;
+    td.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource | TextureUsage::TransferSrc | TextureUsage::TransferDst;
     td.mipLevels = 1;
     td.samples = 1;
     td.debugName = "RT_ShadowDepth";

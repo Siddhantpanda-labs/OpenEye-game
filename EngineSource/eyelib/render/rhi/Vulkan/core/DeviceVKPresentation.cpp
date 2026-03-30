@@ -403,7 +403,137 @@ void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
 
 void DeviceVK::BlitFromNativeFramebuffer(void* nativeFbo, IRenderTarget* dst, bool colorOnly) { (void)nativeFbo; (void)dst; (void)colorOnly; }
 
-void DeviceVK::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) { (void)src; (void)dst; }
+void DeviceVK::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
+    if (!src || !dst || !m_immediateCommandList) return;
+    RenderTargetVK* srcRT = static_cast<RenderTargetVK*>(src);
+    RenderTargetVK* dstRT = static_cast<RenderTargetVK*>(dst);
+    ITexture* srcDepth = srcRT->GetDepthTexture();
+    ITexture* dstDepth = dstRT->GetDepthTexture();
+    if (!srcDepth || !dstDepth) {
+        static bool s_loggedMissingDepth = false;
+        if (!s_loggedMissingDepth) {
+            core::Log::WarnF("DeviceVK::BlitDepthOnly skipped: srcDepth=%p dstDepth=%p", (void*)srcDepth, (void*)dstDepth);
+            s_loggedMissingDepth = true;
+        }
+        return;
+    }
+
+    TextureVK* srcTex = static_cast<TextureVK*>(srcDepth);
+    TextureVK* dstTex = static_cast<TextureVK*>(dstDepth);
+    VkImage srcImage = static_cast<VkImage>(srcTex->m_image);
+    VkImage dstImage = static_cast<VkImage>(dstTex->m_image);
+    if (srcImage == VK_NULL_HANDLE || dstImage == VK_NULL_HANDLE) return;
+
+    CommandListVK* imm = m_immediateCommandList.get();
+    imm->EndRenderingIfActive();
+    if (!imm->IsRecording())
+        imm->Begin();
+    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
+    if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+
+    const uint32_t w = std::min(srcTex->m_width, dstTex->m_width);
+    const uint32_t h = std::min(srcTex->m_height, dstTex->m_height);
+    if (w == 0 || h == 0) return;
+
+    auto stateToDepthLayoutInfo = [](ResourceState state, VkImageLayout& outLayout, VkAccessFlags& outAccess, VkPipelineStageFlags& outStage) {
+        switch (state) {
+        case ResourceState::ShaderResource:
+            outLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            outAccess = VK_ACCESS_SHADER_READ_BIT;
+            outStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            break;
+        case ResourceState::DepthRead:
+            outLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            outAccess = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+            outStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            break;
+        case ResourceState::DepthWrite:
+            outLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            outAccess = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            outStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            break;
+        case ResourceState::TransferSrc:
+            outLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            outAccess = VK_ACCESS_TRANSFER_READ_BIT;
+            outStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            break;
+        case ResourceState::TransferDst:
+            outLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            outAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+            outStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            break;
+        case ResourceState::Undefined:
+            outLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            outAccess = 0;
+            outStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            break;
+        default:
+            outLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            outAccess = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            outStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            break;
+        }
+    };
+
+    const ResourceState srcTracked = BarrierTrackerVK::GetImageState(&m_barrierTracker, srcTex->m_image);
+    const ResourceState dstTracked = BarrierTrackerVK::GetImageState(&m_barrierTracker, dstTex->m_image);
+    VkImageLayout srcOldLayout, dstOldLayout;
+    VkAccessFlags srcOldAccess, dstOldAccess;
+    VkPipelineStageFlags srcStage, dstStage;
+    stateToDepthLayoutInfo(srcTracked, srcOldLayout, srcOldAccess, srcStage);
+    stateToDepthLayoutInfo(dstTracked, dstOldLayout, dstOldAccess, dstStage);
+
+    VkImageMemoryBarrier toCopy[2] = {};
+    toCopy[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toCopy[0].srcAccessMask = srcOldAccess;
+    toCopy[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toCopy[0].oldLayout = srcOldLayout;
+    toCopy[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toCopy[0].image = srcImage;
+    toCopy[0].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+    toCopy[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toCopy[1].srcAccessMask = dstOldAccess;
+    toCopy[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toCopy[1].oldLayout = dstOldLayout;
+    toCopy[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toCopy[1].image = dstImage;
+    toCopy[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, srcStage | dstStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, toCopy);
+
+    VkImageCopy copy = {};
+    copy.srcSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
+    copy.dstSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
+    copy.extent = { w, h, 1 };
+    vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+    const ResourceState srcRestoreState = (srcTracked == ResourceState::Undefined) ? ResourceState::DepthWrite : srcTracked;
+    const ResourceState dstRestoreState = (dstTracked == ResourceState::Undefined) ? ResourceState::DepthWrite : dstTracked;
+    VkImageLayout srcRestoreLayout, dstRestoreLayout;
+    VkAccessFlags srcRestoreAccess, dstRestoreAccess;
+    VkPipelineStageFlags srcRestoreStage, dstRestoreStage;
+    stateToDepthLayoutInfo(srcRestoreState, srcRestoreLayout, srcRestoreAccess, srcRestoreStage);
+    stateToDepthLayoutInfo(dstRestoreState, dstRestoreLayout, dstRestoreAccess, dstRestoreStage);
+
+    VkImageMemoryBarrier restore[2] = {};
+    restore[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    restore[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    restore[0].dstAccessMask = srcRestoreAccess;
+    restore[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    restore[0].newLayout = srcRestoreLayout;
+    restore[0].image = srcImage;
+    restore[0].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+    restore[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    restore[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    restore[1].dstAccessMask = dstRestoreAccess;
+    restore[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    restore[1].newLayout = dstRestoreLayout;
+    restore[1].image = dstImage;
+    restore[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcRestoreStage | dstRestoreStage, 0, 0, nullptr, 0, nullptr, 2, restore);
+
+    BarrierTrackerVK::SetImageState(&m_barrierTracker, srcTex->m_image, srcRestoreState);
+    BarrierTrackerVK::SetImageState(&m_barrierTracker, dstTex->m_image, dstRestoreState);
+}
 
 bool DeviceVK::ReadPixelUint32(IRenderTarget* rt, uint32_t x, uint32_t y, uint32_t* outValue) { (void)rt; (void)x; (void)y; (void)outValue; return false; }
 

@@ -93,7 +93,8 @@ bool CascadeShadowMap::Initialize(rhi::IDevice* device, uint32_t resolution, uin
     const size_t bufferSize = m_splitCount * sizeof(math::Mat4);
     rhi::BufferDesc bd;
     bd.sizeInBytes = bufferSize;
-    bd.usage = rhi::BufferUsage::Storage;
+    // Deferred lighting (Vulkan ResourceSetType::DeferredLightingPass binding 6) uses a uniform-buffer descriptor; storage kept for optional SSBO paths.
+    bd.usage = rhi::BufferUsage::Uniform | rhi::BufferUsage::Storage;
     bd.memoryHint = rhi::BufferMemoryHint::HostVisible;
     m_lightSpaceBuffer = device->CreateBuffer(bd);
     if (!m_lightSpaceBuffer) {

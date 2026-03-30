@@ -1,12 +1,14 @@
 #include "eyelib/render/resources/PassResourceBuilders.h"
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
+#include "eyelib/render/rhi/RHIUniformLayout.h"
 
 namespace eyelib {
 namespace render {
 namespace resources {
 
 namespace {
+
 rhi::IDescriptorSet* AcquireDynamicSet(
     rhi::IDevice* device,
     std::vector<rhi::IDescriptorSet*>& setPool,
@@ -125,9 +127,6 @@ void PassResourceBuilder::Shutdown(rhi::IDevice* device) {
     m_deferredLightingDrawSetCursor = {};
     for (rhi::IBuffer*& b : m_frameUbos) { if (b) { device->DestroyBuffer(b); b = nullptr; } }
     for (rhi::IBuffer*& b : m_bonesBuffers) { if (b) { device->DestroyBuffer(b); b = nullptr; } }
-    if (m_defaultAlbedoTexture) { device->DestroyTexture(m_defaultAlbedoTexture); m_defaultAlbedoTexture = nullptr; }
-    if (m_defaultNormalTexture) { device->DestroyTexture(m_defaultNormalTexture); m_defaultNormalTexture = nullptr; }
-    if (m_defaultMetalRoughTexture) { device->DestroyTexture(m_defaultMetalRoughTexture); m_defaultMetalRoughTexture = nullptr; }
     m_current = {};
 }
 
@@ -159,9 +158,13 @@ rhi::IDescriptorSet* PassResourceBuilder::AcquireDeferredLightingSet(rhi::IDevic
                              rhi::IDevice::ResourceSetType::DeferredLightingPass);
 }
 
-void PassResourceBuilder::EnsureDefaultMaterialTextures(rhi::IDevice* device) {
+static rhi::ITexture* g_defaultAlbedoTexture = nullptr;
+static rhi::ITexture* g_defaultNormalTexture = nullptr;
+static rhi::ITexture* g_defaultMetalRoughTexture = nullptr;
+
+static void EnsureSharedDefaultMaterialTextures(rhi::IDevice* device) {
     if (!device) return;
-    if (!m_defaultAlbedoTexture) {
+    if (!g_defaultAlbedoTexture) {
         rhi::TextureDesc desc{};
         desc.type = rhi::TextureType::Texture2D;
         desc.width = 1;
@@ -170,9 +173,9 @@ void PassResourceBuilder::EnsureDefaultMaterialTextures(rhi::IDevice* device) {
         desc.usage = rhi::TextureUsage::ShaderResource;
         desc.mipLevels = 1;
         static const uint8_t white[4] = { 255, 255, 255, 255 };
-        m_defaultAlbedoTexture = device->CreateTexture(desc, white);
+        g_defaultAlbedoTexture = device->CreateTexture(desc, white);
     }
-    if (!m_defaultNormalTexture) {
+    if (!g_defaultNormalTexture) {
         rhi::TextureDesc desc{};
         desc.type = rhi::TextureType::Texture2D;
         desc.width = 1;
@@ -181,9 +184,9 @@ void PassResourceBuilder::EnsureDefaultMaterialTextures(rhi::IDevice* device) {
         desc.usage = rhi::TextureUsage::ShaderResource;
         desc.mipLevels = 1;
         static const uint8_t normal[4] = { 128, 128, 255, 255 };
-        m_defaultNormalTexture = device->CreateTexture(desc, normal);
+        g_defaultNormalTexture = device->CreateTexture(desc, normal);
     }
-    if (!m_defaultMetalRoughTexture) {
+    if (!g_defaultMetalRoughTexture) {
         rhi::TextureDesc desc{};
         desc.type = rhi::TextureType::Texture2D;
         desc.width = 1;
@@ -192,18 +195,17 @@ void PassResourceBuilder::EnsureDefaultMaterialTextures(rhi::IDevice* device) {
         desc.usage = rhi::TextureUsage::ShaderResource;
         desc.mipLevels = 1;
         static const uint8_t metalRough[4] = { 0, 128, 0, 255 };
-        m_defaultMetalRoughTexture = device->CreateTexture(desc, metalRough);
+        g_defaultMetalRoughTexture = device->CreateTexture(desc, metalRough);
     }
 }
 
-void PassResourceBuilder::UpdateMaterialSetWithDefaults(
-    rhi::IDevice* device, rhi::IDescriptorSet* targetSet, const Material* material, const MaterialInstance* materialInstance) {
+void UpdateMaterialDescriptorSetWithDefaults(rhi::IDevice* device, rhi::IDescriptorSet* targetSet, const Material* material,
+                                             const MaterialInstance* materialInstance) {
     if (!device || !targetSet) return;
-    EnsureDefaultMaterialTextures(device);
+    EnsureSharedDefaultMaterialTextures(device);
     if (!material && !materialInstance) return;
 
-    rhi::IBuffer* materialBuffer = materialInstance ? materialInstance->GetMaterialBufferRHI(device)
-                                                    : material->GetMaterialBufferRHI(device);
+    rhi::IBuffer* materialBuffer = materialInstance ? materialInstance->GetMaterialBufferRHI(device) : material->GetMaterialBufferRHI(device);
     if (materialBuffer)
         targetSet->UpdateUniformBuffer(0, materialBuffer, 0, static_cast<uint32_t>(kMaterialBlockStd140Size));
 
@@ -217,9 +219,14 @@ void PassResourceBuilder::UpdateMaterialSetWithDefaults(
     rhi::ITexture* metalRoughTexture = getTexture("u_MetallicRoughnessTexture");
     if (!metalRoughTexture) metalRoughTexture = getTexture("u_MetallicTexture");
 
-    targetSet->UpdateTexture(1, albedoTexture ? albedoTexture : m_defaultAlbedoTexture);
-    targetSet->UpdateTexture(2, normalTexture ? normalTexture : m_defaultNormalTexture);
-    targetSet->UpdateTexture(3, metalRoughTexture ? metalRoughTexture : m_defaultMetalRoughTexture);
+    targetSet->UpdateTexture(1, albedoTexture ? albedoTexture : g_defaultAlbedoTexture);
+    targetSet->UpdateTexture(2, normalTexture ? normalTexture : g_defaultNormalTexture);
+    targetSet->UpdateTexture(3, metalRoughTexture ? metalRoughTexture : g_defaultMetalRoughTexture);
+}
+
+void PassResourceBuilder::UpdateMaterialSetWithDefaults(rhi::IDevice* device, rhi::IDescriptorSet* targetSet, const Material* material,
+                                                      const MaterialInstance* materialInstance) {
+    UpdateMaterialDescriptorSetWithDefaults(device, targetSet, material, materialInstance);
 }
 
 }  // namespace resources

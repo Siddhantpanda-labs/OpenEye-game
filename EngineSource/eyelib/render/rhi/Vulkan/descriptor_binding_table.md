@@ -20,6 +20,8 @@ Shaders, C++ descriptor updates, and pipeline layout creation must match this fi
 4. Shader reflection, C++ descriptor writes, and layout factories must agree 1:1.
 5. New code must not introduce `Legacy` descriptor paths.
 
+**Pipeline-specific set numbering:** The table below is the **Forward** five-set layout (`CreateForwardPipelineLayout`). **GBuffer** uses four sets: 0 Frame, 1 Material, **2 bindless**, 3 SceneBuffers (`CreateGBufferPipelineLayout`). `ICommandList::BindBindlessHeap` (Vulkan) binds the heap at set **3** for Forward and set **2** for GBuffer after the matching pipeline is bound; prefer `BindDescriptorSets(0, N, …)` with all sets.
+
 | Set | Role         | Lifetime   |
 | --- | ------------ | ---------- |
 | 0   | Frame        | Once/frame |

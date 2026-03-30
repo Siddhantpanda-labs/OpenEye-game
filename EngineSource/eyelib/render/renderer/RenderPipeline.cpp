@@ -101,6 +101,9 @@ void RenderPipeline::Shutdown() {
     }
     m_clusteredLightGrid.reset();
     m_renderGraphOrchestrator.reset();
+    if (m_deferredLightingPassSystem && m_device)
+        m_deferredLightingPassSystem->Shutdown(m_device);
+    m_deferredLightingPassSystem.reset();
     m_lightingPass.reset();
     if (m_shadowPass && m_device) m_shadowPass->Shutdown();
     m_shadowPass.reset();
@@ -131,6 +134,8 @@ void RenderPipeline::Shutdown() {
     if (m_gpuCullPassSystem && m_device)
         m_gpuCullPassSystem->Shutdown();
     m_gpuCullPassSystem.reset();
+    if (m_gbufferPassSystem && m_device)
+        m_gbufferPassSystem->Shutdown(m_device);
     m_gbufferPassSystem.reset();
     m_shaderCache = nullptr;
     m_usingShared = nullptr;
@@ -629,6 +634,13 @@ RenderPipeline::DeferredLightingPassParams RenderPipeline::BuildDeferredLighting
                             p.lightParams.castShadows, &frameData->pointLights, &frameData->spotLights, p.cascadeForLighting);
 
     p.lightingSetForCall = AcquireDeferredLightingSet();
+    if (!p.lightingSetForCall) {
+        static bool s_loggedMissingDeferredSet = false;
+        if (!s_loggedMissingDeferredSet) {
+            core::Log::Warn("RenderPipeline::BuildDeferredLightingPassParams: AcquireDeferredLightingSet returned null.");
+            s_loggedMissingDeferredSet = true;
+        }
+    }
     return p;
 }
 
@@ -643,6 +655,7 @@ RenderPipeline::TransparencyPassParams RenderPipeline::BuildTransparencyPassPara
     const RenderFrameData* frameData = frameCtx.frameData;
     p.frameData = frameData;
     p.camView = camView;
+    p.copyDepthFromGBuffer = (m_mode == PipelineMode::Deferred);
     p.preferVulkanPath = backend::PreferVulkanTransparencyPath(m_device, m_shaderCache);
     return p;
 }

@@ -266,7 +266,10 @@ struct ICommandList {
     virtual void BindDescriptorSet(IDescriptorSet* set) = 0;
     /** Bind descriptor sets. firstSet = first set index; count = number of sets; sets = array. dynamicOffsets/dynamicOffsetCount for dynamic UBO/buffer offsets (optional). Pipeline must be bound. No-op if count==0 or sets==nullptr. */
     virtual void BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescriptorSet* const* sets, const uint32_t* dynamicOffsets = nullptr, uint32_t dynamicOffsetCount = 0) { (void)firstSet; (void)count; (void)sets; (void)dynamicOffsets; (void)dynamicOffsetCount; }
-    /** Bind bindless heap for the next draw/dispatch (bindless pipelines only). No-op if heap is null or bindless not supported. */
+    /**
+     * Bind only the bindless heap descriptor set (Vulkan: valid only for Forward/GBuffer pipeline layouts; set index is layout-specific).
+     * Prefer BindDescriptorSets with the full resource-space set list when possible.
+     */
     virtual void BindBindlessHeap(IBindlessHeap* heap) = 0;
 
     /** Push constants: small per-draw data. See RHIUniformLayout.h for layout. Size must be <= kPushConstantMaxSize. */

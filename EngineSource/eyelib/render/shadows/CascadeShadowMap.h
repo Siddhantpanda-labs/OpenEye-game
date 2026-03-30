@@ -55,9 +55,9 @@ public:
 
     /** Depth texture (2D array); bind at shadow map slot for lighting/forward. */
     rhi::ITexture* GetDepthTextureRHI() const;
-    /** SSBO of split_count mat4 light-space matrices; bind for lighting/forward. */
+    /** Cascade light-space matrices (split_count × mat4). Deferred lighting binds as UBO (Vulkan set 1 binding 6). */
     rhi::IBuffer* GetLightSpaceBufferRHI() const;
-    /** Upload light_space to SSBO. Call after Update, before lighting pass. */
+    /** Upload m_lightSpace to the GPU buffer. Call after Update, before lighting pass. */
     void MapLightSpaceToBuffer() const;
 
     uint32_t GetSplitCount() const { return m_splitCount; }

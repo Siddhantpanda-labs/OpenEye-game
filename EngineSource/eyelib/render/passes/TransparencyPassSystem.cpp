@@ -11,7 +11,7 @@ TransparencyPassExecuteParams TransparencyPassSystem::BuildParams(const Transpar
 
 bool TransparencyPassSystem::Execute(const TransparencyPassExecuteParams& params) const {
     if (!params.build.frameData) return false;
-    if (params.build.device && params.build.hdrRenderTarget && params.build.gbufferRenderTarget)
+    if (params.build.copyDepthFromGBuffer && params.build.device && params.build.hdrRenderTarget && params.build.gbufferRenderTarget)
         params.build.device->BlitDepthOnly(params.build.gbufferRenderTarget, params.build.hdrRenderTarget);
     if (params.build.cmd && params.build.hdrRenderTarget) {
         params.build.cmd->SetRenderTarget(params.build.hdrRenderTarget);

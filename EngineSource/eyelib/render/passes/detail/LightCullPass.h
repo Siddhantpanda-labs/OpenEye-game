@@ -2,6 +2,7 @@
 
 #include "eyelib/render/RenderContext.h"
 #include "eyelib/render/rhi/RHI.h"
+#include <array>
 #include <cstdint>
 
 namespace eyelib {
@@ -44,14 +45,20 @@ public:
 
 private:
     void EnsureResources();
+    void DestroyDescriptorResources();
+
+    /** Must match DeviceVK::kMaxFrames / PassResourceBuilder::kFrames (Vulkan frames in flight). */
+    static constexpr uint32_t kDescriptorSetFrames = 3u;
 
     rhi::IDevice* m_device = nullptr;
     rhi::IShader* m_computeShader = nullptr;
     rhi::IPipeline* m_computePipeline = nullptr;
-    rhi::IDescriptorSet* m_frameSet = nullptr;
-    rhi::IDescriptorSet* m_lightCullPassSet = nullptr;
-    rhi::IDescriptorSet* m_sceneBuffersSet = nullptr;
-    rhi::IBuffer* m_paramsUBO = nullptr;
+    std::array<rhi::IDescriptorSet*, kDescriptorSetFrames> m_frameSets{};
+    std::array<rhi::IDescriptorSet*, kDescriptorSetFrames> m_lightCullPassSets{};
+    std::array<rhi::IDescriptorSet*, kDescriptorSetFrames> m_sceneBuffersSets{};
+    /** SceneBuffers bindings 0–1 unused by light_cull.comp but required by shared Vulkan layout; 2–3 fall back when no lights. */
+    rhi::IBuffer* m_sceneFallbackBuffer = nullptr;
+    std::array<rhi::IBuffer*, kDescriptorSetFrames> m_paramsUBOs{};
     rhi::IBuffer* m_pointLightBuffer = nullptr;
     rhi::IBuffer* m_spotLightBuffer = nullptr;
     rhi::IBuffer* m_outputBuffer = nullptr;
