@@ -32,7 +32,7 @@ void SkyboxPassSystem::EnsureCubemapShader() {
     m_skyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
     skyboxDepth.depthTest = true;
-    skyboxDepth.depthWrite = true;
+    skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
     if (!m_skyboxShader->Load(m_device, "passes/sky/skybox", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
                               std::optional{::eyelib::render::rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
@@ -57,7 +57,7 @@ void SkyboxPassSystem::EnsureProceduralShader() {
     m_proceduralSkyboxShader = std::make_shared<Shader>();
     rhi::DepthStencilState skyboxDepth;
     skyboxDepth.depthTest = true;
-    skyboxDepth.depthWrite = true;
+    skyboxDepth.depthWrite = false;
     skyboxDepth.depthCompare = rhi::DepthCompare::LessEqual;
     if (!m_proceduralSkyboxShader->Load(m_device, "passes/sky/skybox_procedural", Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, &skyboxDepth, rhi::PipelineLayoutKind::Post,
                                         std::optional{::eyelib::render::rhi::StandardAttachmentFormats::PostHDRWithDepth()})) {
@@ -226,7 +226,7 @@ bool SkyboxPassSystem::ExecuteCubemap(const SkyboxPassExecuteParams& params) {
     if (cmd) {
         cmd->SetCullFace(false);
         cmd->SetDepthTest(true);
-        cmd->SetDepthWrite(true);
+        cmd->SetDepthWrite(false);
         cmd->SetDepthFuncLess(false);
     }
     shader->Bind(params.build.device);
@@ -258,7 +258,7 @@ bool SkyboxPassSystem::ExecuteCubemap(const SkyboxPassExecuteParams& params) {
     shader->Unbind();
     if (cmd) {
         cmd->SetDepthTest(true);
-        cmd->SetDepthWrite(true);
+        cmd->SetDepthWrite(false);
         cmd->SetDepthFuncLess(true);
         cmd->SetCullFace(true);
         cmd->SetRenderTarget(nullptr);

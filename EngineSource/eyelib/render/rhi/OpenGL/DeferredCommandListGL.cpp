@@ -41,6 +41,10 @@ void DeferredCommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValu
     ClearValue copy = clear;
     Record([rt, copy](ICommandList* c) { c->ClearRenderTarget(rt, copy); });
 }
+void DeferredCommandListGL::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) {
+    ClearValue copy = clear;
+    Record([rt, copy](ICommandList* c) { c->ClearRenderTargetColorOnly(rt, copy); });
+}
 void DeferredCommandListGL::ClearDefaultFramebuffer(const ClearValue& clear) {
     ClearValue copy = clear;
     Record([copy](ICommandList* c) { c->ClearDefaultFramebuffer(copy); });

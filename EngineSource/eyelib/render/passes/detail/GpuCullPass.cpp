@@ -1,4 +1,4 @@
-#include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/passes/detail/GpuCullPass.h"
 #include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/ShaderSourceLoader.h"

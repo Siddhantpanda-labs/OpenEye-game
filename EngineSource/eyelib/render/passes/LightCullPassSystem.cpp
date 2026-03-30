@@ -1,5 +1,5 @@
 #include "eyelib/render/passes/LightCullPassSystem.h"
-#include "eyelib/render/lighting/LightCullPass.h"
+#include "eyelib/render/passes/detail/LightCullPass.h"
 
 namespace eyelib {
 namespace render {

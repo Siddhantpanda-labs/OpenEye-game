@@ -228,10 +228,10 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, width, height);
     cmd->SetDepthTest(true);
+    cmd->SetDepthFuncLess(true);
     cmd->SetDepthWrite(false);
     cmd->SetBlend(false);
     cmd->SetCullFace(false);
-    cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
     res.shader->Bind(device);
     if (backend::IsVulkan(device)) {
         abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
@@ -241,7 +241,6 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     }
     cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
     cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
-    cmd->SetPolygonOffsetLine(false, 0.f, 0.f);
     res.shader->Unbind();
 }
 
@@ -280,10 +279,10 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, width, height);
     cmd->SetDepthTest(true);
+    cmd->SetDepthFuncLess(true);
     cmd->SetDepthWrite(false);
     cmd->SetBlend(false);
     cmd->SetCullFace(false);
-    cmd->SetPolygonOffsetLine(true, -1.0f, -1.0f);
     res.shader->Bind(device);
     if (backend::IsVulkan(device)) {
         abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
@@ -293,7 +292,6 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     }
     cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
     cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
-    cmd->SetPolygonOffsetLine(false, 0.f, 0.f);
     res.shader->Unbind();
 }
 

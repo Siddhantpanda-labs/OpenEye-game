@@ -44,7 +44,8 @@ bool EditorOverlayPassSystem::ExecuteEntityId(const EntityIdOverlayExecuteParams
 
     rhi::ClearValue clearId = {};
     clearId.colorUint = 0u;
-    params.build.cmd->ClearRenderTarget(params.build.entityIdRenderTarget, clearId);
+    // Entity-ID target shares scene depth; clear only color so depth remains valid for later overlays/debug lines.
+    params.build.cmd->ClearRenderTargetColorOnly(params.build.entityIdRenderTarget, clearId);
 
     params.build.entityIdShader->Bind(params.build.device);
     if (params.build.useTypedPush) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/render/RenderContext.h"
 #include "eyelib/render/IRenderSceneView.h"
 #include "eyelib/render/PipelineSharedResources.h"
 #include "eyelib/render/RenderTypes.h"
@@ -17,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -187,14 +189,13 @@ private:
     void GraphExecuteForwardOpaque();
     void GraphExecuteCopyDepthOcclusionForward();
     void GraphExecuteForwardPlusOpaque();
-    /** Pass name → executor for `RenderGraphRecipes` / `FrameGraphRecipeBuilders` (keeps `Build*Graph` thin). */
-    FrameGraph::ExecuteFunc ExecutorForDeferredPass(const std::string& name);
-    FrameGraph::ExecuteFunc ExecutorForForwardPass(const std::string& name);
-    FrameGraph::ExecuteFunc ExecutorForForwardPlusPass(const std::string& name);
-    FrameGraph::ExecuteFunc ExecutorForForwardStereoPass(const std::string& name);
+    /** Pass name + wiring set → default executor (overrides applied in `ResolveFrameGraphExecutor`). */
+    FrameGraph::ExecuteFunc ExecutorFor(FrameGraphExecutorSet set, const std::string& name);
     FrameGraph::ExecuteFunc ExecutorForForwardStereoSkyboxLeft();
     FrameGraph::ExecuteFunc ExecutorForForwardStereoSkyboxRight();
     FrameGraph::ExecuteFunc ResolveFrameGraphExecutor(FrameGraphExecutorSet set, const std::string& name);
+    /** Device + command list from frame-graph execution context (B2). */
+    RenderContext MakeRenderContext(const FrameRenderContext& frc) const;
     FrameGraph::ExecuteFunc ResolveForwardStereoSkyboxExecutor(bool rightEye);
     /** Pass wiring: delegates to `FrameGraphRecipeBuilders` + executor lookup. */
     void BuildDeferredGraph(FrameGraph& fg);

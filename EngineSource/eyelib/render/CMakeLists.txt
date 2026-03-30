@@ -93,7 +93,9 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/GBuffer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/GBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipelineGraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/RenderPipeline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphPassNames.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/FrameRenderContext.h
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphRecipeBuilders.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/graph/FrameGraphRecipeBuilders.h
@@ -111,8 +113,8 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/lighting/SceneLighting.h
     ${CMAKE_CURRENT_SOURCE_DIR}/lighting/ClusteredLightGrid.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lighting/ClusteredLightGrid.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/LightCullPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/lighting/LightCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/detail/LightCullPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/detail/LightCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ibl/IBL.h
     ${CMAKE_CURRENT_SOURCE_DIR}/reflection/ReflectionProbe.cpp
@@ -141,14 +143,12 @@ list(APPEND RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightingPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/TransparencyPass.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPass.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/detail/GpuCullPass.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/passes/detail/GpuCullPass.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/LightCullPassSystem.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullScenePrep.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/passes/GpuCullScenePrep.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/SkyboxPassSystem.h
     ${CMAKE_CURRENT_SOURCE_DIR}/passes/PostProcessPassSystem.cpp

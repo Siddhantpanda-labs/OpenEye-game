@@ -226,6 +226,41 @@ void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     vkCmdClearAttachments(buf, static_cast<uint32_t>(clears.size()), clears.data(), 1, &rect);
 }
 
+void CommandListVK::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) {
+    if (!rt || !m_isRecording || !m_commandBuffer) return;
+    RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
+    if (rtVK != m_currentRenderTarget) return;
+    VkCommandBuffer buf = static_cast<VkCommandBuffer>(m_commandBuffer);
+    const uint32_t colorCount = rtVK->GetColorAttachmentCount();
+    std::vector<VkClearAttachment> clears;
+    clears.reserve(colorCount);
+    for (uint32_t i = 0; i < colorCount; ++i) {
+        VkClearAttachment att = {};
+        att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        att.colorAttachment = i;
+        ITexture* ctex = rtVK->GetColorTexture(i);
+        const RHITextureFormat fmt = ctex ? ctex->GetFormat() : RHITextureFormat::RGBA8;
+        if (fmt == RHITextureFormat::R32UI) {
+            att.clearValue.color.uint32[0] = clear.colorUint;
+            att.clearValue.color.uint32[1] = 0;
+            att.clearValue.color.uint32[2] = 0;
+            att.clearValue.color.uint32[3] = 0;
+        } else {
+            att.clearValue.color.float32[0] = clear.color[0];
+            att.clearValue.color.float32[1] = clear.color[1];
+            att.clearValue.color.float32[2] = clear.color[2];
+            att.clearValue.color.float32[3] = clear.color[3];
+        }
+        clears.push_back(att);
+    }
+    if (clears.empty()) return;
+    VkClearRect rect = {};
+    rect.rect = { { 0, 0 }, { rtVK->GetWidth(), rtVK->GetHeight() } };
+    rect.baseArrayLayer = 0;
+    rect.layerCount = 1;
+    vkCmdClearAttachments(buf, static_cast<uint32_t>(clears.size()), clears.data(), 1, &rect);
+}
+
 void CommandListVK::ClearDefaultFramebuffer(const ClearValue& clear) { (void)clear; }
 
 void CommandListVK::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {

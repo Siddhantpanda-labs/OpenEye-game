@@ -223,6 +223,8 @@ struct ICommandList {
     virtual void SetRenderTarget(IRenderTarget* rt) = 0;
     virtual void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) = 0;
     virtual void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) = 0;
+    /** Clear only color attachment(s); depth/stencil remain untouched (for RTs with shared depth). */
+    virtual void ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) { ClearRenderTarget(rt, clear); }
     virtual void ClearDefaultFramebuffer(const ClearValue& clear) = 0;
     virtual void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) = 0;
     /** Set viewport for a given index (for stereo: index 0 = left, 1 = right). Used with gl_ViewportIndex in shaders. */

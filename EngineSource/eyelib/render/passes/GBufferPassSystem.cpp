@@ -1,5 +1,5 @@
 #include "eyelib/render/passes/GBufferPassSystem.h"
-#include "eyelib/render/passes/GpuCullPass.h"
+#include "eyelib/render/passes/detail/GpuCullPass.h"
 #include "eyelib/render/ShaderCache.h"
 #include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"

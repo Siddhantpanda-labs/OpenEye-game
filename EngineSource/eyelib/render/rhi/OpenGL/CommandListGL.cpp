@@ -95,6 +95,20 @@ void CommandListGL::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     }
 }
 
+void CommandListGL::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) {
+    if (!rt) return;
+    SetRenderTarget(rt);
+    auto* r = static_cast<RenderTargetGL*>(rt);
+    for (uint32_t i = 0;; ++i) {
+        ITexture* color = r->GetColorTexture(i);
+        if (!color) break;
+        if (color->GetFormat() == RHITextureFormat::R32UI)
+            glClearBufferuiv(GL_COLOR, static_cast<GLint>(i), &clear.colorUint);
+        else
+            glClearBufferfv(GL_COLOR, static_cast<GLint>(i), clear.color);
+    }
+}
+
 void CommandListGL::ClearDefaultFramebuffer(const ClearValue& clear) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glClearColor(clear.color[0], clear.color[1], clear.color[2], clear.color[3]);

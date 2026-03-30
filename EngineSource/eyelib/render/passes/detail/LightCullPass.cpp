@@ -1,4 +1,4 @@
-#include "eyelib/render/lighting/LightCullPass.h"
+#include "eyelib/render/passes/detail/LightCullPass.h"
 #include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/ShaderSourceLoader.h"
 #include "eyelib/core/Log.h"
