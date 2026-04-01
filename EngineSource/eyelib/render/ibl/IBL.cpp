@@ -280,7 +280,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
     const uint32_t frameIndex = m_deviceRHI->GetCurrentFrameIndex() % kIblPassSetFrames;
     rhi::IDescriptorSet* activeIblSet = m_iblPassSets[frameIndex];
 
-    rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
+    rhi::ICommandList* cmd = m_deviceRHI->GetActiveRecordingCommandList();
     if (!cmd) return false;
 
     rhi::BarrierTextureForShaderRead(cmd, environmentCubemap);
@@ -426,7 +426,7 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
         return false;
     }
 
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return false;
 
     const math::Mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
@@ -504,7 +504,7 @@ unsigned int IBL::GetPrefilterMap() const { return NativeId(m_prefilterRHI); }
 unsigned int IBL::GetBRDFLUT() const { return NativeId(m_brdfLUTRHI); }
 
 void IBL::BindForLighting(rhi::ICommandList* cmd, unsigned int irradianceUnit, unsigned int prefilterUnit, unsigned int brdfLUTUnit) const {
-    rhi::ICommandList* list = cmd ? cmd : (m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr);
+    rhi::ICommandList* list = cmd ? cmd : (m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr);
     if (!list) return;
     if (m_irradianceRHI) list->BindTexture(m_irradianceRHI, irradianceUnit);
     if (m_prefilterRHI) list->BindTexture(m_prefilterRHI, prefilterUnit);

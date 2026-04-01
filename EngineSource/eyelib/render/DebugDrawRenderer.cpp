@@ -100,38 +100,20 @@ static void TryLoadFont() {
     s_fontReady = true;
 }
 
-} // namespace
-
-void DebugDrawRenderer::Shutdown() {
-    for (auto& kv : s_perDevice) {
-        rhi::IDevice* dev = kv.first;
-        PerDeviceResources& res = kv.second;
-        if (dev && res.vertexBufferRHI) {
-            dev->DestroyBuffer(res.vertexBufferRHI);
-            res.vertexBufferRHI = nullptr;
-        }
-        res.vertexCapacity = 0;
-        res.shader.reset();
-        res.valid = false;
-    }
-    s_perDevice.clear();
+static rhi::ICommandList* CommandListFromContext(const RenderContext& ctx) {
+    if (!ctx.device) return nullptr;
+    return ctx.cmd ? ctx.cmd : ctx.device->GetActiveRecordingCommandList();
 }
 
-void DebugDrawRenderer::Render(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
-    Render(ctx.device, camera, target, width, height);
-}
-
-void DebugDrawRenderer::Render(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
+static void RenderWithCommandList(rhi::IDevice* device, rhi::ICommandList* cmd, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
     const auto lines = debug::DebugDraw::GetLines();
     const auto texts = debug::DebugDraw::GetTexts();
     if (lines.empty() && texts.empty()) return;
-    if (width == 0 || height == 0 || !device) return;
+    if (width == 0 || height == 0 || !device || !cmd) return;
 
     s_textRenderer.SetDevice(device);
     PerDeviceResources& res = EnsureResources(device);
     if (!res.shader || !res.shader->IsValid()) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
-    if (!cmd) return;
 
     cmd->SetRenderTarget(target);
     cmd->SetViewport(0, 0, width, height);
@@ -194,25 +176,9 @@ void DebugDrawRenderer::Render(rhi::IDevice* device, const CameraView& camera, r
     }
 }
 
-void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
-    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
-    RenderLinesWithDepth(ctx.device, camera, target, width, height, lines, color);
-}
-
-void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
-    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
-    if (lines.empty() || width == 0 || height == 0 || !device) return;
-    PerDeviceResources& res = EnsureResources(device);
-    if (!res.shader || !res.shader->IsValid()) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
-    if (!cmd || !target) return;
-
-    std::vector<LineVertex> vertices;
-    vertices.reserve(lines.size() * 2);
-    for (const auto& l : lines) {
-        vertices.push_back({ l.first, color });
-        vertices.push_back({ l.second, color });
-    }
+static void RenderLineVerticesWithDepth(rhi::IDevice* device, rhi::ICommandList* cmd, PerDeviceResources& res, const CameraView& camera, rhi::IRenderTarget* target,
+    uint32_t width, uint32_t height, const std::vector<LineVertex>& vertices) {
+    if (vertices.empty() || !cmd || !target) return;
     if (!res.vertexBufferRHI || vertices.size() * sizeof(LineVertex) > res.vertexCapacity) {
         if (res.vertexBufferRHI) device->DestroyBuffer(res.vertexBufferRHI);
         rhi::BufferDesc desc;
@@ -244,17 +210,27 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
     res.shader->Unbind();
 }
 
-void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
-    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
-    RenderLinesWithDepth(ctx.device, camera, target, width, height, linesWithColors);
+static void DoRenderLinesWithDepthSolidColor(rhi::IDevice* device, rhi::ICommandList* cmd, const CameraView& camera, rhi::IRenderTarget* target,
+    uint32_t width, uint32_t height, const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
+    if (lines.empty() || width == 0 || height == 0 || !device) return;
+    PerDeviceResources& res = EnsureResources(device);
+    if (!res.shader || !res.shader->IsValid()) return;
+    if (!cmd || !target) return;
+
+    std::vector<LineVertex> vertices;
+    vertices.reserve(lines.size() * 2);
+    for (const auto& l : lines) {
+        vertices.push_back({ l.first, color });
+        vertices.push_back({ l.second, color });
+    }
+    RenderLineVerticesWithDepth(device, cmd, res, camera, target, width, height, vertices);
 }
 
-void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
-    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
+static void DoRenderLinesWithDepthColored(rhi::IDevice* device, rhi::ICommandList* cmd, const CameraView& camera, rhi::IRenderTarget* target,
+    uint32_t width, uint32_t height, const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
     if (linesWithColors.empty() || width == 0 || height == 0 || !device) return;
     PerDeviceResources& res = EnsureResources(device);
     if (!res.shader || !res.shader->IsValid()) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
     if (!cmd || !target) return;
 
     std::vector<LineVertex> vertices;
@@ -264,35 +240,55 @@ void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraV
         vertices.push_back({ lc.first.first, color });
         vertices.push_back({ lc.first.second, color });
     }
-    if (!res.vertexBufferRHI || vertices.size() * sizeof(LineVertex) > res.vertexCapacity) {
-        if (res.vertexBufferRHI) device->DestroyBuffer(res.vertexBufferRHI);
-        rhi::BufferDesc desc;
-        desc.sizeInBytes = std::max<size_t>(vertices.size() * sizeof(LineVertex), 1024);
-        desc.usage = rhi::BufferUsage::Vertex;
-        desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
-        res.vertexBufferRHI = device->CreateBuffer(desc);
-        res.vertexCapacity = desc.sizeInBytes;
-    }
-    if (!res.vertexBufferRHI) return;
-    res.vertexBufferRHI->Update(vertices.data(), 0, vertices.size() * sizeof(LineVertex));
+    RenderLineVerticesWithDepth(device, cmd, res, camera, target, width, height, vertices);
+}
 
-    cmd->SetRenderTarget(target);
-    cmd->SetViewport(0, 0, width, height);
-    cmd->SetDepthTest(true);
-    cmd->SetDepthFuncLess(true);
-    cmd->SetDepthWrite(false);
-    cmd->SetBlend(false);
-    cmd->SetCullFace(false);
-    res.shader->Bind(device);
-    if (backend::IsVulkan(device)) {
-        abi::WriteViewProjectionPairPushConstants(cmd, camera.view, camera.projection);
-    } else {
-        res.shader->SetMat4("u_View", camera.view);
-        res.shader->SetMat4("u_Projection", camera.projection);
+} // namespace
+
+void DebugDrawRenderer::Shutdown() {
+    for (auto& kv : s_perDevice) {
+        rhi::IDevice* dev = kv.first;
+        PerDeviceResources& res = kv.second;
+        if (dev && res.vertexBufferRHI) {
+            dev->DestroyBuffer(res.vertexBufferRHI);
+            res.vertexBufferRHI = nullptr;
+        }
+        res.vertexCapacity = 0;
+        res.shader.reset();
+        res.valid = false;
     }
-    cmd->BindVertexBuffer(res.vertexBufferRHI, 0);
-    cmd->Draw(static_cast<uint32_t>(vertices.size()), 0);
-    res.shader->Unbind();
+    s_perDevice.clear();
+}
+
+void DebugDrawRenderer::Render(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
+    RenderWithCommandList(ctx.device, CommandListFromContext(ctx), camera, target, width, height);
+}
+
+void DebugDrawRenderer::Render(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height) {
+    rhi::ICommandList* cmd = device ? device->GetActiveRecordingCommandList() : nullptr;
+    RenderWithCommandList(device, cmd, camera, target, width, height);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
+    DoRenderLinesWithDepthSolidColor(ctx.device, CommandListFromContext(ctx), camera, target, width, height, lines, color);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<math::Vec3, math::Vec3>>& lines, const math::Vec4& color) {
+    rhi::ICommandList* cmd = device ? device->GetActiveRecordingCommandList() : nullptr;
+    DoRenderLinesWithDepthSolidColor(device, cmd, camera, target, width, height, lines, color);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(const RenderContext& ctx, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
+    DoRenderLinesWithDepthColored(ctx.device, CommandListFromContext(ctx), camera, target, width, height, linesWithColors);
+}
+
+void DebugDrawRenderer::RenderLinesWithDepth(rhi::IDevice* device, const CameraView& camera, rhi::IRenderTarget* target, uint32_t width, uint32_t height,
+    const std::vector<std::pair<std::pair<math::Vec3, math::Vec3>, math::Vec4>>& linesWithColors) {
+    rhi::ICommandList* cmd = device ? device->GetActiveRecordingCommandList() : nullptr;
+    DoRenderLinesWithDepthColored(device, cmd, camera, target, width, height, linesWithColors);
 }
 
 void DebugDrawRenderer::SetTextFontPath(const std::string& path, float pixelHeight) {

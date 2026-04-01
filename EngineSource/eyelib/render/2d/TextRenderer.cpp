@@ -94,7 +94,7 @@ void TextRenderer::RenderText(const std::string& text, Font& font, const math::V
     if (m_vertices.empty()) return;
     rhi::IDevice* device = m_injectedDevice ? m_injectedDevice : m_deviceRHI;
     if (!device) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return;
     EnsureBuffers(m_vertices.size() * sizeof(Vertex), m_indices.size() * sizeof(unsigned int));
     if (!m_vertexBufferRHI || !m_indexBufferRHI) return;
