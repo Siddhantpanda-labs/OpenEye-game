@@ -1,63 +1,64 @@
 #include "api/geometry/Primitives.h"
 #include "eyelib/geometry/primitives/MeshPrimitives.h"
 #include "api/render/Mesh.h"
-#include "api/render/RenderDevice.h"
 
 namespace eyelib {
 namespace api {
 namespace geometry {
 
-/** Upload mesh to GPU if device is set. Primitives are created CPU-only otherwise; caller can pass device or upload later. */
-static void UploadMeshToGPU(Mesh& mesh, RenderDevice device = RenderDevice(nullptr)) {
-    if (device) mesh.UploadToGPU(device);
-}
-
-std::shared_ptr<Mesh> Primitives::CreateCube(float size) {
+std::shared_ptr<Mesh> Primitives::CreateCube(RenderDevice device, float size) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateCube(*mesh->GetEditableMesh(), size);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreateSphere(float radius, int segments, int rings) {
+std::shared_ptr<Mesh> Primitives::CreateSphere(RenderDevice device, float radius, int segments, int rings) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateSphere(*mesh->GetEditableMesh(), radius, segments, rings);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreatePlane(float width, float height, int widthSegments, int heightSegments) {
+std::shared_ptr<Mesh> Primitives::CreatePlane(RenderDevice device, float width, float height, int widthSegments, int heightSegments) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreatePlane(*mesh->GetEditableMesh(), width, height, widthSegments, heightSegments);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreateQuad() {
+std::shared_ptr<Mesh> Primitives::CreateQuad(RenderDevice device) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateQuad(*mesh->GetEditableMesh());
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreateCylinder(float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
+std::shared_ptr<Mesh> Primitives::CreateCylinder(RenderDevice device, float radius, float height, int segments, int rings, bool capTop, bool capBottom) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateCylinder(*mesh->GetEditableMesh(), radius, height, segments, rings, capTop, capBottom);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreateCone(float radius, float height, int segments, bool capBase) {
+std::shared_ptr<Mesh> Primitives::CreateCone(RenderDevice device, float radius, float height, int segments, bool capBase) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateCone(*mesh->GetEditableMesh(), radius, height, segments, capBase);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 
-std::shared_ptr<Mesh> Primitives::CreateTorus(float radius, float tubeRadius, int segments, int tubeSegments) {
+std::shared_ptr<Mesh> Primitives::CreateTorus(RenderDevice device, float radius, float tubeRadius, int segments, int tubeSegments) {
+    if (!device) return nullptr;
     auto mesh = std::make_shared<Mesh>();
     ::eyelib::geometry::MeshPrimitives::CreateTorus(*mesh->GetEditableMesh(), radius, tubeRadius, segments, tubeSegments);
-    UploadMeshToGPU(*mesh);
+    mesh->UploadToGPU(device);
     return mesh;
 }
 

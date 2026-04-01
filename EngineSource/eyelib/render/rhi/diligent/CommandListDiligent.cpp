@@ -73,6 +73,7 @@ const char* PostSlotToVariableName(const char* assetPath, uint32_t slot) {
         return nullptr;
     }
     if (strcmp(assetPath, "passes/post/copy") == 0) return (slot == 0) ? "u_Texture" : nullptr;
+    if (strcmp(assetPath, "passes/post/display_encode") == 0) return (slot == 0) ? "u_Texture" : nullptr;
     return nullptr;
 }
 } // namespace

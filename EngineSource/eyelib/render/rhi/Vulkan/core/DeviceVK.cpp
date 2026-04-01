@@ -73,6 +73,7 @@ DeviceVK::~DeviceVK() {
         std::set<void*> alreadyDestroyedPipelines;
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i, &alreadyDestroyedPipelines);
+        RetirePendingTextureWrappers(true);
         for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
             DestroyDescriptorSetVK(this, set);
         m_pendingDescriptorSetsToFree.clear();
@@ -89,10 +90,21 @@ DeviceVK::~DeviceVK() {
 
     if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
     if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
+    if (m_fallbackShaderResourceTexture2D) {
+        DestroyTexture(m_fallbackShaderResourceTexture2D);
+        m_fallbackShaderResourceTexture2D = nullptr;
+    }
+    if (m_fallbackShaderResourceTextureCube) {
+        DestroyTexture(m_fallbackShaderResourceTextureCube);
+        m_fallbackShaderResourceTextureCube = nullptr;
+    }
     if (device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i);
     }
+    for (auto& bucket : m_frameSliceCommandListsByFrame)
+        bucket.clear();
+    m_transientRecordingCommandList = nullptr;
     m_immediateCommandList.reset();
     if (device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
@@ -245,6 +257,7 @@ DeviceVK::~DeviceVK() {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i);
     }
+    RetirePendingTextureWrappers(true);
     UploadHeapVK::Destroy(&m_uploadHeap, GetAllocator());
     AllocatorVK::Destroy(&m_allocatorVK);
     if (device != VK_NULL_HANDLE)
@@ -1135,6 +1148,21 @@ void DeviceVK::DestroyCommandList(ICommandList* list) {
 
 ICommandList* DeviceVK::GetImmediateCommandList() { return m_immediateCommandList.get(); }
 
+void DeviceVK::SetTransientRecordingCommandList(ICommandList* cmd) {
+    m_transientRecordingCommandList = cmd;
+}
+
+void DeviceVK::EnqueueFrameSliceCommandList(ICommandList* cmd) {
+    if (!cmd) return;
+    m_frameSliceCommandListsByFrame[m_currentFrameIndex].push_back(std::unique_ptr<ICommandList>(cmd));
+}
+
+CommandListVK* DeviceVK::GetRecordingCommandListVK() {
+    if (m_transientRecordingCommandList)
+        return static_cast<CommandListVK*>(m_transientRecordingCommandList);
+    return m_immediateCommandList.get();
+}
+
 void DeviceVK::BeginFrame() {
     if (!m_immediateCommandList || !m_device || !m_queues.GetGraphicsQueue()) return;
     m_currentFrameIndex = (m_currentFrameIndex + 1) % kMaxFrames;
@@ -1147,7 +1175,11 @@ void DeviceVK::BeginFrame() {
     if (fence == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || buf == VK_NULL_HANDLE) return;
 
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    // Free slice CBs from this ring slot only: same fence waited above covers their last submit.
+    m_frameSliceCommandListsByFrame[m_currentFrameIndex].clear();
+    m_transientRecordingCommandList = nullptr;
     m_deletionQueue.Tick(m_device, GetAllocator(), m_currentFrameIndex);
+    RetirePendingTextureWrappers(false);
     ++m_ticksUntilDescriptorSetFree;
     if (m_ticksUntilDescriptorSetFree >= kMaxFrames && !m_pendingDescriptorSetsToFree.empty()) {
         for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
@@ -1162,17 +1194,10 @@ void DeviceVK::BeginFrame() {
     vkResetFences(device, 1, &fence);
     vkResetCommandPool(device, pool, 0);
 
-    VkCommandBufferBeginInfo beginInfo = {};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VkResult beginRes = vkBeginCommandBuffer(buf, &beginInfo);
-    if (beginRes != VK_SUCCESS) {
-        core::Log::ErrorF("Vulkan BeginFrame: vkBeginCommandBuffer failed (0x%x); frame may be black.", beginRes);
-        return;
-    }
+    // Compose buffer is vkBegin'd lazily (after optional editor slice command buffers) so Scene/Game stay isolated.
     m_immediateCommandList->SetCommandBuffer(buf, true);
     m_immediateCommandList->ResetCpuRecordingStateAfterPoolReset();
-    m_immediateCommandList->SetRecordingState(true);
+    m_immediateCommandList->SetRecordingState(false);
     m_frameOpen = true;
 
     // Acquire swapchain image after command buffer is ready (allows recording while waiting in more complex setups).
@@ -1208,23 +1233,37 @@ void DeviceVK::EndFrame() {
         return;
     }
     CommandListVK* imm = m_immediateCommandList.get();
+    std::vector<VkCommandBuffer> submitBuffers;
+    std::vector<std::unique_ptr<ICommandList>>& sliceBucket = m_frameSliceCommandListsByFrame[m_currentFrameIndex];
+    submitBuffers.reserve(sliceBucket.size() + 1u);
+    for (auto& up : sliceBucket) {
+        if (!up) continue;
+        CommandListVK* sliceCl = static_cast<CommandListVK*>(up.get());
+        VkCommandBuffer sliceBuf = static_cast<VkCommandBuffer>(sliceCl->GetCommandBuffer());
+        if (sliceBuf != VK_NULL_HANDLE)
+            submitBuffers.push_back(sliceBuf);
+    }
+    if (!imm->IsRecording())
+        imm->Begin();
     imm->End();
-    VkCommandBuffer buf = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
+    VkCommandBuffer immBuf = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
+    if (immBuf != VK_NULL_HANDLE)
+        submitBuffers.push_back(immBuf);
     VkQueue queue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
     VkFence fence = static_cast<VkFence>(frame.fence);
-    if (buf == VK_NULL_HANDLE || fence == VK_NULL_HANDLE) {
+    if (submitBuffers.empty() || fence == VK_NULL_HANDLE) {
         static bool once = false;
         if (!once) {
-            core::Log::Warn("Vulkan EndFrame: submit skipped — null command buffer or fence.");
+            core::Log::Warn("Vulkan EndFrame: submit skipped — no command buffers or null fence.");
             once = true;
         }
         return;
     }
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &buf;
+    submitInfo.commandBufferCount = static_cast<uint32_t>(submitBuffers.size());
+    submitInfo.pCommandBuffers = submitBuffers.data();
     VkSemaphore waitSem = static_cast<VkSemaphore>(frame.imageAvailable);
     const uint32_t imageIndex = frame.swapchainImageIndex;
     void* renderFinishedPerImage = m_swapchain.GetRenderFinishedSemaphore(imageIndex);
@@ -1276,7 +1315,7 @@ void* DeviceVK::GetBarrierTracker() {
 void DeviceVK::TransitionTextureToState(ITexture* texture, ResourceState newState) {
     if (!texture) return;
     TextureVK* texVK = static_cast<TextureVK*>(texture);
-    if (!texVK->m_image) return;
+    if (texVK->m_retired || !texVK->m_image) return;
     VkImageAspectFlags aspect = static_cast<VkImageAspectFlags>(ToVkImageAspect(texVK->GetFormat()));
     BarrierTrackerVK::TransitionImage(&m_barrierTracker, texVK->m_image, aspect, newState);
 }
@@ -1325,15 +1364,71 @@ ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialDa
 void DeviceVK::DestroyTexture(ITexture* texture) {
     if (!texture) return;
     TextureVK* t = static_cast<TextureVK*>(texture);
+    if (t->m_retired) return;
     const uint32_t frameIndex = GetCurrentFrameIndex();
     if (t->m_imageView)
         m_deletionQueue.EnqueueImageView(frameIndex, m_device, t->m_imageView);
-    if (t->m_image)
+    if (t->m_image) {
+        BarrierTrackerVK::RemoveImageState(&m_barrierTracker, t->m_image);
         m_deletionQueue.EnqueueImage(frameIndex, GetAllocator(), t->m_image, t->m_allocation);
+    }
+    t->m_retired = true;
     t->m_imageView = nullptr;
     t->m_image = nullptr;
     t->m_allocation = nullptr;
-    delete t;
+    // Keep the wrapper alive for a few frames so stale CPU pointers fail safely
+    // (m_image == null) instead of dereferencing freed memory.
+    m_pendingTextureWrapperRetires.push_back({ t, m_frameNumber + kMaxFrames });
+}
+
+ITexture* DeviceVK::GetFallbackShaderResourceTexture2D() {
+    if (m_fallbackShaderResourceTexture2D) return m_fallbackShaderResourceTexture2D;
+    TextureDesc desc{};
+    desc.type = TextureType::Texture2D;
+    desc.width = 1;
+    desc.height = 1;
+    desc.format = RHITextureFormat::RGBA8;
+    desc.usage = TextureUsage::ShaderResource;
+    desc.mipLevels = 1;
+    static const uint8_t black[4] = {0, 0, 0, 255};
+    m_fallbackShaderResourceTexture2D = CreateTexture(desc, black);
+    return m_fallbackShaderResourceTexture2D;
+}
+
+ITexture* DeviceVK::GetFallbackShaderResourceTextureCube() {
+    if (m_fallbackShaderResourceTextureCube) return m_fallbackShaderResourceTextureCube;
+    TextureDesc desc{};
+    desc.type = TextureType::TextureCube;
+    desc.width = 1;
+    desc.height = 1;
+    desc.depthOrArrayLayers = 6;
+    desc.format = RHITextureFormat::RGBA8;
+    desc.usage = TextureUsage::ShaderResource;
+    desc.mipLevels = 1;
+    static const uint8_t face[4] = {0, 0, 0, 255};
+    uint8_t cubeFaces[6 * 4];
+    for (uint32_t f = 0; f < 6; ++f)
+        std::memcpy(cubeFaces + f * 4, face, 4);
+    m_fallbackShaderResourceTextureCube = CreateTexture(desc, cubeFaces);
+    return m_fallbackShaderResourceTextureCube;
+}
+
+void DeviceVK::RetirePendingTextureWrappers(bool forceAll) {
+    if (m_pendingTextureWrapperRetires.empty()) return;
+    const uint32_t currentFrame = m_frameNumber;
+    size_t write = 0;
+    for (size_t read = 0; read < m_pendingTextureWrapperRetires.size(); ++read) {
+        RetiredTextureEntry& e = m_pendingTextureWrapperRetires[read];
+        const bool canRetire = forceAll || (currentFrame >= e.retireFrameNumber);
+        if (canRetire) {
+            delete e.texture;
+            e.texture = nullptr;
+        } else {
+            if (write != read) m_pendingTextureWrapperRetires[write] = e;
+            ++write;
+        }
+    }
+    m_pendingTextureWrapperRetires.resize(write);
 }
 
 void DeviceVK::CommitSparseTexturePages(ITexture* texture, uint32_t level, int32_t x, int32_t y, int32_t z, uint32_t width, uint32_t height, uint32_t depth, bool commit) {
@@ -1506,11 +1601,15 @@ IDescriptorSet* DeviceVK::CreateDescriptorSet(IPipelineLayout* layout) {
 }
 
 void DeviceVK::DestroyDescriptorSet(IDescriptorSet* set) {
-    DestroyDescriptorSetVK(this, set);
+    // Vulkan descriptor sets may still be referenced by submitted command buffers.
+    // Route all destruction through deferred retirement to avoid freeing in-flight sets.
+    EnqueueDestroyDescriptorSet(set);
 }
 
 void DeviceVK::EnqueueDestroyDescriptorSet(IDescriptorSet* set) {
     if (!set) return;
+    if (std::find(m_pendingDescriptorSetsToFree.begin(), m_pendingDescriptorSetsToFree.end(), set) != m_pendingDescriptorSetsToFree.end())
+        return;
     m_pendingDescriptorSetsToFree.push_back(set);
     m_ticksUntilDescriptorSetFree = 0;
 }

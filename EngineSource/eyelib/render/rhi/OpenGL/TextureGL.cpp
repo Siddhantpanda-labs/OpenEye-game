@@ -14,6 +14,8 @@ void* TextureGL::GetNativeTexture() {
     return reinterpret_cast<void*>(static_cast<uintptr_t>(m_handle));
 }
 
+bool TextureGL::IsGpuBindable() const { return m_handle != 0; }
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

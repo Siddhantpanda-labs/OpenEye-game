@@ -27,12 +27,13 @@ PipelineLayoutDesc MakeResourceSetDesc(ResourceSetType type) {
         };
         break;
     case ResourceSetType::ForwardPass:
+        // 3–4: samplerCube in forward.frag (IBL irradiance + prefilter); 5: BRDF LUT 2D.
         desc.bindings = {
             {0, BindingType::Texture},
             {1, BindingType::StorageBuffer},
             {2, BindingType::StorageBuffer},
-            {3, BindingType::Texture},
-            {4, BindingType::Texture},
+            {3, BindingType::TextureCube},
+            {4, BindingType::TextureCube},
             {5, BindingType::Texture},
         };
         break;

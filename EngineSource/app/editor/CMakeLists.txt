@@ -7,6 +7,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorFolderPicker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorProject.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorVulkanRenderSlice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstantiateOmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/RunImporter.cpp

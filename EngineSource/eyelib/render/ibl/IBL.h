@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/rhi/RHI.h"
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -66,7 +67,8 @@ private:
     rhi::ITexture* m_irradianceRHI = nullptr;
     rhi::ITexture* m_prefilterRHI = nullptr;
     rhi::ITexture* m_brdfLUTRHI = nullptr;
-    rhi::IDescriptorSet* m_iblPassSet = nullptr;  // IBL pass set (binding 0 = env cube); Vulkan resource-space
+    static constexpr uint32_t kIblPassSetFrames = 3;
+    std::array<rhi::IDescriptorSet*, kIblPassSetFrames> m_iblPassSets = {};
 };
 
 } // namespace render

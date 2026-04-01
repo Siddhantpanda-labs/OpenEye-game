@@ -195,6 +195,14 @@ RenderPipeline::Mode RenderPipeline::GetMode() const {
            Mode::ForwardPlus;
 }
 
+void RenderPipeline::SetSkyboxBrightness(float multiplier) {
+    if (m_impl && m_impl->pipeline) m_impl->pipeline->SetSkyboxBrightness(multiplier);
+}
+
+float RenderPipeline::GetSkyboxBrightness() const {
+    return (m_impl && m_impl->pipeline) ? m_impl->pipeline->GetSkyboxBrightness() : 1.f;
+}
+
 void RenderPipeline::UpdateUploads() {
     if (m_impl->pipeline) m_impl->pipeline->UpdateUploads();
 }

@@ -36,24 +36,24 @@ std::shared_ptr<eyelib::api::Shader> BuiltinResourceManager::GetSkinnedShader() 
 
 BuiltinResourceManager::PrimitiveEntry BuiltinResourceManager::GetPrimitiveEntry(const std::string& meshId) {
     using namespace eyelib::api::geometry;
-    if (!IsBuiltinMeshId(meshId)) return {};
+    if (!IsBuiltinMeshId(meshId) || !m_device) return {};
     auto it = m_primitiveCache.find(meshId);
     if (it != m_primitiveCache.end()) return it->second;
 
     PrimitiveEntry entry{};
     std::shared_ptr<eyelib::api::Mesh> mesh;
     if (meshId == BuiltinMesh::Cube) {
-        mesh = Primitives::CreateCube(0.5f);
+        mesh = Primitives::CreateCube(m_device, 0.5f);
     } else if (meshId == BuiltinMesh::Sphere) {
-        mesh = Primitives::CreateSphere(0.5f, 32, 16);
+        mesh = Primitives::CreateSphere(m_device, 0.5f, 32, 16);
     } else if (meshId == BuiltinMesh::Plane) {
-        mesh = Primitives::CreatePlane(1.0f, 1.0f, 1, 1);
+        mesh = Primitives::CreatePlane(m_device, 1.0f, 1.0f, 1, 1);
     } else if (meshId == BuiltinMesh::Cylinder) {
-        mesh = Primitives::CreateCylinder(0.5f, 1.0f, 32, 1, true, true);
+        mesh = Primitives::CreateCylinder(m_device, 0.5f, 1.0f, 32, 1, true, true);
     } else if (meshId == BuiltinMesh::Cone) {
-        mesh = Primitives::CreateCone(0.5f, 1.0f, 32, true);
+        mesh = Primitives::CreateCone(m_device, 0.5f, 1.0f, 32, true);
     } else if (meshId == BuiltinMesh::Torus) {
-        mesh = Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
+        mesh = Primitives::CreateTorus(m_device, 0.5f, 0.2f, 32, 16);
     }
     if (mesh) {
         entry.mesh = std::move(mesh);

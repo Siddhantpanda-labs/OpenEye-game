@@ -60,9 +60,10 @@ bool WriteForwardSharedState(const ForwardSharedStateWriteParams& params) {
         params.sceneSet->UpdateStorageBuffer(3, clusterOrFallback, 0, 0);
     }
 
-    if (params.irradianceTexture) params.passSet->UpdateTexture(3, params.irradianceTexture);
-    if (params.prefilterTexture) params.passSet->UpdateTexture(4, params.prefilterTexture);
-    if (params.brdfLutTexture) params.passSet->UpdateTexture(5, params.brdfLutTexture);
+    // Always bind (nullptr → DescriptorSetVK uses correct 2D/cube fallback per binding type).
+    params.passSet->UpdateTexture(3, params.irradianceTexture);
+    params.passSet->UpdateTexture(4, params.prefilterTexture);
+    params.passSet->UpdateTexture(5, params.brdfLutTexture);
     return true;
 }
 

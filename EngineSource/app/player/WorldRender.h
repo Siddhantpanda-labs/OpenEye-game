@@ -43,7 +43,7 @@ public:
     /** Render-thread only: apply a Resize (Phase 5). Must be called at frame boundary, before RenderSceneOnly for this frame. */
     void ApplyResize(uint32_t width, uint32_t height);
 
-    /** Render-thread only: Resize (if needed), Render(scene), BlitToScreen. No World/animation access. Resize only runs when size changed. */
+    /** Render-thread only: Resize (if needed), Render(scene); when this bridge owns presentation it also blits/presents. */
     bool RenderSceneOnly(const eyelib::api::RenderScene& scene, uint32_t width, uint32_t height);
 
     /** Render-thread only: wait for GPU to finish. Call before SwapBuffers to reduce flicker (test fix 1). */
@@ -129,6 +129,9 @@ private:
         std::shared_ptr<eyelib::api::MaterialInstance> instance;
     };
 
+    /** Standalone player only: swapchain blit + EndFrame/Present. Debug assert if called when embedded (shared device). */
+    void BlitToScreenIfOwner();
+
     void EnsureDefaultMaterial();
     void EnsureSkinnedMaterial();
     std::shared_ptr<eyelib::api::MaterialInstance> GetSkinnedMaterialInstance(
@@ -161,6 +164,7 @@ private:
     eyelib::api::Renderer m_renderer;
     eyelib::api::RenderPipeline m_pipeline;
     bool m_ready = false;
+    bool m_ownsPresentation = true;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
 

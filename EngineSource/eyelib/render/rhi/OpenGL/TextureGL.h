@@ -12,6 +12,7 @@ struct TextureGL : ITexture {
     TextureType GetType() const override;
     RHITextureFormat GetFormat() const override;
     void* GetNativeTexture() override;
+    bool IsGpuBindable() const override;
 
     unsigned int m_handle = 0;
     uint32_t m_width = 0;

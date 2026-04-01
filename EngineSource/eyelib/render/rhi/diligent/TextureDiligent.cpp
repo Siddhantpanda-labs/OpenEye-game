@@ -23,6 +23,8 @@ TextureType TextureDiligent::GetType() const { return m_type; }
 RHITextureFormat TextureDiligent::GetFormat() const { return m_format; }
 void* TextureDiligent::GetNativeTexture() { return m_pNative; }
 
+bool TextureDiligent::IsGpuBindable() const { return m_pNative != nullptr; }
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

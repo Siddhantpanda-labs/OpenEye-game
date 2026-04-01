@@ -35,8 +35,8 @@ void main() {
     } else {
         ldrColor = Reinhard(hdrColor);
     }
-    
-    // Gamma correction (output is sRGB)
+
+    // Linear display-referred LDR; sRGB encoding is applied in passes/post/display_encode (final post pass).
     FragColor = vec4(ldrColor, 1.0);
 }
 

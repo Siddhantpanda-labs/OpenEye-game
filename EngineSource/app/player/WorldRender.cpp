@@ -26,6 +26,11 @@
 
 namespace openeye::player {
 
+void WorldRenderBridge::BlitToScreenIfOwner() {
+    assert(m_ownsPresentation && "WorldRenderBridge: BlitToScreen only when owning swapchain/present (standalone). Embedded editor shared device must not present from runtime.");
+    m_pipeline.BlitToScreen();
+}
+
 namespace {
 
 static std::string JoinPath(const std::string& base, const std::string& leaf) {
@@ -129,6 +134,7 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
         return false;
     }
     m_renderer.SetDevice(m_pipeline.GetDevice());
+    m_ownsPresentation = true;
     m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     m_width = width;
     m_height = height;
@@ -155,6 +161,8 @@ bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t 
         return false;
     }
     m_renderer.SetDevice(m_pipeline.GetDevice());
+    // Embedded/editor mode: caller owns frame orchestration and present.
+    m_ownsPresentation = false;
     m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     m_width = width;
     m_height = height;
@@ -472,10 +480,12 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    api::FrameAllocator* frameAlloc) {
     if (!m_captureCallbackSet) {
         world.SetCaptureSnapshotCallback([this, &world]() {
+            world.FlushTransforms();
             world.CaptureRenderSnapshot(m_frameSnapshot);
             world.SetFrameSnapshot(&m_frameSnapshot);
         });
         m_captureCallbackSet = true;
+        world.FlushTransforms();
         world.CaptureRenderSnapshot(m_frameSnapshot);
         world.SetFrameSnapshot(&m_frameSnapshot);
     }
@@ -946,7 +956,9 @@ void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world
             ApplyResize(width, height);
             if (m_pipeline.HasValidOutput()) {
                 m_pipeline.RenderStereo(scene, leftCam, rightCam);
-                m_pipeline.BlitToScreen();
+                if (m_ownsPresentation) {
+                    BlitToScreenIfOwner();
+                }
             }
             return;
         }
@@ -976,7 +988,9 @@ bool WorldRenderBridge::RenderSceneOnly(const eyelib::api::RenderScene& scene, u
         return false;
     }
     m_pipeline.Render(scene);
-    m_pipeline.BlitToScreen();
+    if (m_ownsPresentation) {
+        BlitToScreenIfOwner();
+    }
     return true;
 }
 

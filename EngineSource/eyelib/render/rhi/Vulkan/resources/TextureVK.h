@@ -17,6 +17,7 @@ struct TextureVK : ITexture {
     TextureType GetType() const override;
     RHITextureFormat GetFormat() const override;
     void* GetNativeTexture() override;
+    bool IsGpuBindable() const override;
 
     DeviceVK* m_device = nullptr;
     uint32_t m_width = 0;
@@ -25,6 +26,8 @@ struct TextureVK : ITexture {
     TextureType m_type = TextureType::Texture2D;
     RHITextureFormat m_format = RHITextureFormat::RGBA8;
     bool m_owned = true;
+    // True after DestroyTexture schedules this wrapper for deferred retire.
+    bool m_retired = false;
     // VkImage + VkImageView + VmaAllocation
     void* m_image = nullptr;
     void* m_imageView = nullptr;

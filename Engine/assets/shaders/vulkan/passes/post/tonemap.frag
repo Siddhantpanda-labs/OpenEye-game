@@ -23,5 +23,6 @@ vec3 Reinhard(vec3 color) {
 void main() {
     vec3 hdrColor = texture(u_HDRTexture, v_TexCoord).rgb * pc.u_Exposure;
     vec3 ldrColor = (pc.u_UseACES != 0) ? ACESFilmic(hdrColor) : Reinhard(hdrColor);
+    // Linear LDR; sRGB OETF is applied in display_encode (final post pass before present).
     FragColor = vec4(ldrColor, 1.0);
 }

@@ -187,7 +187,11 @@ IBL::IBL() = default;
 
 IBL::~IBL() {
     if (m_deviceRHI) {
-        if (m_iblPassSet) { m_deviceRHI->DestroyDescriptorSet(m_iblPassSet); m_iblPassSet = nullptr; }
+        for (rhi::IDescriptorSet*& set : m_iblPassSets) {
+            if (!set) continue;
+            m_deviceRHI->EnqueueDestroyDescriptorSet(set);
+            set = nullptr;
+        }
         if (m_irradianceRHI) m_deviceRHI->DestroyTexture(m_irradianceRHI);
         if (m_prefilterRHI) m_deviceRHI->DestroyTexture(m_prefilterRHI);
         if (m_brdfLUTRHI) m_deviceRHI->DestroyTexture(m_brdfLUTRHI);
@@ -262,10 +266,19 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
     }
 
     rhi::IPipelineLayout* iblPassLayout = m_deviceRHI->GetResourceSetLayout(rhi::IDevice::ResourceSetType::IBLPass);
-    if (iblPassLayout)
-        m_iblPassSet = m_deviceRHI->CreateDescriptorSet(iblPassLayout);
-    if (m_iblPassSet)
-        m_iblPassSet->UpdateTexture(0, m_environmentRHI);
+    if (iblPassLayout) {
+        for (rhi::IDescriptorSet*& set : m_iblPassSets) {
+            if (set) {
+                m_deviceRHI->EnqueueDestroyDescriptorSet(set);
+                set = nullptr;
+            }
+            set = m_deviceRHI->CreateDescriptorSet(iblPassLayout);
+            if (set)
+                set->UpdateTexture(0, m_environmentRHI);
+        }
+    }
+    const uint32_t frameIndex = m_deviceRHI->GetCurrentFrameIndex() % kIblPassSetFrames;
+    rhi::IDescriptorSet* activeIblSet = m_iblPassSets[frameIndex];
 
     rhi::ICommandList* cmd = m_deviceRHI->GetImmediateCommandList();
     if (!cmd) return false;
@@ -295,8 +308,8 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
         cmd->SetCullFace(false);
 
         irradianceShader->Bind(m_deviceRHI);
-        if (m_iblPassSet) {
-            rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
+        if (activeIblSet) {
+            rhi::IDescriptorSet* sets[1] = { activeIblSet };
             cmd->BindDescriptorSets(0, 1, sets);
         } else {
             cmd->BindTexture(m_environmentRHI, 0);
@@ -330,8 +343,8 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             cmd->SetCullFace(false);
 
             prefilterShader->Bind(m_deviceRHI);
-            if (m_iblPassSet) {
-                rhi::IDescriptorSet* sets[1] = { m_iblPassSet };
+            if (activeIblSet) {
+                rhi::IDescriptorSet* sets[1] = { activeIblSet };
                 cmd->BindDescriptorSets(0, 1, sets);
             } else {
                 cmd->BindTexture(m_environmentRHI, 0);

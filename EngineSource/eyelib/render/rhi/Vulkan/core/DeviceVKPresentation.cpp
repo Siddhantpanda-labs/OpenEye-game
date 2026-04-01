@@ -116,12 +116,12 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
             }
             return;
         }
-        CommandListVK* imm = m_immediateCommandList.get();
-        imm->EndRenderingIfActive();
-        if (!imm->IsRecording())
-            imm->Begin();
-        VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-        if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) {
+        CommandListVK* rec = GetRecordingCommandListVK();
+        rec->EndRenderingIfActive();
+        if (!rec->IsRecording())
+            rec->Begin();
+        VkCommandBuffer cmd = static_cast<VkCommandBuffer>(rec->GetCommandBuffer());
+        if (!rec->IsRecording() || cmd == VK_NULL_HANDLE) {
             static bool once = false;
             if (!once) {
                 core::Log::Warn("Vulkan present: null-src path skipped — command buffer not recording or null.");
@@ -183,10 +183,12 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
     TextureVK* tex = static_cast<TextureVK*>(color0);
     VkImage srcImage = static_cast<VkImage>(tex->m_image);
     if (srcImage == VK_NULL_HANDLE) return;
-    CommandListVK* imm = m_immediateCommandList.get();
-    imm->EndRenderingIfActive();
-    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-    if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+    CommandListVK* rec = GetRecordingCommandListVK();
+    rec->EndRenderingIfActive();
+    if (!rec->IsRecording())
+        rec->Begin();
+    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(rec->GetCommandBuffer());
+    if (!rec->IsRecording() || cmd == VK_NULL_HANDLE) return;
     VkImage dstImage = static_cast<VkImage>(m_swapchain.GetImage(imageIndex));
     uint32_t srcW = tex->m_width;
     uint32_t srcH = tex->m_height;
@@ -281,7 +283,7 @@ void DeviceVK::BlitToDefaultFramebufferLetterbox(IRenderTarget* src, uint32_t wi
 }
 
 void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
-    if (!src || !dst || !m_immediateCommandList) return;
+    if (!src || !dst || !m_immediateCommandList) return; // immediate wrapper always exists
     RenderTargetVK* srcRT = static_cast<RenderTargetVK*>(src);
     RenderTargetVK* dstRT = static_cast<RenderTargetVK*>(dst);
     ITexture* srcColor = srcRT->GetColorTexture(0);
@@ -293,12 +295,12 @@ void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
     VkImage dstImage = static_cast<VkImage>(dstTex->m_image);
     if (srcImage == VK_NULL_HANDLE || dstImage == VK_NULL_HANDLE) return;
 
-    CommandListVK* imm = m_immediateCommandList.get();
-    imm->EndRenderingIfActive();
-    if (!imm->IsRecording())
-        imm->Begin();
-    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-    if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+    CommandListVK* rec = GetRecordingCommandListVK();
+    rec->EndRenderingIfActive();
+    if (!rec->IsRecording())
+        rec->Begin();
+    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(rec->GetCommandBuffer());
+    if (!rec->IsRecording() || cmd == VK_NULL_HANDLE) return;
 
     const uint32_t w = std::min(srcTex->m_width, dstTex->m_width);
     const uint32_t h = std::min(srcTex->m_height, dstTex->m_height);
@@ -424,12 +426,12 @@ void DeviceVK::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
     VkImage dstImage = static_cast<VkImage>(dstTex->m_image);
     if (srcImage == VK_NULL_HANDLE || dstImage == VK_NULL_HANDLE) return;
 
-    CommandListVK* imm = m_immediateCommandList.get();
-    imm->EndRenderingIfActive();
-    if (!imm->IsRecording())
-        imm->Begin();
-    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(imm->GetCommandBuffer());
-    if (!imm->IsRecording() || cmd == VK_NULL_HANDLE) return;
+    CommandListVK* rec = GetRecordingCommandListVK();
+    rec->EndRenderingIfActive();
+    if (!rec->IsRecording())
+        rec->Begin();
+    VkCommandBuffer cmd = static_cast<VkCommandBuffer>(rec->GetCommandBuffer());
+    if (!rec->IsRecording() || cmd == VK_NULL_HANDLE) return;
 
     const uint32_t w = std::min(srcTex->m_width, dstTex->m_width);
     const uint32_t h = std::min(srcTex->m_height, dstTex->m_height);

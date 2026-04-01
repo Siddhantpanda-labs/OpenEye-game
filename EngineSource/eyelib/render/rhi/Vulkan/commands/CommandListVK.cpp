@@ -96,8 +96,22 @@ void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
 }
 
 void CommandListVK::Begin() {
-    if (m_isImmediate && m_device && m_device->IsFrameOpen())
+    // Compose buffer: begin only after optional editor slices (BeginFrame no longer starts immediate recording).
+    if (m_isImmediate && m_device && m_device->IsFrameOpen()) {
+        if (m_isRecording)
+            return;
+        VkCommandBuffer bufImm = static_cast<VkCommandBuffer>(m_commandBuffer);
+        if (bufImm == VK_NULL_HANDLE)
+            return;
+        ResetCpuRecordingStateAfterPoolReset();
+        vkResetCommandBuffer(bufImm, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+        VkCommandBufferBeginInfo beginInfoImm = {};
+        beginInfoImm.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfoImm.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(bufImm, &beginInfoImm) == VK_SUCCESS)
+            m_isRecording = true;
         return;
+    }
     m_isRecording = false;
     // Stateless rule: clear all bound state so no state survives across frames.
     ResetCpuRecordingStateAfterPoolReset();

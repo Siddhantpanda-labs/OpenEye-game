@@ -100,9 +100,17 @@ void DescriptorSetVK::UpdateTexture(uint32_t binding, ITexture* texture) {
                           binding, DescribeBindings(m_layout, 0u, false).c_str());
         return;
     }
-    TextureVK* texVK = texture ? static_cast<TextureVK*>(texture) : nullptr;
+    ITexture* effective = texture;
+    if (!texture || !texture->IsGpuBindable()) {
+        if (declared == BindingType::TextureCube)
+            effective = m_device->GetFallbackShaderResourceTextureCube();
+        else
+            effective = m_device->GetFallbackShaderResourceTexture2D();
+        if (!effective) return;
+    }
+    TextureVK* texVK = static_cast<TextureVK*>(effective);
     VkImageView imageView = texVK && texVK->m_imageView ? static_cast<VkImageView>(texVK->m_imageView) : VK_NULL_HANDLE;
-    const bool needsNearestSampler = (texture && texture->GetFormat() == RHITextureFormat::R32UI);
+    const bool needsNearestSampler = (effective && effective->GetFormat() == RHITextureFormat::R32UI);
     VkSampler sampler = static_cast<VkSampler>(needsNearestSampler ? m_device->GetNearestSampler() : m_device->GetDefaultSampler());
     if (sampler == VK_NULL_HANDLE) return;
     VkDescriptorImageInfo imageInfo = {};

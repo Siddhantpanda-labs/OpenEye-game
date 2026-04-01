@@ -318,7 +318,7 @@ void Shader::Destroy(rhi::IDevice* device) {
 
 void Shader::Bind(rhi::IDevice* device) const {
     if (!device || !m_pipelineRHI) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->BindPipeline(m_pipelineRHI);
 }
 
@@ -334,7 +334,7 @@ void Shader::SetInt(const std::string& name, int value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformInt(name.c_str(), value);
 }
 
@@ -342,14 +342,14 @@ void Shader::SetUint(const std::string& name, uint32_t value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformUint(name.c_str(), value);
 }
 
 void Shader::SetFloat(const std::string& name, float value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformFloat(name.c_str(), value);
 }
 
@@ -357,7 +357,7 @@ void Shader::SetVec2(const std::string& name, const math::Vec2& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformVec2(name.c_str(), &value.x);
 }
 
@@ -365,7 +365,7 @@ void Shader::SetVec3(const std::string& name, const math::Vec3& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformVec3(name.c_str(), &value.x);
 }
 
@@ -373,7 +373,7 @@ void Shader::SetVec4(const std::string& name, const math::Vec4& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformVec4(name.c_str(), &value.x);
 }
 
@@ -381,7 +381,7 @@ void Shader::SetMat4(const std::string& name, const math::Mat4& value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformMat4(name.c_str(), &value[0][0]);
 }
 
@@ -390,7 +390,7 @@ void Shader::SetMat4Array(const std::string& name, const math::Mat4* values, siz
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformMat4Array(name.c_str(), &values[0][0][0], count);
 }
 
@@ -398,7 +398,7 @@ void Shader::SetHandle64(const std::string& name, uint64_t value) const {
     rhi::IDevice* device = GetDevice();
     if (!device || !m_pipelineRHI) return;
     if (VulkanDisablesLegacyUniforms(device)) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (cmd) cmd->SetUniformHandle64(name.c_str(), value);
 }
 

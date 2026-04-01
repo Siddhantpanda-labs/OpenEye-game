@@ -53,7 +53,8 @@ void ShadowPass::EnsureResourceSpaceSets(rhi::IDevice* device) {
     uboDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
     m_frameUBO = device->CreateBuffer(uboDesc, nullptr);
     rhi::BufferDesc bonesDesc;
-    bonesDesc.sizeInBytes = kMaxBones * 64u;
+    const uint32_t bonesStrideBytes = static_cast<uint32_t>(kMaxBones * sizeof(math::Mat4));
+    bonesDesc.sizeInBytes = bonesStrideBytes * kMaxSkinnedDrawsPerFrame * kMaxFramesInFlight;
     bonesDesc.usage = rhi::BufferUsage::Storage;
     bonesDesc.memoryHint = rhi::BufferMemoryHint::HostVisible;
     m_bonesBuffer = device->CreateBuffer(bonesDesc, nullptr);
@@ -75,12 +76,80 @@ void ShadowPass::EnsureResourceSpaceSets(rhi::IDevice* device) {
         m_sceneBuffersSet->UpdateStorageBuffer(3, sceneFallback, 0, 0);
     }
     if (m_bonesBuffer)
-        m_sceneBuffersSet->UpdateStorageBuffer(1, m_bonesBuffer, 0, static_cast<uint32_t>(bonesDesc.sizeInBytes));
+        m_sceneBuffersSet->UpdateStorageBuffer(1, m_bonesBuffer, 0, 0);
     m_device = device;
+}
+
+void ShadowPass::ResetTransientFrameStateIfNeeded(rhi::IDevice* device) {
+    if (!device) return;
+    const uint32_t frameNumber = device->GetFrameNumber();
+    if (frameNumber == m_lastTransientFrameNumber) return;
+    m_lastTransientFrameNumber = frameNumber;
+    const uint32_t frameIndex = device->GetCurrentFrameIndex() % kMaxFramesInFlight;
+    m_perDrawSceneSetCursor[frameIndex] = 0;
+    m_bonesWriteCursorBytes[frameIndex] = 0;
+}
+
+rhi::IDescriptorSet* ShadowPass::AcquirePerDrawSceneSet(rhi::IDevice* device, uint32_t frameIndex) {
+    if (!device || frameIndex >= kMaxFramesInFlight) return nullptr;
+    auto& sets = m_perDrawSceneSets[frameIndex];
+    uint32_t& cursor = m_perDrawSceneSetCursor[frameIndex];
+    if (cursor >= sets.size()) {
+        rhi::IPipelineLayout* sceneLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::SceneBuffers);
+        if (!sceneLayout) return nullptr;
+        rhi::IDescriptorSet* set = device->CreateDescriptorSet(sceneLayout);
+        if (!set) return nullptr;
+        sets.push_back(set);
+    }
+    return sets[cursor++];
+}
+
+rhi::IDescriptorSet* ShadowPass::BuildSkinnedSceneSet(rhi::IDevice* device, uint32_t frameIndex, const math::Mat4* bonePtr, size_t boneCount) {
+    if (!device || !bonePtr || boneCount == 0 || !m_bonesBuffer || !m_sceneFallbackBuffer || frameIndex >= kMaxFramesInFlight)
+        return m_sceneBuffersSet;
+    const size_t strideBytes = kMaxBones * sizeof(math::Mat4);
+    const size_t perFrameCapacity = strideBytes * kMaxSkinnedDrawsPerFrame;
+    size_t& cursorBytes = m_bonesWriteCursorBytes[frameIndex];
+    if (cursorBytes + strideBytes > perFrameCapacity)
+        return m_sceneBuffersSet;
+    const size_t baseOffset = static_cast<size_t>(frameIndex) * perFrameCapacity;
+    const size_t bufferOffset = baseOffset + cursorBytes;
+    const size_t boneBytes = boneCount * sizeof(math::Mat4);
+    m_bonesBuffer->Update(bonePtr, bufferOffset, boneBytes);
+    cursorBytes += strideBytes;
+
+    rhi::IDescriptorSet* set = AcquirePerDrawSceneSet(device, frameIndex);
+    if (!set) return m_sceneBuffersSet;
+    set->UpdateStorageBuffer(0, m_sceneFallbackBuffer, 0, 0);
+    set->UpdateStorageBuffer(1, m_bonesBuffer, static_cast<uint32_t>(bufferOffset), static_cast<uint32_t>(boneBytes));
+    set->UpdateStorageBuffer(2, m_sceneFallbackBuffer, 0, 0);
+    set->UpdateStorageBuffer(3, m_sceneFallbackBuffer, 0, 0);
+    return set;
+}
+
+rhi::IDescriptorSet* ShadowPass::BuildInstancedSceneSet(rhi::IDevice* device, uint32_t frameIndex, rhi::IBuffer* instanceMatrixBuffer, uint32_t instanceCount) {
+    if (!device || !instanceMatrixBuffer || instanceCount == 0 || !m_sceneFallbackBuffer || frameIndex >= kMaxFramesInFlight)
+        return m_sceneBuffersSet;
+    rhi::IDescriptorSet* set = AcquirePerDrawSceneSet(device, frameIndex);
+    if (!set) return m_sceneBuffersSet;
+    set->UpdateStorageBuffer(0, m_sceneFallbackBuffer, 0, 0);
+    set->UpdateStorageBuffer(1, instanceMatrixBuffer, 0, instanceCount * 64u);
+    set->UpdateStorageBuffer(2, m_sceneFallbackBuffer, 0, 0);
+    set->UpdateStorageBuffer(3, m_sceneFallbackBuffer, 0, 0);
+    return set;
 }
 
 void ShadowPass::Shutdown() {
     if (!m_device) return;
+    for (auto& perFrameSets : m_perDrawSceneSets) {
+        for (rhi::IDescriptorSet*& set : perFrameSets) {
+            if (set) { m_device->DestroyDescriptorSet(set); set = nullptr; }
+        }
+        perFrameSets.clear();
+    }
+    m_perDrawSceneSetCursor = {};
+    m_bonesWriteCursorBytes = {};
+    m_lastTransientFrameNumber = 0xffffffffu;
     if (m_frameSet) { m_device->DestroyDescriptorSet(m_frameSet); m_frameSet = nullptr; }
     if (m_shadowPassSet) { m_device->DestroyDescriptorSet(m_shadowPassSet); m_shadowPassSet = nullptr; }
     if (m_sceneBuffersSet) { m_device->DestroyDescriptorSet(m_sceneBuffersSet); m_sceneBuffersSet = nullptr; }
@@ -103,6 +172,8 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                         float aspectRatio) {
     if (!m_shaderCache || !device || !cmd) return;
     EnsureResourceSpaceSets(device);
+    ResetTransientFrameStateIfNeeded(device);
+    const uint32_t frameIndex = device->GetCurrentFrameIndex() % kMaxFramesInFlight;
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
@@ -149,6 +220,8 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
         cascadeFrustum.FromMatrix(lightMatrix);
 
         const bool useResourceSpace = (m_frameSet && m_shadowPassSet && m_sceneBuffersSet);
+        if (backend::IsVulkan(device) && !useResourceSpace)
+            continue;
         if (useResourceSpace && m_frameUBO)
             m_frameUBO->Update(&lightMatrix, 0, sizeof(math::Mat4));
 
@@ -176,10 +249,15 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
                 shader->SetMat4("u_Model", d.transform);
             if (bonePtr && boneCount > 0) {
                 boneCount = std::min(boneCount, kMaxBones);
-                if (useResourceSpace && m_bonesBuffer)
-                    m_bonesBuffer->Update(bonePtr, 0, boneCount * sizeof(math::Mat4));
-                else
+                if (!useResourceSpace)
                     shader->SetMat4Array("u_Bones", bonePtr, boneCount);
+            }
+            rhi::IDescriptorSet* sceneSetForDraw = m_sceneBuffersSet;
+            if (useResourceSpace && bonePtr && boneCount > 0)
+                sceneSetForDraw = BuildSkinnedSceneSet(device, frameIndex, bonePtr, boneCount);
+            if (useResourceSpace && m_frameSet && m_shadowPassSet && sceneSetForDraw) {
+                rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, sceneSetForDraw };
+                cmd->BindDescriptorSets(0, 3, sets);
             }
             if (!useResourceSpace)
                 shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
@@ -193,10 +271,6 @@ void ShadowPass::Render(CascadeShadowMap& cascadeMap,
             if (it == shaders.end()) continue;
             auto& shader = it->second;
             shader->Bind(device);
-            if (m_frameSet && m_shadowPassSet && m_sceneBuffersSet) {
-                rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, m_sceneBuffersSet };
-                cmd->BindDescriptorSets(0, 3, sets);
-            }
             for (const auto& d : drawables)
                 if (IsVisibleInCascade(d, cascadeFrustum))
                     drawOne(shader.get(), d);
@@ -226,6 +300,8 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
                                  int32_t submeshIndex) {
     if (!m_shaderCache || !device || !cmd || !mesh || !material || !instanceMatrixBuffer || instanceCount == 0) return;
     EnsureResourceSpaceSets(device);
+    ResetTransientFrameStateIfNeeded(device);
+    const uint32_t frameIndex = device->GetCurrentFrameIndex() % kMaxFramesInFlight;
 
     float aspect = aspectRatio;
     if (aspect <= 0.0f && projection[0][0] != 0.0f)
@@ -242,8 +318,11 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
 
     const uint32_t splitCount = cascadeMap.GetSplitCount();
     const bool useResourceSpace = (m_frameSet && m_shadowPassSet && m_sceneBuffersSet);
+    if (backend::IsVulkan(device) && !useResourceSpace)
+        return;
+    rhi::IDescriptorSet* sceneSetForDraw = m_sceneBuffersSet;
     if (useResourceSpace)
-        m_sceneBuffersSet->UpdateStorageBuffer(1, instanceMatrixBuffer, 0, instanceCount * 64u);
+        sceneSetForDraw = BuildInstancedSceneSet(device, frameIndex, instanceMatrixBuffer, instanceCount);
     else
         cmd->BindStorageBuffer(instanceMatrixBuffer, rhi::StorageBinding::InstanceMatrix, 0, instanceCount * 64u);
 
@@ -260,8 +339,8 @@ void ShadowPass::RenderInstanced(CascadeShadowMap& cascadeMap,
         else
             shader->SetMat4("u_LightSpaceMatrix", lightMatrix);
         shader->Bind(device);
-        if (useResourceSpace) {
-            rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, m_sceneBuffersSet };
+        if (useResourceSpace && m_frameSet && m_shadowPassSet && sceneSetForDraw) {
+            rhi::IDescriptorSet* sets[3] = { m_frameSet, m_shadowPassSet, sceneSetForDraw };
             cmd->BindDescriptorSets(0, 3, sets);
         }
         mesh->Bind(device);

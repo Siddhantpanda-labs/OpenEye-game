@@ -68,6 +68,20 @@ void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, s
     }
     d.buffers.clear();
 
+    // Destroy dependent objects before their parents:
+    // framebuffer -> image view -> image.
+    for (void* p : d.framebuffers) {
+        if (dev && p)
+            vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(p), nullptr);
+    }
+    d.framebuffers.clear();
+
+    for (void* p : d.imageViews) {
+        if (dev && p)
+            vkDestroyImageView(dev, static_cast<VkImageView>(p), nullptr);
+    }
+    d.imageViews.clear();
+
     for (auto& p : d.images) {
         VkImage img = static_cast<VkImage>(p.first);
         VmaAllocation alloc = static_cast<VmaAllocation>(p.second);
@@ -75,12 +89,6 @@ void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, s
             vmaDestroyImage(vma, img, alloc);
     }
     d.images.clear();
-
-    for (void* p : d.imageViews) {
-        if (dev && p)
-            vkDestroyImageView(dev, static_cast<VkImageView>(p), nullptr);
-    }
-    d.imageViews.clear();
 
     for (void* p : d.pipelines) {
         if (!dev || !p) continue;
@@ -103,12 +111,6 @@ void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, s
             vkDestroyDescriptorSetLayout(dev, static_cast<VkDescriptorSetLayout>(p), nullptr);
     }
     d.descriptorSetLayouts.clear();
-
-    for (void* p : d.framebuffers) {
-        if (dev && p)
-            vkDestroyFramebuffer(dev, static_cast<VkFramebuffer>(p), nullptr);
-    }
-    d.framebuffers.clear();
 
     for (void* p : d.samplers) {
         if (dev && p)

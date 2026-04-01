@@ -103,16 +103,8 @@ DeferredLightingPassExecuteParams DeferredLightingPassSystem::BuildParams(const 
     rhi::IDescriptorSet* const passSet = params.deferredLightingSet;
     GBuffer* const gbuffer = params.gbuffer;
     LightingPass* const lightingPass = params.lightingPass;
-    if (!passSet || !gbuffer || !lightingPass) {
-        static bool s_loggedMissingBuildInputs = false;
-        if (!s_loggedMissingBuildInputs) {
-            core::Log::WarnF(
-                "DeferredLightingPassSystem::BuildParams skipped: passSet=%p gbuffer=%p lightingPass=%p",
-                (void*)passSet, (void*)gbuffer, (void*)lightingPass);
-            s_loggedMissingBuildInputs = true;
-        }
+    if (!passSet || !gbuffer || !lightingPass)
         return out;
-    }
 
     EnsureFallbackResources(params.device);
     if (!m_fallback2DTexture || !m_fallbackCubeTexture || !m_fallbackStorageBuffer || !m_fallbackUniformBuffer) {
@@ -157,16 +149,8 @@ bool DeferredLightingPassSystem::Execute(const DeferredLightingPassExecuteParams
     rhi::ICommandList* const cmd = params.build.cmd;
     LightingPass* const lightingPass = params.build.lightingPass;
     GBuffer* const gbuffer = params.build.gbuffer;
-    if (!params.build.frameData || !lightingPass || !gbuffer) {
-        static bool s_loggedMissingExecuteInputs = false;
-        if (!s_loggedMissingExecuteInputs) {
-            core::Log::WarnF(
-                "DeferredLightingPassSystem::Execute skipped: frameData=%p lightingPass=%p gbuffer=%p",
-                (void*)params.build.frameData, (void*)lightingPass, (void*)gbuffer);
-            s_loggedMissingExecuteInputs = true;
-        }
+    if (!params.build.frameData || !lightingPass || !gbuffer)
         return false;
-    }
     if (cmd && params.build.hdrRenderTarget)
         rhi::ClearAndSetRenderTargetWithViewport(cmd, params.build.hdrRenderTarget, 0, 0, params.build.width, params.build.height,
                                                  params.build.clearColor);

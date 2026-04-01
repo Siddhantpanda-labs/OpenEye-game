@@ -109,6 +109,11 @@ void BarrierTrackerVK::SetImageState(BarrierTrackerVK* tracker, void* image, Res
     tracker->m_imageState[image] = state;
 }
 
+void BarrierTrackerVK::RemoveImageState(BarrierTrackerVK* tracker, void* image) {
+    if (!tracker || !image) return;
+    tracker->m_imageState.erase(image);
+}
+
 } // namespace rhi
 } // namespace render
 } // namespace eyelib

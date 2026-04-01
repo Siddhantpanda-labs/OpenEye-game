@@ -59,6 +59,7 @@ void PostProcessor::DestroyFramebuffers() {
     if (m_outputRT) { m_deviceRHI->DestroyRenderTarget(m_outputRT); m_outputRT = nullptr; }
     if (m_ldrPingPong) { m_deviceRHI->DestroyRenderTarget(m_ldrPingPong); m_ldrPingPong = nullptr; }
     if (m_bloomExtractRT) { m_deviceRHI->DestroyRenderTarget(m_bloomExtractRT); m_bloomExtractRT = nullptr; }
+    if (m_bloomBlurScratchRT) { m_deviceRHI->DestroyRenderTarget(m_bloomBlurScratchRT); m_bloomBlurScratchRT = nullptr; }
     if (m_ssaoRT) { m_deviceRHI->DestroyRenderTarget(m_ssaoRT); m_ssaoRT = nullptr; }
     if (m_ssaoBlurRT) { m_deviceRHI->DestroyRenderTarget(m_ssaoBlurRT); m_ssaoBlurRT = nullptr; }
     if (m_ssrPrevRT) { m_deviceRHI->DestroyRenderTarget(m_ssrPrevRT); m_ssrPrevRT = nullptr; }
@@ -128,6 +129,16 @@ void PostProcessor::RecycleTransientPostSetsIfNeeded() {
     m_transientPostFrameIndex = frameIndex;
 }
 
+void PostProcessor::BindPostPassDescriptorSets(rhi::ICommandList* cmd, rhi::IDescriptorSet* postPassSet) {
+    if (!cmd || !postPassSet) return;
+    if (m_frameSet) {
+        rhi::IDescriptorSet* sets[2] = {m_frameSet, postPassSet};
+        cmd->BindDescriptorSets(0, 2, sets);
+    } else {
+        cmd->BindDescriptorSets(1, 1, &postPassSet);
+    }
+}
+
 rhi::IDescriptorSet* PostProcessor::CreateTransientPostSet(const std::vector<std::pair<uint32_t, rhi::ITexture*>>& bindings) {
     if (!m_useVulkanTransientPostSets || !m_deviceRHI) return nullptr;
     if (!m_postPassLayout)
@@ -177,6 +188,8 @@ void PostProcessor::CreateFramebuffers() {
     if (!m_pingPongRT[1]) core::Log::Error("PostProcessor::CreateFramebuffers: pingPongRT[1] failed");
     m_bloomExtractRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
     if (!m_bloomExtractRT) core::Log::Error("PostProcessor::CreateFramebuffers: bloomExtractRT failed");
+    m_bloomBlurScratchRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgb16f, rhi::RHITextureFormat::None, 1);
+    if (!m_bloomBlurScratchRT) core::Log::Error("PostProcessor::CreateFramebuffers: bloomBlurScratchRT failed");
     m_outputRT = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgba8, rhi::RHITextureFormat::None, 1);
     if (!m_outputRT) core::Log::Error("PostProcessor::CreateFramebuffers: outputRT failed");
     m_ldrPingPong = m_deviceRHI->CreateRenderTarget(m_width, m_height, rgba8, rhi::RHITextureFormat::None, 1);
@@ -233,7 +246,7 @@ void PostProcessor::LoadShaders() {
 
     m_bloomCompositeShader = std::make_shared<Shader>();
     if (!m_bloomCompositeShader->Load(m_deviceRHI, "passes/post/bloom_composite", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
-                                      std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
+                                      std::optional{rhi::StandardAttachmentFormats::PostHDR()})) {
         core::Log::WarnF("PostProcessor: Failed to load bloom composite shader");
     }
 
@@ -310,7 +323,7 @@ void main() {
 }
 )";
     m_ssaoBlendShader->BuildFromSource(m_deviceRHI, ssaoBlendVert, ssaoBlendFrag, fullscreenLayout, rhi::PrimitiveTopology::TriangleList,
-                                       rhi::PipelineLayoutKind::PushOnly, std::optional{rhi::StandardAttachmentFormats::LegacyRGBA8()});
+                                       rhi::PipelineLayoutKind::PushOnly, std::optional{rhi::StandardAttachmentFormats::PostHDR()});
 
     m_ssaoBlurShader = std::make_shared<Shader>();
     if (!m_ssaoBlurShader->Load(m_deviceRHI, "passes/post/ssao_blur", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
@@ -321,6 +334,11 @@ void main() {
     if (!m_copyShader->Load(m_deviceRHI, "passes/post/copy", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
                             std::optional{rhi::StandardAttachmentFormats::PostCopyBGRA()})) {
         core::Log::WarnF("PostProcessor: Failed to load copy shader");
+    }
+    m_displayEncodeShader = std::make_shared<Shader>();
+    if (!m_displayEncodeShader->Load(m_deviceRHI, "passes/post/display_encode", fullscreenLayout, rhi::PrimitiveTopology::TriangleList,
+                                     postLayout, std::optional{rhi::StandardAttachmentFormats::PostLDR8()})) {
+        core::Log::WarnF("PostProcessor: Failed to load display_encode shader");
     }
     m_depthPyramidShader = std::make_shared<Shader>();
     if (!m_depthPyramidShader->Load(m_deviceRHI, "passes/post/depth_pyramid", fullscreenLayout, rhi::PrimitiveTopology::TriangleList, postLayout,
@@ -359,24 +377,17 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!hdrInputTexture || !GetOutputTextureRHI()) {
         return hdrInputTexture;
     }
-    rhi::ICommandList* cmdPost = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmdPost = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (cmdPost)
         rhi::BarrierTextureForShaderRead(cmdPost, hdrInputTexture);
 
-    // SSAO (applied before tone mapping, in linear space)
+    // SSAO factor texture (computed in linear/view space)
     rhi::ITexture* ssaoTexture = nullptr;
     if (settings.enableSSAO) {
         ssaoTexture = ApplySSAO(gbuffer, settings, viewMatrix, projectionMatrix);
     }
 
-    // Bloom extraction and blur (if enabled) — from HDR before SSR
-    rhi::ITexture* bloomTexture = nullptr;
-    if (settings.enableBloom) {
-        bloomTexture = ExtractBloom(hdrInputTexture, settings.bloomThreshold);
-        bloomTexture = BlurTexture(bloomTexture, settings.bloomIterations);
-    }
-
-    // SSR on HDR lit buffer (before tone mapping); output to ping-pong so we can tone-map the result
+    // SSR on HDR lit buffer (before SSAO/bloom/tonemap)
     rhi::ITexture* preToneMapTexture = hdrInputTexture;
     if (settings.enableSSR && GetPingPongRT(0)) {
         preToneMapTexture = ApplySSR(hdrInputTexture, gbuffer, skyboxTexture, settings,
@@ -386,68 +397,29 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             rhi::BarrierTextureForShaderRead(cmdPost, preToneMapTexture);
     }
 
-    // Tone mapping (HDR → LDR; input is post-SSR HDR when SSR enabled)
-    rhi::ITexture* toneMappedTexture = ApplyToneMapping(preToneMapTexture, settings);
+    // Linear HDR working buffer: SSR → (optional) SSAO multiply → (optional) bloom add → tonemap
+    rhi::ITexture* hdrWorking = preToneMapTexture;
 
-    // Apply SSAO to tone-mapped result (multiply occlusion)
     if (settings.enableSSAO && ssaoTexture && m_ssaoBlendShader && m_ssaoBlendShader->IsValid()) {
-        rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
-        if (cmd && m_outputRT) {
-            cmd->SetRenderTarget(m_outputRT);
-            cmd->SetViewport(0, 0, m_width, m_height);
-            cmd->SetDepthTest(false);
-            cmd->SetDepthWrite(false);
-            cmd->SetCullFace(false);
-            cmd->SetBlend(false);
-            m_ssaoBlendShader->Bind(m_deviceRHI);
-            m_ssaoBlendShader->SetInt("u_Scene", 0);
-            m_ssaoBlendShader->SetInt("u_SSAO", 1);
-            cmd->BindTexture(toneMappedTexture, 0);
-            cmd->BindTexture(ssaoTexture, 1);
-            if (m_ssaoBlendShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssaoBlendShader->GetPipelineRHI()); }
-            m_ssaoBlendShader->Unbind();
-            toneMappedTexture = GetOutputTextureRHI();
+        hdrWorking = ApplySSAOBlendHDR(hdrWorking, ssaoTexture);
+        if (cmdPost && hdrWorking)
+            rhi::BarrierTextureForShaderRead(cmdPost, hdrWorking);
+    }
+
+    rhi::ITexture* bloomTexture = nullptr;
+    if (settings.enableBloom) {
+        bloomTexture = ExtractBloom(hdrWorking, settings.bloomThreshold);
+        if (bloomTexture) {
+            bloomTexture = BlurTexture(bloomTexture, settings.bloomIterations);
+            if (bloomTexture && m_bloomCompositeShader && m_bloomCompositeShader->IsValid()) {
+                hdrWorking = ApplyBloomCompositeHDR(hdrWorking, bloomTexture, settings);
+                if (cmdPost && hdrWorking)
+                    rhi::BarrierTextureForShaderRead(cmdPost, hdrWorking);
+            }
         }
     }
 
-    // Bloom composite (if enabled)
-    if (settings.enableBloom && bloomTexture && m_bloomCompositeShader && m_bloomCompositeShader->IsValid()) {
-        rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
-        if (cmd) {
-            rhi::IRenderTarget* compositeRT = SelectPostTargetLDR(toneMappedTexture);
-            if (!compositeRT) return toneMappedTexture;
-            rhi::BarrierTextureForShaderRead(cmd, toneMappedTexture);
-            rhi::BarrierTextureForShaderRead(cmd, bloomTexture);
-            cmd->SetRenderTarget(compositeRT);
-            cmd->SetViewport(0, 0, m_width, m_height);
-            cmd->SetDepthTest(false);
-            cmd->SetDepthWrite(false);
-            cmd->SetCullFace(false);
-            cmd->SetBlend(false);
-            m_bloomCompositeShader->Bind(m_deviceRHI);
-            m_bloomCompositeShader->SetInt("u_SceneTexture", 0);
-            m_bloomCompositeShader->SetInt("u_BloomTexture", 1);
-            m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
-            if (m_postPassLayout) {
-                rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, toneMappedTexture}, {1u, bloomTexture}});
-            if (postSet) {
-                if (rhi::IPipeline* pipe = m_bloomCompositeShader->GetPipelineRHI())
-                    cmd->BindPipeline(pipe);
-                cmd->BindDescriptorSets(1, 1, &postSet);
-                abi::WriteBloomCompositePushConstant(cmd, settings.bloomIntensity);
-                } else {
-                    m_bloomCompositeShader->Unbind();
-                    return toneMappedTexture;
-                }
-            } else {
-                cmd->BindTexture(toneMappedTexture, 0);
-                cmd->BindTexture(bloomTexture, 1);
-            }
-            if (m_bloomCompositeShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_bloomCompositeShader->GetPipelineRHI()); }
-            m_bloomCompositeShader->Unbind();
-            toneMappedTexture = GetColorTexture(compositeRT);
-        }
-    }
+    rhi::ITexture* toneMappedTexture = ApplyToneMapping(hdrWorking, settings);
 
     // General Blur (if enabled, applied after bloom)
     if (settings.enableBlur) {
@@ -475,10 +447,13 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         toneMappedTexture = ApplyFilmGrain(toneMappedTexture, settings, time);
     }
 
-    // FXAA (final pass, on LDR)
+    // FXAA (on linear LDR, before display encoding)
     if (settings.enableFXAA) {
         toneMappedTexture = ApplyFXAA(toneMappedTexture);
     }
+
+    // sRGB OETF once: UNORM8 targets and swapchain blit expect gamma-encoded values for correct display.
+    toneMappedTexture = ApplyDisplayEncoding(toneMappedTexture);
 
     m_lastOutputTexture = toneMappedTexture;
     m_lastOutputRT = ResolveRenderTargetForTexture(toneMappedTexture);
@@ -489,7 +464,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!m_toneMappingShader || !m_toneMappingShader->IsValid()) {
         return hdrTexture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(hdrTexture);
     if (!cmd || !targetRT) return hdrTexture;
     rhi::BarrierTextureForShaderRead(cmd, hdrTexture);
@@ -510,7 +485,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         if (postSet) {
             if (rhi::IPipeline* pipe = m_toneMappingShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
         } else {
             m_toneMappingShader->Unbind();
             return hdrTexture;
@@ -533,7 +508,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!m_bloomExtractShader || !m_bloomExtractShader->IsValid()) {
         return nullptr;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (!cmd || !m_bloomExtractRT) return nullptr;
     cmd->SetRenderTarget(m_bloomExtractRT);
     cmd->SetViewport(0, 0, m_width, m_height);
@@ -550,7 +525,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         if (postSet) {
             if (rhi::IPipeline* pipe = m_bloomExtractShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteBloomExtractPushConstant(cmd, threshold);
         } else {
             m_bloomExtractShader->Unbind();
@@ -569,8 +544,9 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!m_bloomBlurShader || !m_bloomBlurShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (!cmd) return texture;
+    if (!m_bloomExtractRT || !m_bloomBlurScratchRT) return texture;
     bool horizontal = true;
     rhi::ITexture* currentTexture = texture;
 
@@ -579,7 +555,8 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     m_bloomBlurShader->SetFloat("u_Intensity", 1.0f);
 
     for (int i = 0; i < iterations; ++i) {
-        rhi::IRenderTarget* rt = m_pingPongRT[horizontal ? 0 : 1];
+        // Ping-pong only between bloom extract and dedicated scratch so we never overwrite HDR scene in m_pingPongRT.
+        rhi::IRenderTarget* rt = (i % 2 == 0) ? m_bloomBlurScratchRT : m_bloomExtractRT;
         if (!rt) break;
         if (i > 0)
             rhi::BarrierTextureForShaderRead(cmd, currentTexture);
@@ -596,7 +573,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (postSet) {
                 if (rhi::IPipeline* pipe = m_bloomBlurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
-                cmd->BindDescriptorSets(1, 1, &postSet);
+                BindPostPassDescriptorSets(cmd, postSet);
                 abi::WriteBloomBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), horizontal ? 1 : 0,
                                                  1.0f);
             } else {
@@ -618,7 +595,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!m_blurShader || !m_blurShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (!cmd) return texture;
     bool horizontal = true;
     rhi::ITexture* currentTexture = texture;
@@ -645,7 +622,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
             if (postSet) {
                 if (rhi::IPipeline* pipe = m_blurShader->GetPipelineRHI())
                     cmd->BindPipeline(pipe);
-                cmd->BindDescriptorSets(1, 1, &postSet);
+                BindPostPassDescriptorSets(cmd, postSet);
                 abi::WriteBloomBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), horizontal ? 1 : 0,
                                                  intensity);
             } else {
@@ -667,7 +644,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     if (!m_chromaticAberrationShader || !m_chromaticAberrationShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(texture);
     if (!cmd || !targetRT) return texture;
     rhi::BarrierTextureForShaderRead(cmd, texture);
@@ -686,7 +663,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         if (postSet) {
             if (rhi::IPipeline* pipe = m_chromaticAberrationShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteChromaticAberrationPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height), intensity);
         } else {
             m_chromaticAberrationShader->Unbind();
@@ -702,11 +679,112 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
     return m_lastOutputTexture;
 }
 
+rhi::ITexture* PostProcessor::ApplyDisplayEncoding(rhi::ITexture* linearLdr) {
+    if (!m_displayEncodeShader || !m_displayEncodeShader->IsValid()) {
+        return linearLdr;
+    }
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
+    rhi::IRenderTarget* targetRT = SelectPostTargetLDR(linearLdr);
+    if (!cmd || !targetRT) return linearLdr;
+    rhi::BarrierTextureForShaderRead(cmd, linearLdr);
+    cmd->SetRenderTarget(targetRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
+
+    m_displayEncodeShader->Bind(m_deviceRHI);
+    m_displayEncodeShader->SetInt("u_Texture", 0);
+    if (m_postPassLayout) {
+        rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, linearLdr}});
+        if (postSet) {
+            if (rhi::IPipeline* pipe = m_displayEncodeShader->GetPipelineRHI())
+                cmd->BindPipeline(pipe);
+            BindPostPassDescriptorSets(cmd, postSet);
+        } else {
+            m_displayEncodeShader->Unbind();
+            return linearLdr;
+        }
+    } else {
+        cmd->BindTexture(linearLdr, 0);
+    }
+    if (m_displayEncodeShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_displayEncodeShader->GetPipelineRHI()); }
+    m_displayEncodeShader->Unbind();
+    m_lastOutputTexture = GetColorTexture(targetRT);
+    m_lastOutputRT = targetRT;
+    return m_lastOutputTexture;
+}
+
+rhi::ITexture* PostProcessor::ApplySSAOBlendHDR(rhi::ITexture* hdrScene, rhi::ITexture* ssaoTexture) {
+    if (!hdrScene || !ssaoTexture || !m_ssaoBlendShader || !m_ssaoBlendShader->IsValid()) {
+        return hdrScene;
+    }
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
+    rhi::IRenderTarget* targetRT = SelectPostTargetHDR(hdrScene);
+    if (!cmd || !targetRT) return hdrScene;
+    rhi::BarrierTextureForShaderRead(cmd, hdrScene);
+    rhi::BarrierTextureForShaderRead(cmd, ssaoTexture);
+    cmd->SetRenderTarget(targetRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
+    m_ssaoBlendShader->Bind(m_deviceRHI);
+    m_ssaoBlendShader->SetInt("u_Scene", 0);
+    m_ssaoBlendShader->SetInt("u_SSAO", 1);
+    cmd->BindTexture(hdrScene, 0);
+    cmd->BindTexture(ssaoTexture, 1);
+    if (m_ssaoBlendShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_ssaoBlendShader->GetPipelineRHI()); }
+    m_ssaoBlendShader->Unbind();
+    return GetColorTexture(targetRT);
+}
+
+rhi::ITexture* PostProcessor::ApplyBloomCompositeHDR(rhi::ITexture* hdrScene, rhi::ITexture* bloomTexture, const Settings& settings) {
+    if (!hdrScene || !bloomTexture || !m_bloomCompositeShader || !m_bloomCompositeShader->IsValid()) {
+        return hdrScene;
+    }
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
+    rhi::IRenderTarget* compositeRT = SelectPostTargetHDR(hdrScene);
+    if (!cmd || !compositeRT) return hdrScene;
+    rhi::BarrierTextureForShaderRead(cmd, hdrScene);
+    rhi::BarrierTextureForShaderRead(cmd, bloomTexture);
+    cmd->SetRenderTarget(compositeRT);
+    cmd->SetViewport(0, 0, m_width, m_height);
+    cmd->SetDepthTest(false);
+    cmd->SetDepthWrite(false);
+    cmd->SetCullFace(false);
+    cmd->SetBlend(false);
+    m_bloomCompositeShader->Bind(m_deviceRHI);
+    m_bloomCompositeShader->SetInt("u_SceneTexture", 0);
+    m_bloomCompositeShader->SetInt("u_BloomTexture", 1);
+    m_bloomCompositeShader->SetFloat("u_BloomIntensity", settings.bloomIntensity);
+    if (m_postPassLayout) {
+        rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, hdrScene}, {1u, bloomTexture}});
+        if (postSet) {
+            if (rhi::IPipeline* pipe = m_bloomCompositeShader->GetPipelineRHI())
+                cmd->BindPipeline(pipe);
+            BindPostPassDescriptorSets(cmd, postSet);
+            abi::WriteBloomCompositePushConstant(cmd, settings.bloomIntensity);
+        } else {
+            m_bloomCompositeShader->Unbind();
+            return hdrScene;
+        }
+    } else {
+        cmd->BindTexture(hdrScene, 0);
+        cmd->BindTexture(bloomTexture, 1);
+    }
+    if (m_bloomCompositeShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_bloomCompositeShader->GetPipelineRHI()); }
+    m_bloomCompositeShader->Unbind();
+    return GetColorTexture(compositeRT);
+}
+
  rhi::ITexture* PostProcessor::ApplyFXAA(rhi::ITexture* texture) {
     if (!m_fxaaShader || !m_fxaaShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(texture);
     if (!cmd || !targetRT) return texture;
     rhi::BarrierTextureForShaderRead(cmd, texture);
@@ -724,7 +802,7 @@ rhi::ITexture* PostProcessor::ApplyPostProcessing(rhi::ITexture* hdrInputTexture
         if (postSet) {
             if (rhi::IPipeline* pipe = m_fxaaShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteFxaaPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height));
         } else {
             m_fxaaShader->Unbind();
@@ -759,7 +837,7 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
     if (!m_ssaoShader || !m_ssaoShader->IsValid()) {
         return nullptr;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (!cmd || !m_ssaoRT) return nullptr;
     rhi::ClearValue cv = {1.f, 1.f, 1.f, 1.f};
     rhi::ClearAndSetRenderTargetWithViewport(cmd, m_ssaoRT, 0, 0, m_width, m_height, cv);
@@ -776,7 +854,7 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
         rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, posT}, {1u, nrmT}, {2u, depT}});
         if (postSet && m_ssaoShader->GetPipelineRHI()) {
             cmd->BindPipeline(m_ssaoShader->GetPipelineRHI());
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteSsaoPushConstants(cmd, viewMatrix, projectionMatrix, static_cast<float>(m_width), static_cast<float>(m_height),
                                         settings.ssaoRadius, settings.ssaoBias, settings.ssaoSamples);
         }
@@ -817,7 +895,7 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
                 rhi::IDescriptorSet* blurSet = CreateTransientPostSet({{0u, srcTex}, {1u, depthTex}});
                 if (blurSet && m_ssaoBlurShader->GetPipelineRHI()) {
                     cmd->BindPipeline(m_ssaoBlurShader->GetPipelineRHI());
-                    cmd->BindDescriptorSets(1, 1, &blurSet);
+                    BindPostPassDescriptorSets(cmd, blurSet);
                     abi::WriteSsaoBlurPushConstants(cmd, (pass == 0) ? 1.0f : 0.0f, (pass == 0) ? 0.0f : 1.0f, res.x, res.y, 0.1f,
                                                       1000.0f, farOverEdge, kSSAOBlurSampleCount, kernel, kSSAOBlurKernelSize);
                 }
@@ -846,7 +924,7 @@ void BuildGaussianKernel(float* outKernel, int maxSamples, int gaussianHalfWidth
 
 void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane) {
     if (!m_depthPyramidShader || !m_depthPyramidShader->IsValid() || m_depthPyramidRTs.size() != kDepthPyramidLevels) return;
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::ITexture* depthTex = gbuffer.GetDepthTextureRHI();
     if (!cmd || !depthTex) return;
 
@@ -871,7 +949,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, depthTex}, {1u, m_depthPyramidTexture}});
         if (postSet && m_depthPyramidShader->GetPipelineRHI()) {
             cmd->BindPipeline(m_depthPyramidShader->GetPipelineRHI());
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteDepthPyramidPushConstants(cmd, 0, static_cast<float>(m_width), static_cast<float>(m_height), nearPlane, farPlane);
         }
     } else {
@@ -899,7 +977,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, depthTex}, {1u, m_depthPyramidTexture}});
             if (postSet && m_depthPyramidShader->GetPipelineRHI()) {
                 cmd->BindPipeline(m_depthPyramidShader->GetPipelineRHI());
-                cmd->BindDescriptorSets(1, 1, &postSet);
+                BindPostPassDescriptorSets(cmd, postSet);
                 abi::WriteDepthPyramidPushConstants(cmd, static_cast<int>(mip), static_cast<float>(prevW), static_cast<float>(prevH), nearPlane,
                                                       farPlane);
             }
@@ -923,7 +1001,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         return sceneTexture;
     }
     rhi::IRenderTarget* rt = (outputRT != nullptr) ? outputRT : m_outputRT;
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     if (!cmd || !rt) return sceneTexture;
 
     rhi::BarrierTextureForShaderRead(cmd, sceneTexture);
@@ -958,7 +1036,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
             return sceneTexture;
         }
         cmd->BindPipeline(m_ssrShader->GetPipelineRHI());
-        cmd->BindDescriptorSets(1, 1, &postSet);
+        BindPostPassDescriptorSets(cmd, postSet);
         abi::WriteSSRPushConstants(cmd, viewMatrix, projectionMatrix, invViewMatrix, viewPos, settings.ssrNearPlane, settings.ssrFarPlane,
                                    static_cast<float>(m_width), static_cast<float>(m_height), settings.ssrStepSize, settings.ssrThickness,
                                    settings.ssrMaxSteps);
@@ -1022,7 +1100,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
                 if (postSet) {
                     if (rhi::IPipeline* pipe = m_copyShader->GetPipelineRHI())
                         cmd->BindPipeline(pipe);
-                    cmd->BindDescriptorSets(1, 1, &postSet);
+                    BindPostPassDescriptorSets(cmd, postSet);
                 } else {
                     m_copyShader->Unbind();
                     return ssrOut;
@@ -1043,7 +1121,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (!m_motionBlurShader || !m_motionBlurShader->IsValid() || !velocityTexture) {
         return texture;  // Skip if no shader or no velocity buffer
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(texture);
     if (!cmd || !targetRT) return texture;
     rhi::BarrierTextureForShaderRead(cmd, texture);
@@ -1066,7 +1144,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         if (postSet) {
             if (rhi::IPipeline* pipe = m_motionBlurShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteMotionBlurPushConstants(cmd, static_cast<float>(m_width), static_cast<float>(m_height),
                                               settings.motionBlurIntensity, settings.motionBlurSamples);
         } else {
@@ -1088,7 +1166,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (!m_vignetteShader || !m_vignetteShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(texture);
     if (!cmd || !targetRT) return texture;
     rhi::BarrierTextureForShaderRead(cmd, texture);
@@ -1108,7 +1186,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         if (postSet) {
             if (rhi::IPipeline* pipe = m_vignetteShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteVignettePushConstants(cmd, settings.vignetteIntensity, settings.vignetteRadius, settings.vignetteSoftness);
         } else {
             m_vignetteShader->Unbind();
@@ -1128,7 +1206,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
     if (!m_filmGrainShader || !m_filmGrainShader->IsValid()) {
         return texture;
     }
-    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_deviceRHI ? m_deviceRHI->GetActiveRecordingCommandList() : nullptr;
     rhi::IRenderTarget* targetRT = SelectPostTargetLDR(texture);
     if (!cmd || !targetRT) return texture;
     rhi::BarrierTextureForShaderRead(cmd, texture);
@@ -1147,7 +1225,7 @@ void PostProcessor::BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, f
         if (postSet) {
             if (rhi::IPipeline* pipe = m_filmGrainShader->GetPipelineRHI())
                 cmd->BindPipeline(pipe);
-            cmd->BindDescriptorSets(1, 1, &postSet);
+            BindPostPassDescriptorSets(cmd, postSet);
             abi::WriteFilmGrainPushConstants(cmd, settings.filmGrainIntensity, time);
         } else {
             m_filmGrainShader->Unbind();
@@ -1187,7 +1265,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
                 if (postSet) {
                     if (rhi::IPipeline* pipe = m_toneMappingShader->GetPipelineRHI())
                         cmd->BindPipeline(pipe);
-                    cmd->BindDescriptorSets(1, 1, &postSet);
+                    BindPostPassDescriptorSets(cmd, postSet);
                     abi::WriteTonemapPushConstants(cmd, settings.exposure, settings.useACES ? 1 : 0);
                 } else {
                     m_toneMappingShader->Unbind();
@@ -1221,7 +1299,7 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
                 if (postSet) {
                     if (rhi::IPipeline* pipe = m_fxaaShader->GetPipelineRHI())
                         cmd->BindPipeline(pipe);
-                    cmd->BindDescriptorSets(1, 1, &postSet);
+                    BindPostPassDescriptorSets(cmd, postSet);
                     abi::WriteFxaaPushConstants(cmd, static_cast<float>(res.width), static_cast<float>(res.height));
                 } else {
                     m_fxaaShader->Unbind();
@@ -1236,6 +1314,39 @@ void PostProcessor::AddPostPassesToFrameGraph(FrameGraph* fg, int hdrInput, int 
             m_fxaaShader->Unbind();
         },
         { toneMappedOutput }, { finalOutput }, true);
+
+    fg->AddPass("Post.DisplayEncode",
+        [this, finalOutput, cmd](const FGPassResources& res) {
+            rhi::ITexture* tex = res.getTextureRHI(finalOutput);
+            if (!tex || !m_displayEncodeShader || !m_displayEncodeShader->IsValid()) return;
+            rhi::IRenderTarget* targetRT = SelectPostTargetLDR(tex);
+            if (!targetRT) return;
+            cmd->SetRenderTarget(targetRT);
+            cmd->SetViewport(0, 0, res.width, res.height);
+            cmd->SetDepthTest(false);
+            cmd->SetDepthWrite(false);
+            cmd->SetCullFace(false);
+            cmd->SetBlend(false);
+            m_displayEncodeShader->Bind(m_deviceRHI);
+            m_displayEncodeShader->SetInt("u_Texture", 0);
+            if (m_postPassLayout) {
+                rhi::IDescriptorSet* postSet = CreateTransientPostSet({{0u, tex}});
+                if (postSet) {
+                    if (rhi::IPipeline* pipe = m_displayEncodeShader->GetPipelineRHI())
+                        cmd->BindPipeline(pipe);
+                    BindPostPassDescriptorSets(cmd, postSet);
+                } else {
+                    m_displayEncodeShader->Unbind();
+                    return;
+                }
+            } else {
+                cmd->BindTexture(tex, 0);
+            }
+            if (m_displayEncodeShader->GetPipelineRHI()) { cmd->DrawFullscreenQuad(m_displayEncodeShader->GetPipelineRHI()); }
+            m_displayEncodeShader->Unbind();
+            m_lastOutputValid = true;
+        },
+        { finalOutput }, { finalOutput }, true);
 }
 
 rhi::ITexture* PostProcessor::GetColorTexture(rhi::IRenderTarget* rt) const {
@@ -1247,6 +1358,14 @@ rhi::IRenderTarget* PostProcessor::SelectPostTargetLDR(rhi::ITexture* inputTextu
     if (!inputTexture) return m_outputRT;
     if (GetColorTexture(m_outputRT) != inputTexture) return m_outputRT;
     if (GetColorTexture(m_ldrPingPong) != inputTexture) return m_ldrPingPong;
+    return nullptr;
+}
+
+rhi::IRenderTarget* PostProcessor::SelectPostTargetHDR(rhi::ITexture* inputTexture) const {
+    if (!m_pingPongRT[0] || !m_pingPongRT[1]) return nullptr;
+    if (!inputTexture) return m_pingPongRT[0];
+    if (GetColorTexture(m_pingPongRT[0]) != inputTexture) return m_pingPongRT[0];
+    if (GetColorTexture(m_pingPongRT[1]) != inputTexture) return m_pingPongRT[1];
     return nullptr;
 }
 
@@ -1266,6 +1385,7 @@ rhi::IRenderTarget* PostProcessor::ResolveRenderTargetForTexture(rhi::ITexture* 
     if (m_pingPongRT[0] && GetColorTexture(m_pingPongRT[0]) == texture) return m_pingPongRT[0];
     if (m_pingPongRT[1] && GetColorTexture(m_pingPongRT[1]) == texture) return m_pingPongRT[1];
     if (m_bloomExtractRT && GetColorTexture(m_bloomExtractRT) == texture) return m_bloomExtractRT;
+    if (m_bloomBlurScratchRT && GetColorTexture(m_bloomBlurScratchRT) == texture) return m_bloomBlurScratchRT;
     if (m_ssaoRT && GetColorTexture(m_ssaoRT) == texture) return m_ssaoRT;
     if (m_ssaoBlurRT && GetColorTexture(m_ssaoBlurRT) == texture) return m_ssaoBlurRT;
     if (m_ssrPrevRT && GetColorTexture(m_ssrPrevRT) == texture) return m_ssrPrevRT;

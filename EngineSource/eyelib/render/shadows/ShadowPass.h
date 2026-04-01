@@ -4,6 +4,7 @@
 #include "eyelib/render/RenderTypes.h"
 #include "eyelib/render/shadows/CascadeShadowMap.h"
 #include "eyelib/render/rhi/RHI.h"
+#include <array>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -68,6 +69,10 @@ public:
 
 private:
     void EnsureResourceSpaceSets(rhi::IDevice* device);
+    void ResetTransientFrameStateIfNeeded(rhi::IDevice* device);
+    rhi::IDescriptorSet* AcquirePerDrawSceneSet(rhi::IDevice* device, uint32_t frameIndex);
+    rhi::IDescriptorSet* BuildSkinnedSceneSet(rhi::IDevice* device, uint32_t frameIndex, const math::Mat4* bonePtr, size_t boneCount);
+    rhi::IDescriptorSet* BuildInstancedSceneSet(rhi::IDevice* device, uint32_t frameIndex, rhi::IBuffer* instanceMatrixBuffer, uint32_t instanceCount);
 
     ShaderCache* m_shaderCache = nullptr;
     rhi::IDevice* m_device = nullptr;
@@ -77,6 +82,12 @@ private:
     rhi::IBuffer* m_frameUBO = nullptr;
     rhi::IBuffer* m_bonesBuffer = nullptr;  // SceneBuffers binding 1 for skinned (resource-space)
     rhi::IBuffer* m_sceneFallbackBuffer = nullptr;  // SceneBuffers fallback for required bindings 0..3
+    static constexpr uint32_t kMaxFramesInFlight = 3u;
+    static constexpr uint32_t kMaxSkinnedDrawsPerFrame = 256u;
+    std::array<std::vector<rhi::IDescriptorSet*>, kMaxFramesInFlight> m_perDrawSceneSets{};
+    std::array<uint32_t, kMaxFramesInFlight> m_perDrawSceneSetCursor{};
+    std::array<size_t, kMaxFramesInFlight> m_bonesWriteCursorBytes{};
+    uint32_t m_lastTransientFrameNumber = 0xffffffffu;
 };
 
 } // namespace render

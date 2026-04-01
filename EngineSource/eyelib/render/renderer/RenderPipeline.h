@@ -115,11 +115,14 @@ public:
     void WarmupPipelines();
     /** Wait for GPU to finish all submitted work (e.g. before swap to avoid flicker). */
     void Finish();
+    /** Cubemap sky HDR multiplier (default 1). Clamped to non-negative. */
+    void SetSkyboxBrightness(float multiplier);
+    float GetSkyboxBrightness() const { return m_skyboxBrightness; }
     /** Returns true when the pipeline has a valid render target to present. */
     bool HasValidOutput() const;
 
     rhi::IDevice* GetRHIDevice() { return m_device; }
-    rhi::ICommandList* GetRHICommandList() { return m_device ? m_device->GetImmediateCommandList() : nullptr; }
+    rhi::ICommandList* GetRHICommandList() { return m_device ? m_device->GetActiveRecordingCommandList() : nullptr; }
     /** True when this pipeline owns the device (Initialize(unique_ptr) was used). Caller must run global teardown before Shutdown() when true. */
     bool OwnsDevice() const { return m_ownedDevice != nullptr; }
 
@@ -396,6 +399,7 @@ private:
 
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit
+    float m_skyboxBrightness = 1.0f;
     PipelineMode m_mode = PipelineMode::Deferred;
     PrePostCallback m_prePostCallback;
     

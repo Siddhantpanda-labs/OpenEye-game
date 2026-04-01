@@ -42,7 +42,9 @@ public:
 
 private:
     /** SceneBuffers layout (set 3) declares four SSBO bindings; Vulkan requires every binding to be written before bind. */
-    void EnsureSceneBuffersDescriptorWrites(rhi::IDevice* device) const;
+    void EnsureSceneBuffersDescriptorWrites(rhi::IDevice* device, rhi::IDescriptorSet* sceneSet) const;
+    rhi::IDescriptorSet* AcquireMaterialSetForDraw() const;
+    rhi::IDescriptorSet* AcquireSceneSetForDraw() const;
 
     using DrawableFeed = std::function<void(std::function<void(const Drawable&)>)>;
 
@@ -103,6 +105,8 @@ private:
     /** Dummy storage buffer so bindings 0–3 are valid for static meshes (same pattern as ShadowPass / LightCullPass). */
     mutable rhi::IBuffer* m_gbufferSceneFallbackBuffer = nullptr;
     mutable rhi::IDevice* m_sceneFallbackDevice = nullptr;
+    mutable std::function<rhi::IDescriptorSet*()> m_acquireMaterialDrawSet;
+    mutable std::function<rhi::IDescriptorSet*()> m_acquireSceneDrawSet;
 };
 
 }  // namespace render

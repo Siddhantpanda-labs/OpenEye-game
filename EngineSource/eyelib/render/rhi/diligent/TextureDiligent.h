@@ -14,6 +14,7 @@ struct TextureDiligent : ITexture {
     TextureType GetType() const override;
     RHITextureFormat GetFormat() const override;
     void* GetNativeTexture() override;
+    bool IsGpuBindable() const override;
 
     uint32_t m_width = 0;
     uint32_t m_height = 0;

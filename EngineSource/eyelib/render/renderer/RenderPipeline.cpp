@@ -76,6 +76,10 @@ constexpr uint32_t kDefaultDirectionalShadowCascades = 3u;
 
 RenderPipeline::RenderPipeline() = default;
 
+void RenderPipeline::SetSkyboxBrightness(float multiplier) {
+    m_skyboxBrightness = (multiplier < 0.f) ? 0.f : multiplier;
+}
+
 RenderPipeline::~RenderPipeline() {
     Shutdown();
 }
@@ -357,7 +361,7 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     if (m_postProcessor) {
         m_postProcessor->Resize(renderW, renderH);
     }
-    rhi::ICommandList* cmd = m_device ? m_device->GetImmediateCommandList() : nullptr;
+    rhi::ICommandList* cmd = m_device ? m_device->GetActiveRecordingCommandList() : nullptr;
     if (cmd) cmd->SetViewport(0, 0, renderW, renderH);
 }
 
@@ -566,6 +570,8 @@ GBufferPassOpaqueParams RenderPipeline::BuildGBufferOpaqueParams(rhi::ICommandLi
     p.cmd = cmd;
     p.gbuffer = m_gbuffer.get();
     p.ensureCurrentFrameResourceSets = [this]() { EnsureCurrentFrameResourceSets(); };
+    p.acquireMaterialDrawSet = [this]() { return AcquireMaterialDrawSet(); };
+    p.acquireSceneDrawSet = [this]() { return AcquireSceneDrawSet(); };
     p.frameUbo = m_frameUbo;
     p.prevView = m_prevView;
     p.prevProjection = m_prevProjection;
@@ -634,13 +640,6 @@ RenderPipeline::DeferredLightingPassParams RenderPipeline::BuildDeferredLighting
                             p.lightParams.castShadows, &frameData->pointLights, &frameData->spotLights, p.cascadeForLighting);
 
     p.lightingSetForCall = AcquireDeferredLightingSet();
-    if (!p.lightingSetForCall) {
-        static bool s_loggedMissingDeferredSet = false;
-        if (!s_loggedMissingDeferredSet) {
-            core::Log::Warn("RenderPipeline::BuildDeferredLightingPassParams: AcquireDeferredLightingSet returned null.");
-            s_loggedMissingDeferredSet = true;
-        }
-    }
     return p;
 }
 
@@ -767,7 +766,7 @@ void RenderPipeline::ExecutePostProcessPass(const PostProcessPassParams& params)
 FrameRenderContext RenderPipeline::GetFrameRenderContext() const {
     FrameRenderContext ctx{};
     ctx.device = m_device;
-    ctx.cmd = m_device ? m_device->GetImmediateCommandList() : nullptr;
+    ctx.cmd = m_device ? m_device->GetActiveRecordingCommandList() : nullptr;
     ctx.frameData = m_currentFrameData;
     ctx.width = m_width;
     ctx.height = m_height;
@@ -1329,6 +1328,7 @@ void RenderPipeline::RenderSkyboxImpl(const CameraView& camera, const std::share
     ctx.viewportHeight = vpH;
     ctx.useGbufferDepth = useGbufferDepth;
     ctx.isVulkan = backend::IsVulkan(m_device);
+    ctx.skyboxBrightness = m_skyboxBrightness;
     (void)m_skyboxPassSystem->RenderCubemap(ctx, skybox);
 }
 

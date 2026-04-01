@@ -26,6 +26,8 @@ struct SkyboxPassBuildParams {
     uint32_t viewportHeight = 0;
     bool useGbufferDepth = false;
     bool isVulkan = false;
+    /** HDR multiplier for sampled cubemap (1 = unchanged). */
+    float skyboxBrightness = 1.0f;
 };
 
 struct SkyboxPassExecuteParams {
@@ -47,6 +49,7 @@ struct SkyboxDrawContext {
     uint32_t viewportHeight = 0;
     bool useGbufferDepth = false;
     bool isVulkan = false;
+    float skyboxBrightness = 1.0f;
 };
 
 class SkyboxPassSystem {
@@ -70,7 +73,7 @@ public:
 private:
     void EnsureCubemapShader();
     void EnsureProceduralShader();
-    void EnsureDummyTexture();
+    void EnsureDummyTextures();
 
     rhi::IDevice* m_device = nullptr;
     PipelineSharedResources* m_ownedResources = nullptr;
@@ -84,7 +87,10 @@ private:
     std::array<rhi::IDescriptorSet*, kPostSetsFrames> m_postSets = {};
     uint32_t m_lastPostSetFilledFrameNumber = 0xffffffffu;
     rhi::ITexture* m_cachedSkyboxTexture = nullptr;
-    rhi::ITexture* m_skyboxDummyTexture = nullptr;
+    /** 2D fallback for PostPass bindings 1–6 (sampler2D). */
+    rhi::ITexture* m_skyboxDummyTexture2D = nullptr;
+    /** Cubemap fallback for binding 0 (samplerCube in skybox shader). */
+    rhi::ITexture* m_skyboxDummyTextureCube = nullptr;
 };
 
 }  // namespace render

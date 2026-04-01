@@ -112,7 +112,7 @@ std::shared_ptr<Mesh> Mesh::Create(rhi::IDevice* device, const MeshDescriptor& d
 
 void Mesh::Bind(rhi::IDevice* device) const {
     if (!device || !m_vertexBufferRHI || !m_indexBufferRHI) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return;
     cmd->BindVertexBuffer(m_vertexBufferRHI, 0);
     cmd->BindIndexBuffer(m_indexBufferRHI, m_indexType);
@@ -171,7 +171,7 @@ rhi::VertexLayout Mesh::GetFullscreenQuadVertexLayoutRHI() {
 
 void MeshHandle::Bind(rhi::IDevice* device) const {
     if (!device || !vertexBuffer || !indexBuffer) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return;
     cmd->BindVertexBuffer(vertexBuffer, 0);
     cmd->BindIndexBuffer(indexBuffer, indexType);
@@ -179,7 +179,7 @@ void MeshHandle::Bind(rhi::IDevice* device) const {
 
 void MeshHandle::Draw(rhi::IDevice* device, int submeshIndex) const {
     if (!device || !vertexBuffer || !indexBuffer) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return;
     Bind(device);
     if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < submeshes.size()) {
@@ -192,7 +192,7 @@ void MeshHandle::Draw(rhi::IDevice* device, int submeshIndex) const {
 
 void MeshHandle::DrawInstanced(rhi::IDevice* device, int submeshIndex, uint32_t instanceCount) const {
     if (!device || !vertexBuffer || !indexBuffer || instanceCount == 0) return;
-    rhi::ICommandList* cmd = device->GetImmediateCommandList();
+    rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
     if (!cmd) return;
     Bind(device);
     if (submeshIndex >= 0 && static_cast<size_t>(submeshIndex) < submeshes.size()) {

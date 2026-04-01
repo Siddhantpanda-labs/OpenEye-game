@@ -14,11 +14,11 @@ struct RenderContext {
     rhi::IDevice* device = nullptr;
     rhi::ICommandList* cmd = nullptr;
 
-    /** Build context from device (cmd = device->GetImmediateCommandList()). */
+    /** Build context from device (cmd = active recording buffer: slice when set, else immediate). */
     static RenderContext FromDevice(rhi::IDevice* d) {
         RenderContext ctx;
         ctx.device = d;
-        ctx.cmd = d ? d->GetImmediateCommandList() : nullptr;
+        ctx.cmd = d ? d->GetActiveRecordingCommandList() : nullptr;
         return ctx;
     }
 

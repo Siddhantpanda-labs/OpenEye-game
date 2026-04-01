@@ -45,6 +45,9 @@ public:
 
     void SetMode(Mode mode);
     Mode GetMode() const;
+    /** Cubemap sky HDR multiplier (default 1). Clamped to non-negative. */
+    void SetSkyboxBrightness(float multiplier);
+    float GetSkyboxBrightness() const;
 
     /** Upload phase: CPU→staging→vkCmdCopy*. Call after BeginFrame, before Render. */
     void UpdateUploads();

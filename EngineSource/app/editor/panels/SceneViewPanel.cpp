@@ -1,4 +1,5 @@
 #include "SceneViewPanel.h"
+#include "../EditorVulkanRenderSlice.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "ui/LightGizmoIcons.h"
@@ -11,6 +12,7 @@
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/debug/Profiler.h"
+#include "eyelib/render/rhi/RHI.h"
 
 #include "ImGuizmo.h"
 
@@ -276,6 +278,9 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         std::vector<uint32_t> entityIdsForOpaque;
         size_t drawableCount = 0;
         if (canRender) {
+            eyelib::render::rhi::IDevice* rhiDev =
+                static_cast<eyelib::render::rhi::IDevice*>(ctx->sceneViewPipeline->GetDevice().Get());
+            ::openeye::editor::VulkanRenderSliceScope vulkanSlice(rhiDev);
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
             eyelib::api::debug::Profiler::BeginSample("SceneView Build");

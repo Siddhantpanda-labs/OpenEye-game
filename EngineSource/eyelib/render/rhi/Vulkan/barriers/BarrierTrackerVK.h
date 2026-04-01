@@ -35,6 +35,8 @@ struct BarrierTrackerVK {
 
     /** Set tracked layout after an explicit barrier (no pending barrier recorded). */
     static void SetImageState(BarrierTrackerVK* tracker, void* image, ResourceState state);
+    /** Remove all tracking for an image that is being retired/destroyed. */
+    static void RemoveImageState(BarrierTrackerVK* tracker, void* image);
 
 private:
     std::unordered_map<void*, ResourceState> m_bufferState;

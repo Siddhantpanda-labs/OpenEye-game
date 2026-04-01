@@ -19,6 +19,8 @@ struct GBufferPassOpaqueParams {
     rhi::ICommandList* cmd = nullptr;
     GBuffer* gbuffer = nullptr;
     std::function<void()> ensureCurrentFrameResourceSets;
+    std::function<rhi::IDescriptorSet*()> acquireMaterialDrawSet;
+    std::function<rhi::IDescriptorSet*()> acquireSceneDrawSet;
     rhi::IBuffer* frameUbo = nullptr;
     math::Mat4 prevView{};
     math::Mat4 prevProjection{};

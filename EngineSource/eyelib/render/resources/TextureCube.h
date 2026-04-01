@@ -40,7 +40,7 @@ public:
     void SetWrap(TextureWrap s, TextureWrap t, TextureWrap r);
 
     int GetSize() const { return m_size; }
-    bool IsValid() const { return m_textureRHI != nullptr; }
+    bool IsValid() const { return m_textureRHI != nullptr && m_textureRHI->IsGpuBindable(); }
     unsigned int Id() const;
     rhi::ITexture* GetTextureRHI() const { return m_textureRHI; }
 

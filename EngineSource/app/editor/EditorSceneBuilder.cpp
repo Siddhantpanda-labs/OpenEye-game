@@ -200,28 +200,26 @@ EditorSceneBuilder::ModelEntry EditorSceneBuilder::LoadModelEntry(eyelib::api::A
 
 EditorSceneBuilder::ModelEntry EditorSceneBuilder::GetPrimitiveEntry(const std::string& meshId) {
     using namespace eyelib::api::geometry;
-    if (!IsBuiltinMeshId(meshId)) return ModelEntry{};
+    if (!IsBuiltinMeshId(meshId) || !m_renderDevice) return ModelEntry{};
     auto it = m_primitiveCache.find(meshId);
     if (it != m_primitiveCache.end()) return it->second;
 
     ModelEntry entry{};
     std::shared_ptr<eyelib::api::Mesh> mesh;
     if (meshId == BuiltinMesh::Cube) {
-        mesh = eyelib::api::geometry::Primitives::CreateCube(0.5f);
+        mesh = Primitives::CreateCube(m_renderDevice, 0.5f);
     } else if (meshId == BuiltinMesh::Sphere) {
-        mesh = eyelib::api::geometry::Primitives::CreateSphere(0.5f, 32, 16);
+        mesh = Primitives::CreateSphere(m_renderDevice, 0.5f, 32, 16);
     } else if (meshId == BuiltinMesh::Plane) {
-        mesh = eyelib::api::geometry::Primitives::CreatePlane(1.0f, 1.0f, 1, 1);
+        mesh = Primitives::CreatePlane(m_renderDevice, 1.0f, 1.0f, 1, 1);
     } else if (meshId == BuiltinMesh::Cylinder) {
-        mesh = eyelib::api::geometry::Primitives::CreateCylinder(0.5f, 1.0f, 32, 1, true, true);
+        mesh = Primitives::CreateCylinder(m_renderDevice, 0.5f, 1.0f, 32, 1, true, true);
     } else if (meshId == BuiltinMesh::Cone) {
-        mesh = eyelib::api::geometry::Primitives::CreateCone(0.5f, 1.0f, 32, true);
+        mesh = Primitives::CreateCone(m_renderDevice, 0.5f, 1.0f, 32, true);
     } else if (meshId == BuiltinMesh::Torus) {
-        mesh = eyelib::api::geometry::Primitives::CreateTorus(0.5f, 0.2f, 32, 16);
+        mesh = Primitives::CreateTorus(m_renderDevice, 0.5f, 0.2f, 32, 16);
     }
     if (mesh) {
-        if (m_renderDevice)
-            mesh->UploadToGPU(m_renderDevice);
         entry.mesh = std::move(mesh);
         EnsureDefaultMaterial();
         entry.material = m_defaultMaterial;

@@ -151,11 +151,21 @@ private:
     rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
     /** For LDR passes only: returns an LDR RT (m_outputRT or m_ldrPingPong) different from input. */
     rhi::IRenderTarget* SelectPostTargetLDR(rhi::ITexture* inputTexture) const;
+    /** Ping-pong between HDR RGB16F RTs; used for HDR SSAO blend and HDR bloom composite before tonemap. */
+    rhi::IRenderTarget* SelectPostTargetHDR(rhi::ITexture* inputTexture) const;
     rhi::IRenderTarget* SelectPostTarget(rhi::ITexture* inputTexture) const;
     rhi::IRenderTarget* ResolveRenderTargetForTexture(rhi::ITexture* texture) const;
+    /** Linear display-referred LDR (0–1) → sRGB-encoded for UNORM8 / swapchain; run after all LDR effects (e.g. FXAA). */
+    rhi::ITexture* ApplyDisplayEncoding(rhi::ITexture* linearLdr);
+    /** Multiply scene by SSAO in linear HDR (before bloom and tonemap). */
+    rhi::ITexture* ApplySSAOBlendHDR(rhi::ITexture* hdrScene, rhi::ITexture* ssaoTexture);
+    /** Additive bloom in linear HDR before tonemap (scene and bloom share the same color space). */
+    rhi::ITexture* ApplyBloomCompositeHDR(rhi::ITexture* hdrScene, rhi::ITexture* bloomTexture, const Settings& settings);
     void LoadShaders();
     void RecycleTransientPostSetsIfNeeded();
     rhi::IDescriptorSet* CreateTransientPostSet(const std::vector<std::pair<uint32_t, rhi::ITexture*>>& bindings);
+    /** Vulkan Post layout: set0=Frame, set1=PostPass — bind both in one call. */
+    void BindPostPassDescriptorSets(rhi::ICommandList* cmd, rhi::IDescriptorSet* postPassSet);
     /** Build Hi-Z depth pyramid from GBuffer depth; call before ApplySSR when pyramid is used. */
     void BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane);
 
@@ -182,11 +192,13 @@ private:
 
     // Output render target (final result); LDR (R8G8B8A8)
     rhi::IRenderTarget* m_outputRT = nullptr;
-    // LDR ping-pong for LDR-only passes (tone map, bloom composite, FXAA, etc.); R8G8B8A8
+    // LDR ping-pong for LDR-only passes (tone map, FXAA, etc.); R8G8B8A8
     rhi::IRenderTarget* m_ldrPingPong = nullptr;
 
     // Bloom extraction render target
     rhi::IRenderTarget* m_bloomExtractRT = nullptr;
+    /** HDR scratch used only for bloom blur ping-pong with m_bloomExtractRT (never shares ping-pong with scene/SSR). */
+    rhi::IRenderTarget* m_bloomBlurScratchRT = nullptr;
 
     // SSAO render target (raw then overwritten by blur result)
     rhi::IRenderTarget* m_ssaoRT = nullptr;
@@ -214,6 +226,7 @@ private:
     std::shared_ptr<Shader> m_ssaoBlendShader;  // For blending SSAO with scene
     std::shared_ptr<Shader> m_ssaoBlurShader;   // Bilateral blur for SSAO (Limitless-style)
     std::shared_ptr<Shader> m_copyShader;       // Fullscreen copy (e.g. SSR temporal)
+    std::shared_ptr<Shader> m_displayEncodeShader; // Linear LDR → sRGB (final post before present)
     std::shared_ptr<Shader> m_depthPyramidShader;
     rhi::ITexture* m_depthPyramidTexture = nullptr;
     std::vector<rhi::IRenderTarget*> m_depthPyramidRTs;

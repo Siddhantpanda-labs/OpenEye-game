@@ -1,4 +1,5 @@
 #include "GameViewPanel.h"
+#include "../EditorVulkanRenderSlice.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "GameRuntime.h"
@@ -45,6 +46,13 @@ std::string GetEntityDisplayName(eyelib::api::world::World& world, EntityId id) 
     return buf;
 }
 
+void* ResolveGamePanelTextureId(EditorContext* ctx, void* nativeTexture) {
+    if (!nativeTexture) return nullptr;
+    if (ctx && ctx->resolveImGuiTextureId)
+        return ctx->resolveImGuiTextureId(nativeTexture);
+    return nativeTexture;
+}
+
 } // namespace
 
 void ShowGameViewPanel(EditorContext* ctx) {
@@ -57,13 +65,16 @@ void ShowGameViewPanel(EditorContext* ctx) {
         ImVec2 region = ImGui::GetContentRegionAvail();
         uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
         uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
+        eyelib::render::rhi::IDevice* rhiDev =
+            static_cast<eyelib::render::rhi::IDevice*>(ctx->gameRuntime->GetDevice().Get());
+        ::openeye::editor::VulkanRenderSliceScope vulkanSlice(rhiDev);
         // Render before Tick so the first frame shows bodies at their initial position (no jump on Play).
         (void)ctx->gameRuntime->Render(w, h);
         float deltaSeconds = ImGui::GetIO().DeltaTime;
         if (deltaSeconds <= 0.f) deltaSeconds = 1.f / 60.f;
         ctx->gameRuntime->Tick(deltaSeconds);
 
-        void* texId = ctx->gameRuntime->GetOutputColorTextureNativeHandle();
+        void* texId = ResolveGamePanelTextureId(ctx, ctx->gameRuntime->GetOutputColorTextureNativeHandle());
         if (texId) {
             ImVec2 size(static_cast<float>(w), static_cast<float>(h));
             ImGui::Image(texId, size, ImVec2(0, 1), ImVec2(1, 0));
@@ -108,6 +119,9 @@ void ShowGameViewPanel(EditorContext* ctx) {
         const bool canPreview = !ctx->isPlaying && hasDebugCamera && ctx->gameViewPipeline && ctx->assetRegistry;
 
         if (canPreview) {
+            eyelib::render::rhi::IDevice* rhiDev =
+                static_cast<eyelib::render::rhi::IDevice*>(ctx->gameViewPipeline->GetDevice().Get());
+            ::openeye::editor::VulkanRenderSliceScope vulkanSlice(rhiDev);
             ImVec2 region = ImGui::GetContentRegionAvail();
             const uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
             const uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
@@ -138,9 +152,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 ctx->gameViewPipeline->Render(scene, nullptr);
                 eyelib::api::debug::Profiler::EndSample();
 
-                void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
-                if (ctx->resolveImGuiTextureId)
-                    texId = ctx->resolveImGuiTextureId(texId);
+                void* texId = ResolveGamePanelTextureId(ctx, ctx->gameViewPipeline->GetOutputColorTextureNativeHandle());
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {
                     ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
                 } else {
@@ -181,9 +193,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 ctx->gameViewPipeline->RenderStereo(scene, leftCam, rightCam);
                 eyelib::api::debug::Profiler::EndSample();
 
-                void* texId = ctx->gameViewPipeline->GetOutputColorTextureNativeHandle();
-                if (ctx->resolveImGuiTextureId)
-                    texId = ctx->resolveImGuiTextureId(texId);
+                void* texId = ResolveGamePanelTextureId(ctx, ctx->gameViewPipeline->GetOutputColorTextureNativeHandle());
                 if (texId && ctx->gameViewPipeline->HasValidOutput()) {
                     ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
                 } else {

@@ -50,6 +50,9 @@ struct DeviceVK : IDevice {
     ICommandList* CreateCommandList() override;
     void DestroyCommandList(ICommandList* list) override;
     ICommandList* GetImmediateCommandList() override;
+    ICommandList* GetTransientRecordingCommandList() const override { return m_transientRecordingCommandList; }
+    void SetTransientRecordingCommandList(ICommandList* cmd) override;
+    void EnqueueFrameSliceCommandList(ICommandList* cmd) override;
     void SubmitCommandList(ICommandList* list) override;
 
     void* GetBarrierTracker() override;
@@ -195,6 +198,8 @@ struct DeviceVK : IDevice {
     IBuffer* GetFullscreenQuadVBO() const { return m_fullscreenQuadVBO; }
     IBuffer* GetFullscreenQuadIBO() const { return m_fullscreenQuadIBO; }
     void EnsureFullscreenQuad();
+    /** Active list for Blit/BlitDepthOnly: transient slice when set, else immediate. */
+    CommandListVK* GetRecordingCommandListVK();
     /** True between BeginFrame() and EndFrame(). CommandListVK uses this to avoid resetting the immediate buffer mid-frame. */
     bool IsFrameOpen() const { return m_frameOpen; }
     /** Current frame index (0 .. kMaxFrames-1). Used by DeletionQueue, DescriptorCache, UploadHeap, etc. */
@@ -212,6 +217,10 @@ struct DeviceVK : IDevice {
     DescriptorCacheVK* GetDescriptorCache() { return &m_descriptorCache; }
     /** Tracks resource state; TransitionBuffer/TransitionImage then FlushBarriers(cmdList). Reset in BeginFrame. */
     BarrierTrackerVK* GetBarrierTrackerVK() { return &m_barrierTracker; }
+    /** 1x1 RGBA8 for descriptor writes when a texture is null or not GPU-bindable (2D bindings). */
+    ITexture* GetFallbackShaderResourceTexture2D();
+    /** 1x1 RGBA8 cubemap for cube/samplerCube bindings in the same situation. */
+    ITexture* GetFallbackShaderResourceTextureCube();
 
 private:
     void QueryCapabilities();
@@ -274,8 +283,13 @@ private:
     };
     std::unordered_map<uint64_t, GraphicsPipelineCacheEntry> m_graphicsPipelineCache;
     std::unique_ptr<CommandListVK> m_immediateCommandList;
+    ICommandList* m_transientRecordingCommandList = nullptr;
+    /** Slice CBs allocated from frameContexts[i]'s pool; clear only when re-entering slot i after vkWaitForFences(i). */
+    std::array<std::vector<std::unique_ptr<ICommandList>>, kMaxFrames> m_frameSliceCommandListsByFrame;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;
+    ITexture* m_fallbackShaderResourceTexture2D = nullptr;
+    ITexture* m_fallbackShaderResourceTextureCube = nullptr;
     AllocatorVK m_allocatorVK;
     UploadHeapVK m_uploadHeap;
     DescriptorAllocatorVK m_descriptorAllocator;
@@ -289,6 +303,13 @@ private:
     /** Descriptor sets to free after 3 frame boundaries (so no CB still references them). */
     std::vector<IDescriptorSet*> m_pendingDescriptorSetsToFree;
     uint32_t m_ticksUntilDescriptorSetFree = 0;
+    struct RetiredTextureEntry {
+        TextureVK* texture = nullptr;
+        uint32_t retireFrameNumber = 0;
+    };
+    /** Texture wrappers are retired after N frames to avoid CPU-side stale-pointer UAF. */
+    std::vector<RetiredTextureEntry> m_pendingTextureWrapperRetires;
+    void RetirePendingTextureWrappers(bool forceAll);
     void EnsureImGuiDescriptorPool();
 };
 

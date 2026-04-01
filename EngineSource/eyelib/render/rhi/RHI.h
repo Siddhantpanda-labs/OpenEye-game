@@ -69,6 +69,16 @@ struct IDevice {
     virtual void DestroyCommandList(ICommandList* list) = 0;
 
     virtual ICommandList* GetImmediateCommandList() = 0;
+    /** When non-null, pipeline recording and device-internal Blit paths use this list instead of the immediate buffer (Vulkan editor slices). */
+    virtual ICommandList* GetTransientRecordingCommandList() const { return nullptr; }
+    virtual void SetTransientRecordingCommandList(ICommandList* cmd) { (void)cmd; }
+    /** Same buffer as RenderPipeline::GetRHICommandList(): transient slice when set, else immediate. Use for all per-frame GPU recording that must stay on one command buffer. */
+    virtual ICommandList* GetActiveRecordingCommandList() {
+        ICommandList* t = GetTransientRecordingCommandList();
+        return t ? t : GetImmediateCommandList();
+    }
+    /** Ownership transfers to the device; buffer is submitted before the compose buffer in the same queue submit. List must be End()ed. Vulkan editor only. */
+    virtual void EnqueueFrameSliceCommandList(ICommandList* cmd) { (void)cmd; }
     /** Replay a deferred list (or no-op for immediate). Must be called on the render thread. Submit lists in order for deterministic execution. */
     virtual void SubmitCommandList(ICommandList* list) = 0;
 
@@ -354,6 +364,8 @@ struct ITexture {
     virtual RHITextureFormat GetFormat() const = 0;
     /** Backend-native texture handle (e.g. GL texture id as void*). For interop only. */
     virtual void* GetNativeTexture() = 0;
+    /** False after GPU resources are torn down (e.g. Vulkan deferred destroy with live wrapper). */
+    virtual bool IsGpuBindable() const { return true; }
 };
 
 // ---- Shader ----

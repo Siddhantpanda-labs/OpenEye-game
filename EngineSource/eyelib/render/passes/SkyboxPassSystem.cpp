@@ -8,6 +8,7 @@
 #include "eyelib/render/resources/TextureCube.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include <glm/gtc/matrix_inverse.hpp>
+#include <cstring>
 
 namespace eyelib {
 namespace render {
@@ -91,28 +92,53 @@ void SkyboxPassSystem::Shutdown() {
         }
     }
     m_cachedSkyboxTexture = nullptr;
-    if (m_skyboxDummyTexture && m_device) {
-        m_device->DestroyTexture(m_skyboxDummyTexture);
-        m_skyboxDummyTexture = nullptr;
+    if (m_skyboxDummyTexture2D && m_device) {
+        m_device->DestroyTexture(m_skyboxDummyTexture2D);
+        m_skyboxDummyTexture2D = nullptr;
+    }
+    if (m_skyboxDummyTextureCube && m_device) {
+        m_device->DestroyTexture(m_skyboxDummyTextureCube);
+        m_skyboxDummyTextureCube = nullptr;
     }
     m_lastPostSetFilledFrameNumber = 0xffffffffu;
 }
 
-void SkyboxPassSystem::EnsureDummyTexture() {
-    if (m_skyboxDummyTexture || !m_device) return;
-    rhi::TextureDesc desc = {};
-    desc.type = rhi::TextureType::Texture2D;
-    desc.width = 1;
-    desc.height = 1;
-    desc.format = rhi::RHITextureFormat::RGBA8;
-    desc.usage = rhi::TextureUsage::ShaderResource;
-    desc.mipLevels = 1;
-    static const uint8_t black[4] = { 0, 0, 0, 255 };
-    m_skyboxDummyTexture = m_device->CreateTexture(desc, black);
+void SkyboxPassSystem::EnsureDummyTextures() {
+    if (!m_device) return;
+    if (!m_skyboxDummyTexture2D) {
+        rhi::TextureDesc desc = {};
+        desc.type = rhi::TextureType::Texture2D;
+        desc.width = 1;
+        desc.height = 1;
+        desc.format = rhi::RHITextureFormat::RGBA8;
+        desc.usage = rhi::TextureUsage::ShaderResource;
+        desc.mipLevels = 1;
+        static const uint8_t black[4] = { 0, 0, 0, 255 };
+        m_skyboxDummyTexture2D = m_device->CreateTexture(desc, black);
+    }
+    if (!m_skyboxDummyTextureCube) {
+        rhi::TextureDesc desc = {};
+        desc.type = rhi::TextureType::TextureCube;
+        desc.width = 1;
+        desc.height = 1;
+        desc.depthOrArrayLayers = 6;
+        desc.format = rhi::RHITextureFormat::RGBA8;
+        desc.usage = rhi::TextureUsage::ShaderResource;
+        desc.mipLevels = 1;
+        static const uint8_t face[4] = { 0, 0, 0, 255 };
+        uint8_t cubeFaces[6 * 4];
+        for (uint32_t f = 0; f < 6; ++f)
+            std::memcpy(cubeFaces + f * 4, face, 4);
+        m_skyboxDummyTextureCube = m_device->CreateTexture(desc, cubeFaces);
+    }
 }
 
 void SkyboxPassSystem::EnsurePostSetFilled(rhi::ITexture* binding0Tex) {
     if (!m_device) return;
+    EnsureDummyTextures();
+    rhi::ITexture* dummy2D = m_skyboxDummyTexture2D;
+    rhi::ITexture* dummyCube = m_skyboxDummyTextureCube;
+    if (!dummy2D || !dummyCube) return;
     const uint32_t frameIndex = m_device->GetCurrentFrameIndex() % kPostSetsFrames;
     const uint32_t frameNumber = m_device->GetFrameNumber();
     rhi::IDescriptorSet*& setRef = m_postSets[frameIndex];
@@ -122,15 +148,11 @@ void SkyboxPassSystem::EnsurePostSetFilled(rhi::ITexture* binding0Tex) {
         setRef = m_device->CreateDescriptorSet(postLayout);
         if (!setRef) return;
     }
-    rhi::ITexture* expectedTex = binding0Tex ? binding0Tex : m_skyboxDummyTexture;
-    if (m_lastPostSetFilledFrameNumber == frameNumber && m_cachedSkyboxTexture == expectedTex) return;
-    EnsureDummyTexture();
-    rhi::ITexture* dummy = m_skyboxDummyTexture;
-    if (!dummy) return;
-    rhi::ITexture* tex0 = binding0Tex ? binding0Tex : dummy;
+    rhi::ITexture* tex0 = (binding0Tex && binding0Tex->IsGpuBindable()) ? binding0Tex : dummyCube;
+    if (m_lastPostSetFilledFrameNumber == frameNumber && m_cachedSkyboxTexture == tex0) return;
     setRef->UpdateTexture(0, tex0);
     for (uint32_t b = 1; b < kPostPassBindingCount; ++b)
-        setRef->UpdateTexture(b, dummy);
+        setRef->UpdateTexture(b, dummy2D);
     m_lastPostSetFilledFrameNumber = frameNumber;
     m_cachedSkyboxTexture = tex0;
 }
@@ -172,6 +194,7 @@ bool SkyboxPassSystem::RenderCubemap(const SkyboxDrawContext& ctx, const std::sh
     build.viewportHeight = ctx.viewportHeight;
     build.useGbufferDepth = ctx.useGbufferDepth;
     build.isVulkan = ctx.isVulkan;
+    build.skyboxBrightness = ctx.skyboxBrightness;
     SkyboxPassExecuteParams params = BuildParams(build);
     return ExecuteCubemap(params);
 }
@@ -231,10 +254,11 @@ bool SkyboxPassSystem::ExecuteCubemap(const SkyboxPassExecuteParams& params) {
     }
     shader->Bind(params.build.device);
     if (params.build.isVulkan && cmd) {
-        abi::WriteSkyboxInversePushConstants(cmd, params.inverseView, params.inverseProjection);
+        abi::WriteSkyboxInversePushConstants(cmd, params.inverseView, params.inverseProjection, params.build.skyboxBrightness);
     } else {
         shader->SetMat4("u_InverseViewMatrix", params.inverseView);
         shader->SetMat4("u_InverseProjectionMatrix", params.inverseProjection);
+        shader->SetFloat("u_SkyboxBrightness", params.build.skyboxBrightness);
     }
     shader->SetInt("u_Skybox", 0);
     if (!params.build.frameSet || !params.build.postSet) {

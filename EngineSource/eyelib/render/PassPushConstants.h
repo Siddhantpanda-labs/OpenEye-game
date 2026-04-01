@@ -37,6 +37,8 @@ constexpr uint32_t kViewProjPairProjectionOffset = 64u;
 /** Skybox fullscreen passes (`passes/sky/skybox.frag`, `skybox_procedural.frag`) — inverse view @0, inverse projection @64. */
 constexpr uint32_t kSkyboxInverseViewOffset = 0u;
 constexpr uint32_t kSkyboxInverseProjectionOffset = 64u;
+/** `u_SkyboxBrightness` multiplier (std430 after two mat4). */
+constexpr uint32_t kSkyboxBrightnessOffset = 128u;
 
 /** G-buffer geometry (`passes/deferred/gbuffer.vert` + `gbuffer.frag`), std430: VS block then FS float. */
 constexpr uint32_t kGBufferFragHasAlbedoOffset = 92u;
@@ -126,10 +128,16 @@ inline void WriteViewProjectionPairPushConstants(rhi::ICommandList* cmd, const m
     cmd->SetPushConstants(kViewProjPairProjectionOffset, static_cast<uint32_t>(sizeof(math::Mat4)), &projection);
 }
 
-inline void WriteSkyboxInversePushConstants(rhi::ICommandList* cmd, const math::Mat4& inverseView, const math::Mat4& inverseProjection) {
+inline void WriteSkyboxInversePushConstants(rhi::ICommandList* cmd, const math::Mat4& inverseView, const math::Mat4& inverseProjection,
+                                            float skyboxBrightness) {
     if (!cmd) return;
     cmd->SetPushConstants(kSkyboxInverseViewOffset, static_cast<uint32_t>(sizeof(math::Mat4)), &inverseView);
     cmd->SetPushConstants(kSkyboxInverseProjectionOffset, static_cast<uint32_t>(sizeof(math::Mat4)), &inverseProjection);
+    cmd->SetPushConstants(kSkyboxBrightnessOffset, static_cast<uint32_t>(sizeof(float)), &skyboxBrightness);
+}
+
+inline void WriteSkyboxInversePushConstants(rhi::ICommandList* cmd, const math::Mat4& inverseView, const math::Mat4& inverseProjection) {
+    WriteSkyboxInversePushConstants(cmd, inverseView, inverseProjection, 1.0f);
 }
 
 /** GPU cull with draw list (`passes/gpu_cull/cull_indirect_with_drawlist_rs.comp`), std430. */

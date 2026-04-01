@@ -26,6 +26,8 @@ RHITextureFormat TextureVK::GetFormat() const { return m_format; }
 
 void* TextureVK::GetNativeTexture() { return m_imageView; }
 
+bool TextureVK::IsGpuBindable() const { return !m_retired && m_imageView != nullptr; }
+
 namespace {
 
 bool GetUploadLayout(RHITextureFormat fmt, uint32_t* srcBpp, uint32_t* dstBpp) {
@@ -563,19 +565,9 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
 
 void DestroyTextureVK(DeviceVK* deviceObj, ITexture* texture) {
     if (!deviceObj || !texture) return;
-    TextureVK* t = static_cast<TextureVK*>(texture);
-    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    if (device && t->m_imageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, static_cast<VkImageView>(t->m_imageView), nullptr);
-        t->m_imageView = nullptr;
-    }
-    VmaAllocator allocator = static_cast<VmaAllocator>(deviceObj->GetAllocator());
-    if (allocator && t->m_image != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, static_cast<VkImage>(t->m_image), static_cast<VmaAllocation>(t->m_allocation));
-        t->m_image = nullptr;
-        t->m_allocation = nullptr;
-    }
-    delete t;
+    // Route all runtime texture destruction through DeviceVK so we always use
+    // the same deferred-lifetime policy (safe with in-flight command buffers).
+    deviceObj->DestroyTexture(texture);
 }
 
 } // namespace rhi

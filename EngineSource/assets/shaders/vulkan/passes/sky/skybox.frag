@@ -8,6 +8,7 @@ layout(set = 1, binding = 0) uniform samplerCube u_Skybox;
 layout(push_constant, std430) uniform SkyboxPush {
     mat4 u_InverseViewMatrix;
     mat4 u_InverseProjectionMatrix;
+    float u_SkyboxBrightness;
 } pc;
 
 void main() {
@@ -18,9 +19,7 @@ void main() {
     vec3 viewDir = normalize(viewDirH.xyz);
     vec3 worldDir = normalize((pc.u_InverseViewMatrix * vec4(viewDir, 0.0)).xyz);
     vec3 color = texture(u_Skybox, worldDir).rgb;
-    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-    color = mix(vec3(luma), color, 1.0);
-    color = (color - 0.5) * 1.0 + 0.5;
+    color *= max(pc.u_SkyboxBrightness, 0.0);
+    color = pow(color, vec3(1.0 / 2.2));
     FragColor = vec4(color, 1.0);
-    // FragColor = vec4( 1.0,1.0,1.0, 1.0);
 }
