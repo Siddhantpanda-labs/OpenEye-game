@@ -312,7 +312,10 @@ public:
     bool SaveScene(const std::string& path) const;
     size_t GetEntityCount() const;
 
-    /** Scene-level skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
+    /**
+     * Scene-level skybox: cubemap path or asset GUID string, or the literal "procedural" for procedural sky.
+     * Values are canonicalized when set (see eyelib::world::skybox). Serialized as "skybox" in .scene files.
+     */
     std::string GetSkyboxAssetId() const;
     /** Set skybox asset id via command (mutation layer). Returns false if command application failed. */
     bool SetSkyboxAssetId(const std::string& assetId);

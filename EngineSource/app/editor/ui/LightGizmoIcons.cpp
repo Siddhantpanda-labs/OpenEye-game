@@ -27,6 +27,7 @@ bool LightGizmoIcons::LoadPngToGlTexture(const char* path, uint32_t* outTexId) {
     int w = 0, h = 0, comp = 0;
     stbi_set_flip_vertically_on_load(1);
     unsigned char* data = stbi_load(path, &w, &h, &comp, 4);
+    stbi_set_flip_vertically_on_load(0);
     if (!data || w <= 0 || h <= 0) return false;
 
     uint32_t texId = 0;

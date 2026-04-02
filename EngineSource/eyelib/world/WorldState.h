@@ -79,9 +79,9 @@ public:
 
     void Clear();
 
-    /** Scene-level: skybox asset id (e.g. "Skybox/Citadella"). Empty = no skybox. Serialized in scene file. */
+    /** Scene-level: skybox cubemap path/GUID, or skybox::kProceduralId for procedural sky. Canonicalized in SetSkyboxAssetId. */
     const std::string& GetSkyboxAssetId() const { return m_skyboxAssetId; }
-    void SetSkyboxAssetId(std::string id) { m_skyboxAssetId = std::move(id); }
+    void SetSkyboxAssetId(std::string id);
     /** Scene-level: render pipeline mode. Values: Forward | Deferred | ForwardPlus. Serialized in scene file. */
     const std::string& GetRenderPipelineMode() const { return m_renderPipelineMode; }
     void SetRenderPipelineMode(std::string mode) { m_renderPipelineMode = std::move(mode); }

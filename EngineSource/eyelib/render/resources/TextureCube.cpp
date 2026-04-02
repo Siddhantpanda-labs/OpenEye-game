@@ -60,6 +60,7 @@ bool TextureCube::LoadFromFiles(rhi::IDevice* device, const std::vector<std::str
         core::Log::ErrorF("TextureCube: expected 6 face paths");
         return false;
     }
+    stbi_set_flip_vertically_on_load(0);
     std::vector<std::vector<uint8_t>> decodedFaces;
     decodedFaces.resize(6);
     int w = 0, h = 0, ch = 0;
@@ -145,6 +146,7 @@ void CrossLayoutFaceOffsets(uint32_t faceSize, CrossFace out[6]) {
 
 bool TextureCube::LoadFromCrossLayout(rhi::IDevice* device, const std::string& path, uint32_t faceSize, bool isSRGB, bool generateMipmaps) {
     if (!device || faceSize == 0) return false;
+    stbi_set_flip_vertically_on_load(0);
     std::vector<uint8_t> bytes = platform::filesystem::ReadFile(path);
     if (bytes.empty()) {
         core::Log::ErrorF("TextureCube: LoadFromCrossLayout failed to read: %s", path.c_str());

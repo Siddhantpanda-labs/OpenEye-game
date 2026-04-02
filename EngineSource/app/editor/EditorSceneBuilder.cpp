@@ -1,5 +1,6 @@
 #include "EditorSceneBuilder.h"
 
+#include "api/render/SkyboxCubemapLoad.h"
 #include "api/asset/AssetRegistry.h"
 #include "api/asset/AssetId.h"
 #include "api/asset/AssetTypes.h"
@@ -19,11 +20,12 @@
 
 #include <cmath>
 #include <exception>
+#include "eyelib/world/SkyboxAssetId.h"
+
 #include <unordered_set>
 
 namespace {
 const float kPi = 3.14159265f;
-const char* kDefaultSkyboxCrossPath = "Skybox/SkyMap/Cubemap_Sky_512x512.png";
 }
 
 namespace openeye::editor {
@@ -287,29 +289,10 @@ void EditorSceneBuilder::PruneStaleDrawableCache() {
 std::shared_ptr<eyelib::api::TextureCube> EditorSceneBuilder::LoadSkyboxFromAssetId(const std::string& assetId,
                                                                                     const std::vector<std::string>& assetRoots,
                                                                                     eyelib::api::RenderDevice device) {
-    if (assetId.empty() || !device) return nullptr;
-    const std::string resolved = ResolveAssetPath(assetId, assetRoots);
-    if (!resolved.empty() && !api::platform::filesystem::IsDirectory(resolved)) {
-        auto skybox = std::make_shared<eyelib::api::TextureCube>();
-        if (skybox->LoadFromCrossLayout(device, resolved, 512, true, true))
-            return skybox;
-    }
-    const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
-    std::string paths[6];
-    for (int i = 0; i < 6; ++i) {
-        std::string id = assetId + "/" + kFaces[i];
-        paths[i] = ResolveAssetPath(id, assetRoots);
-        if (paths[i].empty()) {
-            eyelib::api::core::Log::WarnF("EditorSceneBuilder: skybox face missing: %s", id.c_str());
-            return nullptr;
-        }
-    }
-    auto skybox = std::make_shared<eyelib::api::TextureCube>();
-    if (!skybox->LoadFromFiles(device, paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
-        eyelib::api::core::Log::WarnF("EditorSceneBuilder: failed to load skybox %s", assetId.c_str());
+    if (assetId.empty() || !device || eyelib::world::skybox::IsProceduralSkyboxId(assetId))
         return nullptr;
-    }
-    return skybox;
+    const auto resolve = [&](const std::string& id) { return ResolveAssetPath(id, assetRoots); };
+    return eyelib::render::LoadSkyboxCubemapFromAssetId(device, assetId, resolve, eyelib::world::skybox::kDefaultCrossFaceSize);
 }
 
 void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
@@ -353,11 +336,8 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.castShadows = true;
 
     scene.skybox.reset();
-    // Default to procedural sky when scene has no explicit skybox asset.
-    const std::string skyboxId = (world && !world->GetSkyboxAssetId().empty())
-        ? world->GetSkyboxAssetId()
-        : std::string(kDefaultSkyboxCrossPath);
-    if (!skyboxId.empty()) {
+    const std::string skyboxId = world ? world->GetSkyboxAssetId() : std::string();
+    if (!eyelib::world::skybox::IsProceduralSkyboxId(skyboxId)) {
         auto it = m_skyboxCache.find(skyboxId);
         if (it != m_skyboxCache.end()) {
             scene.skybox = it->second;  // cached success or failure — no retry, no log

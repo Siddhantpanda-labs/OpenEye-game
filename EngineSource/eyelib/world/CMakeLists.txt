@@ -6,6 +6,8 @@ set(EYELIB_WORLD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldView.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldState.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldState.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxAssetId.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxAssetId.h
     ${CMAKE_CURRENT_SOURCE_DIR}/EntityId.h
     ${CMAKE_CURRENT_SOURCE_DIR}/EntityRegistry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EntityRegistry.h

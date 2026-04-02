@@ -9,6 +9,8 @@ set(API_RENDER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Texture3D.h
     ${CMAKE_CURRENT_SOURCE_DIR}/TextureCube.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TextureCube.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxCubemapLoad.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxCubemapLoad.h
     ${CMAKE_CURRENT_SOURCE_DIR}/TextureArray.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TextureArray.h
     ${CMAKE_CURRENT_SOURCE_DIR}/TextureTypes.h

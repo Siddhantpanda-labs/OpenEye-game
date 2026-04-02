@@ -1,5 +1,7 @@
 #include "WorldSerializer.h"
 
+#include "eyelib/world/SkyboxAssetId.h"
+
 #include "ComponentSerializer.h"
 #include "eyelib/world/EntityRegistry.h"
 #include "eyelib/world/WorldGraph/Hierarchy.h"
@@ -104,9 +106,7 @@ nlohmann::json WorldSerializer::Serialize(const WorldState& state) const {
     }
     root["components"] = std::move(components);
 
-    if (!state.GetSkyboxAssetId().empty()) {
-        root["skybox"] = state.GetSkyboxAssetId();
-    }
+    root["skybox"] = state.GetSkyboxAssetId();
     root["renderPipelineMode"] = NormalizeRenderPipelineMode(state.GetRenderPipelineMode());
 
     return root;
@@ -195,6 +195,8 @@ bool WorldSerializer::Deserialize(WorldState& state, const nlohmann::json& root)
 
     if (root.contains("skybox") && root["skybox"].is_string()) {
         state.SetSkyboxAssetId(root["skybox"].get<std::string>());
+    } else {
+        state.SetSkyboxAssetId(skybox::kProceduralId);
     }
     if (root.contains("renderPipelineMode") && root["renderPipelineMode"].is_string()) {
         state.SetRenderPipelineMode(NormalizeRenderPipelineMode(root["renderPipelineMode"].get<std::string>()));

@@ -53,6 +53,7 @@ void FrameDecoder::reset() {
 bool FrameDecoder::decodeJpeg(const uint8_t* data, size_t size,
                               std::vector<uint8_t>& outRgb, int& outWidth, int& outHeight) {
   int w = 0, h = 0, ch = 0;
+  stbi_set_flip_vertically_on_load(0);
   stbi_uc* img = stbi_load_from_memory(data, (int)size, &w, &h, &ch, 3);
   if (!img || w <= 0 || h <= 0) return false;
   outWidth = w;

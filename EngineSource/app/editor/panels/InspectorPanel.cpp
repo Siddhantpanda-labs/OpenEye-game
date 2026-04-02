@@ -617,7 +617,7 @@ void ShowInspectorPanel(EditorContext* ctx) {
             char skyboxBuf[256];
             std::string skyboxId = ctx->world.GetSkyboxAssetId();
             std::snprintf(skyboxBuf, sizeof(skyboxBuf), "%.255s", skyboxId.c_str());
-            if (ImGui::InputText("Skybox (e.g. Skybox/Citadella)", skyboxBuf, sizeof(skyboxBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (ImGui::InputText("Skybox (procedural | evening | path or folder)", skyboxBuf, sizeof(skyboxBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
                 ctx->world.SetSkyboxAssetId(skyboxBuf[0] ? std::string(skyboxBuf) : std::string());
             }
         } else if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {

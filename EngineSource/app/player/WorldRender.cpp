@@ -10,12 +10,14 @@
 #include "api/math/TransformUtils.h"
 #include "api/platform/All.h"
 #include "api/render/Material.h"
+#include "api/render/SkyboxCubemapLoad.h"
 #include "api/render/CameraConventions.h"
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
 #include "WorldAnimation.h"
 #include "api/asset/AssetManager.h"
 #include "eyelib/vr/XRViewHelpers.h"
+#include "eyelib/world/SkyboxAssetId.h"
 
 #include <cassert>
 #include <cmath>
@@ -442,32 +444,21 @@ std::shared_ptr<eyelib::api::Material> WorldRenderBridge::ResolveMaterial(
 
 std::shared_ptr<eyelib::api::TextureCube> WorldRenderBridge::GetOrLoadSkybox(const std::string& assetId,
                                                                              const std::vector<std::string>& assetRoots) {
-    if (assetId.empty()) return nullptr;
+    if (assetId.empty() || eyelib::world::skybox::IsProceduralSkyboxId(assetId))
+        return nullptr;
     auto it = m_skyboxCache.find(assetId);
     if (it != m_skyboxCache.end()) {
         return it->second;  // cached success or failure (nullptr) — no retry, no log
-    }
-    const char* kFaces[] = { "posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg" };
-    std::string paths[6];
-    for (int i = 0; i < 6; ++i) {
-        paths[i] = ResolveAssetPath(assetId + "/" + kFaces[i], assetRoots);
-        if (paths[i].empty()) {
-            eyelib::api::core::Log::WarnF("WorldRenderBridge: skybox face missing: %s/%s", assetId.c_str(), kFaces[i]);
-            m_skyboxCache[assetId] = nullptr;
-            return nullptr;
-        }
     }
     eyelib::api::RenderDevice device = m_pipeline.GetDevice();
     if (!device) {
         m_skyboxCache[assetId] = nullptr;
         return nullptr;
     }
-    auto skybox = std::make_shared<eyelib::api::TextureCube>();
-    if (!skybox->LoadFromFiles(device, paths[0], paths[1], paths[2], paths[3], paths[4], paths[5], true, true)) {
-        eyelib::api::core::Log::WarnF("WorldRenderBridge: failed to load skybox %s", assetId.c_str());
-        m_skyboxCache[assetId] = nullptr;
-        return nullptr;
-    }
+    const auto resolve = [&](const std::string& id) {
+        return ResolveAssetPath(id, assetRoots, m_assetRegistryForResolver);
+    };
+    auto skybox = eyelib::render::LoadSkyboxCubemapFromAssetId(device, assetId, resolve, eyelib::world::skybox::kDefaultCrossFaceSize);
     m_skyboxCache[assetId] = skybox;
     return skybox;
 }
@@ -492,10 +483,10 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
     BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
 
     const std::string skyboxId = world.GetSkyboxAssetId();
-    if (!skyboxId.empty()) {
-        scene.skybox = GetOrLoadSkybox(skyboxId, options.assetRoots);
-    } else {
+    if (eyelib::world::skybox::IsProceduralSkyboxId(skyboxId)) {
         scene.skybox.reset();
+    } else {
+        scene.skybox = GetOrLoadSkybox(skyboxId, options.assetRoots);
     }
 }
 

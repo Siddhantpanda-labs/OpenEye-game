@@ -1,5 +1,7 @@
 #include "WorldState.h"
 
+#include "SkyboxAssetId.h"
+
 #include "ComponentStorage/TransformStore.h"
 #include "EntityRegistry.h"
 #include "WorldGraph/Hierarchy.h"
@@ -116,12 +118,16 @@ EntityId WorldState::FromEnTT(entt::entity e) const {
     return it->second;
 }
 
+void WorldState::SetSkyboxAssetId(std::string id) {
+    m_skyboxAssetId = skybox::NormalizeSkyboxAssetId(id);
+}
+
 void WorldState::Clear() {
     m_entityToEnTT.clear();
     m_enttToEntity.clear();
     m_registry.clear();
     m_componentStores.clear();
-    m_skyboxAssetId.clear();
+    m_skyboxAssetId = std::string(skybox::kProceduralId);
     m_renderPipelineMode = "Forward";
     if (m_entities) {
         m_entities->Clear();

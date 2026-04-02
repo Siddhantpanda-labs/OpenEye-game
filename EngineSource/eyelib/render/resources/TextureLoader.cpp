@@ -21,6 +21,12 @@ static bool IsHDRPath(const std::string& path) {
     for (char& c : ext) if (c >= 'A' && c <= 'Z') c += 32;
     return ext == ".hdr";
 }
+
+/** stbi_set_flip_vertically_on_load is process-global; restore 0 after HDR decode (OpenGL-style flip). */
+struct StbiFlipScope {
+    explicit StbiFlipScope(int flip) { stbi_set_flip_vertically_on_load(flip); }
+    ~StbiFlipScope() { stbi_set_flip_vertically_on_load(0); }
+};
 } // namespace
 
 TextureLoader::Texture2DPtr TextureLoader::LoadPNG(const std::string& path, bool isSRGB, bool generateMipmaps) {
@@ -50,7 +56,7 @@ TextureLoader::Texture2DPtr TextureLoader::LoadHDR(const std::string& path, bool
         core::Log::ErrorF("TextureLoader::LoadHDR: failed to read %s", path.c_str());
         return nullptr;
     }
-    stbi_set_flip_vertically_on_load(1);
+    StbiFlipScope flipHdr(1);
     int w = 0, h = 0, ch = 0;
     float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &ch, 0);
     if (!data) {
@@ -75,7 +81,7 @@ TextureLoader::Texture2DPtr TextureLoader::LoadHDR(rhi::IDevice* device, const s
         core::Log::ErrorF("TextureLoader::LoadHDR: failed to read %s", path.c_str());
         return nullptr;
     }
-    stbi_set_flip_vertically_on_load(1);
+    StbiFlipScope flipHdr(1);
     int w = 0, h = 0, ch = 0;
     float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &ch, 0);
     if (!data) {
@@ -104,7 +110,7 @@ void TextureLoader::LoadAsync(const std::string& path, DecodeCallback callback) 
             return;
         }
         if (IsHDRPath(path)) {
-            stbi_set_flip_vertically_on_load(1);
+            StbiFlipScope flipHdr(1);
             int w = 0, h = 0, ch = 0;
             float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &ch, 0);
             if (!data) {
