@@ -8,7 +8,7 @@ This document describes the structure and architecture of the render module: **e
 
 The render module provides:
 
-- **RHI (Render Hardware Interface)** — backend-agnostic abstraction over OpenGL and optional Diligent Engine.
+- **RHI (Render Hardware Interface)** — backend-agnostic abstraction over **OpenGL**, **Vulkan** (when enabled), and optional **Diligent Engine**.
 - **Scene model** — drawables, camera, lights, skybox; consumed via a read-only view interface.
 - **Frame graph** — declarative pass ordering with DAG-based execution and transient texture aliasing.
 - **Pipeline modes** — Deferred (GBuffer + lighting), Forward (frame-graph), and Forward+ (legacy tiled).
@@ -19,6 +19,8 @@ Design principles:
 - **Explicit device passing** — RHI and resource creation/load APIs take `rhi::IDevice*` (or `api::RenderDevice` at API layer); no global or injected device for render resources.
 - **Zero-copy scene view** — Pipeline renders from `IRenderSceneView`; API and ECS both implement it over their scene data without copying.
 - **CPU vs GPU split** — Mesh is GPU-only; CPU geometry lives in `MeshDescriptor` / `EditableMesh`. Textures load/create with an explicit device.
+- **Single active recording buffer (Vulkan + editor)** — Per-frame GPU work that must land on the buffer that will be submitted uses `IDevice::GetActiveRecordingCommandList()` (transient slice when set, else immediate). See §3.4.
+- **Device-owned submission** — Recording happens on command lists; **queue submit** is performed by the device (`EndFrame`, `SubmitCommandList`), not by ad-hoc callers.
 
 ---
 
@@ -29,56 +31,39 @@ Design principles:
 ```
 eyelib/render/
 ├── rhi/                    # RHI interface and backends
-│   ├── RHI.h               # IDevice, ICommandList, IBuffer, ITexture, IShader, IPipeline, etc.
-│   ├── RHITypes.h          # BufferDesc, TextureDesc, VertexLayout, enums (ResourceState, etc.)
+│   ├── RHI.h               # IDevice, ICommandList, GetActiveRecordingCommandList, …
+│   ├── RHITypes.h          # BufferDesc, TextureDesc, VertexLayout, enums (ResourceState, …)
 │   ├── CreateDevice.h/cpp  # CreateOpenGLDevice(), CreateGraphicsDevice(), CreateDiligentDevice()
-│   ├── RHIUtils.cpp        # Helpers (e.g. ClearAndSetRenderTargetWithViewport)
-│   ├── OpenGL/             # OpenGL backend (DeviceGL, CommandListGL, BufferGL, TextureGL, ...)
-│   └── diligent/           # Diligent Engine backend (optional, when OPENEYE_DILIGENT_AVAILABLE)
+│   ├── RHIUtils.cpp
+│   ├── OpenGL/             # DeviceGL, CommandListGL, DeferredCommandListGL, …
+│   ├── Vulkan/             # DeviceVK, CommandListVK, TextureVK, barriers, descriptors, …
+│   └── diligent/           # Optional when OPENEYE_DILIGENT_AVAILABLE
 ├── framegraph/
-│   ├── FrameGraph.h/cpp    # DAG-based frame graph: CreateTexture, ImportTextureRHI, AddPass, Compile(device), Execute
-│   └── FrameGraphRecipe.h/cpp  # Declarative pass list (name, reads, writes) + AddPassesFromRecipe()
+│   ├── FrameGraph.h/cpp
+│   └── FrameGraphRecipe.h/cpp
+├── renderer/               # Pipeline orchestration + graph wiring
+│   ├── RenderPipeline.h/cpp
+│   ├── RenderPipelineGraph.cpp
+│   └── graph/              # Recipes, FrameGraphPassNames, …
 ├── passes/
-│   ├── GBufferPassSystem   # Deferred geometry system: fill position, normal, albedo, PBR, velocity, depth
-│   ├── ShadowPass          # Cascade directional shadow map
-│   ├── LightingPass        # Full-screen lighting from GBuffer (+ shadow); reads scene lighting from SSBO (binding 5) when provided
-│   ├── TransparencyPass    # Sorted transparent drawables
-│   ├── GpuCullPass         # GPU culling / indirect draw list
-│   └── LightCullPass       # Clustered/tiled light culling (Forward+)
-├── resources/
-│   ├── Mesh.h/cpp          # GPU-only mesh; CreateFromDescriptor(device, desc), Bind/Draw(device)
-│   ├── Shader.h/cpp        # GPU shader/pipeline; Load(device, name, layout, topology)
-│   ├── Material.h/cpp      # Material parameters + texture bindings
-│   ├── MaterialInstance.h/cpp
-│   ├── Texture2D.h/cpp     # 2D texture; Create(device, ...), LoadFromFile(device, ...)
-│   ├── Texture3D.h/cpp
-│   ├── TextureCube.h/cpp   # Cubemap; LoadFromFiles(device, ...) — device required
-│   ├── TextureArray.h/cpp
-│   ├── TextureLoader       # LoadPNG/JPEG/HDR(device, path), CreateFromDecoded(device, ...)
-│   └── TextureTypes.h
-├── IRenderSceneView.h      # Read-only scene view: GetCamera, GetLight, GetSkybox, ForEach*Drawable/Light
-├── RenderTypes.h           # Drawable, CameraView, LightParams, PointLight, SpotLight, RenderScene
-├── RenderContext.h         # { device, cmd } for pass invocation
-├── RenderPipeline.h/cpp    # Orchestrator: Init(device), Render(view), frame graph build/execute
-├── GBuffer.h/cpp           # Deferred G-buffer RT and accessors
-├── CascadeShadowMap.h/cpp
-├── SceneLighting.h/cpp     # Phase 5: scene lighting SSBO (directional + point + spot); FillSceneLightingBuffer; bind in LightingPass
-├── PostProcessor.h/cpp     # Tone mapping, bloom, FXAA, SSAO, SSR, etc.
-├── FullscreenQuad.h/cpp
-├── MeshDescriptor.h        # CPU mesh data (vertices, indices, submeshes)
-├── MeshDescriptorUtils.h   # GenerateNormals, GenerateTangents, Optimize, ComputeAABB
-├── ShaderDescriptor.h / ShaderReflection.h
-├── TextureDescriptor.h
-├── ClusteredLightGrid, GpuProfilerRHI, PipelineCache, StreamingHooks, ...
-├── Renderer.h/cpp          # Batch / immediate-style draw (eyelib)
-├── 2d/                     # Sprite, Font, TextRenderer, SpriteRenderer, Primitives
-└── ARCHITECTURE.md         # This file
+│   ├── GBufferPassSystem, GpuCullPassSystem, LightCullPassSystem, SkyboxPassSystem, …
+│   ├── Forward*Geometry*, TransparencyPassSystem, DeferredLightingPassSystem, …
+│   └── detail/             # GpuCullPass, LightCullPass, …
+├── resources/              # Mesh, Shader, textures, TextureLoader, …
+├── post/                   # PostProcessor
+├── shadows/, ibl/, materials/, 2d/, …
+├── IRenderSceneView.h
+├── RenderTypes.h
+├── RenderContext.h         # { device, cmd } — cmd = active recording list
+├── PassPushConstants.h     # Shared GPU push layouts (domain-scoped over time)
+├── DebugDrawRenderer.cpp
+└── RENDER_MODULE.md        # This file
 ```
 
 ### 2.2 api/render (public API)
 
-- Thin wrappers around eyelib types: **RenderPipeline**, **RenderScene**, **Renderer**, **Mesh**, **Material**, **Shader**, **Texture**, **TextureCube**, **Texture3D**, **TextureArray**, **GBuffer**, **CascadeShadowMap**, **FrameGraph**, **PostProcessor**, **IBL**, **RenderTarget**, **Camera**, **Light**, **LODManager**, etc.
-- **RenderSceneAdapter**: `api::RenderScene` → `ApiRenderSceneView` implementing `eyelib::render::IRenderSceneView` (zero-copy: iterates API scene storage).
+- Thin wrappers around eyelib types: **RenderPipeline**, **RenderScene**, **Renderer**, **Mesh**, **Material**, **Shader**, **Texture**, **TextureCube**, **SkyboxCubemapLoad**, **GBuffer**, **PostProcessor**, **IBL**, etc.
+- **RenderSceneAdapter**: `api::RenderScene` → `ApiRenderSceneView` implementing `eyelib::render::IRenderSceneView` (zero-copy).
 - **RenderDevice**: opaque handle (`void*`) for passing the RHI device from pipeline to asset loaders and other systems.
 - **FrameGraph**: API `Compile(RenderDevice device)` forwards to eyelib `Compile(rhi::IDevice*)`; no parameterless overload.
 
@@ -88,27 +73,47 @@ eyelib/render/
 
 ### 3.1 Interface (rhi/RHI.h, RHITypes.h)
 
-- **IDevice** — creation and lifecycle: buffers, textures, shaders, pipelines, render targets, query pools, descriptor sets, bindless heap. Also command list creation/submit, immediate command list, shader path resolution, capabilities.
+- **IDevice** — creation and lifecycle: buffers, textures, shaders, pipelines, render targets, query pools, descriptor sets, bindless heap. Command lists: `CreateCommandList`, `DestroyCommandList`, `GetImmediateCommandList`, optional transient recording, `GetActiveRecordingCommandList`, `EnqueueFrameSliceCommandList`, `SubmitCommandList`. Shader path resolution, `GetCapabilities()`, `GetRenderBackend()`.
 - **ICommandList** — recording: bind pipeline, vertex/index buffers, descriptor sets, draw/dispatch, render target, viewport, clear, copy, barriers.
-- **IBuffer**, **ITexture** — opaque handles; backend-specific (OpenGL: VBO/ID, texture ID; Diligent: IBuffer/ITexture).
-- **IShader**, **IPipeline** — compiled shader and graphics pipeline (vertex layout, topology, depth/stencil).
-- **IRenderTarget** — framebuffer with color/depth attachments.
-- **IPipelineLayout**, **IDescriptorSet** — for uniform/texture/sampler bindings (Vulkan-style; OpenGL emulates).
-- **IBindlessHeap** — bindless texture/sampler handles when supported.
-- **IQueryPool** — GPU timing (e.g. per-pass).
+- **IBuffer**, **ITexture** — opaque handles; backend-specific (GL IDs, Vulkan `VkBuffer`/`VkImage`, etc.).
+- **IShader**, **IPipeline** — compiled shader and graphics/compute pipelines.
+- **IRenderTarget** — framebuffer / swapchain-relative targets.
+- **IPipelineLayout**, **IDescriptorSet** — bindings (Vulkan-native; OpenGL emulates).
+- **IBindlessHeap**, **IQueryPool** — optional capabilities.
 
-Resource states (e.g. `ShaderResource`, `RenderTarget`, `DepthWrite`) drive automatic barriers in the frame graph.
+Resource states drive barriers (frame graph + `BarrierTracker` on Vulkan).
 
 ### 3.2 Backends
 
-- **OpenGL** (`rhi/OpenGL/`): DeviceGL, CommandListGL (immediate + DeferredCommandListGL for record-then-submit), BufferGL, TextureGL, ShaderGL, PipelineGL, RenderTargetGL, DescriptorSetGL, QueryPoolGL, BindlessHeapGL. Shader path: `assets/shaders/opengl/{name}.vert/.frag`.
-- **Diligent** (`rhi/diligent/`): Optional. DeviceDiligent, CommandListDiligent, etc. Created via `CreateDiligentDevice(nwh, width, height)`.
+- **OpenGL** (`rhi/OpenGL/`): immediate command list + deferred record-and-replay for `CreateCommandList`/`SubmitCommandList`. Shader assets: `assets/shaders/opengl/{name}.vert/.frag`.
+- **Vulkan** (`rhi/Vulkan/`): `DeviceVK`, `CommandListVK`, per-frame command pool and fence, swapchain acquire/present, `UploadHeapVK`, `BarrierTrackerVK`, descriptor allocator/cache, graphics pipeline cache. Shader assets: `assets/shaders/vulkan/` (SPIR-V path). Built when `OPENEYE_USE_VULKAN` and the SDK are available.
+- **Diligent** (`rhi/diligent/`): Optional. `CreateDiligentDevice(nwh, width, height)`.
 
-Device creation:
+Device creation (typical):
 
 - `CreateOpenGLDevice()` — GL context must be current.
-- `CreateGraphicsDevice(makeContextCurrent)` — calls `makeContextCurrent` then creates OpenGL device.
-- `CreateDiligentDevice(nwh, w, h)` — when Diligent is available.
+- `CreateGraphicsDevice(makeContextCurrent)` — often selects OpenGL after making context current.
+- Vulkan device creation via the project’s Vulkan bootstrap (see `rhi/Vulkan/core/CreateDeviceVulkan.cpp` and CMake options).
+
+### 3.3 Vulkan frame submission model
+
+- **`BeginFrame`**: advances frame ring, waits fence, resets command pool, resets per-frame upload/descriptor/barrier state. The **main** immediate command buffer is prepared but **recording starts lazily** (after optional editor slices) so embedded views do not corrupt swapchain composition order.
+- **`EndFrame`**: collects **all enqueued slice command buffers** for the current frame slot, then **ends and appends the main immediate buffer**, and issues **one** `vkQueueSubmit` with slices **first**, main buffer **last** (see `DeviceVK::EndFrame`).
+- **`SubmitCommandList`**: separate submit path for ad-hoc lists (e.g. async upload with timeline semaphore).
+
+### 3.4 Active recording command list & editor slices
+
+**Problem:** In the editor, **Scene View** and **Game View** render to **offscreen** pipelines sharing the same `IDevice` as the main frame. Recording their draws on the **same** VkCommandBuffer as swapchain composition would interleave unrelated passes and break ordering/state.
+
+**Mechanism:**
+
+1. **`IDevice::GetTransientRecordingCommandList()`** / **`SetTransientRecordingCommandList(cmd)`** — Vulkan: while non-null, this buffer is the “current slice” target.
+2. **`IDevice::GetActiveRecordingCommandList()`** — returns transient if set, **else** `GetImmediateCommandList()`. All code that records per-frame GPU work that must participate in the correct submit should use this (not `GetImmediateCommandList()` alone).
+3. **`EnqueueFrameSliceCommandList(cmd)`** — takes ownership of a finished list; device stores it in the **current frame ring** for inclusion in `EndFrame`’s submit batch.
+
+**Editor integration** (application layer): `OpenEyeEditor` uses **`VulkanRenderSliceScope`** (`app/editor/EditorVulkanRenderSlice.cpp`): on enter — `CreateCommandList`, `Begin`, `SetTransientRecordingCommandList`; on exit — clear transient, `End`, `EnqueueFrameSliceCommandList`. Used around **SceneViewPanel** and **GameViewPanel** render paths when the backend is Vulkan. OpenGL: scope no-ops (backend check in ctor).
+
+**Eyelib discipline:** `RenderContext::FromDevice()` sets **`cmd = GetActiveRecordingCommandList()`**. Systems updated to follow this include (non-exhaustive): **`Shader::Bind`** and uniform setters, **`Mesh`/`MeshHandle` bind/draw**, **`PostProcessor`**, **`DebugDrawRenderer`**, **`TextRenderer`**, **`IBL`** bake/bind paths, and pipeline code that builds `RenderContext` for passes.
 
 ---
 
@@ -129,12 +134,12 @@ Read-only interface used by the pipeline so it never copies full scene data:
 - `GetCamera()`, `GetLight()`, `GetSkybox()`
 - `ForEachOpaqueDrawable(cb)`, `ForEachTransparentDrawable(cb)`
 - `ForEachPointLight(cb)`, `ForEachSpotLight(cb)`
-- Optional: `GetSceneForCallback()` for code that needs a full `RenderScene*` (e.g. pre/post callback).
+- Optional: `GetSceneForCallback()` for code that needs a full `RenderScene*`.
 
 Implementations:
 
 - **RenderSceneView** — wraps `const RenderScene&` (eyelib).
-- **ApiRenderSceneView** (api/render) — wraps `const api::RenderScene&`; adapts API types to eyelib `Drawable`/`CameraView`/etc. so the pipeline sees the same interface.
+- **ApiRenderSceneView** (api/render) — wraps `const api::RenderScene&`.
 
 ---
 
@@ -142,23 +147,17 @@ Implementations:
 
 ### 5.1 Responsibilities (framegraph/FrameGraph.h/cpp)
 
-- **Resource declaration**: CreateTexture(desc) for transients; ImportTextureRHI(name, texture, w, h) for existing RHI textures (e.g. HDR, GBuffer, shadow).
-- **Pass registration**: AddPass(name, execute, reads, writes, sideEffect). Reads/writes are `FGTextureHandle`s.
-- **Compile(device)**:
-  - Computes texture lifetimes and transient aliasing (same dimensions/format, non-overlapping lifetimes share RHI texture).
-  - Builds DAG from read/write dependencies; topological sort → execution order. On cycle, falls back to insertion order.
-  - Recomputes first/last pass per resource in execution order for correct barriers and aliasing.
-- **Execute(cmd)**: Runs passes in computed order; inserts barriers so each resource is in the right state; runs execute callbacks with FGPassResources (getTexture / getTextureRHI, width, height).
+- **Resource declaration**: `CreateTexture(desc)` for transients; `ImportTextureRHI(name, texture, w, h)` for existing RHI textures (e.g. HDR, GBuffer, shadow).
+- **Pass registration**: `AddPass(name, execute, reads, writes, sideEffect)`.
+- **Compile(device)**: lifetimes, transient aliasing, DAG topological order, barrier/alias metadata.
+- **Execute(cmd)**: runs passes in order; transitions resources; callbacks receive `FGPassResources`.
 
 No parameterless `Compile()` — device is required.
 
 ### 5.2 Recipe (FrameGraphRecipe.h/cpp)
 
-- **FrameGraphPassDef** — name, reads[], writes[], sideEffect.
-- **FrameGraphRecipe** — vector of pass defs.
-- **AddPassesFromRecipe(graph, recipe, nameToHandle, getExecutor)** — resolves names to handles, adds passes to the graph; getExecutor(passName) returns the ExecuteFunc (typically closing over view, context, pipeline state).
-
-Pipeline code builds a nameToHandle map (ImportTextureRHI / CreateTexture), defines a recipe, then calls AddPassesFromRecipe with a lambda that returns the right executor per pass.
+- **AddPassesFromRecipe** — resolves pass names to handles and executor lambdas.
+- Shared pass-name constants: **`renderer/graph/FrameGraphPassNames.h`** (reduces string drift between recipes and `RenderPipelineGraph`).
 
 ---
 
@@ -166,30 +165,24 @@ Pipeline code builds a nameToHandle map (ImportTextureRHI / CreateTexture), defi
 
 ### 6.1 Modes (RenderPipeline.h)
 
-- **Forward** — Frame graph: GPU Cull → Shadow → Forward Opaque → Transparency → Skybox → Post. Single forward pass into HDR.
-- **Deferred** — Frame graph: GPU Cull → Shadow → GBuffer → Copy depth (for occlusion) → Lighting → Transparency → Skybox → Post. Lighting reads GBuffer, writes HDR.
-- **ForwardPlus** — Legacy path: tiled/clustered many lights; skybox after; no frame graph.
+- **Forward** — Frame graph: GPU Cull → Shadow → Forward Opaque → Transparency → Skybox → Post.
+- **Deferred** — GPU Cull → Shadow → GBuffer → Copy depth → Lighting → Transparency → Skybox → Post.
+- **ForwardPlus** — Legacy tiled/clustered path; no frame graph.
 
-Render(view) dispatches by mode: Deferred → BuildAndExecuteFrameGraph; Forward → BuildAndExecuteForwardFrameGraph; ForwardPlus → BuildAndExecuteForwardPlusFrameGraph (single path for all).
+Graph execution and executor wiring are largely in **`RenderPipeline.cpp`** + **`RenderPipelineGraph.cpp`** (orchestration vs. graph recipes/executors).
 
 ### 6.2 Initialization & Lifecycle
 
-- Initialize(unique_ptr&lt;IDevice&gt;) or Initialize(IDevice* sharedDevice), width, height.
-- Resize(w, h) at frame boundary (GBuffer, HDR RT, post).
-- Render(IRenderSceneView) or Render(RenderScene); optional entityIdsForOpaque for entity-ID pass (picking).
-- BlitToScreen() to present.
-- GetRHIDevice(), GetRHICommandList() for passes and asset loading that need the device.
+- `Initialize` / shared device, `Resize`, `Render(IRenderSceneView)`, optional entity-ID pass for picking.
+- **`GetRHIDevice()`**, **`GetRHICommandList()`** — the latter returns **`GetActiveRecordingCommandList()`** on the device (same buffer as `RenderContext::FromDevice` when building from device only).
 
-### 6.3 Frame Graph Build (Deferred example)
+### 6.3 Frame graph build (Deferred example)
 
 1. Clear frame graph; set frame size.
-2. Build nameToHandle: ImportTextureRHI for HDR, HDRDepth, GBuffer*, Shadow.
-3. PrepareGpuCullFromView(view, cam) — build draw list, upload to GPU, configure GpuCullPass.
-4. Define FrameGraphRecipe: GPU Cull, Shadow, GBuffer, Copy depth, Lighting, Transparency (and Skybox, Post via AddSkyboxPassToFrameGraph / PostProcessor).
-5. getExecutor(name): each pass gets a lambda that captures pipeline, view, ctx, and runs the corresponding pass (e.g. GBuffer → `BuildGBufferOpaqueParams` + `GBufferPassSystem::RenderOpaqueGeometry`).
-6. AddPassesFromRecipe; then Compile(device), Execute(ctx).
-
-Forward frame graph is similar but with a single forward pass instead of GBuffer + Lighting.
+2. Build `nameToHandle`: import HDR, depth, GBuffer, shadow, etc.
+3. `PrepareGpuCullFromView` / GPU cull configuration.
+4. Recipe: cull, shadow, GBuffer, copy depth, lighting, transparency, skybox, post.
+5. `AddPassesFromRecipe` → `Compile(device)` → `Execute(ctx)` with `RenderContext` carrying **active** `cmd`.
 
 ---
 
@@ -197,54 +190,44 @@ Forward frame graph is similar but with a single forward pass instead of GBuffer
 
 ### 7.1 Mesh
 
-- **Mesh** (resources/Mesh.h): GPU-only. CreateFromDescriptor(device, desc) builds vertex/index buffers and submeshes. Bind(device), Draw(device, submeshIndex). Destroy(device). No CPU geometry stored.
-- **MeshDescriptor** (MeshDescriptor.h): CPU-only; vertices, indices32/indices16, indexFormat, submeshes. Used by loaders and EditableMesh; Mesh::CreateFromDescriptor(device, desc) produces the GPU mesh.
-- **MeshHandle**: Optional view (vertexBuffer, indexBuffer, indexType, totalIndexCount, submeshes) for draw path.
-- **EditableMesh** (assets): CPU-authoritative; GetDescriptor(), BuildRenderMesh(out, device), CopyToRenderMesh(out, device).
+- **Mesh**: GPU-only; `CreateFromDescriptor(device, desc)`, `Bind`/`Draw` use **`GetActiveRecordingCommandList()`** on the device for Vulkan slice correctness.
+- **MeshDescriptor** / **EditableMesh**: CPU-side geometry sources.
 
 ### 7.2 Shader
 
-- **Shader** (resources/Shader.h): GPU pipeline. Load(device, assetPath, layout, topology) or LoadFromFile(device, vertPath, fragPath, layout). BuildFromSource(device, ...). Bind(device). No SetDevice/GetDevice; device passed explicitly.
-- **ShaderDescriptor**: CPU representation for serialization / creating another instance; LoadFromDescriptor(device, desc).
+- **Shader**: `Load`/`Bind`/uniform setters use the **active** recording command list so pipeline binds record on the slice when the editor has set a transient list.
 
 ### 7.3 Textures
 
-- **Texture2D / Texture3D / TextureCube / TextureArray**: Create(device, ...), LoadFromFile(device, path) or LoadFromDescriptor(device, desc). TextureCube has only device-taking LoadFromFiles(device, ...); no SetDevice/GetDevice.
-- **TextureLoader** (resources/TextureLoader): LoadPNG(device, path), LoadHDR(device, path), CreateFromDecoded(device, img). Parameterless overloads remain for compatibility but prefer device-taking versions.
-- **TextureDescriptor**: path + options; used for reload and asset storage.
+- **Texture2D / 3D / Cube / Array**: explicit `device` on create/load.
+- **TextureLoader**: HDR paths use controlled `stbi_set_flip_vertically_on_load` scoping; cubemap loads pin flip off in **TextureCube** so global STB state does not leak between loaders.
 
 ### 7.4 Material / MaterialInstance / MaterialBuilder
 
-- **Material**: Parameters and texture bindings (albedo, normal, metallic-roughness, etc.).
-- **MaterialInstance**: Per-draw overrides; used at draw time with Material.
-- **MaterialBuilder** (Refractor 7.5, Limitless-inspired): Fluent API to construct a Material (Albedo, Metallic, Roughness, textures, Blending, TwoSided, Refraction, ShaderIndex, snippets, etc.); `build()` returns `std::shared_ptr<Material>`.
+- **Material** / **MaterialInstance**: parameters and texture bindings at draw time.
+- **MaterialBuilder**: fluent construction of materials (see refactor docs).
 
 ---
 
 ## 8. Passes (High Level)
 
-| Pass           | Role                                                                 |
-|----------------|----------------------------------------------------------------------|
-| **GpuCullPass**| Build draw list from view; optional GPU culling; indirect draw list.|
-| **ShadowPass** | Render directional shadow map from light view.                       |
-| **GBufferPassSystem**| Deferred geometry system: fill position, normal, albedo, PBR, velocity, depth. |
-| **LightingPass**| Full-screen: sample GBuffer + shadow, write HDR.                    |
-| **TransparencyPass**| Sorted transparent drawables over HDR.                             |
-| **Skybox**     | Full-screen quad, depth LEQUAL, sample cubemap; drawn as frame-graph pass. |
-| **PostProcessor**| Tone mapping, bloom, FXAA, SSAO, SSR, etc.; can be integrated as final frame-graph pass. |
+| Area | Role |
+|------|------|
+| **GpuCullPassSystem** | Draw list + optional GPU culling / indirect draws. |
+| **ShadowPass** | Directional cascades. |
+| **GBufferPassSystem** | Deferred geometry → GBuffer. |
+| **DeferredLightingPassSystem** / **LightingPass** | Full-screen lighting from GBuffer + shadow. |
+| **TransparencyPassSystem** | Sorted transparency. |
+| **SkyboxPassSystem** | Cubemap or procedural sky (fullscreen, depth test). |
+| **PostProcessor** | Tone map, bloom, FXAA, SSAO, SSR, etc.; binds correct descriptor sets for Vulkan post layout. |
 
 ---
 
 ## 9. API Layer (api/render) Summary
 
-- **RenderDevice** — opaque device handle; obtained from pipeline (e.g. GetDevice()); passed to FrameGraph::Compile(device), texture loaders, asset registry.
-- **RenderScene** — API scene (opaque/transparent storage, camera, light, skybox as api::TextureCube, etc.).
-- **ApiRenderSceneView** — implements IRenderSceneView over api::RenderScene so RenderPipeline::Render(view) works without copying.
-- **RenderPipeline** (api) — wraps eyelib RenderPipeline; InitializeWithSharedDevice(RenderDevice, w, h); Render(scene) builds ApiRenderSceneView and calls eyelib Render(view).
-- **FrameGraph** (api) — Compile(RenderDevice device) only; no parameterless Compile().
-- **TextureCube** (api) — LoadFromFiles(RenderDevice device, ...) only; forwards to eyelib TextureCube::LoadFromFiles(device, ...).
-
-Applications (editor, player) get the device from the pipeline, pass it to asset loaders and skybox load so all GPU resource creation is explicit.
+- **RenderDevice** — passed into `FrameGraph::Compile`, loaders, registry.
+- **RenderPipeline** — `InitializeWithSharedDevice`; `Render(scene)` via `ApiRenderSceneView`.
+- **SkyboxCubemapLoad** — shared cubemap resolve (cross layout vs. six faces) for editor and runtime bridges.
 
 ---
 
@@ -252,49 +235,48 @@ Applications (editor, player) get the device from the pipeline, pass it to asset
 
 ### 10.1 Frame lifecycle (order is fixed)
 
-`BeginFrame` → `UpdateUploads` → Compile frame graph → Execute frame graph → `EndFrame` → `Present`. All CPU→staging→copy uploads happen in `UpdateUploads()`; no uploads during pass execution.
+`BeginFrame` → `UpdateUploads` → compile frame graph → execute frame graph → `EndFrame` → present. Staging uploads are concentrated in **`UpdateUploads`** where possible; avoid ad-hoc uploads mid-pass when a unified upload phase exists.
 
 ### 10.2 Recording vs submission
 
-- **Renderer** records commands only (into the command list provided by the device).
-- **Device** owns submission: `EndFrame()` or `SubmitCommandList(list)` performs `vkQueueSubmit` / equivalent. The renderer must never submit directly.
+- **Passes** record into the **`ICommandList`** provided by context (**active** list).
+- **Device** submits: **`EndFrame`** batches slice + main buffers (Vulkan); **`SubmitCommandList`** for standalone submits.
 
-### 10.3 FrameGraph is the only authority for transients
+### 10.3 FrameGraph is the authority for graph transients
 
-- **Transient textures** (GBuffer, HDR, shadow maps, post targets): only via `FrameGraph::CreateTexture()` or `FrameGraph::ImportTextureRHI()`. Pass execute callbacks must not create textures.
-- **Barriers**: only the FrameGraph inserts transitions between passes (via Read/Write declarations and `TransitionPassResources`). Pass code must not call `BarrierTexture` / `TransitionTextureToState` for frame-graph resources; declare reads/writes so the graph inserts barriers.
+- Transient textures and inter-pass barriers come from graph **reads/writes** and compile-time lifetime analysis.
 
 ### 10.4 Resource lifetime domains
 
 | Domain | Examples | Rule |
 |--------|----------|------|
-| **Persistent** | Meshes, materials, textures, IBL, shadow cascade RTs | Created at load/init; live until unload. |
-| **FrameGraph transient** | GBuffer, HDR, post buffers, shadow map targets in graph | Created/aliased by FrameGraph at Compile(); released on Clear(). |
-| **Streaming** | Upload heap (staging), per-frame scratch | Per-frame or rolling; never mix with persistent or graph transients. |
+| **Persistent** | Meshes, materials, IBL, shadow RTs owned by pipeline | Until unload. |
+| **FrameGraph transient** | GBuffer, HDR, post intermediates | Created at `Compile`; cleared with graph. |
+| **Per-frame scratch** | Upload heap regions, transient descriptor sets | Ring-buffered per frame index. |
 
-Do not mix domains (e.g. do not create a persistent texture inside a pass execute callback).
+### 10.5 Command list state across frames
 
-### 10.5 Command lists are stateless across frames
+Each frame, pools reset (Vulkan) or lists are begun fresh; **do not** assume bindings survive across `BeginFrame` boundaries.
 
-`Begin()` clears all tracked state (bound pipeline, RT, textures, buffers, push constants). `End()` finalizes recording. No state survives across frames; each `Begin()` starts from a clean slate.
+### 10.6 Descriptor binding
 
-### 10.6 Descriptor binding (slot-based, backend owns layout)
+High-level code uses slot APIs (`BindTexture`, `BindBuffer`, …); backend maps to sets/bindings (Vulkan **Post** layout uses multiple sets — see post/bind passes).
 
-Renderer binds by slot only: `cmd->BindTexture(tex, slot)`, `cmd->BindBuffer(buf, slot)`. The backend decides descriptor set index and layout (binding table or PushOnly). The renderer must not depend on descriptor set numbers or layout details.
+### 10.7 New recording code checklist
+
+1. Use **`GetActiveRecordingCommandList()`** (or **`RenderContext::FromDevice`**) for anything that must appear in the same submit batch as the rest of the frame **when editor slices are active**.
+2. Do not **`vkQueueSubmit`** (or equivalent) from pass code.
+3. For editor-only pre-composition work on Vulkan, prefer **`VulkanRenderSliceScope`** (or the same transient + enqueue pattern) instead of the main immediate buffer.
 
 ---
 
 ## 11. Conventions
 
-- **Pipeline warmup**: Pipelines are precompiled at init (e.g. `WarmupPipelines()`). `Draw()` must never create a pipeline.
-- **Device**: Always pass `rhi::IDevice*` (or `api::RenderDevice`) into creation/load APIs; do not rely on a global or SetDevice for render resources.
-- **Scene**: Pipeline takes `IRenderSceneView`; implement it over your scene type for zero-copy.
-- **Frame graph**: Compile(device) required; execution order is DAG-derived when acyclic.
-- **Mesh**: GPU-only in Mesh; CPU in MeshDescriptor / EditableMesh.
-- **Shaders**: Load/Bind take device; backend resolves paths (e.g. assets/shaders/opengl/...).
+- **Warmup**: Pipelines created at init where possible; avoid first-draw compile hitch.
+- **Device**: always explicit `rhi::IDevice*` / `api::RenderDevice`.
+- **Shaders**: backend folder under `assets/shaders/{opengl|vulkan|diligent}/…`.
+- **Refactor roadmap**: `documentation/refractor/Render_refractor.md` and `Render_Report.md`.
 
 ---
 
-**Refactor plan (clean, production-level):** See `documentation/refractor/Render_refractor.md` for the phased plan to split the pipeline into coordinators, introduce RenderFrameData/RenderWorldCache, submission layer, and editor/runtime split.
-
-*Last updated to reflect explicit device passing, FrameGraph DAG/Compile(device), TextureCube device-only LoadFromFiles, and CPU vs GPU mesh/texture split.*
+*Last updated: Vulkan backend, per-frame slice submission, `GetActiveRecordingCommandList` / `RenderContext`, editor slice integration, graph split (`RenderPipelineGraph`), and pass-system naming.*
