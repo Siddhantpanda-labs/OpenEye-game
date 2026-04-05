@@ -31,7 +31,8 @@ World::World() {
     m_systemGraph.SetFixedTimestep(1.0f / 60.0f);
     m_systemGraph.SetProcessCommandsCallback([this]() { ApplyPendingCommands(); });
     RegisterSystem(std::make_shared<systems::RegionSystem>());
-    RegisterSystem(std::make_shared<systems::TransformSystem>());
+    m_transformSystem = std::make_shared<systems::TransformSystem>();
+    RegisterSystem(m_transformSystem);
     m_systemGraph.SetPostPhysicsStepCallback(nullptr);
     m_events.SetEventLog(&m_eventLog, [this]() { return m_simulationTime; });
 }
@@ -230,6 +231,11 @@ void World::FlushSimulation() {
 }
 
 void World::FlushTransforms() {
+    if (m_transformSystem) {
+        // Editor/tools contract: recompute world transforms deterministically, without running full simulation phase.
+        m_transformSystem->Update(m_state);
+        return;
+    }
     m_systemGraph.RunSimulationPhaseOnce(0.0f);
 }
 

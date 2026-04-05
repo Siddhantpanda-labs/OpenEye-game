@@ -351,7 +351,7 @@ void GBufferPassSystem::RenderIndirect(GBuffer& gbuffer,
     static Material fallbackMaterial;
     resources::UpdateMaterialDescriptorSetWithDefaults(ctx.device, materialSet, &fallbackMaterial, nullptr);
 
-    gbuffer.BindForGeometryPass(ctx.cmd);
+    // G-buffer already cleared and bound by RenderOpaqueGeometry before indirect draw.
     shader->Bind(ctx.device);
     shader->SetMat4("u_View", view);
     shader->SetMat4("u_Projection", projection);
@@ -392,7 +392,11 @@ void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
     if (!backend::SupportsMultiDrawIndirect(ctx.device))
         return;
 
-    ShaderKey key{ PipelineStage::GBuffer, InstanceType::Static, kDefaultMaterialTypeId };
+    // Capability gate: only backends that support per-draw transform fetch use the DrawID-aware shader variant.
+    const InstanceType shaderInstanceType = backend::SupportsGpuDrivenPerDrawTransformIndirect(ctx.device)
+        ? InstanceType::Skinned
+        : InstanceType::Static;
+    ShaderKey key{ PipelineStage::GBuffer, shaderInstanceType, kDefaultMaterialTypeId };
     auto shader = m_shaderCache->getOrCompile(ctx.device, key);
     if (!shader || !shader->IsValid()) return;
     rhi::IPipeline* pipe = shader->GetPipelineRHI();
@@ -407,7 +411,7 @@ void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
     resources::UpdateMaterialDescriptorSetWithDefaults(ctx.device, materialSet, &fallbackMaterial, nullptr);
     sceneSet->UpdateStorageBuffer(1, perDrawTransformBuffer, 0, transformCount * 64u);
 
-    gbuffer.BindForGeometryPass(ctx.cmd);
+    // G-buffer already cleared and bound by RenderOpaqueGeometry before indirect draw.
     shader->Bind(ctx.device);
     shader->SetMat4("u_View", view);
     shader->SetMat4("u_Projection", projection);
@@ -571,6 +575,11 @@ void GBufferPassSystem::RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) c
         std::memcpy(frameUbo + 64, &p.prevProjection[0][0], 16 * sizeof(float));
         p.frameUbo->Update(frameUbo, 0, 320);
     }
+
+    // Deferred/hybrid contract: G-buffer color + depth must be defined every frame before lighting runs,
+    // including when there are zero opaque draws. Otherwise stale depth rejects skybox and deferred re-lights old surfaces.
+    p.gbuffer->BindForGeometryPass(p.cmd);
+
     const bool useIndirectQuad = p.useGpuDrivenGBuffer && p.gpuCullPass && p.gpuCullPass->IsSupported(p.device)
         && p.gpuDrivenQuad && p.gpuDrivenQuad->IsValid() && (p.gpuCullDrawListCount == 0);
     const bool useIndirectScene = p.useGpuDrivenGBuffer && p.gpuCullPass && p.gpuCullPass->IsSupported(p.device)

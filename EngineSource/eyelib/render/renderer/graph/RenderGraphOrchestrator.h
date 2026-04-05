@@ -48,7 +48,7 @@ private:
     bool m_needsCompile = true;
     uint32_t m_lastWidth = 0;
     uint32_t m_lastHeight = 0;
-    PipelineMode m_lastMode = PipelineMode::Deferred;
+    PipelineMode m_lastMode = PipelineMode::Hybrid;
     bool m_lastStereo = false;
 };
 

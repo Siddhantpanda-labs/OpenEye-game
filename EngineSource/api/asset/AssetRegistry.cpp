@@ -8,6 +8,7 @@
 #include "asset/readers/texture_reader.h"
 #include "asset/core/import_mesh.h"
 #include "eyelib/render/materials/MaterialDescriptor.h"
+#include "eyelib/render/materials/MaterialShader.h"
 #include "eyelib/render/MeshDescriptor.h"
 #include "eyelib/render/TextureDescriptor.h"
 #include "eyelib/render/ShaderDescriptor.h"
@@ -57,16 +58,51 @@ struct AssetIdHash {
 };
 
 void LoadedMaterialToDescriptor(const asset::LoadedMaterial& src, eyelib::render::MaterialDescriptor& dst) {
-    dst.shaderAssetPath = "passes/forward/forward";
+    dst.shaderAssetPath = src.shaderAssetPath;
+    dst.texturePaths.clear();
+    dst.keywords.clear();
+    dst.floats.clear();
+    dst.vec3s.clear();
+    dst.vec4s.clear();
     dst.albedo.x = src.albedoColorR;
     dst.albedo.y = src.albedoColorG;
     dst.albedo.z = src.albedoColorB;
     dst.metallic = src.metallicValue;
     dst.roughness = src.roughnessValue;
+    dst.emission.x = src.emissionR;
+    dst.emission.y = src.emissionG;
+    dst.emission.z = src.emissionB;
+    dst.ao = src.aoValue;
+    dst.alpha = src.alpha;
     if (!src.albedoPath.empty()) dst.texturePaths["u_AlbedoTexture"] = src.albedoPath;
     if (!src.normalPath.empty()) dst.texturePaths["u_NormalTexture"] = src.normalPath;
     if (!src.metallicPath.empty()) dst.texturePaths["u_MetallicTexture"] = src.metallicPath;
     if (!src.roughnessPath.empty()) dst.texturePaths["u_RoughnessTexture"] = src.roughnessPath;
+    if (!src.aoPath.empty()) dst.texturePaths["u_AOTexture"] = src.aoPath;
+    if (!src.emissivePath.empty()) dst.texturePaths["u_EmissiveTexture"] = src.emissivePath;
+    if (!src.metallicRoughnessPath.empty()) dst.texturePaths["u_MetallicRoughnessTexture"] = src.metallicRoughnessPath;
+
+    dst.shadingModel = static_cast<eyelib::render::ShadingModel>(src.shadingModel);
+    dst.blending = static_cast<eyelib::render::Blending>(src.blending);
+    dst.twoSided = (src.flags & 1u) != 0;
+    dst.refraction = (src.flags & 2u) != 0;
+    dst.reflectiveStrength = src.reflectiveStrength;
+    dst.fragmentSnippet = src.fragmentSnippet;
+    dst.shadingSnippet = src.shadingSnippet;
+    if (src.materialShaderId != 0u)
+        dst.materialShaderId = static_cast<eyelib::render::MaterialTypeId>(src.materialShaderId);
+    else if (dst.shadingModel == eyelib::render::ShadingModel::Unlit)
+        dst.materialShaderId = eyelib::render::MaterialShaderIds::Unlit;
+    else
+        dst.materialShaderId = eyelib::render::kDefaultMaterialTypeId;
+
+    for (const auto& kv : src.keywordPairs) dst.keywords[kv.first] = kv.second;
+    for (const auto& kv : src.floatPairs) dst.floats[kv.first] = kv.second;
+    for (const auto& kv : src.vec3Pairs)
+        dst.vec3s[kv.first] = eyelib::math::Vec3(kv.second[0], kv.second[1], kv.second[2]);
+    for (const auto& kv : src.vec4Pairs)
+        dst.vec4s[kv.first] =
+            eyelib::math::Vec4(kv.second[0], kv.second[1], kv.second[2], kv.second[3]);
 }
 
 std::string JoinRelative(const std::string& a, const std::string& b) {
@@ -272,11 +308,14 @@ AssetId AssetRegistry::LoadAssetDescriptorOnly(const std::string& filePath, Asse
 }
 
 void AssetRegistry::UnloadAsset(const AssetId& id) {
+    const AssetType t = GetAssetType(id);
     asset::AssetManager::Get().UnloadAsset(ToGuid(id));
     m_impl->materialDescriptors.erase(id);
     m_impl->meshDescriptors.erase(id);
     m_impl->textureDescriptors.erase(id);
     m_impl->shaderDescriptors.erase(id);
+    if (t == AssetType::Material && m_impl->resolver)
+        m_impl->resolver->InvalidateMaterial(id);
 }
 
 bool AssetRegistry::ReloadAsset(const AssetId& id) {
@@ -448,6 +487,11 @@ const eyelib::render::MaterialDescriptor* AssetRegistry::GetMaterialDescriptor(c
     if (!materialRelPath.empty())
         ResolveMaterialTexturePathsRelativeToMaterial(m_impl->assetRoot, materialRelPath, desc);
     return &m_impl->materialDescriptors[id];
+}
+
+void AssetRegistry::SetMaterialDescriptor(const AssetId& id, const eyelib::render::MaterialDescriptor& desc) {
+    if (!id.IsValid()) return;
+    m_impl->materialDescriptors[id] = desc;
 }
 
 const eyelib::render::MeshDescriptor* AssetRegistry::GetMeshDescriptor(const AssetId& id) const {

@@ -84,4 +84,9 @@ void RendererGPUResourceCache::OnDeviceLost() {
     m_materials.clear();
 }
 
+void RendererGPUResourceCache::InvalidateMaterial(const eyelib::api::AssetId& id) {
+    if (!id.IsValid()) return;
+    m_materials.erase(id);
+}
+
 } // namespace openeye::player

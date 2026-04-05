@@ -42,7 +42,16 @@ void TransformSystem::RebuildLinearizedOrder(WorldState& state) const {
 void TransformSystem::Update(WorldState& state) const {
     auto& store = state.GetTransformStore();
     const auto& hierarchy = state.GraphHierarchy();
-    if (store.Size() == 0) return;
+    if (store.Size() == 0) {
+        // Reset cached traversal state when world becomes empty.
+        // Without this, deleting all entities can leave stale entity ids cached in
+        // m_linearizedOrder and the next single-entity world may skip rebuild.
+        m_linearizedOrder.clear();
+        m_lastTransformCount = 0;
+        m_lastHierarchyVersion = hierarchy.GetVersion();
+        m_updatedThisPass.clear();
+        return;
+    }
 
     const uint32_t hierarchyVersion = hierarchy.GetVersion();
     const size_t transformCount = store.Size();

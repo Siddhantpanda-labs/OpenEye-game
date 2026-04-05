@@ -1175,11 +1175,13 @@ bool World::SetSkyboxAssetId(const std::string& assetId) {
 }
 
 std::string World::GetRenderPipelineMode() const {
-    if (!m_impl) return "Forward";
+    if (!m_impl) return "Hybrid";
     const std::string& mode = m_impl->world.GetState().GetRenderPipelineMode();
-    if (mode == "Forward" || mode == "Deferred" || mode == "ForwardPlus")
+    if (mode == "Deferred")
+        return "Hybrid";
+    if (mode == "Forward" || mode == "Hybrid" || mode == "ForwardPlus")
         return mode;
-    return "Forward";
+    return "Hybrid";
 }
 
 bool World::SetRenderPipelineMode(const std::string& mode) {
@@ -1204,6 +1206,8 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.transformRotations.clear();
     out.transformScales.clear();
     if (!m_impl) return;
+    // Architectural contract: snapshots always observe latest world transforms, independent of scheduler timing.
+    m_impl->world.FlushTransforms();
     ::eyelib::world::WorldObservation obs(m_impl->world.GetView());
     const auto transforms = obs.GetTransformsView();
     for (const auto& [entity, t] : transforms) {

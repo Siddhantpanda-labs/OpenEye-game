@@ -23,6 +23,7 @@
 
 namespace eyelib {
 namespace world {
+namespace systems { class TransformSystem; }
 
 struct ApplySyncResult {
     bool success = false;
@@ -140,6 +141,7 @@ private:
     EventLog m_eventLog;
     TransactionManager m_transactions;
     std::vector<std::shared_ptr<IWorldSystem>> m_systems;
+    std::shared_ptr<systems::TransformSystem> m_transformSystem;
     SystemGraphScheduler m_systemGraph;
     WorldScheduler m_scheduler;
     double m_simulationTime = 0.0;

@@ -128,7 +128,7 @@ void WorldState::Clear() {
     m_registry.clear();
     m_componentStores.clear();
     m_skyboxAssetId = std::string(skybox::kProceduralId);
-    m_renderPipelineMode = "Forward";
+    m_renderPipelineMode = "Hybrid";
     if (m_entities) {
         m_entities->Clear();
     }

@@ -126,6 +126,11 @@ public:
         m_materials.clear();
     }
 
+    void InvalidateMaterial(const eyelib::api::AssetId& id) override {
+        if (!id.IsValid()) return;
+        m_materials.erase(id);
+    }
+
 private:
     void* m_device = nullptr;
     eyelib::api::AssetRegistry* m_registry = nullptr;
@@ -500,21 +505,27 @@ int RunEditor(int argc, char** argv) {
             } catch (...) {}
             ctx.world.SetFrameSnapshot(nullptr);
             ctx.gameRuntimeStopRequested = false;
-            // Model A: single device; no restore needed.
             // Revert world to pre-Play snapshot so edits during Play are discarded.
             if (!ctx.playSnapshotPath.empty()) {
-                if (ctx.world.LoadScene(ctx.playSnapshotPath)) {
-                    if (ctx.assetRegistry) {
-                        EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
-                    }
-                    openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
-                    ctx.selectedEntity = ::eyelib::world::InvalidEntity;
-                    ctx.sceneSelected = false;
-                }
+                (void)ctx.world.LoadScene(ctx.playSnapshotPath);
                 (void)eyelib::api::platform::filesystem::DeleteFile(ctx.playSnapshotPath);
                 ctx.playSnapshotPath.clear();
             }
-            eyelib::api::core::Log::Info("Game runtime stopped; default device restored.");
+            // GameRuntime repoints AssetRegistry at the play primary root and rescans; restore editor indexing.
+            if (ctx.assetRegistry) {
+                if (!ctx.projectAssetsRoot.empty())
+                    ctx.assetRegistry->SetAssetRoot(ctx.projectAssetsRoot);
+                else
+                    ctx.assetRegistry->SetAssetRoot(ctx.engineAssetsPath);
+                ctx.assetRegistry->Scan();
+                if (editorRenderDevice)
+                    ctx.assetRegistry->SetRenderDevice(editorRenderDevice);
+                EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
+            }
+            openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
+            ctx.selectedEntity = ::eyelib::world::InvalidEntity;
+            ctx.sceneSelected = false;
+            eyelib::api::core::Log::Info("Game runtime stopped; editor asset registry restored.");
         }
         window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
 

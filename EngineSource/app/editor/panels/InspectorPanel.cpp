@@ -1,4 +1,5 @@
 #include "InspectorPanel.h"
+#include "InspectorMaterialEditor.h"
 #include "EditorContext.h"
 #include "ScenePipelineMode.h"
 #include "PanelCommon.h"
@@ -574,42 +575,32 @@ void ShowAddComponentPopup(EditorContext* ctx) {
     ImGui::EndPopup();
 }
 
-void ShowMaterialAssetEditor(EditorContext* ctx) {
-    if (!ctx || ctx->selectedMaterialAssetId.empty() || !ctx->assetRegistry) return;
-    ctx->assetRegistry->LoadAsset(ctx->selectedMaterialAssetId, eyelib::api::AssetType::Material);
-    std::shared_ptr<eyelib::api::Material> mat = ctx->assetRegistry->GetMaterial(ctx->selectedMaterialAssetId);
-    if (!mat) return;
-    if (ImGui::CollapsingHeader("Material (asset)", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::TextUnformatted(ctx->selectedMaterialAssetId.c_str());
-        bool refr = mat->GetRefraction();
-        if (ImGui::Checkbox("Refraction", &refr)) mat->SetRefraction(refr);
-        bool refl = mat->GetReflective();
-        if (ImGui::Checkbox("Reflective (SSR)", &refl)) mat->SetReflective(refl);
-        if (refl) {
-            float strength = mat->GetReflectiveStrength();
-            if (ImGui::SliderFloat("Reflection strength", &strength, 0.01f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
-                mat->SetReflectiveStrength(strength);
-        }
-    }
-}
-
 } // namespace
 
 void ShowInspectorPanel(EditorContext* ctx) {
     if (ImGui::Begin("Inspector", nullptr, ImGuiWindowFlags_None)) {
         if (!ctx) {
             ImGui::TextUnformatted("(No context)");
+        } else if (!ctx->selectedMaterialAssetId.empty()) {
+            ImGui::TextUnformatted("Material asset");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Close##MatInspector")) ctx->selectedMaterialAssetId.clear();
+            ImGui::Separator();
+            openeye::editor::DrawMaterialAssetEditor(ctx);
         } else if (ctx->sceneSelected) {
             ImGui::TextUnformatted("Scene");
             ImGui::Separator();
-            const char* modeItems[] = { "Forward", "Deferred", "ForwardPlus" };
+            const char* modeItems[] = { "Hybrid (GBuffer + forward transparency)", "Forward-only", "Forward+ (clustered forward-only)" };
             std::string sceneMode = ctx->world.GetRenderPipelineMode();
+            if (sceneMode == "Deferred")
+                sceneMode = "Hybrid";
             int modeIndex = 0;
-            if (sceneMode == "Deferred") modeIndex = 1;
+            if (sceneMode == "Hybrid") modeIndex = 0;
             else if (sceneMode == "ForwardPlus") modeIndex = 2;
+            else modeIndex = 1;
             if (ImGui::Combo("Render Pipeline", &modeIndex, modeItems, IM_ARRAYSIZE(modeItems))) {
                 const eyelib::api::RenderPipeline::Mode mode =
-                    (modeIndex == 1) ? eyelib::api::RenderPipeline::Mode::Deferred :
+                    (modeIndex == 0) ? eyelib::api::RenderPipeline::Mode::Hybrid :
                     (modeIndex == 2) ? eyelib::api::RenderPipeline::Mode::ForwardPlus :
                     eyelib::api::RenderPipeline::Mode::Forward;
                 openeye::editor::SetScenePipelineMode(*ctx, mode);
@@ -621,11 +612,7 @@ void ShowInspectorPanel(EditorContext* ctx) {
                 ctx->world.SetSkyboxAssetId(skyboxBuf[0] ? std::string(skyboxBuf) : std::string());
             }
         } else if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
-            if (!ctx->selectedMaterialAssetId.empty()) {
-                ShowMaterialAssetEditor(ctx);
-            } else {
-                ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
-            }
+            ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
         } else {
             ctx->sceneSelected = false;  // ensure entity selection takes precedence if both were set
             // Top name box: click to edit, click away or Enter to apply rename
@@ -676,9 +663,6 @@ void ShowInspectorPanel(EditorContext* ctx) {
                     }
                     ImGui::TreePop();
                 }
-            }
-            if (!ctx->selectedMaterialAssetId.empty()) {
-                ShowMaterialAssetEditor(ctx);
             }
             ImGui::Separator();
 

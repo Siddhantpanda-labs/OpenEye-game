@@ -6,6 +6,7 @@
 #include <string>
 
 namespace eyelib { namespace api { class AssetRegistry; } }
+namespace eyelib { namespace render { struct MaterialDescriptor; } }
 
 namespace eyelib {
 namespace api {
@@ -17,8 +18,8 @@ public:
     /** No registry: returns Invalid. */
     static AssetId LoadMaterial(const std::string& path);
 
-    /** Save material to canonical .mat binary. Stub: returns false. */
-    static bool SaveMaterial(const std::string& path, const AssetId& materialAssetId);
+    /** Save CPU descriptor to MAT1 v3 binary at \a absolutePath (e.g. project Assets + relative id). */
+    static bool SaveMaterial(const std::string& absolutePath, const ::eyelib::render::MaterialDescriptor& desc);
 };
 
 } // namespace api

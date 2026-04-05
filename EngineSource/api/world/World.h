@@ -209,7 +209,7 @@ public:
         std::optional<::eyelib::world::components::Transform> GetTransform(::eyelib::world::EntityId entity) const;
     };
 
-    /** One capture per frame: fills \a out from world state (one pass). Call once per frame; then use \a out for BuildScene and set as frame snapshot so GetObservation() returns a view over it. */
+    /** One capture per frame: recomputes world transforms, then fills \a out from world state (one pass). Call once per frame; then use \a out for BuildScene and set as frame snapshot so GetObservation() returns a view over it. */
     void CaptureRenderSnapshot(RenderSnapshot& out) const;
     /** Set the current frame snapshot. GetObservation() will return a view over it until cleared. Call at frame start after CaptureRenderSnapshot; clear at frame end. */
     void SetFrameSnapshot(const RenderSnapshot* snapshot);
@@ -319,9 +319,9 @@ public:
     std::string GetSkyboxAssetId() const;
     /** Set skybox asset id via command (mutation layer). Returns false if command application failed. */
     bool SetSkyboxAssetId(const std::string& assetId);
-    /** Scene-level render pipeline mode. Values: "Forward", "Deferred", "ForwardPlus". */
+    /** Scene-level render pipeline mode. Values: "Hybrid" (default), "Forward", "ForwardPlus". Legacy "Deferred" maps to Hybrid. */
     std::string GetRenderPipelineMode() const;
-    /** Set scene-level render pipeline mode via command (mutation layer). Invalid values are normalized to "Forward". */
+    /** Set scene-level render pipeline mode via command (mutation layer). Invalid values normalize to "Hybrid". */
     bool SetRenderPipelineMode(const std::string& mode);
 
     Observation GetObservation() const;

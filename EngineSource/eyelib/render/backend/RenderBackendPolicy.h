@@ -39,6 +39,8 @@ bool SupportsCompute(const rhi::IDevice* device);
 bool SupportsMultiDrawIndirect(const rhi::IDevice* device);
 /** @return true when device supports MDI with GPU-written draw count (indirect parameters). */
 bool SupportsMultiDrawIndirectCount(const rhi::IDevice* device);
+/** @return true when GPU-driven GBuffer indirect path can fetch per-draw transforms in vertex stage. */
+bool SupportsGpuDrivenPerDrawTransformIndirect(const rhi::IDevice* device);
 /** @return true when resource-space / descriptor-set bind path is valid (layout + BindDescriptorSets). */
 bool SupportsResourceSpaceBindPath(const rhi::IDevice* device);
 /** @return true when atomic counter buffers are exposed to shaders. */

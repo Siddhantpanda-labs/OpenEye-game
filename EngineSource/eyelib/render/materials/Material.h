@@ -48,6 +48,7 @@ public:
     void SetMaterialShaderId(MaterialTypeId id) { m_shaderIndex = id; m_hashDirty = true; }
 
     void SetTexture(const std::string& name, std::shared_ptr<Texture2D> texture);
+    void RemoveTexture(const std::string& name);
     std::shared_ptr<Texture2D> GetTexture(const std::string& name) const;
     /** C2: RHI texture for bindless or external binding. Returns nullptr if no texture or invalid. */
     rhi::ITexture* GetTextureRHI(const std::string& name) const;

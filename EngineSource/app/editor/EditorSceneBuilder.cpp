@@ -304,7 +304,8 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               eyelib::api::AssetRegistry* assetRegistry,
                               std::shared_ptr<eyelib::api::Material> defaultMaterial,
                               const eyelib::api::world::World* world,
-                              std::vector<::eyelib::world::EntityId>* outDrawableToEntity) {
+                              std::vector<::eyelib::world::EntityId>* outDrawableToEntity,
+                              std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity) {
     m_renderDevice = assetRegistry ? assetRegistry->GetRenderDevice() : eyelib::api::RenderDevice();
     ++m_buildFrameCounter;
     std::string rootsSig;
@@ -325,6 +326,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.pointLightsStorage.clear();
     scene.spotLightsStorage.clear();
     if (outDrawableToEntity) outDrawableToEntity->clear();
+    if (outTransparentDrawableToEntity) outTransparentDrawableToEntity->clear();
 
     EditorCameraToView(editorCamera, viewportWidth, viewportHeight, scene.camera);
 
@@ -413,9 +415,15 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
             drawable.transform = TransformToMatrix(*transform);
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
-        scene.opaqueStorage.push_back(std::move(drawable));
-        if (outDrawableToEntity)
-            outDrawableToEntity->push_back(entry.entity);
+        if (eyelib::api::DrawableRoutesToTransparentPass(drawable)) {
+            scene.transparentStorage.push_back(std::move(drawable));
+            if (outTransparentDrawableToEntity)
+                outTransparentDrawableToEntity->push_back(entry.entity);
+        } else {
+            scene.opaqueStorage.push_back(std::move(drawable));
+            if (outDrawableToEntity)
+                outDrawableToEntity->push_back(entry.entity);
+        }
     }
 
     for (const auto& entry : snapshot.meshRenderers) {
@@ -434,17 +442,23 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
             drawable.transform = TransformToMatrix(*transform);
         if (drawable.material)
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, nullptr);
-        scene.opaqueStorage.push_back(std::move(drawable));
-        if (outDrawableToEntity)
-            outDrawableToEntity->push_back(entry.entity);
+        if (eyelib::api::DrawableRoutesToTransparentPass(drawable)) {
+            scene.transparentStorage.push_back(std::move(drawable));
+            if (outTransparentDrawableToEntity)
+                outTransparentDrawableToEntity->push_back(entry.entity);
+        } else {
+            scene.opaqueStorage.push_back(std::move(drawable));
+            if (outDrawableToEntity)
+                outDrawableToEntity->push_back(entry.entity);
+        }
     }
 
     PruneStaleDrawableCache();
 
     scene.opaque = scene.opaqueStorage.empty() ? nullptr : scene.opaqueStorage.data();
     scene.opaqueCount = scene.opaqueStorage.size();
-    scene.transparent = nullptr;
-    scene.transparentCount = 0;
+    scene.transparent = scene.transparentStorage.empty() ? nullptr : scene.transparentStorage.data();
+    scene.transparentCount = scene.transparentStorage.size();
     scene.pointLights = scene.pointLightsStorage.empty() ? nullptr : scene.pointLightsStorage.data();
     scene.pointLightCount = scene.pointLightsStorage.size();
     scene.spotLights = scene.spotLightsStorage.empty() ? nullptr : scene.spotLightsStorage.data();

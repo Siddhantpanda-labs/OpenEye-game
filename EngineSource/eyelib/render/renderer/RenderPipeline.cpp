@@ -58,6 +58,7 @@
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/math/Frustum.h"
 #include <algorithm>
+#include <cmath>
 #include <cassert>
 #include <cstdint>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -72,7 +73,12 @@ namespace {
 constexpr uint32_t kDefaultDirectionalShadowResolution = 1536u;
 constexpr uint32_t kDefaultDirectionalShadowCascades = 3u;
 
+float EntityIdDistanceToCamera(const math::Mat4& transform, const math::Vec3& viewPos) {
+    math::Vec3 p(transform[3][0], transform[3][1], transform[3][2]);
+    const float dx = p.x - viewPos.x, dy = p.y - viewPos.y, dz = p.z - viewPos.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
+}  // namespace
 
 RenderPipeline::RenderPipeline() = default;
 
@@ -497,7 +503,22 @@ void RenderPipeline::PrepareFrameData(const IRenderSceneView& view) {
     }
 
     m_frameData.visibleTransparent.clear();
-    view.ForEachTransparentDrawable([this](const Drawable& d) { m_frameData.visibleTransparent.push_back(d); });
+    if constexpr (kEnableCpuFrustumCulling) {
+        math::Frustum cameraFrustumTransparent;
+        cameraFrustumTransparent.FromMatrix(m_frameData.cameraRaw.projection * m_frameData.cameraRaw.view);
+        view.ForEachTransparentDrawable([this, &cameraFrustumTransparent](const Drawable& d) {
+            if (!d.mesh) return;
+            if (d.bones && d.boneCount > 0) {
+                m_frameData.visibleTransparent.push_back(d);
+                return;
+            }
+            const math::AABB worldAabb = d.mesh->GetAABB().Transform(d.transform);
+            if (cameraFrustumTransparent.Contains(worldAabb) != 0)
+                m_frameData.visibleTransparent.push_back(d);
+        });
+    } else {
+        view.ForEachTransparentDrawable([this](const Drawable& d) { m_frameData.visibleTransparent.push_back(d); });
+    }
 
 }
 
@@ -654,7 +675,7 @@ RenderPipeline::TransparencyPassParams RenderPipeline::BuildTransparencyPassPara
     const RenderFrameData* frameData = frameCtx.frameData;
     p.frameData = frameData;
     p.camView = camView;
-    p.copyDepthFromGBuffer = (m_mode == PipelineMode::Deferred);
+    p.copyDepthFromGBuffer = (m_mode == PipelineMode::Hybrid);
     p.preferVulkanPath = backend::PreferVulkanTransparencyPath(m_device, m_shaderCache);
     return p;
 }
@@ -788,7 +809,7 @@ void RenderPipeline::BuildAndExecuteFrameGraph(const IRenderSceneView& view) {
     m_lastGpuCullDrawListCount = PrepareGpuCullFromFrameData(m_frameData, m_frameData.camera);
     PreparePersistentShaderReadInputs(frc.cmd, m_frameData);
 
-    CompileFrameGraphIfNeeded(PipelineMode::Deferred, false);
+    CompileFrameGraphIfNeeded(PipelineMode::Hybrid, false);
     m_frameGraphExecutionContext = frc;
     m_renderGraphOrchestrator->Execute(ctx);
     m_frameGraphExecutionContext = {};
@@ -956,6 +977,8 @@ void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const Rend
                                               rhi::IDescriptorSet* sceneSet, bool usePrev) {
         BuildForwardPassSharedState(fd, cv, passSet, sceneSet, usePrev);
     };
+    ctx.transparentShaderStage =
+        (m_mode == PipelineMode::Hybrid || m_mode == PipelineMode::ForwardPlus) ? PipelineStage::ForwardPlus : PipelineStage::Forward;
     ForwardTransparentRender(cmd, frameData, cam, ctx);
 }
 
@@ -1070,7 +1093,23 @@ void RenderPipeline::PrepareForwardPlusFrame(rhi::ICommandList* cmd, const Rende
     ctx.lightIndexBuffer = &m_lightIndexBuffer;
     ctx.sceneLightingBuffer = m_sceneLightingBuffer;
     ctx.cascadeShadowMap = m_cascadeShadowMap.get();
-    ForwardPlusPrepareFrame(cmd, frameData, ctx);
+    ForwardPlusPrepareFrame(cmd, frameData, ctx, true);
+}
+
+void RenderPipeline::PrepareHybridTransparencyLighting(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    ForwardPlusPrepareContext ctx{};
+    ctx.device = m_device;
+    ctx.width = m_width;
+    ctx.height = m_height;
+    ctx.hdrRenderTarget = m_hdrRenderTarget;
+    ctx.clusteredLightGrid = m_clusteredLightGrid.get();
+    ctx.lightCullPassSystem = m_lightCullPassSystem.get();
+    ctx.pointLightBuffer = &m_pointLightBuffer;
+    ctx.spotLightBuffer = &m_spotLightBuffer;
+    ctx.lightIndexBuffer = &m_lightIndexBuffer;
+    ctx.sceneLightingBuffer = m_sceneLightingBuffer;
+    ctx.cascadeShadowMap = m_cascadeShadowMap.get();
+    ForwardPlusPrepareFrame(cmd, frameData, ctx, false);
 }
 
 void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
@@ -1105,7 +1144,8 @@ void RenderPipeline::Render(const RenderScene& scene) {
     Render(view);
 }
 
-void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque) {
+void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque,
+                            const std::vector<uint32_t>* entityIdsForTransparent) {
     if (m_width == 0 || m_height == 0) return;
     EnsureResources(m_width, m_height);
     if (!m_hdrRenderTarget || !m_gbuffer) return;
@@ -1125,9 +1165,9 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         const rhi::ClearValue clearRed = { 1.f, 0.f, 0.f, 1.f };
         rhi::ClearAndSetRenderTargetWithViewport(cmd, m_hdrRenderTarget, 0, 0, m_width, m_height, clearRed);
     } else {
-    // Single path: all modes go through frame graph (Deferred/Forward/ForwardPlus use BuildAndExecute*FrameGraph).
+    // Single path: all modes go through frame graph (Hybrid/Forward/ForwardPlus use BuildAndExecute*FrameGraph).
     switch (m_mode) {
-    case PipelineMode::Deferred:
+    case PipelineMode::Hybrid:
         BuildAndExecuteFrameGraph(view);
         break;
     case PipelineMode::Forward:
@@ -1141,12 +1181,20 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
         break;
     }
 
-    // EntityID pass: same depth as opaque, write R32UI for picking (editor). Run only when entity IDs provided and count matches.
-    if (entityIdsForOpaque && m_entityIdRenderTarget) {
+    // EntityID pass: shared scene depth, write R32UI for picking (editor). Opaque then transparent (back-to-front).
+    if (m_entityIdRenderTarget && (entityIdsForOpaque || entityIdsForTransparent)) {
         size_t opaqueCount = 0;
         view.ForEachOpaqueDrawable([&opaqueCount](const Drawable&) { ++opaqueCount; });
-        if (opaqueCount == entityIdsForOpaque->size())
-            RenderEntityIDPass(view, *entityIdsForOpaque);
+        size_t transparentCount = 0;
+        view.ForEachTransparentDrawable([&transparentCount](const Drawable&) { ++transparentCount; });
+        static const std::vector<uint32_t> kEmptyEntityIds;
+        const std::vector<uint32_t>& opaqueIdsRef = entityIdsForOpaque ? *entityIdsForOpaque : kEmptyEntityIds;
+        const bool opaqueMatch = (opaqueCount == opaqueIdsRef.size());
+        const bool trMatch = !entityIdsForTransparent || (transparentCount == entityIdsForTransparent->size());
+        const bool wantOpaque = !opaqueIdsRef.empty();
+        const bool wantTr = entityIdsForTransparent && !entityIdsForTransparent->empty();
+        if (opaqueMatch && trMatch && (wantOpaque || wantTr))
+            RenderEntityIDPass(view, opaqueIdsRef, entityIdsForTransparent);
     }
 
     if (m_prePostCallback) {
@@ -1474,8 +1522,11 @@ void RenderPipeline::RunStreamingNV12Pass(rhi::IRenderTarget* sourceRT, void* nv
     (void)m_streamingPassSystem->ExecuteNv12(execParams);
 }
 
-void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque) {
-    if (!m_entityIdRenderTarget || entityIdsForOpaque.empty()) return;
+void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque,
+                                        const std::vector<uint32_t>* entityIdsForTransparent) {
+    if (!m_entityIdRenderTarget) return;
+    const bool wantTr = entityIdsForTransparent && !entityIdsForTransparent->empty();
+    if (entityIdsForOpaque.empty() && !wantTr) return;
     EnsureEntityIdShader();
     if (!m_entityIdShader || !m_entityIdShader->IsValid()) return;
 
@@ -1494,10 +1545,14 @@ void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std:
     build.width = m_width;
     build.height = m_height;
     build.useTypedPush = useTypedEntityIdPush;
-    build.drawItems = [this, &view, &entityIdsForOpaque](rhi::ICommandList* cmdArg, Shader* entityIdShader, bool useTypedPush) {
+    build.drawItems = [this, &view, &entityIdsForOpaque, entityIdsForTransparent, cam](rhi::ICommandList* cmdArg, Shader* entityIdShader,
+                                                                                       bool useTypedPush) {
         size_t index = 0;
         view.ForEachOpaqueDrawable([&](const Drawable& d) {
-            if (!d.mesh || index >= entityIdsForOpaque.size()) { ++index; return; }
+            if (!d.mesh || index >= entityIdsForOpaque.size()) {
+                ++index;
+                return;
+            }
             uint32_t id = entityIdsForOpaque[index++];
             if (useTypedPush) {
                 abi::WriteEntityIdFragPushConstants(cmdArg, id);
@@ -1510,6 +1565,40 @@ void RenderPipeline::RenderEntityIDPass(const IRenderSceneView& view, const std:
             { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
             d.mesh->Unbind();
         });
+
+        if (entityIdsForTransparent && !entityIdsForTransparent->empty()) {
+            struct TrEntry {
+                Drawable drawable;
+                uint32_t id = 0;
+                float dist = 0.f;
+            };
+            std::vector<TrEntry> tr;
+            size_t ti = 0;
+            view.ForEachTransparentDrawable([&](const Drawable& d) {
+                if (ti >= entityIdsForTransparent->size()) return;
+                const uint32_t id = (*entityIdsForTransparent)[ti++];
+                if (!d.mesh) return;
+                TrEntry e{};
+                e.drawable = d;
+                e.id = id;
+                e.dist = EntityIdDistanceToCamera(d.transform, cam.viewPos);
+                tr.push_back(std::move(e));
+            });
+            std::sort(tr.begin(), tr.end(), [](const TrEntry& a, const TrEntry& b) { return a.dist > b.dist; });
+            for (const TrEntry& e : tr) {
+                const Drawable& d = e.drawable;
+                if (useTypedPush) {
+                    abi::WriteEntityIdFragPushConstants(cmdArg, e.id);
+                    abi::WriteEntityIdModelPushConstants(cmdArg, d.transform);
+                } else {
+                    entityIdShader->SetUint("u_EntityID", e.id);
+                    entityIdShader->SetMat4("u_Model", d.transform);
+                }
+                d.mesh->Bind(m_device);
+                { MeshHandle h = d.mesh->GetHandle(); if (h.IsValid()) h.Draw(m_device, d.submeshIndex); }
+                d.mesh->Unbind();
+            }
+        }
     };
     EntityIdOverlayExecuteParams execParams = m_editorOverlayPassSystem->BuildEntityIdParams(build);
     (void)m_editorOverlayPassSystem->ExecuteEntityId(execParams);

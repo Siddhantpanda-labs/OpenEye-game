@@ -4,7 +4,10 @@
 #include "ScenePipelineMode.h"
 #include "InstantiateOmesh.h"
 #include "RunImporter.h"
+#include "api/asset/AssetRegistry.h"
 #include "api/platform/All.h"
+#include "asset/meta/meta_file.h"
+#include "asset/readers/material_reader.h"
 #include <imgui.h>
 #include <string>
 #include <vector>
@@ -59,7 +62,7 @@ static constexpr const char* kMaterialPayloadType = "OpenEyeMaterial";
 
 /** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty). */
 static const char* GetEmptySceneJson() {
-    return "{\"version\":1,\"renderPipelineMode\":\"Forward\"}";
+    return "{\"version\":1,\"renderPipelineMode\":\"Hybrid\"}";
 }
 
 /** Close the current window. Docked panels are child windows and must use EndChild(). */
@@ -116,35 +119,56 @@ static bool CreateNewFolder(const std::string& parentPath) {
     return fs::CreateDirectory(path);
 }
 
-/** Write minimal canonical .mat (MAT1 v2) so loader can load it. */
-static bool CreateEmptyMaterialFile(const std::string& folderPath) {
+/** Relative path under project Assets root, or empty if fullPath is not under root. */
+static std::string RelativeToProjectAssets(const std::string& fullPath, const std::string& projectAssetsRoot) {
+    if (projectAssetsRoot.empty()) return {};
+    std::string norm = fs::NormalizePath(fullPath);
+    std::string root = fs::NormalizePath(projectAssetsRoot);
+    if (norm.size() < root.size() || norm.compare(0, root.size(), root) != 0) return {};
+    size_t start = root.size();
+    if (start < norm.size() && (norm[start] == '/' || norm[start] == '\\')) start++;
+    std::string rel = norm.substr(start);
+    std::replace(rel.begin(), rel.end(), '\\', '/');
+    while (!rel.empty() && rel[0] == '/') rel.erase(0, 1);
+    return rel;
+}
+
+/** Write minimal canonical .mat (MAT1 v3) and sibling .meta so AssetDatabase::Scan can index it. */
+static bool CreateEmptyMaterialFile(const std::string& folderPath, openeye::editor::EditorContext* ctx) {
     std::string path = fs::NormalizePath(folderPath + "/NewMaterial.mat");
     int suffix = 0;
-    while (fs::FileExists(path)) {
+    while (fs::FileExists(path) || fs::FileExists(path + ".meta")) {
         suffix++;
         char buf[64];
         std::snprintf(buf, sizeof(buf), "/NewMaterial%d.mat", suffix);
         path = fs::NormalizePath(folderPath + buf);
     }
-    constexpr uint32_t kMat1Magic = 0x4D415431u;
-    constexpr uint32_t kMat1Version = 2u;
-#pragma pack(push, 1)
-    struct MinimalMatHeader {
-        uint32_t magic = kMat1Magic;
-        uint32_t version = kMat1Version;
-        uint32_t nameLen = 0;
-        uint32_t albedoPathLen = 0;
-        uint32_t normalPathLen = 0;
-        uint32_t metallicPathLen = 0;
-        uint32_t roughnessPathLen = 0;
-        float metallicValue = 0.f;
-        float roughnessValue = 0.5f;
-        float albedoColorR = 1.f;
-        float albedoColorG = 1.f;
-        float albedoColorB = 1.f;
-    } header;
-#pragma pack(pop)
-    return fs::WriteFile(path, reinterpret_cast<const char*>(&header), sizeof(header));
+    asset::LoadedMaterial lm;
+    lm.roughnessValue = 0.5f;
+    lm.albedoColorR = lm.albedoColorG = lm.albedoColorB = 1.f;
+    lm.aoValue = 1.f;
+    lm.alpha = 1.f;
+    if (!asset::MaterialReader::Write(path, lm)) return false;
+
+    asset::MetaFile meta;
+    meta.guid = asset::GenerateGuidString();
+    meta.type = "Material";
+    meta.version = 1;
+    const std::string metaPath = path + ".meta";
+    if (!asset::WriteMetaFile(metaPath, meta)) {
+        fs::DeleteFile(path);
+        return false;
+    }
+
+    if (ctx && ctx->assetRegistry && !ctx->projectAssetsRoot.empty()) {
+        const std::string rel = RelativeToProjectAssets(path, ctx->projectAssetsRoot);
+        if (!rel.empty()) {
+            const eyelib::api::AssetId aid = eyelib::api::AssetId::FromString(meta.guid);
+            if (aid.IsValid()) ctx->assetRegistry->RegisterAsset(aid, rel, "Material");
+            ctx->selectedMaterialAssetId = rel;
+        }
+    }
+    return true;
 }
 
 static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std::string& name, bool isDir) {
@@ -179,6 +203,10 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
     }
     if (!isDir && IsMatFile(fullPath)) {
         if (ImGui::IsItemClicked(0)) {
+            if (ctx) {
+                ctx->sceneSelected = false;
+                ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+            }
             if (ctx && !ctx->projectAssetsRoot.empty() && fullPath.size() >= ctx->projectAssetsRoot.size()
                 && fullPath.compare(0, ctx->projectAssetsRoot.size(), ctx->projectAssetsRoot) == 0) {
                 size_t start = ctx->projectAssetsRoot.size();
@@ -210,7 +238,7 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             if (ImGui::BeginMenu("Create")) {
                 if (ImGui::MenuItem("Scene file")) CreateEmptySceneFile(fullPath);
                 if (ImGui::MenuItem("Folder")) CreateNewFolder(fullPath);
-                if (ImGui::MenuItem("Material")) CreateEmptyMaterialFile(fullPath);
+                if (ImGui::MenuItem("Material")) CreateEmptyMaterialFile(fullPath, ctx);
                 ImGui::EndMenu();
             }
             ImGui::Separator();
@@ -406,7 +434,7 @@ void ShowAssetPanel(EditorContext* ctx) {
                         CreateNewFolder(s_currentPath);
                     }
                     if (ImGui::MenuItem("Material")) {
-                        CreateEmptyMaterialFile(s_currentPath);
+                        CreateEmptyMaterialFile(s_currentPath, ctx);
                     }
                     ImGui::EndMenu();
                 }

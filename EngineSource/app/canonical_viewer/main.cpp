@@ -416,7 +416,7 @@ int main(int argc, char** argv) {
         eyelib::api::core::Engine::Shutdown();
         return 4;
     }
-    pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Hybrid);
 
     eyelib::api::RenderDevice device = pipeline.GetDevice();
     if (!device) {

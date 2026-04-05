@@ -26,7 +26,7 @@ void RenderPipeline::CompileFrameGraphIfNeeded(PipelineMode mode, bool stereo) {
     if (!m_renderGraphOrchestrator) return;
     m_renderGraphOrchestrator->CompileIfNeeded(mode, stereo, m_width, m_height, m_device,
         [this, mode, stereo](FrameGraph& fg) {
-            if (mode == PipelineMode::Deferred)
+            if (mode == PipelineMode::Hybrid)
                 BuildDeferredGraph(fg);
             else if (mode == PipelineMode::ForwardPlus)
                 BuildForwardPlusGraph(fg);
@@ -82,6 +82,8 @@ void RenderPipeline::GraphExecuteDeferredLighting() {
 void RenderPipeline::GraphExecuteTransparency() {
     const FrameRenderContext& frc = m_frameGraphExecutionContext;
     if (!frc.frameData) return;
+    if (m_mode == PipelineMode::Hybrid && frc.cmd)
+        PrepareHybridTransparencyLighting(frc.cmd, *frc.frameData);
     TransparencyPassParams tr = BuildTransparencyPassParams(frc, frc.frameData->camera);
     ExecuteTransparencyPass(tr);
 }

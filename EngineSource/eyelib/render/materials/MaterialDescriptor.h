@@ -37,6 +37,15 @@ struct MaterialDescriptor {
     math::Vec3 emission{0.0f};
     float ao = 1.0f;
     float alpha = 1.0f;
+
+    ShadingModel shadingModel = ShadingModel::Lit;
+    Blending blending = Blending::Opaque;
+    bool twoSided = false;
+    bool refraction = false;
+    float reflectiveStrength = 0.f;
+    MaterialTypeId materialShaderId = kDefaultMaterialTypeId;
+    std::string fragmentSnippet;
+    std::string shadingSnippet;
 };
 
 /**
@@ -44,6 +53,13 @@ struct MaterialDescriptor {
  * resolveShader(name) -> shared_ptr<Shader> or nullptr; resolveTexture(path) -> shared_ptr<Texture2D> or nullptr.
  */
 std::shared_ptr<Material> CreateMaterialFromDescriptor(
+    const MaterialDescriptor& desc,
+    std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
+    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture);
+
+/** Updates an existing material from \a desc (PBR, blend, snippets, textures). Empty texture path clears the slot. */
+void ApplyMaterialFromDescriptor(
+    Material& mat,
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
     std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture);

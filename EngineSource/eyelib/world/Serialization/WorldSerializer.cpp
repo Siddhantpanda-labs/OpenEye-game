@@ -19,9 +19,11 @@ namespace world {
 
 namespace {
 static std::string NormalizeRenderPipelineMode(const std::string& mode) {
-    if (mode == "Forward" || mode == "Deferred" || mode == "ForwardPlus")
+    if (mode == "Hybrid" || mode == "Forward" || mode == "ForwardPlus")
         return mode;
-    return "Forward";
+    if (mode == "Deferred")
+        return "Hybrid";
+    return "Hybrid";
 }
 
 static nlohmann::json SerializeEntityId(const EntityId& id) {
@@ -201,7 +203,7 @@ bool WorldSerializer::Deserialize(WorldState& state, const nlohmann::json& root)
     if (root.contains("renderPipelineMode") && root["renderPipelineMode"].is_string()) {
         state.SetRenderPipelineMode(NormalizeRenderPipelineMode(root["renderPipelineMode"].get<std::string>()));
     } else {
-        state.SetRenderPipelineMode("Forward");
+        state.SetRenderPipelineMode("Hybrid");
     }
 
     return true;

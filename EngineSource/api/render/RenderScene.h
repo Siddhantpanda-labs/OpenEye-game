@@ -56,6 +56,19 @@ struct Drawable {
     int32_t submeshIndex = -1;
 };
 
+/** True when the drawable should use the forward transparent pass (non-opaque blend or alpha &lt; ~1). */
+inline bool DrawableRoutesToTransparentPass(const Drawable& d) {
+    std::shared_ptr<Material> base = d.material;
+    if (d.materialInstance) {
+        if (auto m = d.materialInstance->GetMaterial())
+            base = std::move(m);
+    }
+    if (!base) return false;
+    if (base->GetBlending() != Blending::Opaque) return true;
+    const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : base->GetAlpha();
+    return alpha < 0.99f;
+}
+
 struct CameraView {
     math::Mat4 view{1.0f};
     math::Mat4 projection{1.0f};

@@ -274,8 +274,10 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             ctx->world.CaptureRenderSnapshot(snapshot);
         }
 
-        std::vector<EntityId> drawableToEntity;
+        std::vector<EntityId> opaqueEntityIds;
+        std::vector<EntityId> transparentEntityIds;
         std::vector<uint32_t> entityIdsForOpaque;
+        std::vector<uint32_t> entityIdsForTransparent;
         size_t drawableCount = 0;
         if (canRender) {
             eyelib::render::rhi::IDevice* rhiDev =
@@ -284,11 +286,14 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             static EditorSceneBuilder s_builder;
             eyelib::api::RenderScene scene;
             eyelib::api::debug::Profiler::BeginSample("SceneView Build");
-            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, &drawableToEntity);
+            s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world,
+                &opaqueEntityIds, &transparentEntityIds);
             eyelib::api::debug::Profiler::EndSample();
-            drawableCount = scene.opaqueCount;
-            for (EntityId e : drawableToEntity)
+            drawableCount = scene.opaqueCount + scene.transparentCount;
+            for (EntityId e : opaqueEntityIds)
                 entityIdsForOpaque.push_back(PackEntityId(e));
+            for (EntityId e : transparentEntityIds)
+                entityIdsForTransparent.push_back(PackEntityId(e));
             ctx->sceneViewPipeline->Resize(w, h);
             {
                 Mat4 view, proj;
@@ -306,7 +311,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 ctx->sceneViewPipeline->SetPendingDebugLinesColored(view, proj, colored);
             }
             eyelib::api::debug::Profiler::BeginSample("SceneView Render");
-            ctx->sceneViewPipeline->Render(scene, entityIdsForOpaque.empty() ? nullptr : &entityIdsForOpaque);
+            ctx->sceneViewPipeline->Render(scene, &entityIdsForOpaque, &entityIdsForTransparent);
             eyelib::api::debug::Profiler::EndSample();
             if (ctx->selectedEntity != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(ctx->selectedEntity))
                 ctx->sceneViewPipeline->RenderOutlineFromIdBuffer(PackEntityId(ctx->selectedEntity), 1.0f, 0.5f, 0.0f);

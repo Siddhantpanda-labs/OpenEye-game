@@ -78,6 +78,7 @@ DeviceDiligent::DeviceDiligent(void* nwh, uint32_t width, uint32_t height, Devic
     (void)nwh;
     m_caps.supportsCompute = true;   // Diligent supports compute
     m_caps.supportsMultiDrawIndirect = true;  // D3D12/Vk support it; D3D11/GL depend on impl
+    m_caps.supportsGpuDrivenPerDrawTransformIndirect = false;
     m_immediateCommandList = std::make_unique<CommandListDiligent>(this);
 }
 

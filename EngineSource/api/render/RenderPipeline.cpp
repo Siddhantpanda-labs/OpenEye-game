@@ -182,16 +182,16 @@ bool RenderPipeline::OwnsDevice() const {
 }
 
 void RenderPipeline::SetMode(Mode mode) {
-    ::eyelib::render::PipelineMode m = (mode == Mode::Forward) ? ::eyelib::render::PipelineMode::Forward :
-                             (mode == Mode::Deferred) ? ::eyelib::render::PipelineMode::Deferred :
+    ::eyelib::render::PipelineMode m = (mode == Mode::Hybrid) ? ::eyelib::render::PipelineMode::Hybrid :
+                             (mode == Mode::Forward) ? ::eyelib::render::PipelineMode::Forward :
                              ::eyelib::render::PipelineMode::ForwardPlus;
     m_impl->pipeline->SetMode(m);
 }
 
 RenderPipeline::Mode RenderPipeline::GetMode() const {
     ::eyelib::render::PipelineMode m = m_impl->pipeline->GetMode();
-    return (m == ::eyelib::render::PipelineMode::Forward) ? Mode::Forward :
-           (m == ::eyelib::render::PipelineMode::Deferred) ? Mode::Deferred :
+    return (m == ::eyelib::render::PipelineMode::Hybrid) ? Mode::Hybrid :
+           (m == ::eyelib::render::PipelineMode::Forward) ? Mode::Forward :
            Mode::ForwardPlus;
 }
 
@@ -207,9 +207,10 @@ void RenderPipeline::UpdateUploads() {
     if (m_impl->pipeline) m_impl->pipeline->UpdateUploads();
 }
 
-void RenderPipeline::Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque) {
+void RenderPipeline::Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque,
+                            const std::vector<uint32_t>* entityIdsForTransparent) {
     ApiRenderSceneView view(scene);
-    m_impl->pipeline->Render(view, entityIdsForOpaque);
+    m_impl->pipeline->Render(view, entityIdsForOpaque, entityIdsForTransparent);
 }
 
 void RenderPipeline::RenderStereo(const RenderScene& scene, const CameraView& leftCam, const CameraView& rightCam) {

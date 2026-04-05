@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/render/RenderTypes.h"
+#include "eyelib/render/ShaderKey.h"
 #include "eyelib/render/rhi/RHI.h"
 #include <functional>
 
@@ -104,7 +105,9 @@ struct ForwardPlusPrepareContext {
     CascadeShadowMap* cascadeShadowMap = nullptr;
 };
 
-void ForwardPlusPrepareFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData, ForwardPlusPrepareContext& ctx);
+/** When \a clearHdrAndInitViewport is false (hybrid path after deferred lighting), only uploads/culls lights and scene buffer — does not clear HDR. */
+void ForwardPlusPrepareFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData, ForwardPlusPrepareContext& ctx,
+                            bool clearHdrAndInitViewport = true);
 
 /** Per-frame state and acquire hooks for Vulkan forward transparent draws. */
 struct ForwardTransparentRenderContext {
@@ -126,6 +129,8 @@ struct ForwardTransparentRenderContext {
     std::function<rhi::IDescriptorSet*()> acquireSceneDrawSet;
     std::function<IBL*(const RenderFrameData&)> ensureIbl;
     std::function<void(const RenderFrameData&, const CameraView&, rhi::IDescriptorSet*, rhi::IDescriptorSet*, bool)> buildForwardPassSharedState;
+    /** Forward = classic forward lighting; ForwardPlus = clustered/tiled buffers (hybrid transparent pass). */
+    PipelineStage transparentShaderStage = PipelineStage::Forward;
 };
 
 void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,

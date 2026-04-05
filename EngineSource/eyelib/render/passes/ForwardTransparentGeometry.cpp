@@ -1,4 +1,5 @@
 #include "eyelib/render/passes/ForwardGeometryCommon.h"
+#include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/passes/common/ForwardSharedEnvironment.h"
 #include "eyelib/render/PassPushConstants.h"
 #include "eyelib/render/ShaderCache.h"
@@ -61,6 +62,7 @@ void ApplyMaterialBlendCullTransparent(rhi::ICommandList* cmd, const Material* m
 void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
                               ForwardTransparentRenderContext& ctx) {
     if (!cmd || !ctx.shaderCache || !ctx.ensureIbl || !ctx.buildForwardPassSharedState) return;
+    const bool useTypedForwardPush = backend::UseTypedPushConstants(ctx.device);
     IBL* iblPtr = ctx.ensureIbl(frameData);
     const passes::common::ForwardSharedEnvironmentState envState =
         passes::common::ResolveForwardSharedEnvironmentForPipeline(frameData, cam, ctx.cascadeShadowMap, ctx.reflectionProbeManager, iblPtr);
@@ -89,7 +91,7 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
         const auto material = d.materialInstance ? d.materialInstance->GetMaterial() : d.material;
         if (!d.mesh || !material) continue;
         const float alpha = d.materialInstance ? d.materialInstance->GetAlpha() : material->GetAlpha();
-        if (alpha >= 0.99f) continue;
+        if (material->GetBlending() == Blending::Opaque && alpha >= 0.99f) continue;
         sorted.push_back({ i, DistanceToCameraTransparent(d.transform, cam.viewPos) });
     }
     std::sort(sorted.begin(), sorted.end(), [](const TEntry& a, const TEntry& b) { return a.dist > b.dist; });
@@ -106,7 +108,7 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
         ApplyMaterialBlendCullTransparent(cmd, material.get());
         const Material* baseMat = material.get();
         InstanceType it = (d.bones && d.boneCount > 0) ? InstanceType::Skinned : InstanceType::Static;
-        ShaderKey key{ PipelineStage::Forward, it, baseMat->GetMaterialShaderId() };
+        ShaderKey key{ ctx.transparentShaderStage, it, baseMat->GetMaterialShaderId() };
         auto shader = ctx.shaderCache->getOrCompile(ctx.device, key, baseMat);
         if (!shader || !shader->IsValid()) continue;
         rhi::IPipeline* pipe = shader->GetPipelineRHI();
@@ -153,7 +155,16 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
         }
         rhi::IDescriptorSet* sets[5] = { ctx.frameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
         cmd->BindDescriptorSets(0, 5, sets);
-        abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture);
+        if (!useTypedForwardPush) {
+            sh->SetInt("u_UseIBL", useIBL);
+            sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
+        }
+        if (useTypedForwardPush) {
+            abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture);
+        } else {
+            sh->SetMat4("u_Model", d.transform);
+            sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
+        }
         debug::Profiler::AddFrameCounter("drawCalls", 1);
         debug::Profiler::AddFrameCounter("triangles", GetIndexCountForDraw(d.mesh.get(), d.submeshIndex) / 3u);
         debug::Profiler::AddFrameCounter("stateChanges", 1);

@@ -58,8 +58,8 @@ class PassResourceBuilder;
 }
 
 /**
- * Orchestrates render passes via a frame graph for Forward and Deferred.
- * Render(view) dispatches by mode: Deferred/Forward/ForwardPlus each use BuildAndExecute*FrameGraph (single path).
+ * Orchestrates render passes via a frame graph.
+ * Render(view) dispatches by mode: Hybrid/Forward/ForwardPlus each use BuildAndExecute*FrameGraph (single path).
  */
 class RenderPipeline {
 public:
@@ -91,8 +91,10 @@ public:
     void UpdateUploads();
     /** Render scene (ECS or converted from API at the api layer). */
     void Render(const RenderScene& scene);
-    /** Render from a read-only view (zero-copy when view wraps API scene). When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass (same depth as main; for editor picking). */
-    void Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Render from a read-only view (zero-copy when view wraps API scene). When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass (same depth as main; for editor picking).
+     *  When entityIdsForTransparent is non-null, size must match transparent drawable count; those draws run after opaques, back-to-front. */
+    void Render(const IRenderSceneView& view, const std::vector<uint32_t>* entityIdsForOpaque = nullptr,
+                const std::vector<uint32_t>* entityIdsForTransparent = nullptr);
     /** Single-pass stereo: one render, two viewports (left | right). Uses instanced draw (2 instances) and stereo shader. Call when pipeline is already resized to full width (width = 2 * eyeWidth). */
     void RenderStereo(const IRenderSceneView& view, const CameraView& leftCam, const CameraView& rightCam);
     /** Draw outline from entity ID buffer (post-process). Call after Render(view, entityIds). selectedPackedId = 0 skips. RGB 0..1. */
@@ -223,6 +225,8 @@ private:
     void RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Setup for Forward+ opaque pass: light grid, buffers, clear HDR, bind shadow/scene lighting/light index. */
     void PrepareForwardPlusFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData);
+    /** Hybrid: refresh clustered lights + scene lighting buffer without clearing HDR (after deferred composite). */
+    void PrepareHybridTransparencyLighting(rhi::ICommandList* cmd, const RenderFrameData& frameData);
     /** Skybox as a frame-graph pass: writes to HDR so post reads it. Used by Deferred and Forward. */
     /** Adds Skybox pass; executor uses m_currentView (set before Execute). */
     void AddSkyboxPassToFrameGraph(FGTextureHandle hdrColor, bool useGbufferDepth);
@@ -247,7 +251,8 @@ private:
     void EnsureOutlinePostShader();
     void EnsureEntityIdShader();
     void EnsureStreamingNV12Pass();
-    void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque);
+    void RenderEntityIDPass(const IRenderSceneView& view, const std::vector<uint32_t>& entityIdsForOpaque,
+                            const std::vector<uint32_t>* entityIdsForTransparent);
     /** Build params for deferred GBuffer opaque pass; consumed by GBufferPassSystem::RenderOpaqueGeometry. */
     GBufferPassOpaqueParams BuildGBufferOpaqueParams(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
                                                      uint32_t gpuCullDrawListCount);
@@ -400,7 +405,7 @@ private:
     uint32_t m_width = 0, m_height = 0;       // render size (letterbox aspect)
     uint32_t m_windowWidth = 0, m_windowHeight = 0;  // output window size for letterbox blit
     float m_skyboxBrightness = 1.0f;
-    PipelineMode m_mode = PipelineMode::Deferred;
+    PipelineMode m_mode = PipelineMode::Hybrid;
     PrePostCallback m_prePostCallback;
     
     // Previous frame matrices for velocity calculation

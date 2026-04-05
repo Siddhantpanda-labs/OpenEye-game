@@ -29,6 +29,7 @@ public:
     std::shared_ptr<eyelib::render::Texture2D> GetTexture(const eyelib::api::AssetId& id) override;
     std::shared_ptr<eyelib::render::Material> GetMaterial(const eyelib::api::AssetId& id) override;
     void OnDeviceLost() override;
+    void InvalidateMaterial(const eyelib::api::AssetId& id) override;
 
 private:
     void* m_device = nullptr;

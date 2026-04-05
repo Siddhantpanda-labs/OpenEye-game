@@ -21,6 +21,7 @@ public:
     bool Initialize(rhi::IDevice* device, uint32_t width, uint32_t height);
     void Resize(uint32_t width, uint32_t height);
 
+    /** Clears all G-buffer color targets + depth and binds them for the geometry pass. Must run once per frame before deferred lighting, even when zero meshes draw (empty scene). */
     void BindForGeometryPass(rhi::ICommandList* cmd);
     /** No-op: deferred lighting binds G-buffer via descriptor sets. Kept for API compatibility. */
     void BindForLightingPass(rhi::ICommandList* cmd);

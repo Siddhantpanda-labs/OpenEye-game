@@ -980,7 +980,7 @@ private:
     std::string m_prev;
 };
 
-/** Scene-level: set render pipeline mode (Forward | Deferred | ForwardPlus). */
+/** Scene-level: set render pipeline mode (Hybrid | Forward | ForwardPlus). "Deferred" accepted as legacy alias for Hybrid. */
 class SetRenderPipelineModeCommand final : public Command {
 public:
     explicit SetRenderPipelineModeCommand(std::string mode)
@@ -988,8 +988,10 @@ public:
 
     bool Apply(WorldState& state) override {
         m_prev = state.GetRenderPipelineMode();
-        if (m_mode != "Forward" && m_mode != "Deferred" && m_mode != "ForwardPlus")
-            m_mode = "Forward";
+        if (m_mode == "Deferred")
+            m_mode = "Hybrid";
+        if (m_mode != "Forward" && m_mode != "Hybrid" && m_mode != "ForwardPlus")
+            m_mode = "Hybrid";
         state.SetRenderPipelineMode(m_mode);
         return true;
     }

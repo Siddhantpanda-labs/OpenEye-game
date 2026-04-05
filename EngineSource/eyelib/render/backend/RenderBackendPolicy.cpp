@@ -40,6 +40,10 @@ bool SupportsMultiDrawIndirectCount(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsMultiDrawIndirectCount;
 }
 
+bool SupportsGpuDrivenPerDrawTransformIndirect(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsGpuDrivenPerDrawTransformIndirect;
+}
+
 bool SupportsResourceSpaceBindPath(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsResourceSpaceBindPath;
 }

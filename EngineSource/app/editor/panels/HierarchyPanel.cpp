@@ -19,6 +19,10 @@ namespace {
 
 using EntityId = ::eyelib::world::EntityId;
 
+static void ClearMaterialAssetSelection(openeye::editor::EditorContext* ctx) {
+    if (ctx) ctx->selectedMaterialAssetId.clear();
+}
+
 constexpr const char* kEntityPayload = "OpenEyeEntity";
 constexpr const char* kOmeshPayloadType = "OpenEyeOmesh";
 struct OmeshDragPayload { char path[512]; char guid[128]; };
@@ -135,6 +139,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
         label.c_str());
 
     if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        ClearMaterialAssetSelection(ctx);
         ctx->sceneSelected = false;
         ctx->selectedEntity = entity;
     }
@@ -183,6 +188,7 @@ void ShowEntityNode(EditorContext* ctx, EntityId entity, int depth) {
                 EntityId root = openeye::editor::InstantiateOmesh(world, path, guid, entity);
                 if (root != ::eyelib::world::InvalidEntity) {
                     s_lastInstantiatedOmeshRoot = root;
+                    ClearMaterialAssetSelection(ctx);
                     ctx->sceneSelected = false;
                     ctx->selectedEntity = root;
                     EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
@@ -212,6 +218,7 @@ static void AddPrimitiveEntity(EditorContext* ctx, AddEntityMeshChoice choice) {
         world.SetParent(newEntity, s_pendingAddParent);
         s_pendingAddParent = ::eyelib::world::InvalidEntity;
     }
+    ClearMaterialAssetSelection(ctx);
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
 
@@ -267,6 +274,7 @@ static void AddLightEntity(EditorContext* ctx, eyelib::world::components::Light:
         world.SetParent(newEntity, s_pendingAddParent);
         s_pendingAddParent = ::eyelib::world::InvalidEntity;
     }
+    ClearMaterialAssetSelection(ctx);
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
     eyelib::world::components::Light light{};
@@ -286,6 +294,7 @@ static void AddCameraEntity(EditorContext* ctx) {
         world.SetParent(newEntity, s_pendingAddParent);
         s_pendingAddParent = ::eyelib::world::InvalidEntity;
     }
+    ClearMaterialAssetSelection(ctx);
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
     eyelib::world::components::Camera camera{};
@@ -304,6 +313,7 @@ static void AddXRCameraEntity(EditorContext* ctx) {
         world.SetParent(newEntity, s_pendingAddParent);
         s_pendingAddParent = ::eyelib::world::InvalidEntity;
     }
+    ClearMaterialAssetSelection(ctx);
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
     eyelib::world::components::XRCamera xrCamera{};
@@ -322,6 +332,7 @@ static void AddEmptyEntity(EditorContext* ctx) {
         world.SetParent(newEntity, s_pendingAddParent);
         s_pendingAddParent = ::eyelib::world::InvalidEntity;
     }
+    ClearMaterialAssetSelection(ctx);
     ctx->sceneSelected = false;
     ctx->selectedEntity = newEntity;
 }
@@ -428,6 +439,7 @@ void ShowHierarchyPanel(EditorContext* ctx) {
             "%s",
             sceneName.c_str());
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+            ClearMaterialAssetSelection(ctx);
             ctx->sceneSelected = true;
             ctx->selectedEntity = ::eyelib::world::InvalidEntity;
         }
@@ -449,6 +461,7 @@ void ShowHierarchyPanel(EditorContext* ctx) {
                     EntityId root = openeye::editor::InstantiateOmesh(ctx->world, path, guid, ::eyelib::world::InvalidEntity);
                     if (root != ::eyelib::world::InvalidEntity) {
                         s_lastInstantiatedOmeshRoot = root;
+                        ClearMaterialAssetSelection(ctx);
                         ctx->sceneSelected = false;
                         ctx->selectedEntity = root;
                         EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);

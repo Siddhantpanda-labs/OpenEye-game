@@ -40,7 +40,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 2
+            "index": 0
           }
         },
         {
@@ -61,7 +61,7 @@
           },
           "entity": {
             "generation": 0,
-            "index": 0
+            "index": 2
           }
         }
       ],
@@ -97,29 +97,64 @@
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "",
+            "materialAssetId": "NewFolder\\Red.mat",
             "meshAssetId": "builtin://Cube",
-            "visible": true
-          },
-          "entity": {
-            "generation": 0,
-            "index": 2
-          }
-        },
-        {
-          "data": {
-            "activeLOD": 0,
-            "lodMeshAssetIds": [],
-            "materialAssetId": "",
-            "meshAssetId": "builtin://Cube",
+            "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
             "index": 0
           }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "NewFolder\\Blue.mat",
+            "meshAssetId": "builtin://Cube",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
         }
       ],
+      "version": 1
+    },
+    "RigidBody": {
+      "items": [
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Script": {
+      "items": [],
       "version": 1
     },
     "Transform": {
@@ -176,14 +211,14 @@
           "data": {
             "position": [
               2.2384068965911865,
-              4.836394309997559,
+              4.836394786834717,
               0.0
             ],
             "rotation": [
-              0.8467217087745667,
-              0.1992313265800476,
-              0.49204665422439575,
-              -0.035487402230501175
+              0.8467217683792114,
+              0.19923135638237,
+              0.4920467138290405,
+              -0.03548738732933998
             ],
             "scale": [
               0.9999992251396179,
@@ -230,18 +265,10 @@
       {
         "entity": {
           "generation": 0,
-          "index": 3
+          "index": 0
         },
         "flags": 0,
-        "name": "Camera"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 2
-        },
-        "flags": 0,
-        "name": "Cube1"
+        "name": "Cube"
       },
       {
         "entity": {
@@ -254,10 +281,18 @@
       {
         "entity": {
           "generation": 0,
-          "index": 0
+          "index": 2
         },
         "flags": 0,
-        "name": "Cube"
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Camera"
       }
     ],
     "tags": []
@@ -271,5 +306,7 @@
       0
     ]
   },
+  "renderPipelineMode": "Hybrid",
+  "skybox": "procedural",
   "version": 1
 }

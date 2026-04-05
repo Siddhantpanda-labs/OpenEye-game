@@ -1010,6 +1010,7 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsCompute = true;
     m_caps.supportsMultiDrawIndirect = true;
     m_caps.supportsMultiDrawIndirectCount = true;
+    m_caps.supportsGpuDrivenPerDrawTransformIndirect = true;
     m_caps.supportsAsyncCompute = true;
     m_caps.supportsBindless = true;  // descriptor indexing
     m_caps.supportsRayTracing = false;

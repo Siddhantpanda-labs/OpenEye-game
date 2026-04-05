@@ -19,6 +19,7 @@
 #include "eyelib/vr/XRViewHelpers.h"
 #include "eyelib/world/SkyboxAssetId.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -43,7 +44,7 @@ static std::string JoinPath(const std::string& base, const std::string& leaf) {
 }
 
 static eyelib::api::RenderPipeline::Mode SceneModeToPipelineMode(const std::string& mode) {
-    if (mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Deferred;
+    if (mode == "Hybrid" || mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Hybrid;
     if (mode == "ForwardPlus") return eyelib::api::RenderPipeline::Mode::ForwardPlus;
     return eyelib::api::RenderPipeline::Mode::Forward;
 }
@@ -137,7 +138,7 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
     }
     m_renderer.SetDevice(m_pipeline.GetDevice());
     m_ownsPresentation = true;
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Hybrid);
     m_width = width;
     m_height = height;
     m_builtinManager = std::make_unique<BuiltinResourceManager>();
@@ -165,7 +166,7 @@ bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t 
     m_renderer.SetDevice(m_pipeline.GetDevice());
     // Embedded/editor mode: caller owns frame orchestration and present.
     m_ownsPresentation = false;
-    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
+    m_pipeline.SetMode(eyelib::api::RenderPipeline::Mode::Hybrid);
     m_width = width;
     m_height = height;
     m_builtinManager = std::make_unique<BuiltinResourceManager>();
@@ -529,35 +530,11 @@ void WorldRenderBridge::BuildSceneFromViews(
     eyelib::api::RenderScene& scene,
     api::FrameAllocator* frameAlloc) {
     (void)options;
-    // Count pass: opaque (renderables + mesh renderers), point lights, spot lights
-    size_t opaqueCount = 0;
-    for (const auto& entry : renderables) {
-        const auto& renderable = entry.component;
-        if (!renderable.visible) continue;
-        std::string meshId = renderable.meshAssetId;
-        if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
-            meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
-        }
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
-            if (meshResolved.empty()) continue;
-            if (LoadModelEntry(assetRegistry, meshResolved).mesh) opaqueCount++;
-        }
-    }
-    for (const auto& entry : meshRenderers) {
-        const auto& renderer = entry.component;
-        if (!renderer.visible || renderer.meshAssetId.empty()) continue;
-        const std::string& meshId = renderer.meshAssetId;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            if (GetPrimitiveEntry(meshId).mesh) opaqueCount++;
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
-            if (meshResolved.empty()) continue;
-            if (LoadModelEntry(assetRegistry, meshResolved).mesh) opaqueCount++;
-        }
-    }
+    std::vector<eyelib::api::Drawable> opaqueBuild;
+    std::vector<eyelib::api::Drawable> transparentBuild;
+    opaqueBuild.reserve(renderables.size() + meshRenderers.size());
+    transparentBuild.reserve(std::min(renderables.size() + meshRenderers.size(), size_t{64}));
+
     size_t pointLightCount = 0;
     size_t spotLightCount = 0;
     for (const auto& entry : lights) {
@@ -566,15 +543,13 @@ void WorldRenderBridge::BuildSceneFromViews(
         else if (light.type == eyelib::world::components::Light::Type::Spot) spotLightCount++;
     }
 
-    eyelib::api::Drawable* opaquePtr = nullptr;
     eyelib::api::render::PointLight* pointLightsPtr = nullptr;
     eyelib::api::render::SpotLight* spotLightsPtr = nullptr;
     if (frameAlloc) {
-        opaquePtr = frameAlloc->AllocateArray<eyelib::api::Drawable>(opaqueCount);
         pointLightsPtr = frameAlloc->AllocateArray<eyelib::api::render::PointLight>(pointLightCount);
         spotLightsPtr = frameAlloc->AllocateArray<eyelib::api::render::SpotLight>(spotLightCount);
-        scene.opaque = opaquePtr;
-        scene.opaqueCount = opaqueCount;
+        scene.opaque = nullptr;
+        scene.opaqueCount = 0;
         scene.transparent = nullptr;
         scene.transparentCount = 0;
         scene.pointLights = pointLightsPtr;
@@ -583,14 +558,19 @@ void WorldRenderBridge::BuildSceneFromViews(
         scene.spotLightCount = spotLightCount;
     } else {
         scene.opaqueStorage.clear();
-        scene.opaqueStorage.reserve(opaqueCount);
+        scene.transparentStorage.clear();
         scene.pointLightsStorage.clear();
         scene.pointLightsStorage.reserve(pointLightCount);
         scene.spotLightsStorage.clear();
         scene.spotLightsStorage.reserve(spotLightCount);
     }
 
-    size_t opaqueIdx = 0;
+    auto pushDrawable = [&](eyelib::api::Drawable&& drawable) {
+        if (eyelib::api::DrawableRoutesToTransparentPass(drawable))
+            transparentBuild.push_back(std::move(drawable));
+        else
+            opaqueBuild.push_back(std::move(drawable));
+    };
     for (const auto& entry : renderables) {
         const auto& renderable = entry.component;
         if (!renderable.visible) continue;
@@ -646,12 +626,7 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (drawable.material) {
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
-        if (frameAlloc) {
-            new (opaquePtr + opaqueIdx) eyelib::api::Drawable(drawable);
-            opaqueIdx++;
-        } else {
-            scene.opaqueStorage.push_back(drawable);
-        }
+        pushDrawable(std::move(drawable));
     }
 
     for (const auto& entry : meshRenderers) {
@@ -706,19 +681,25 @@ void WorldRenderBridge::BuildSceneFromViews(
         if (drawable.material) {
             eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
         }
-        if (frameAlloc) {
-            new (opaquePtr + opaqueIdx) eyelib::api::Drawable(drawable);
-            opaqueIdx++;
-        } else {
-            scene.opaqueStorage.push_back(drawable);
-        }
+        pushDrawable(std::move(drawable));
     }
 
-    if (!frameAlloc) {
+    if (frameAlloc) {
+        scene.opaqueCount = opaqueBuild.size();
+        scene.transparentCount = transparentBuild.size();
+        scene.opaque = frameAlloc->AllocateArray<eyelib::api::Drawable>(scene.opaqueCount);
+        scene.transparent = frameAlloc->AllocateArray<eyelib::api::Drawable>(scene.transparentCount);
+        for (size_t i = 0; i < scene.opaqueCount; ++i)
+            new (scene.opaque + i) eyelib::api::Drawable(std::move(opaqueBuild[i]));
+        for (size_t i = 0; i < scene.transparentCount; ++i)
+            new (scene.transparent + i) eyelib::api::Drawable(std::move(transparentBuild[i]));
+    } else {
+        scene.opaqueStorage = std::move(opaqueBuild);
+        scene.transparentStorage = std::move(transparentBuild);
         scene.opaque = scene.opaqueStorage.empty() ? nullptr : scene.opaqueStorage.data();
         scene.opaqueCount = scene.opaqueStorage.size();
-        scene.transparent = nullptr;
-        scene.transparentCount = 0;
+        scene.transparent = scene.transparentStorage.empty() ? nullptr : scene.transparentStorage.data();
+        scene.transparentCount = scene.transparentStorage.size();
     }
 
     // Active view priority: XR camera (if present) -> primary regular camera -> any regular camera -> fallback

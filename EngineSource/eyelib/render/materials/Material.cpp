@@ -21,6 +21,11 @@ void Material::SetTexture(const std::string& name, std::shared_ptr<Texture2D> te
     m_hashDirty = true;
 }
 
+void Material::RemoveTexture(const std::string& name) {
+    if (m_textures.erase(name) != 0)
+        m_hashDirty = true;
+}
+
 std::shared_ptr<Texture2D> Material::GetTexture(const std::string& name) const {
     auto it = m_textures.find(name);
     return it != m_textures.end() ? it->second : nullptr;
@@ -222,29 +227,60 @@ rhi::IBuffer* Material::GetMaterialBufferRHI(rhi::IDevice* device) const {
     return m_materialBuffer.get();
 }
 
+static void FillMaterialFromDescriptor(
+    Material& mat,
+    const MaterialDescriptor& desc,
+    const std::function<std::shared_ptr<Shader>(const std::string& name)>& resolveShader,
+    const std::function<std::shared_ptr<Texture2D>(const std::string& path)>& resolveTexture) {
+    (void)resolveShader;
+    if (!desc.shaderAssetPath.empty())
+        mat.SetMaterialShaderId(MaterialShaderIds::PBR);
+    else if (desc.materialShaderId != kDefaultMaterialTypeId)
+        mat.SetMaterialShaderId(desc.materialShaderId);
+    for (const auto& p : desc.texturePaths) {
+        if (p.second.empty())
+            mat.RemoveTexture(p.first);
+        else {
+            auto tex = resolveTexture(p.second);
+            if (tex)
+                mat.SetTexture(p.first, tex);
+        }
+    }
+    for (const auto& p : desc.floats) mat.SetFloat(p.first, p.second);
+    for (const auto& p : desc.vec3s) mat.SetVec3(p.first, p.second);
+    for (const auto& p : desc.vec4s) mat.SetVec4(p.first, p.second);
+    for (const auto& p : desc.mat4Arrays) mat.SetMat4Array(p.first, p.second);
+    for (const auto& p : desc.keywords) mat.SetKeyword(p.first, p.second);
+    mat.SetAlbedo(desc.albedo);
+    mat.SetMetallic(desc.metallic);
+    mat.SetRoughness(desc.roughness);
+    mat.SetEmission(desc.emission);
+    mat.SetAO(desc.ao);
+    mat.SetAlpha(desc.alpha);
+    mat.SetShadingModel(desc.shadingModel);
+    mat.SetBlending(desc.blending);
+    mat.SetTwoSided(desc.twoSided);
+    mat.SetRefraction(desc.refraction);
+    mat.SetReflectiveStrength(desc.reflectiveStrength);
+    mat.SetFragmentSnippet(desc.fragmentSnippet);
+    mat.SetShadingSnippet(desc.shadingSnippet);
+}
+
 std::shared_ptr<Material> CreateMaterialFromDescriptor(
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
     std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
     auto mat = std::make_shared<Material>();
-    if (!desc.shaderAssetPath.empty())
-        mat->SetMaterialShaderId(MaterialShaderIds::PBR);
-    for (const auto& p : desc.texturePaths) {
-        auto tex = resolveTexture(p.second);
-        if (tex) mat->SetTexture(p.first, tex);
-    }
-    for (const auto& p : desc.floats) mat->SetFloat(p.first, p.second);
-    for (const auto& p : desc.vec3s) mat->SetVec3(p.first, p.second);
-    for (const auto& p : desc.vec4s) mat->SetVec4(p.first, p.second);
-    for (const auto& p : desc.mat4Arrays) mat->SetMat4Array(p.first, p.second);
-    for (const auto& p : desc.keywords) mat->SetKeyword(p.first, p.second);
-    mat->SetAlbedo(desc.albedo);
-    mat->SetMetallic(desc.metallic);
-    mat->SetRoughness(desc.roughness);
-    mat->SetEmission(desc.emission);
-    mat->SetAO(desc.ao);
-    mat->SetAlpha(desc.alpha);
+    FillMaterialFromDescriptor(*mat, desc, resolveShader, resolveTexture);
     return mat;
+}
+
+void ApplyMaterialFromDescriptor(
+    Material& mat,
+    const MaterialDescriptor& desc,
+    std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
+    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
+    FillMaterialFromDescriptor(mat, desc, resolveShader, resolveTexture);
 }
 
 int ComputeForwardAlbedoTextureFlag(const Material* mat, const MaterialInstance* mi) {

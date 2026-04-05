@@ -9,7 +9,8 @@
 namespace eyelib {
 namespace render {
 
-void ForwardPlusPrepareFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData, ForwardPlusPrepareContext& ctx) {
+void ForwardPlusPrepareFrame(rhi::ICommandList* cmd, const RenderFrameData& frameData, ForwardPlusPrepareContext& ctx,
+                            bool clearHdrAndInitViewport) {
     if (!ctx.clusteredLightGrid || !ctx.device || !ctx.pointLightBuffer || !ctx.spotLightBuffer || !ctx.lightIndexBuffer) return;
 
     const CameraView& cam = frameData.camera;
@@ -92,11 +93,16 @@ void ForwardPlusPrepareFrame(rhi::ICommandList* cmd, const RenderFrameData& fram
                                                cam.view, cam.projection, cam.viewPos);
         ctx.clusteredLightGrid->UploadToGPU(*ctx.lightIndexBuffer);
     }
-    if (cmd && ctx.hdrRenderTarget) {
-        rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
-        rhi::ClearAndSetRenderTargetWithViewport(cmd, ctx.hdrRenderTarget, 0, 0, ctx.width, ctx.height, cv);
+    if (clearHdrAndInitViewport) {
+        if (cmd && ctx.hdrRenderTarget) {
+            rhi::ClearValue cv = { 0.1f, 0.1f, 0.15f, 1.f };
+            rhi::ClearAndSetRenderTargetWithViewport(cmd, ctx.hdrRenderTarget, 0, 0, ctx.width, ctx.height, cv);
+        }
+        if (cmd) {
+            cmd->SetDepthTest(true);
+            cmd->SetCullFace(false);
+        }
     }
-    if (cmd) { cmd->SetDepthTest(true); cmd->SetCullFace(false); }
 
     math::Mat4 lightSpaceMatrix(1.0f);
     if (light.castShadows && ctx.cascadeShadowMap && ctx.cascadeShadowMap->GetSplitCount() > 0)

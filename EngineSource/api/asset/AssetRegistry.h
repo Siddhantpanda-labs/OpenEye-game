@@ -79,6 +79,8 @@ public:
 
     /** Descriptor lookups for resolver. Lazy-load from asset when missing. */
     const eyelib::render::MaterialDescriptor* GetMaterialDescriptor(const AssetId& id) const;
+    /** Editor: replace cached CPU material (does not touch .mat on disk until SaveMaterial). */
+    void SetMaterialDescriptor(const AssetId& id, const eyelib::render::MaterialDescriptor& desc);
     const eyelib::render::MeshDescriptor* GetMeshDescriptor(const AssetId& id) const;
     const eyelib::render::TextureDescriptor* GetTextureDescriptor(const AssetId& id) const;
     const eyelib::render::ShaderDescriptor* GetShaderDescriptor(const AssetId& id) const;

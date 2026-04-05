@@ -6,14 +6,14 @@
 namespace openeye::editor {
 
 inline eyelib::api::RenderPipeline::Mode SceneModeStringToPipelineMode(const std::string& mode) {
-    if (mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Deferred;
+    if (mode == "Hybrid" || mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Hybrid;
     if (mode == "ForwardPlus") return eyelib::api::RenderPipeline::Mode::ForwardPlus;
     return eyelib::api::RenderPipeline::Mode::Forward;
 }
 
 inline const char* PipelineModeToSceneModeString(eyelib::api::RenderPipeline::Mode mode) {
     switch (mode) {
-    case eyelib::api::RenderPipeline::Mode::Deferred: return "Deferred";
+    case eyelib::api::RenderPipeline::Mode::Hybrid: return "Hybrid";
     case eyelib::api::RenderPipeline::Mode::ForwardPlus: return "ForwardPlus";
     case eyelib::api::RenderPipeline::Mode::Forward:
     default:

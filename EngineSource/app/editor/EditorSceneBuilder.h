@@ -16,7 +16,7 @@ namespace openeye::editor {
 /**
  * Builds api::RenderScene from World::RenderSnapshot using editor camera and assets.
  * API-only; no animation/skinning. Used for scene view viewport.
- * When non-null, outDrawableToEntity is filled with entity id per drawable index (same order as scene.opaqueStorage) for outline/selection.
+ * When non-null, outDrawableToEntity lists entity ids in scene.opaqueStorage order; outTransparentDrawableToEntity lists ids in scene.transparentStorage order (for GPU picking).
  */
 class EditorSceneBuilder {
 public:
@@ -35,7 +35,8 @@ public:
                eyelib::api::AssetRegistry* assetRegistry,
                std::shared_ptr<eyelib::api::Material> defaultMaterial = nullptr,
                const eyelib::api::world::World* world = nullptr,
-               std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr);
+               std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr,
+               std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity = nullptr);
 
     /** Load skybox cubemap from scene asset id (e.g. "Skybox/Citadella"). Returns null if missing or failed. Device required for GPU upload. */
     static std::shared_ptr<eyelib::api::TextureCube> LoadSkyboxFromAssetId(const std::string& assetId,

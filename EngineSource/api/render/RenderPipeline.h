@@ -22,7 +22,8 @@ class RenderTarget;
  */
 class RenderPipeline {
 public:
-    enum class Mode { Forward, Deferred, ForwardPlus };
+    /** Hybrid = GBuffer + deferred lighting + forward transparency (default). Forward / ForwardPlus = full forward paths. */
+    enum class Mode { Hybrid, Forward, ForwardPlus };
 
     RenderPipeline();
     ~RenderPipeline();
@@ -51,8 +52,9 @@ public:
 
     /** Upload phase: CPU→staging→vkCmdCopy*. Call after BeginFrame, before Render. */
     void UpdateUploads();
-    /** Render scene. When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass for GPU picking. */
-    void Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque = nullptr);
+    /** Render scene. When entityIdsForOpaque is non-null and size matches opaque drawable count, runs EntityID pass for GPU picking. When entityIdsForTransparent is non-null, size must match transparent drawable count. */
+    void Render(const RenderScene& scene, const std::vector<uint32_t>* entityIdsForOpaque = nullptr,
+                const std::vector<uint32_t>* entityIdsForTransparent = nullptr);
     /** Single-pass stereo: one render, two viewports (left | right). Pipeline must be resized to full width (2*eyeWidth). */
     void RenderStereo(const RenderScene& scene, const CameraView& leftCam, const CameraView& rightCam);
     /** Read entity ID at pixel (x,y) in render target coordinates, origin bottom-left. Call after Render(scene, ids) and Finish(). Returns true and writes ID to *outId; 0 = no entity. */

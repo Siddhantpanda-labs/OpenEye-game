@@ -109,7 +109,7 @@ private:
 
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
     std::string m_skyboxAssetId;
-    std::string m_renderPipelineMode = "Forward";
+    std::string m_renderPipelineMode = "Hybrid";
     entt::registry m_registry;
     std::unordered_map<EntityId, entt::entity, EntityIdHash> m_entityToEnTT;
     std::unordered_map<entt::entity, EntityId> m_enttToEntity;

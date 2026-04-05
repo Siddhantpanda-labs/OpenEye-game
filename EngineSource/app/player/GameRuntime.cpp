@@ -58,7 +58,11 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
     m_assetRegistry = &assetRegistry;
     m_assetRoots = assetRoots;
     if (!assetRoots.empty()) {
-        assetRegistry.SetAssetRoot(assetRoots[0]);
+        // Editor passes { engineAssets, projectAssets }; Scan must index the project tree so relative
+        // scene ids (materials/meshes) resolve. Standalone player typically passes a single root — use [0].
+        const std::string& primaryRoot =
+            assetRoots.size() >= 2 ? assetRoots.back() : assetRoots.front();
+        assetRegistry.SetAssetRoot(primaryRoot);
         assetRegistry.Scan();
     }
     m_options = {};

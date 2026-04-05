@@ -352,6 +352,97 @@ bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkForm
     return true;
 }
 
+/**
+ * Vulkan: images start in UNDEFINED. Descriptors for sampled images are written with
+ * VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; sampling without a prior transition hits VUID-vkCmdDraw-None-09600.
+ * For SRV-only textures created with no CPU upload and no render-target first use, transition the whole mip chain
+ * and all array layers once. Skips RT|TransferDst textures (IBL/probes render or copy into them first).
+ */
+bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, uint32_t mipLevels, uint32_t arrayLayers,
+                                          VkImageAspectFlags aspectMask) {
+    if (!image || mipLevels == 0 || arrayLayers == 0) return false;
+    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
+    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    if (!queue) return false;
+
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
+        return false;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = pool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(device, &allocInfo, &cmd) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkCommandBufferBeginInfo beginInfo = {};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspectMask;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = arrayLayers;
+    constexpr VkPipelineStageFlags kDstShaderStages = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, kDstShaderStages, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fenceInfo = {};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+
+    VkSubmitInfo submit = {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    if (vkQueueSubmit(queue, 1, &submit, fence) != VK_SUCCESS) {
+        vkDestroyFence(device, fence, nullptr);
+        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkDestroyCommandPool(device, pool, nullptr);
+        return false;
+    }
+    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, pool, 1, &cmd);
+    vkDestroyCommandPool(device, pool, nullptr);
+    return true;
+}
+
 } // namespace
 
 ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const void* initialData) {
@@ -527,6 +618,26 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
             return nullptr;
         }
         vmaDestroyBuffer(allocator, stagingBuf, stagingAlloc);
+    }
+
+    const bool didCpuUpload = wantUpload || wantCubeUpload;
+    const bool wantSrvOnlyLayoutInit =
+        !didCpuUpload && !desc.sparse && !desc.transient && HasUsage(desc.usage, TextureUsage::ShaderResource) &&
+        !HasUsage(desc.usage, TextureUsage::RenderTarget) && !HasUsage(desc.usage, TextureUsage::TransferDst) &&
+        desc.format != RHITextureFormat::Depth24 && desc.format != RHITextureFormat::Depth24Stencil8 &&
+        desc.format != RHITextureFormat::None;
+    if (wantSrvOnlyLayoutInit) {
+        const VkImageAspectFlags aspect = ToVkImageAspect(desc.format);
+        if ((aspect & VK_IMAGE_ASPECT_COLOR_BIT) == 0u) {
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::Error("CreateTextureVK: SRV-only layout init skipped non-color format");
+            return nullptr;
+        }
+        if (!SubmitImageUndefinedToShaderReadOnly(deviceObj, image, imgInfo.mipLevels, imgInfo.arrayLayers, aspect)) {
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::Error("CreateTextureVK: UNDEFINED -> SHADER_READ_ONLY layout init failed");
+            return nullptr;
+        }
     }
 
     VkImageViewCreateInfo viewInfo = {};

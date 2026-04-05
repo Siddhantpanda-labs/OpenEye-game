@@ -143,7 +143,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;
                 eyelib::api::debug::Profiler::BeginSample("GameView Build");
-                s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
+                s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr, nullptr);
                 eyelib::api::debug::Profiler::EndSample();
                 SceneCameraToView(camTransform, camComp, w, h, scene.camera);
 
@@ -163,7 +163,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 static EditorSceneBuilder s_builder;
                 eyelib::api::RenderScene scene;
                 eyelib::api::debug::Profiler::BeginSample("GameView Build");
-                s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr);
+                s_builder.Build(scene, snapshot, ctx->editorCamera, w, h, ctx->assetRoots, ctx->assetRegistry, ctx->defaultMaterial, &ctx->world, nullptr, nullptr);
                 eyelib::api::debug::Profiler::EndSample();
 
                 eyelib::vr::XRViewData leftData, rightData;

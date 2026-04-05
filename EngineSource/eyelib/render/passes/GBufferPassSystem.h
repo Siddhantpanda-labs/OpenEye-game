@@ -38,6 +38,7 @@ public:
                                const math::Mat4& prevView,
                                const math::Mat4& prevProjection) const;
 
+    /** Fills the G-buffer for opaque geometry. Always clears G-buffer + depth first (including 0 draws) so hybrid deferred never samples stale G-buffer. */
     void RenderOpaqueGeometry(const GBufferPassOpaqueParams& p) const;
 
 private:
@@ -57,6 +58,7 @@ private:
                          const math::Mat4& prevView,
                          const math::Mat4& prevProjection) const;
 
+    /** GPU indirect G-buffer draw; does not clear G-buffer — call GBuffer::BindForGeometryPass first (RenderOpaqueGeometry does). */
     void RenderIndirect(GBuffer& gbuffer,
                         const RenderContext& ctx,
                         rhi::IBuffer* indirectBuffer,
@@ -68,6 +70,7 @@ private:
                         const math::Mat4* prevView = nullptr,
                         const math::Mat4* prevProjection = nullptr) const;
 
+    /** Same contract as RenderIndirect (no clear; RenderOpaqueGeometry clears first). */
     void RenderIndirectWithPerDrawData(GBuffer& gbuffer,
                                        const RenderContext& ctx,
                                        rhi::IBuffer* indirectBuffer,

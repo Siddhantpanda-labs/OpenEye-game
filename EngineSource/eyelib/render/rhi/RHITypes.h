@@ -380,6 +380,8 @@ struct RHICapabilities {
     bool supportsSparseBuffer = false;      ///< Sparse buffers (ARB_sparse_buffer)
     bool supportsAtomicCounters = false;    ///< Atomic counter buffers (ARB_shader_atomic_counters)
     bool supportsShaderSubroutines = false; ///< Shader subroutines (ARB_shader_subroutine)
+    /** GPU-driven GBuffer indirect path with per-draw model matrix fetch in VS (DrawID/BaseInstance + SSBO transform buffer). */
+    bool supportsGpuDrivenPerDrawTransformIndirect = false;
     /** When true, GetResourceSetLayout returns valid layouts and BindDescriptorSets applies correctly.
      *  Vulkan: true. OpenGL: false until shaders use descriptor_binding_table layout(binding=N). */
     bool supportsResourceSpaceBindPath = false;

@@ -101,6 +101,7 @@ void DeviceGL::QueryCapabilities() {
     m_caps.supportsCompute = has("GL_ARB_compute_shader");
     m_caps.supportsMultiDrawIndirect = has("GL_ARB_multi_draw_indirect");
     m_caps.supportsMultiDrawIndirectCount = has("GL_ARB_indirect_parameters");
+    m_caps.supportsGpuDrivenPerDrawTransformIndirect = false;
     m_caps.supportsAsyncCompute = false;  // OpenGL has no async compute queue
     m_caps.supportsRayTracing = false;
     m_caps.supportsTessellation = has("GL_ARB_tessellation_shader");

@@ -26,6 +26,8 @@ public:
     virtual std::shared_ptr<::eyelib::render::Material> GetMaterial(const AssetId& id) = 0;
 
     virtual void OnDeviceLost() = 0;
+    /** Drop cached GPU material so the next GetMaterial rebuilds from descriptor (e.g. after editor save). */
+    virtual void InvalidateMaterial(const AssetId& id) { (void)id; }
 };
 
 } // namespace api
