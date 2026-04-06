@@ -55,6 +55,8 @@ struct EditorContext {
     eyelib::api::RenderPipeline* sceneViewPipeline = nullptr;
     /** Game panel debug preview (when not playing). Set by EditorApp; null if not available. */
     eyelib::api::RenderPipeline* gameViewPipeline = nullptr;
+    /** Material Inspector sphere preview (shared device with scene view). */
+    eyelib::api::RenderPipeline* materialPreviewPipeline = nullptr;
     /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
     ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;
@@ -94,6 +96,16 @@ struct EditorContext {
     char pathBuffer[512] = "scenes/main.json";
     char projectPathBuffer[512] = "Projects/MyWorld";
     char projectNameBuffer[128] = "NewProject";
+
+    /**
+     * Work that mutates GPU-bound editor state (e.g. pipeline mode on view pipelines). Enqueue from UI during the frame;
+     * EditorApp drains this immediately before device BeginFrame() so it never runs mid-command-buffer.
+     */
+    void EnqueueGpuSafeWork(std::function<void()>&& fn);
+    void DrainGpuSafeWork();
+
+private:
+    std::vector<std::function<void()>> m_pendingGpuSafeWork;
 };
 
 } // namespace openeye::editor

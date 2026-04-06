@@ -19,11 +19,12 @@ class Texture2D;
  * Shader name, texture paths, PBR and custom params, keywords; no GPU pointers.
  * Safe to store in registry and serialize.
  * Use with Material::CreateFromDescriptor(device, desc, resolveShader, resolveTexture) to build a GPU-bound Material.
+ * Texture map values are asset GUIDs; resolveTexture receives that GUID string.
  */
 struct MaterialDescriptor {
     /** Non-empty selects built-in PBR material path (e.g. default forward asset). */
     std::string shaderAssetPath;
-    /** Texture slot name -> file path. */
+    /** Uniform name (e.g. u_AlbedoTexture) -> texture asset GUID string (dashed), matching AssetDatabase / .meta. */
     std::unordered_map<std::string, std::string> texturePaths;
     std::unordered_map<std::string, float> floats;
     std::unordered_map<std::string, math::Vec3> vec3s;
@@ -50,19 +51,19 @@ struct MaterialDescriptor {
 
 /**
  * Create a Material from a CPU descriptor. Resolvers provide shader/texture instances for the given device.
- * resolveShader(name) -> shared_ptr<Shader> or nullptr; resolveTexture(path) -> shared_ptr<Texture2D> or nullptr.
+ * resolveShader(name) -> shared_ptr<Shader> or nullptr; resolveTexture(textureAssetGuid) -> shared_ptr<Texture2D> or nullptr.
  */
 std::shared_ptr<Material> CreateMaterialFromDescriptor(
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
-    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture);
+    std::function<std::shared_ptr<Texture2D>(const std::string& textureAssetGuid)> resolveTexture);
 
 /** Updates an existing material from \a desc (PBR, blend, snippets, textures). Empty texture path clears the slot. */
 void ApplyMaterialFromDescriptor(
     Material& mat,
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
-    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture);
+    std::function<std::shared_ptr<Texture2D>(const std::string& textureAssetGuid)> resolveTexture);
 
 } // namespace render
 } // namespace eyelib

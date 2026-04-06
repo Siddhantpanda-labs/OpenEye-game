@@ -4,10 +4,10 @@
 
 namespace asset {
 
-/** Reference to a texture (path or name; resolved at write time). */
+/** Resolved texture reference: dashed asset GUID (matches sibling .png.meta etc.). Empty = no texture. */
 struct TextureRef {
-    std::string path;  // e.g. "car_albedo.texture" or source path
-    bool empty() const { return path.empty(); }
+    std::string textureAssetId;
+    bool empty() const { return textureAssetId.empty(); }
 };
 
 struct ImportMaterial {

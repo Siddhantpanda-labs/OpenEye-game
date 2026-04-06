@@ -119,14 +119,14 @@ void ExtractMaterials(const aiScene* scene, const std::string& sourceName, Impor
         aiString path;
         if (mat->GetTexture(aiTextureType_BASE_COLOR, 0, &path) == AI_SUCCESS ||
             mat->GetTexture(aiTextureType_DIFFUSE, 0, &path) == AI_SUCCESS) {
-            imp.albedo.path = path.C_Str();
+            imp.albedo.textureAssetId = path.C_Str();
         }
         if (mat->GetTexture(aiTextureType_NORMALS, 0, &path) == AI_SUCCESS)
-            imp.normal.path = path.C_Str();
+            imp.normal.textureAssetId = path.C_Str();
         if (mat->GetTexture(aiTextureType_METALNESS, 0, &path) == AI_SUCCESS)
-            imp.metallic.path = path.C_Str();
+            imp.metallic.textureAssetId = path.C_Str();
         if (mat->GetTexture(aiTextureType_DIFFUSE_ROUGHNESS, 0, &path) == AI_SUCCESS)
-            imp.roughness.path = path.C_Str();
+            imp.roughness.textureAssetId = path.C_Str();
 
         float f;
         if (mat->Get(AI_MATKEY_METALLIC_FACTOR, f) == AI_SUCCESS) imp.metallicValue = f;
@@ -216,6 +216,19 @@ int AddNode(const aiNode* node, const aiScene* scene, ImportScene& out) {
     for (unsigned i = 0; i < node->mNumChildren; ++i) {
         int childIdx = AddNode(node->mChildren[i], scene, out);
         n.children.push_back(childIdx);
+    }
+    // Preserve all meshes referenced by this source node. ImportNode stores a single mesh index,
+    // so emit additional mesh references as synthetic identity children under this node.
+    // This avoids dropping node->mMeshes[1..N], which otherwise breaks submesh/material mapping.
+    for (unsigned i = 1; i < node->mNumMeshes; ++i) {
+        ImportNode extra;
+        extra.name = n.name + "_mesh_" + std::to_string(i);
+        extra.meshIndex = static_cast<int>(node->mMeshes[i]);
+        for (int k = 0; k < 16; ++k)
+            extra.localTransform.m[k] = (k % 5 == 0) ? 1.0f : 0.0f;
+        int extraIdx = static_cast<int>(out.nodes.size());
+        out.nodes.push_back(std::move(extra));
+        n.children.push_back(extraIdx);
     }
     int idx = static_cast<int>(out.nodes.size());
     out.nodes.push_back(std::move(n));

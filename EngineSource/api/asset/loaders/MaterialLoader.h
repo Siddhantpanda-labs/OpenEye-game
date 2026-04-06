@@ -18,7 +18,7 @@ public:
     /** No registry: returns Invalid. */
     static AssetId LoadMaterial(const std::string& path);
 
-    /** Save CPU descriptor to MAT1 v3 binary at \a absolutePath (e.g. project Assets + relative id). */
+    /** Save CPU descriptor to canonical MAT1 binary (MaterialFormat::kVersion) at \a absolutePath. */
     static bool SaveMaterial(const std::string& absolutePath, const ::eyelib::render::MaterialDescriptor& desc);
 };
 

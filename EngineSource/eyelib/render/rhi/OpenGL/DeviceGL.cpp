@@ -1,4 +1,5 @@
 #include "eyelib/render/rhi/OpenGL/DeviceGL.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/OpenGL/DeferredCommandListGL.h"
 #include "eyelib/render/rhi/ResourceSetLayoutDesc.h"
 #include "eyelib/render/rhi/OpenGL/BindlessHeapGL.h"
@@ -58,6 +59,16 @@ DeviceGL::~DeviceGL() {
     }
     if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
     if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
+    if (m_sharedShadowMapArrayDummyRt) {
+        DestroyRenderTarget(m_sharedShadowMapArrayDummyRt);
+        m_sharedShadowMapArrayDummyRt = nullptr;
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
+    if (m_sharedBindlessHeap) {
+        delete static_cast<BindlessHeapGL*>(m_sharedBindlessHeap);
+        m_sharedBindlessHeap = nullptr;
+    }
+    m_sharedBindlessTextureHandles.clear();
     m_immediateCommandList.reset();
 }
 
@@ -338,6 +349,10 @@ ITexture* DeviceGL::CreateTexture(const TextureDesc& desc, const void* initialDa
 
 void DeviceGL::DestroyTexture(ITexture* texture) {
     auto* t = static_cast<TextureGL*>(texture);
+    {
+        std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+        m_sharedBindlessTextureHandles.erase(texture);
+    }
     if (t && t->m_handle && t->m_owned) {
         glDeleteTextures(1, &t->m_handle);
         t->m_handle = 0;
@@ -791,6 +806,27 @@ IRenderTarget* DeviceGL::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32
     return rt;
 }
 
+IRenderTarget* DeviceGL::GetSharedShadowMapArrayDummyRenderTarget() {
+    if (!m_sharedShadowMapArrayDummyRt) {
+        m_sharedShadowMapArrayDummyRt = CreateDepthOnlyRenderTargetArray(1u, 1u, 1u);
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
+    return m_sharedShadowMapArrayDummyRt;
+}
+
+void DeviceGL::EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) {
+    if (!cmd || m_sharedShadowMapArrayDummyBarrierDone)
+        return;
+    IRenderTarget* rt = GetSharedShadowMapArrayDummyRenderTarget();
+    if (!rt)
+        return;
+    ITexture* depth = rt->GetDepthTexture();
+    if (!depth)
+        return;
+    cmd->BarrierTexture(depth, ResourceState::Undefined, ResourceState::ShaderResource);
+    m_sharedShadowMapArrayDummyBarrierDone = true;
+}
+
 IRenderTarget* DeviceGL::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                            const std::vector<RHITextureFormat>& colorFormats,
                                                            ITexture* sharedDepthTexture,
@@ -924,6 +960,10 @@ IRenderTarget* DeviceGL::CreateRenderTargetFromTextureWithDepth(ITexture* colorT
 }
 
 void DeviceGL::DestroyRenderTarget(IRenderTarget* rt) {
+    if (rt == m_sharedShadowMapArrayDummyRt) {
+        m_sharedShadowMapArrayDummyRt = nullptr;
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
     auto* r = static_cast<RenderTargetGL*>(rt);
     if (!r) return;
     if (r->m_fbo) {
@@ -1016,6 +1056,32 @@ IBindlessHeap* DeviceGL::CreateBindlessHeap() {
 
 void DeviceGL::DestroyBindlessHeap(IBindlessHeap* heap) {
     delete static_cast<BindlessHeapGL*>(heap);
+}
+
+IBindlessHeap* DeviceGL::GetOrCreateSharedBindlessHeap() {
+    if (!backend::SupportsBindless(this))
+        return nullptr;
+    std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+    if (!m_sharedBindlessHeap)
+        m_sharedBindlessHeap = CreateBindlessHeap();
+    return m_sharedBindlessHeap;
+}
+
+BindlessHandle DeviceGL::GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) {
+    if (!texture || !backend::SupportsBindless(this))
+        return kInvalidBindlessHandle;
+    std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+    if (!m_sharedBindlessHeap)
+        m_sharedBindlessHeap = CreateBindlessHeap();
+    if (!m_sharedBindlessHeap)
+        return kInvalidBindlessHandle;
+    auto it = m_sharedBindlessTextureHandles.find(texture);
+    if (it != m_sharedBindlessTextureHandles.end())
+        return it->second;
+    const BindlessHandle handle = m_sharedBindlessHeap->AllocateTextureHandle(texture);
+    if (handle != kInvalidBindlessHandle)
+        m_sharedBindlessTextureHandles.emplace(texture, handle);
+    return handle;
 }
 
 int DeviceGL::GetMaxSamples(int requestedSamples) {

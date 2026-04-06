@@ -41,6 +41,13 @@ struct IRenderTarget;
 struct IQueryPool;
 struct IFence;
 
+/** GPU frame lifecycle for backends that submit per-frame command buffers (Vulkan). Used for debug checks and tooling. */
+enum class GpuFramePhase : uint8_t {
+    BetweenFrames,
+    Recording,
+    Submitting,
+};
+
 // ---- Device ----
 
 struct IDevice {
@@ -69,9 +76,12 @@ struct IDevice {
     virtual void DestroyCommandList(ICommandList* list) = 0;
 
     virtual ICommandList* GetImmediateCommandList() = 0;
-    /** When non-null, pipeline recording and device-internal Blit paths use this list instead of the immediate buffer (Vulkan editor slices). */
+    /** Top of the transient stack when non-empty; pipeline recording and Blit use this instead of the immediate buffer (Vulkan editor slices). Nested scopes use Push/Pop. */
     virtual ICommandList* GetTransientRecordingCommandList() const { return nullptr; }
-    virtual void SetTransientRecordingCommandList(ICommandList* cmd) { (void)cmd; }
+    /** Push a slice command list after Begin(); becomes active until Pop. Must pair with PopTransientRecordingCommandList (same pointer). */
+    virtual void PushTransientRecordingCommandList(ICommandList* cmd) { (void)cmd; }
+    /** Pop the active transient list; @param cmd must match the list pushed by the innermost scope. */
+    virtual void PopTransientRecordingCommandList(ICommandList* cmd) { (void)cmd; }
     /** Same buffer as RenderPipeline::GetRHICommandList(): transient slice when set, else immediate. Use for all per-frame GPU recording that must stay on one command buffer. */
     virtual ICommandList* GetActiveRecordingCommandList() {
         ICommandList* t = GetTransientRecordingCommandList();
@@ -140,6 +150,11 @@ struct IDevice {
     }
     virtual void DestroyRenderTarget(IRenderTarget* rt) = 0;
 
+    /** Lazy 1×1×1 depth-array RT for sampler2DArray shadow slots (forward + deferred). Device-owned; do not DestroyRenderTarget. */
+    virtual IRenderTarget* GetSharedShadowMapArrayDummyRenderTarget() { return nullptr; }
+    /** Transition shared dummy depth to shader-read once (never rendered as attachment). No-op if unsupported or already done. */
+    virtual void EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) { (void)cmd; }
+
     virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;
     virtual void DestroyQueryPool(IQueryPool* pool) = 0;
 
@@ -158,6 +173,10 @@ struct IDevice {
     /** Create bindless heap for allocate-once bindless texture/buffer handles. Returns nullptr if !GetCapabilities().supportsBindless. */
     virtual IBindlessHeap* CreateBindlessHeap() = 0;
     virtual void DestroyBindlessHeap(IBindlessHeap* heap) = 0;
+    /** Device-global bindless heap shared by all pipelines on this device. Default returns nullptr for backends without bindless support. */
+    virtual IBindlessHeap* GetOrCreateSharedBindlessHeap() { return nullptr; }
+    /** Device-global texture handle allocation/caching. Returns kInvalidBindlessHandle when unsupported or allocation failed. */
+    virtual BindlessHandle GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) { (void)texture; return kInvalidBindlessHandle; }
 
     /** Maximum supported MSAA samples; clamp requested samples to this. Returns 0 if no MSAA support. */
     virtual int GetMaxSamples(int requestedSamples) = 0;
@@ -169,6 +188,8 @@ struct IDevice {
     virtual void BeginFrame() {}
     /** End frame: end recording and submit. Vulkan: end immediate command buffer and submit. Call after all recording (scene, blit, UI) and before Present(). Other backends: no-op. */
     virtual void EndFrame() {}
+    /** Vulkan: BetweenFrames → Recording → Submitting → BetweenFrames. Other backends: BetweenFrames. */
+    virtual GpuFramePhase GetGpuFramePhase() const { return GpuFramePhase::BetweenFrames; }
     /** Current frame index (0 .. N-1) for per-frame resources. Vulkan: ring index for DeletionQueue/descriptor sets. Default 0 for backends without multiple frames in flight. */
     virtual uint32_t GetCurrentFrameIndex() const { return 0; }
     /** Monotonic frame number (incremented each BeginFrame). Use to avoid updating a descriptor set more than once per frame. Default 0. */
@@ -229,6 +250,8 @@ struct ICommandList {
 
     virtual void Begin() = 0;
     virtual void End() = 0;
+    /** True between Begin() and End(). Used so Render() can skip Begin when VulkanRenderSliceScope (or similar) already opened recording on the active list. */
+    virtual bool IsRecording() const { return false; }
 
     virtual void SetRenderTarget(IRenderTarget* rt) = 0;
     virtual void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) = 0;

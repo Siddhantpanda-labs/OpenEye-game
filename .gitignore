@@ -79,6 +79,9 @@ Thumbs.db
 .idea/
 *.code-workspace
 
+# Nested / duplicate tree (do not commit)
+OpenEye-game-forwardgl/
+
 # Assets (large files - customize as needed)
 EngineSource/assets/models/*
 # EngineSource/assets/textures/*

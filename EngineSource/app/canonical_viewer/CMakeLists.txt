@@ -12,6 +12,7 @@ target_include_directories(CanonicalViewer PRIVATE
 )
 target_link_libraries(CanonicalViewer PRIVATE
     AssetReaders
+    AssetMeta
     EyelibCoreAPI
     EyelibPlatformAPI
     EyelibAssetsAPI

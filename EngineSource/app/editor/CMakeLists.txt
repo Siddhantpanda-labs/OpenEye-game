@@ -18,6 +18,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/HierarchyPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/InspectorMaterialEditor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/MaterialPreview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/SceneViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/GameViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/ProfilerPanel.cpp

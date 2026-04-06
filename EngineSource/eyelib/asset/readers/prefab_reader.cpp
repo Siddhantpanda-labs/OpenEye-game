@@ -64,6 +64,21 @@ bool ParseMesh(const std::string& line, std::string& meshPath) {
     return true;
 }
 
+// Parse "    meshIndex: 12"
+bool ParseMeshIndex(const std::string& line, int& meshIndex) {
+    size_t i = line.find("meshIndex:");
+    if (i == std::string::npos) return false;
+    i += std::strlen("meshIndex:");
+    const size_t start = line.find_first_not_of(" \t", i);
+    if (start == std::string::npos) return false;
+    try {
+        meshIndex = std::stoi(line.substr(start));
+    } catch (...) {
+        return false;
+    }
+    return true;
+}
+
 int GetIndent(const std::string& line) {
     int n = 0;
     for (char c : line) {
@@ -90,6 +105,8 @@ void ParseEntityNode(const std::vector<std::string>& lines, size_t& idx, int bas
             ParseTransform(lines[idx], out.localTransform);
         else if (lines[idx].find("mesh:") != std::string::npos)
             ParseMesh(lines[idx], out.meshPath);
+        else if (lines[idx].find("meshIndex:") != std::string::npos)
+            ParseMeshIndex(lines[idx], out.meshIndex);
         else if (lines[idx].find("children:") != std::string::npos) {
             idx++;
             while (idx < lines.size() && GetIndent(lines[idx]) > baseIndent && lines[idx].find("- name:") != std::string::npos) {

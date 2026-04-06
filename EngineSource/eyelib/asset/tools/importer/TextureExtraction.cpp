@@ -232,17 +232,17 @@ int ResolveAndAddTexture(const std::string& rawPath, const aiScene* scene,
 void RemapMaterialPaths(ImportScene& out, std::unordered_map<std::string, int>& pathToIndex) {
     for (ImportMaterial& mat : out.materials) {
         auto setPath = [&](TextureRef& ref, const std::string& key) {
-            if (ref.path.empty()) return;
+            if (ref.textureAssetId.empty()) return;
             std::string k = NormalizePath(key);
             auto it = pathToIndex.find(k);
             if (it != pathToIndex.end() && it->second >= 0 &&
                 static_cast<size_t>(it->second) < out.textures.size())
-                ref.path = "textures/" + out.textures[static_cast<size_t>(it->second)].outputFileName;
+                ref.textureAssetId = "textures/" + out.textures[static_cast<size_t>(it->second)].outputFileName;
         };
-        setPath(mat.albedo, mat.albedo.path);
-        setPath(mat.normal, mat.normal.path);
-        setPath(mat.metallic, mat.metallic.path);
-        setPath(mat.roughness, mat.roughness.path);
+        setPath(mat.albedo, mat.albedo.textureAssetId);
+        setPath(mat.normal, mat.normal.textureAssetId);
+        setPath(mat.metallic, mat.metallic.textureAssetId);
+        setPath(mat.roughness, mat.roughness.textureAssetId);
     }
 }
 
@@ -257,10 +257,10 @@ void ExtractTextures(const aiScene* scene, const char* sourcePath, const std::st
             if (path.empty()) return;
             ResolveAndAddTexture(path, scene, sourceDir, sourceName, out, pathToIndex);
         };
-        collect(mat.albedo.path);
-        collect(mat.normal.path);
-        collect(mat.metallic.path);
-        collect(mat.roughness.path);
+        collect(mat.albedo.textureAssetId);
+        collect(mat.normal.textureAssetId);
+        collect(mat.metallic.textureAssetId);
+        collect(mat.roughness.textureAssetId);
     }
 
     RemapMaterialPaths(out, pathToIndex);

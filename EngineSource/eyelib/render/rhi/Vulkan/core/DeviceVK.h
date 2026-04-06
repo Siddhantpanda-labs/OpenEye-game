@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -50,8 +51,9 @@ struct DeviceVK : IDevice {
     ICommandList* CreateCommandList() override;
     void DestroyCommandList(ICommandList* list) override;
     ICommandList* GetImmediateCommandList() override;
-    ICommandList* GetTransientRecordingCommandList() const override { return m_transientRecordingCommandList; }
-    void SetTransientRecordingCommandList(ICommandList* cmd) override;
+    ICommandList* GetTransientRecordingCommandList() const override;
+    void PushTransientRecordingCommandList(ICommandList* cmd) override;
+    void PopTransientRecordingCommandList(ICommandList* cmd) override;
     void EnqueueFrameSliceCommandList(ICommandList* cmd) override;
     void SubmitCommandList(ICommandList* list) override;
 
@@ -100,6 +102,9 @@ struct DeviceVK : IDevice {
     IRenderTarget* CreateRenderTargetFromTextureWithDepth(ITexture* colorTexture, uint32_t face, uint32_t mipLevel, ITexture* depthTexture) override;
     void DestroyRenderTarget(IRenderTarget* rt) override;
 
+    IRenderTarget* GetSharedShadowMapArrayDummyRenderTarget() override;
+    void EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) override;
+
     ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) override;
 
     IQueryPool* CreateQueryPool(QueryType type, uint32_t count) override;
@@ -114,11 +119,14 @@ struct DeviceVK : IDevice {
 
     IBindlessHeap* CreateBindlessHeap() override;
     void DestroyBindlessHeap(IBindlessHeap* heap) override;
+    IBindlessHeap* GetOrCreateSharedBindlessHeap() override;
+    BindlessHandle GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) override;
 
     int GetMaxSamples(int requestedSamples) override;
 
     void BeginFrame() override;
     void EndFrame() override;
+    GpuFramePhase GetGpuFramePhase() const override { return m_gpuFramePhase; }
     void Present() override;
     void OnWindowResized(uint32_t width, uint32_t height) override;
     void Finish() override;
@@ -283,13 +291,17 @@ private:
     };
     std::unordered_map<uint64_t, GraphicsPipelineCacheEntry> m_graphicsPipelineCache;
     std::unique_ptr<CommandListVK> m_immediateCommandList;
-    ICommandList* m_transientRecordingCommandList = nullptr;
+    /** Nested editor slices (SceneView, GameView, MaterialPreview): innermost is active for GetRecordingCommandListVK. */
+    std::vector<ICommandList*> m_transientRecordingStack;
+    GpuFramePhase m_gpuFramePhase = GpuFramePhase::BetweenFrames;
     /** Slice CBs allocated from frameContexts[i]'s pool; clear only when re-entering slot i after vkWaitForFences(i). */
     std::array<std::vector<std::unique_ptr<ICommandList>>, kMaxFrames> m_frameSliceCommandListsByFrame;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;
     ITexture* m_fallbackShaderResourceTexture2D = nullptr;
     ITexture* m_fallbackShaderResourceTextureCube = nullptr;
+    IRenderTarget* m_sharedShadowMapArrayDummyRt = nullptr;
+    bool m_sharedShadowMapArrayDummyBarrierDone = false;
     AllocatorVK m_allocatorVK;
     UploadHeapVK m_uploadHeap;
     DescriptorAllocatorVK m_descriptorAllocator;
@@ -311,6 +323,9 @@ private:
     std::vector<RetiredTextureEntry> m_pendingTextureWrapperRetires;
     void RetirePendingTextureWrappers(bool forceAll);
     void EnsureImGuiDescriptorPool();
+    IBindlessHeap* m_sharedBindlessHeap = nullptr;
+    std::unordered_map<ITexture*, BindlessHandle> m_sharedBindlessTextureHandles;
+    std::mutex m_sharedBindlessMutex;
 };
 
 } // namespace rhi

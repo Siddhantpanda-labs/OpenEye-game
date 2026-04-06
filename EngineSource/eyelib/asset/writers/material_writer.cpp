@@ -1,37 +1,32 @@
 #include "asset/writers/material_writer.h"
-#include "asset/core/material_format.h"
+#include "asset/readers/material_reader.h"
 
 #include <fstream>
-#include <cstring>
+#include <vector>
 
 namespace asset {
 
 bool MaterialWriter::Write(const ImportMaterial& material, const std::string& path) {
+    LoadedMaterial lm;
+    lm.name = material.name;
+    lm.albedoPath = material.albedo.textureAssetId;
+    lm.normalPath = material.normal.textureAssetId;
+    lm.metallicPath = material.metallic.textureAssetId;
+    lm.roughnessPath = material.roughness.textureAssetId;
+    lm.metallicValue = material.metallicValue;
+    lm.roughnessValue = material.roughnessValue;
+    lm.albedoColorR = material.albedoColorR;
+    lm.albedoColorG = material.albedoColorG;
+    lm.albedoColorB = material.albedoColorB;
+
+    std::vector<uint8_t> buf;
+    if (!MaterialReader::EncodeToBuffer(lm, buf)) return false;
+
     std::ofstream file(path, std::ios::binary);
     if (!file) return false;
-
-    using namespace MaterialFormat;
-
-    MaterialHeader header;
-    header.nameLen = static_cast<uint32_t>(material.name.size());
-    header.albedoPathLen = static_cast<uint32_t>(material.albedo.path.size());
-    header.normalPathLen = static_cast<uint32_t>(material.normal.path.size());
-    header.metallicPathLen = static_cast<uint32_t>(material.metallic.path.size());
-    header.roughnessPathLen = static_cast<uint32_t>(material.roughness.path.size());
-    header.metallicValue = material.metallicValue;
-    header.roughnessValue = material.roughnessValue;
-    header.albedoColorR = material.albedoColorR;
-    header.albedoColorG = material.albedoColorG;
-    header.albedoColorB = material.albedoColorB;
-
-    if (!file.write(reinterpret_cast<const char*>(&header), sizeof(header))) return false;
-    if (!material.name.empty() && !file.write(material.name.data(), material.name.size())) return false;
-    if (!material.albedo.path.empty() && !file.write(material.albedo.path.data(), material.albedo.path.size())) return false;
-    if (!material.normal.path.empty() && !file.write(material.normal.path.data(), material.normal.path.size())) return false;
-    if (!material.metallic.path.empty() && !file.write(material.metallic.path.data(), material.metallic.path.size())) return false;
-    if (!material.roughness.path.empty() && !file.write(material.roughness.path.data(), material.roughness.path.size())) return false;
-
-    return true;
+    if (!buf.empty() && !file.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size())))
+        return false;
+    return static_cast<bool>(file);
 }
 
 } // namespace asset

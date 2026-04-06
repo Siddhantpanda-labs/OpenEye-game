@@ -35,8 +35,9 @@ layout(set = 1, binding = 1) uniform sampler2D u_AlbedoTexture;
 layout(set = 1, binding = 2) uniform sampler2D u_NormalTexture;
 layout(set = 1, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
+/* After GBufferInstancedPush in gbuffer_instanced.vert (vec4 + 3 floats = 28 bytes). */
 layout(push_constant, std430) uniform GBufferFragPush {
-    float u_HasAlbedoTexture;
+    layout(offset = 28) float u_HasAlbedoTexture;
 } pc;
 
 #include "../../common/material_surface.glsl"

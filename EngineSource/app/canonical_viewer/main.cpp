@@ -14,6 +14,7 @@
 #include "asset/readers/texture_reader.h"
 #include "asset/readers/oea_reader.h"
 #include "asset/core/import_mesh.h"
+#include "asset/meta/meta_file.h"
 #include "eyelib/render/resources/Texture2D.h"
 #include "eyelib/render/rhi/RHI.h"
 
@@ -27,6 +28,7 @@
 #include <vector>
 #include <algorithm>
 #include <filesystem>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -64,6 +66,57 @@ std::string Trim(const std::string& s) {
     if (b == std::string::npos) return {};
     const size_t e = s.find_last_not_of(" \t\r\n");
     return s.substr(b, e - b + 1);
+}
+
+std::string GuidKey(const std::string& s) {
+    std::string t = Trim(s);
+    for (char& c : t) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return t;
+}
+
+/**
+ * Resolves an asset GUID to an on-disk path by scanning sibling `.meta` files under the given roots.
+ * Used for texture slots stored as GUIDs in .mat; there is no path-string fallback.
+ */
+std::string FindAssetPathByGuid(const std::string& primaryBaseDir,
+                                const std::string& fallbackBaseDir,
+                                const std::string& guidStr) {
+    const std::string key = GuidKey(guidStr);
+    if (key.empty()) return {};
+
+    static std::unordered_map<std::string, std::string> cache;
+    const std::string cacheKey = primaryBaseDir + "\x1e" + fallbackBaseDir + "\x1e" + key;
+    if (const auto it = cache.find(cacheKey); it != cache.end()) return it->second;
+
+    auto scanRoot = [&key](const std::string& root) -> std::string {
+        if (root.empty()) return {};
+        std::error_code ec;
+        const fs::path rootPath = fs::absolute(root, ec);
+        if (ec || !fs::is_directory(rootPath, ec)) return {};
+        fs::recursive_directory_iterator dirIt(rootPath,
+            fs::directory_options::skip_permission_denied, ec);
+        if (ec) return {};
+        for (; dirIt != fs::recursive_directory_iterator(); dirIt.increment(ec)) {
+            if (ec) break;
+            const fs::path& p = dirIt->path();
+            if (p.extension() != ".meta") continue;
+            asset::MetaFile meta;
+            if (!asset::ReadMetaFile(p.string(), meta)) continue;
+            if (GuidKey(meta.guid) == key) {
+                fs::path withoutMeta = p;
+                withoutMeta.replace_extension("");
+                return withoutMeta.string();
+            }
+        }
+        return {};
+    };
+
+    std::string found = scanRoot(primaryBaseDir);
+    if (found.empty() && !fallbackBaseDir.empty()) found = scanRoot(fallbackBaseDir);
+    cache.emplace(cacheKey, found);
+    return found;
 }
 
 bool ReadMaterialMap(const std::string& mapPath, std::vector<std::string>& outIndexedFiles) {
@@ -248,33 +301,28 @@ std::shared_ptr<eyelib::api::Material> CreateMaterialFromLoaded(eyelib::api::Ren
     mat->SetAlbedo(eyelib::math::Vec3(loaded.albedoColorR, loaded.albedoColorG, loaded.albedoColorB));
     mat->SetMetallic(loaded.metallicValue);
     mat->SetRoughness(loaded.roughnessValue);
-    auto resolvePath = [&baseDir, &fallbackBaseDir](const std::string& p) -> std::string {
-        return ResolvePathWithFallback(baseDir, fallbackBaseDir, p);
+    mat->SetEmission(eyelib::math::Vec3(loaded.emissionR, loaded.emissionG, loaded.emissionB));
+    mat->SetAO(loaded.aoValue);
+    mat->SetAlpha(loaded.alpha);
+    (void)litShader;
+
+    auto resolveTextureFile = [&baseDir, &fallbackBaseDir](const std::string& textureAssetGuid) -> std::string {
+        return FindAssetPathByGuid(baseDir, fallbackBaseDir, textureAssetGuid);
     };
-    if (!loaded.albedoPath.empty()) {
-        std::string p = resolvePath(loaded.albedoPath);
-        if (!p.empty()) {
-            if (auto tex = LoadTextureFromPath(device, p)) mat->SetAlbedoTexture(tex);
-        }
-    }
-    if (!loaded.normalPath.empty()) {
-        std::string p = resolvePath(loaded.normalPath);
-        if (!p.empty()) {
-            if (auto tex = LoadTextureFromPath(device, p)) mat->SetNormalTexture(tex);
-        }
-    }
-    if (!loaded.metallicPath.empty()) {
-        std::string p = resolvePath(loaded.metallicPath);
-        if (!p.empty()) {
-            if (auto tex = LoadTextureFromPath(device, p)) mat->SetMetallicTexture(tex);
-        }
-    }
-    if (!loaded.roughnessPath.empty()) {
-        std::string p = resolvePath(loaded.roughnessPath);
-        if (!p.empty()) {
-            if (auto tex = LoadTextureFromPath(device, p)) mat->SetRoughnessTexture(tex);
-        }
-    }
+    auto bindSlot = [&](const std::string& guid,
+                        void (eyelib::api::Material::*setter)(std::shared_ptr<eyelib::api::Texture>)) {
+        if (guid.empty()) return;
+        const std::string p = resolveTextureFile(guid);
+        if (p.empty()) return;
+        if (auto tex = LoadTextureFromPath(device, p)) (mat.get()->*setter)(std::move(tex));
+    };
+    bindSlot(loaded.albedoPath, &eyelib::api::Material::SetAlbedoTexture);
+    bindSlot(loaded.normalPath, &eyelib::api::Material::SetNormalTexture);
+    bindSlot(loaded.metallicPath, &eyelib::api::Material::SetMetallicTexture);
+    bindSlot(loaded.roughnessPath, &eyelib::api::Material::SetRoughnessTexture);
+    bindSlot(loaded.aoPath, &eyelib::api::Material::SetAOTexture);
+    bindSlot(loaded.emissivePath, &eyelib::api::Material::SetEmissiveTexture);
+    bindSlot(loaded.metallicRoughnessPath, &eyelib::api::Material::SetMetallicRoughnessTexture);
     return mat;
 }
 

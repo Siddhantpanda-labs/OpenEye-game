@@ -32,11 +32,16 @@ void ForwardPlusOpaqueRenderBatched(rhi::ICommandList* cmd, const RenderFrameDat
     if (!ctx.shaderCache) return;
 
     if (ctx.ensureResourceSets) ctx.ensureResourceSets();
+    resources::PassResourceBuilder* passResourceBuilder =
+        ctx.getPassResourceBuilder ? ctx.getPassResourceBuilder() : ctx.passResourceBuilder;
+    rhi::IDescriptorSet* frameSetForCall = ctx.getFrameSet ? ctx.getFrameSet() : ctx.frameSet;
+    rhi::IDescriptorSet* materialSetForCall = ctx.getMaterialSet ? ctx.getMaterialSet() : ctx.materialSet;
+    rhi::IBuffer* frameUboForCall = ctx.getFrameUbo ? ctx.getFrameUbo() : ctx.frameUbo;
     rhi::IDescriptorSet* passSetForCall = ctx.acquirePassDrawSet ? ctx.acquirePassDrawSet() : nullptr;
     rhi::IDescriptorSet* sceneSetForCall = ctx.acquireSceneDrawSet ? ctx.acquireSceneDrawSet() : nullptr;
     rhi::IDescriptorSet* bindlessSet = ctx.bindlessHeap ? ctx.bindlessHeap->GetDescriptorSet() : nullptr;
-    if (!ForwardPbrResourceBindingsReady(ctx.device, cmd, ctx.frameSet, passSetForCall, ctx.materialSet,
-            sceneSetForCall, ctx.frameUbo, ctx.bindlessHeap)) {
+    if (!ForwardPbrResourceBindingsReady(ctx.device, cmd, frameSetForCall, passSetForCall, materialSetForCall,
+            sceneSetForCall, frameUboForCall, ctx.bindlessHeap)) {
         static bool s_loggedForwardPlusSkip = false;
         if (!s_loggedForwardPlusSkip) {
             core::Log::WarnF(
@@ -64,8 +69,8 @@ void ForwardPlusOpaqueRenderBatched(rhi::ICommandList* cmd, const RenderFrameDat
                 debug::Profiler::AddFrameCounter("stateChanges", 1);
                 rhi::IDescriptorSet* drawMaterialSet = ctx.acquireMaterialDrawSet ? ctx.acquireMaterialDrawSet() : nullptr;
                 if (!drawMaterialSet) { sh->Unbind(); continue; }
-                if (ctx.passResourceBuilder)
-                    ctx.passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, batch.material.get(), batch.materialInstance.get());
+                if (passResourceBuilder)
+                    passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, batch.material.get(), batch.materialInstance.get());
                 const int useAlbedoTexture = ComputeForwardAlbedoTextureFlag(batch.material.get(), batch.materialInstance.get());
                 if (!useTypedForwardPush)
                     sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
@@ -81,12 +86,26 @@ void ForwardPlusOpaqueRenderBatched(rhi::ICommandList* cmd, const RenderFrameDat
                     drawSceneSet->UpdateStorageBuffer(3, clusterOrDummy, 0, 0);
                     sceneSetForDraw = drawSceneSet;
                 }
-                rhi::IDescriptorSet* sets[5] = { ctx.frameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
+                rhi::IDescriptorSet* sets[5] = { frameSetForCall, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
                 cmd->BindDescriptorSets(0, 5, sets);
                 const int useIBL = (envState.irradianceTexture || envState.prefilterTexture || envState.brdfLutTexture) ? 1 : 0;
                 if (useTypedForwardPush) {
-                    // Forward+ instanced VS reads model from instance buffer; only FS flags are needed.
-                    abi::WriteForwardPushConstants(cmd, math::Mat4(1.0f), useIBL, useAlbedoTexture);
+                    const math::Vec4 uvTransform = batch.materialInstance
+                        ? batch.materialInstance->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                        : (batch.material ? batch.material->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                                          : math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+                    const float uvRotation = batch.materialInstance
+                        ? batch.materialInstance->GetFloat("u_UVRotation", 0.0f)
+                        : (batch.material ? batch.material->GetFloat("u_UVRotation", 0.0f) : 0.0f);
+                    const float texCoordIndex = batch.materialInstance
+                        ? batch.materialInstance->GetFloat("u_TexCoordIndex", 0.0f)
+                        : (batch.material ? batch.material->GetFloat("u_TexCoordIndex", 0.0f) : 0.0f);
+                    const float flipV = batch.materialInstance
+                        ? batch.materialInstance->GetFloat("u_FlipV", 0.0f)
+                        : (batch.material ? batch.material->GetFloat("u_FlipV", 0.0f) : 0.0f);
+                    // Forward+ instanced VS reads model from instance buffer; keep model identity and provide UV push fields.
+                    abi::WriteForwardPushConstants(cmd, math::Mat4(1.0f), useIBL, useAlbedoTexture,
+                                                   uvTransform, uvRotation, texCoordIndex, flipV);
                 } else {
                     sh->SetInt("u_UseIBL", useIBL);
                 }
@@ -115,8 +134,8 @@ void ForwardPlusOpaqueRenderBatched(rhi::ICommandList* cmd, const RenderFrameDat
 
                 rhi::IDescriptorSet* drawMaterialSet = ctx.acquireMaterialDrawSet ? ctx.acquireMaterialDrawSet() : nullptr;
                 if (!drawMaterialSet) { sh->Unbind(); continue; }
-                if (ctx.passResourceBuilder)
-                    ctx.passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, single.material.get(), single.materialInstance.get());
+                if (passResourceBuilder)
+                    passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, single.material.get(), single.materialInstance.get());
                 const int useAlbedoTexture = ComputeForwardAlbedoTextureFlag(single.material.get(), single.materialInstance.get());
                 if (!useTypedForwardPush)
                     sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
@@ -142,10 +161,24 @@ void ForwardPlusOpaqueRenderBatched(rhi::ICommandList* cmd, const RenderFrameDat
                         sceneSetForDraw = drawSceneSet;
                     }
                 }
-                rhi::IDescriptorSet* sets[5] = { ctx.frameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
+                rhi::IDescriptorSet* sets[5] = { frameSetForCall, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
                 cmd->BindDescriptorSets(0, 5, sets);
                 if (useTypedForwardPush) {
-                    abi::WriteForwardPushConstants(cmd, single.transform, useIBL, useAlbedoTexture);
+                    const math::Vec4 uvTransform = single.materialInstance
+                        ? single.materialInstance->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                        : (single.material ? single.material->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                                           : math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+                    const float uvRotation = single.materialInstance
+                        ? single.materialInstance->GetFloat("u_UVRotation", 0.0f)
+                        : (single.material ? single.material->GetFloat("u_UVRotation", 0.0f) : 0.0f);
+                    const float texCoordIndex = single.materialInstance
+                        ? single.materialInstance->GetFloat("u_TexCoordIndex", 0.0f)
+                        : (single.material ? single.material->GetFloat("u_TexCoordIndex", 0.0f) : 0.0f);
+                    const float flipV = single.materialInstance
+                        ? single.materialInstance->GetFloat("u_FlipV", 0.0f)
+                        : (single.material ? single.material->GetFloat("u_FlipV", 0.0f) : 0.0f);
+                    abi::WriteForwardPushConstants(cmd, single.transform, useIBL, useAlbedoTexture,
+                                                   uvTransform, uvRotation, texCoordIndex, flipV);
                 } else {
                     sh->SetMat4("u_Model", single.transform);
                     sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(single.transform)));

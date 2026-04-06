@@ -1,6 +1,8 @@
 #include "InspectorMaterialEditor.h"
+#include "MaterialPreview.h"
 #include "EditorContext.h"
 
+#include "api/asset/AssetId.h"
 #include "api/asset/AssetRegistry.h"
 #include "api/asset/IGPUResourceResolver.h"
 #include "api/asset/loaders/MaterialLoader.h"
@@ -67,10 +69,10 @@ static void ApplyDescriptorToGpu(EditorContext* ctx, const eyelib::api::AssetId&
         if (!sid.IsValid()) sid = ctx->assetRegistry->LoadAssetDescriptorOnly("name:" + name, eyelib::api::AssetType::Shader);
         return resolver->GetShader(sid);
     };
-    auto resolveTexture = [ctx, resolver](const std::string& path) -> std::shared_ptr<eyelib::render::Texture2D> {
-        if (!ctx->assetRegistry || !resolver || path.empty()) return nullptr;
-        eyelib::api::AssetId tid = ctx->assetRegistry->GetId(path);
-        if (!tid.IsValid()) tid = ctx->assetRegistry->LoadAssetDescriptorOnly(path, eyelib::api::AssetType::Texture);
+    auto resolveTexture = [ctx, resolver](const std::string& textureAssetGuid) -> std::shared_ptr<eyelib::render::Texture2D> {
+        if (!ctx->assetRegistry || !resolver || textureAssetGuid.empty()) return nullptr;
+        eyelib::api::AssetId tid = eyelib::api::AssetId::FromString(textureAssetGuid);
+        if (!tid.IsValid()) return nullptr;
         return resolver->GetTexture(tid);
     };
     eyelib::render::ApplyMaterialFromDescriptor(*mat, desc, resolveShader, resolveTexture);
@@ -153,12 +155,17 @@ void DrawMaterialAssetEditor(EditorContext* ctx) {
 
     auto pushApply = [&] { ApplyDescriptorToGpu(ctx, matId, s_edit); };
 
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
-    ImGui::BeginChild("MaterialEditorScroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+    constexpr float kPreviewDockHeight = 300.f;
 
-    ImGui::TextUnformatted(ctx->selectedMaterialAssetId.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled("(MAT1 v3 + MATX)");
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.9f, 0.96f, 1.f));
+    ImGui::TextWrapped("%s", ctx->selectedMaterialAssetId.c_str());
+    ImGui::PopStyleColor();
+    ImGui::TextDisabled("Material asset · edits apply to GPU; Save writes MAT1 to disk.");
+    ImGui::Separator();
+
+    ImGui::BeginChild("MatEditorScroll", ImVec2(0, -kPreviewDockHeight), false,
+        ImGuiWindowFlags_HorizontalScrollbar);
 
     ImGui::BeginGroup();
     if (ImGui::Button("Save to disk", ImVec2(120, 0))) {
@@ -271,7 +278,7 @@ void DrawMaterialAssetEditor(EditorContext* ctx) {
         }
     }
 
-    SectionTitle("Texture paths (project-relative or asset id)");
+    SectionTitle("Textures (texture asset GUID from .meta)");
     for (size_t i = 0; i < sizeof(kTextureSlots) / sizeof(kTextureSlots[0]); ++i) {
         const TextureSlotDef& slot = kTextureSlots[i];
         ImGui::PushID(static_cast<int>(i));
@@ -469,6 +476,18 @@ void DrawMaterialAssetEditor(EditorContext* ctx) {
     }
 
     ImGui::EndChild();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    SectionTitle("Viewport preview");
+    ImGui::TextDisabled("Lit sphere with turntable orbit. Uses the live material in the registry.");
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.055f, 0.056f, 0.07f, 1.f));
+    ImGui::BeginChild("MatPreviewRegion", ImVec2(0, 0),
+        ImGuiChildFlags_Border | ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_None);
+    DrawMaterialEditorPreview(ctx, matId);
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+
     ImGui::PopStyleVar();
 }
 

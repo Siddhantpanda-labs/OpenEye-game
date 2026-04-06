@@ -256,8 +256,12 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
             return (t && t->IsValid()) ? 1.0f : 0.0f;
         };
         if (device && backend::IsVulkan(device)) {
-            if (cmd)
+            if (cmd) {
                 abi::WriteGBufferGeometryPushConstants(cmd, d.transform, uvT, uvRot, texIdx, flipV, hasTex("u_AlbedoTexture"));
+                /* Skinned VS reads int at 96; keep 0 for bone path (indirect multi-draw sets 1 elsewhere). */
+                const int32_t usePerDrawTransform = 0;
+                cmd->SetPushConstants(abi::kGBufferSkinnedUsePerDrawTransformOffset, sizeof(int32_t), &usePerDrawTransform);
+            }
         } else {
             shader->SetMat4("u_Model", d.transform);
             shader->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));
@@ -419,7 +423,16 @@ void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
         shader->SetMat4("u_PrevView", *prevView);
         shader->SetMat4("u_PrevProjection", *prevProjection);
     }
-    shader->SetInt("u_UsePerDrawTransformBuffer", 1);
+    if (shaderInstanceType == InstanceType::Skinned) {
+        shader->SetInt("u_UsePerDrawTransformBuffer", 1);
+        if (backend::IsVulkan(ctx.device) && ctx.cmd) {
+            const math::Mat4 identity(1.0f);
+            const math::Vec4 uvDef(0.0f, 0.0f, 1.0f, 1.0f);
+            abi::WriteGBufferGeometryPushConstants(ctx.cmd, identity, uvDef, 0.0f, 0.0f, 1.0f, 0.0f);
+            const int32_t usePerDraw = 1;
+            ctx.cmd->SetPushConstants(abi::kGBufferSkinnedUsePerDrawTransformOffset, sizeof(int32_t), &usePerDraw);
+        }
+    }
 
     ctx.cmd->SetDepthTest(true);
     ctx.cmd->SetDepthWrite(true);
@@ -431,7 +444,8 @@ void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
     ctx.cmd->BindIndexBuffer(mesh->GetIndexBufferRHI(), mesh->GetRHIIndexType());
     ctx.cmd->MultiDrawIndexedIndirect(indirectBuffer, 0, drawCount, stride);
 
-    shader->SetInt("u_UsePerDrawTransformBuffer", 0);
+    if (shaderInstanceType == InstanceType::Skinned)
+        shader->SetInt("u_UsePerDrawTransformBuffer", 0);
     shader->Unbind();
     gbuffer.Unbind(ctx.cmd);
     ctx.cmd->SetCullFace(true);
@@ -507,10 +521,19 @@ void GBufferPassSystem::RenderInstanced(GBuffer& gbuffer,
         return getTextureRHI(name) ? 1.0f : 0.0f;
     };
 
-    shader->SetVec4("u_UVTransform", getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f)));
-    shader->SetFloat("u_UVRotation", getFloat("u_UVRotation", 0.0f));
-    shader->SetFloat("u_TexCoordIndex", getFloat("u_TexCoordIndex", 0.0f));
-    shader->SetFloat("u_FlipV", getFloat("u_FlipV", 1.0f));
+    const math::Vec4 uvTInst = getVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+    const float uvRotInst = getFloat("u_UVRotation", 0.0f);
+    const float texIdxInst = getFloat("u_TexCoordIndex", 0.0f);
+    const float flipVInst = getFloat("u_FlipV", 1.0f);
+    if (device && backend::IsVulkan(device)) {
+        if (cmd)
+            abi::WriteGBufferInstancedGeometryPushConstants(cmd, uvTInst, uvRotInst, texIdxInst, flipVInst, hasTex("u_AlbedoTexture"));
+    } else {
+        shader->SetVec4("u_UVTransform", uvTInst);
+        shader->SetFloat("u_UVRotation", uvRotInst);
+        shader->SetFloat("u_TexCoordIndex", texIdxInst);
+        shader->SetFloat("u_FlipV", flipVInst);
+    }
 
     const char* textureOrder[] = {
         "u_AlbedoTexture", "u_NormalTexture", "u_MetallicRoughnessTexture",

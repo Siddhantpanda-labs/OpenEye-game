@@ -39,6 +39,10 @@ struct ForwardOpaqueRenderContext {
     CascadeShadowMap* cascadeShadowMap = nullptr;
     ReflectionProbeManager* reflectionProbeManager = nullptr;
     std::function<void()> ensureResourceSets;
+    std::function<resources::PassResourceBuilder*()> getPassResourceBuilder;
+    std::function<rhi::IDescriptorSet*()> getFrameSet;
+    std::function<rhi::IDescriptorSet*()> getMaterialSet;
+    std::function<rhi::IBuffer*()> getFrameUbo;
     std::function<rhi::IDescriptorSet*()> acquirePassDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireMaterialDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireSceneDrawSet;
@@ -81,6 +85,10 @@ struct ForwardPlusOpaqueRenderContext {
     CascadeShadowMap* cascadeShadowMap = nullptr;
     ReflectionProbeManager* reflectionProbeManager = nullptr;
     std::function<void()> ensureResourceSets;
+    std::function<resources::PassResourceBuilder*()> getPassResourceBuilder;
+    std::function<rhi::IDescriptorSet*()> getFrameSet;
+    std::function<rhi::IDescriptorSet*()> getMaterialSet;
+    std::function<rhi::IBuffer*()> getFrameUbo;
     std::function<rhi::IDescriptorSet*()> acquirePassDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireMaterialDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireSceneDrawSet;
@@ -124,6 +132,10 @@ struct ForwardTransparentRenderContext {
     CascadeShadowMap* cascadeShadowMap = nullptr;
     ReflectionProbeManager* reflectionProbeManager = nullptr;
     std::function<void()> ensureResourceSets;
+    std::function<resources::PassResourceBuilder*()> getPassResourceBuilder;
+    std::function<rhi::IDescriptorSet*()> getFrameSet;
+    std::function<rhi::IDescriptorSet*()> getMaterialSet;
+    std::function<rhi::IBuffer*()> getFrameUbo;
     std::function<rhi::IDescriptorSet*()> acquirePassDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireMaterialDrawSet;
     std::function<rhi::IDescriptorSet*()> acquireSceneDrawSet;

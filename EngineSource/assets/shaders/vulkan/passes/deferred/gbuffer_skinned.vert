@@ -30,13 +30,14 @@ layout(set = 3, binding = 1) readonly buffer BoneOrTransformBlock {
     mat4 u_Data[];
 };
 
+/* Fragment uses float u_HasAlbedoTexture at offset 92 (shared with static gbuffer). VS-only int starts at 96. */
 layout(push_constant, std430) uniform GBufferSkinnedPush {
     mat4 u_Model;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
     float u_FlipV;
-    int u_UsePerDrawTransformBuffer;
+    layout(offset = 96) int u_UsePerDrawTransformBuffer;
 } pc;
 
 void main() {

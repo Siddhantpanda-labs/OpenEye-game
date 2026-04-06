@@ -1,4 +1,4 @@
-# Canonical asset writers (depend only on core)
+# Canonical asset writers (MaterialWriter uses MaterialReader::EncodeToBuffer)
 set(WRITERS_SOURCES
     mesh_writer.cpp
     material_writer.cpp
@@ -8,7 +8,7 @@ set(WRITERS_SOURCES
     oea_writer.cpp
 )
 add_library(AssetWriters STATIC ${WRITERS_SOURCES})
-target_link_libraries(AssetWriters PUBLIC AssetCore)
+target_link_libraries(AssetWriters PUBLIC AssetCore AssetReaders)
 target_include_directories(AssetWriters PUBLIC ${ASSET_INCLUDE_DIR})
 
 if(TARGET zstd_static)

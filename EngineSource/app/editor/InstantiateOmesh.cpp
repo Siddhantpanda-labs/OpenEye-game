@@ -158,6 +158,23 @@ std::unordered_map<std::string, int> BuildMeshPathToSubmeshStart(const std::stri
     return out;
 }
 
+std::vector<int> BuildSubmeshStartByMeshEntryIndex(const std::string& omeshPath,
+                                                   const std::vector<asset::OeaEntry>& entries) {
+    std::vector<int> out;
+    int running = 0;
+    for (const auto& e : entries) {
+        if (e.type != asset::OeaFormat::Entry_Mesh) continue;
+        out.push_back(running);
+        std::vector<uint8_t> data;
+        asset::ImportMesh part;
+        if (asset::OeaReader::ReadEntryData(omeshPath, e.name, data) && asset::MeshReader::Read(data, part) && !part.submeshes.empty())
+            running += static_cast<int>(part.submeshes.size());
+        else
+            running += 1;
+    }
+    return out;
+}
+
 std::vector<std::string> BuildMaterialIdsBySubmeshIndex(const std::string& omeshPath,
                                                         const std::vector<asset::OeaEntry>& entries) {
     std::vector<std::string> materialMap;
@@ -205,17 +222,23 @@ int MeshPathToSubmeshStart(const std::string& meshPath,
 }
 
 void AssignMeshIndicesRecurse(asset::PrefabNode& node,
+                              const std::vector<int>& submeshStartByMeshEntryIndex,
                               const std::unordered_map<std::string, int>& meshPathToSubmeshStart) {
-    if (!node.meshPath.empty())
+    if (node.meshIndex >= 0 && static_cast<size_t>(node.meshIndex) < submeshStartByMeshEntryIndex.size())
+        node.meshIndex = submeshStartByMeshEntryIndex[static_cast<size_t>(node.meshIndex)];
+    else if (!node.meshPath.empty())
         node.meshIndex = MeshPathToSubmeshStart(node.meshPath, meshPathToSubmeshStart);
+    else
+        node.meshIndex = -1;
     for (auto& child : node.children)
-        AssignMeshIndicesRecurse(child, meshPathToSubmeshStart);
+        AssignMeshIndicesRecurse(child, submeshStartByMeshEntryIndex, meshPathToSubmeshStart);
 }
 
 void AssignMeshIndices(std::vector<asset::PrefabNode>& roots,
+                       const std::vector<int>& submeshStartByMeshEntryIndex,
                        const std::unordered_map<std::string, int>& meshPathToSubmeshStart) {
     for (auto& root : roots)
-        AssignMeshIndicesRecurse(root, meshPathToSubmeshStart);
+        AssignMeshIndicesRecurse(root, submeshStartByMeshEntryIndex, meshPathToSubmeshStart);
 }
 
 eyelib::math::Mat4 RowMajorToMat4(const float m[16]) {
@@ -308,8 +331,9 @@ eyelib::math::Mat4 RowMajorToMat4(const float m[16]) {
     std::vector<asset::PrefabNode> roots;
     if (!asset::PrefabReader::ReadHierarchyFromText(prefabText, roots)) return ::eyelib::world::InvalidEntity;
 
+    const auto submeshStartByMeshEntryIndex = BuildSubmeshStartByMeshEntryIndex(omeshPath, entries);
     const auto meshPathToSubmeshStart = BuildMeshPathToSubmeshStart(omeshPath, entries);
-    AssignMeshIndices(roots, meshPathToSubmeshStart);
+    AssignMeshIndices(roots, submeshStartByMeshEntryIndex, meshPathToSubmeshStart);
     const std::vector<std::string> materialIdsByMeshIndex = BuildMaterialIdsBySubmeshIndex(omeshPath, entries);
 
     ::eyelib::world::EntityId rootEntity = ::eyelib::world::InvalidEntity;

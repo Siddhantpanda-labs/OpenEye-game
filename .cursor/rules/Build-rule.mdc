@@ -1,0 +1,9 @@
+---
+description: 
+globs: **/CMakeLists.txt, **/cmake/**/*.cmake
+alwaysApply: false
+---
+
+For OpenEye’s build during development, use a **Debug** configuration.
+
+To see which **targets** exist (executables, libraries), read the relevant `CMakeLists.txt` files in this repo rather than guessing names.

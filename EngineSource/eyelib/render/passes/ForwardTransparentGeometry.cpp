@@ -67,11 +67,16 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
     const passes::common::ForwardSharedEnvironmentState envState =
         passes::common::ResolveForwardSharedEnvironmentForPipeline(frameData, cam, ctx.cascadeShadowMap, ctx.reflectionProbeManager, iblPtr);
     if (ctx.ensureResourceSets) ctx.ensureResourceSets();
+    resources::PassResourceBuilder* passResourceBuilder =
+        ctx.getPassResourceBuilder ? ctx.getPassResourceBuilder() : ctx.passResourceBuilder;
+    rhi::IDescriptorSet* frameSetForCall = ctx.getFrameSet ? ctx.getFrameSet() : ctx.frameSet;
+    rhi::IDescriptorSet* materialSetForCall = ctx.getMaterialSet ? ctx.getMaterialSet() : ctx.materialSet;
+    rhi::IBuffer* frameUboForCall = ctx.getFrameUbo ? ctx.getFrameUbo() : ctx.frameUbo;
     rhi::IDescriptorSet* passSetForCall = ctx.acquirePassDrawSet ? ctx.acquirePassDrawSet() : nullptr;
     rhi::IDescriptorSet* sceneSetForCall = ctx.acquireSceneDrawSet ? ctx.acquireSceneDrawSet() : nullptr;
     rhi::IDescriptorSet* bindlessSet = ctx.bindlessHeap ? ctx.bindlessHeap->GetDescriptorSet() : nullptr;
-    if (!ForwardPbrResourceBindingsReady(ctx.device, cmd, ctx.frameSet, passSetForCall, ctx.materialSet,
-            sceneSetForCall, ctx.frameUbo, ctx.bindlessHeap)) {
+    if (!ForwardPbrResourceBindingsReady(ctx.device, cmd, frameSetForCall, passSetForCall, materialSetForCall,
+            sceneSetForCall, frameUboForCall, ctx.bindlessHeap)) {
         static bool s_loggedTrSkip = false;
         if (!s_loggedTrSkip) {
             core::Log::WarnF("RenderForwardTransparent: skipped (need bindless + forward resource-space sets).");
@@ -136,8 +141,8 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
             sh->Unbind();
             continue;
         }
-        if (ctx.passResourceBuilder)
-            ctx.passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, d.material.get(), d.materialInstance.get());
+        if (passResourceBuilder)
+            passResourceBuilder->UpdateMaterialSetWithDefaults(ctx.device, drawMaterialSet, d.material.get(), d.materialInstance.get());
         const int useAlbedoTexture = ComputeForwardAlbedoTextureFlag(d.material.get(), d.materialInstance.get());
         rhi::IDescriptorSet* sceneSetForDraw = sceneSetForCall;
         if (bonePtr && boneCount > 0 && ctx.bonesBuffer) {
@@ -153,14 +158,28 @@ void ForwardTransparentRender(rhi::ICommandList* cmd, const RenderFrameData& fra
                 sceneSetForDraw = drawSceneSet;
             }
         }
-        rhi::IDescriptorSet* sets[5] = { ctx.frameSet, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
+        rhi::IDescriptorSet* sets[5] = { frameSetForCall, passSetForCall, drawMaterialSet, bindlessSet, sceneSetForDraw };
         cmd->BindDescriptorSets(0, 5, sets);
         if (!useTypedForwardPush) {
             sh->SetInt("u_UseIBL", useIBL);
             sh->SetInt("u_UseAlbedoTexture", useAlbedoTexture);
         }
         if (useTypedForwardPush) {
-            abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture);
+            const math::Vec4 uvTransform = d.materialInstance
+                ? d.materialInstance->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                : (d.material ? d.material->GetVec4("u_UVTransform", math::Vec4(0.0f, 0.0f, 1.0f, 1.0f))
+                              : math::Vec4(0.0f, 0.0f, 1.0f, 1.0f));
+            const float uvRotation = d.materialInstance
+                ? d.materialInstance->GetFloat("u_UVRotation", 0.0f)
+                : (d.material ? d.material->GetFloat("u_UVRotation", 0.0f) : 0.0f);
+            const float texCoordIndex = d.materialInstance
+                ? d.materialInstance->GetFloat("u_TexCoordIndex", 0.0f)
+                : (d.material ? d.material->GetFloat("u_TexCoordIndex", 0.0f) : 0.0f);
+            const float flipV = d.materialInstance
+                ? d.materialInstance->GetFloat("u_FlipV", 0.0f)
+                : (d.material ? d.material->GetFloat("u_FlipV", 0.0f) : 0.0f);
+            abi::WriteForwardPushConstants(cmd, d.transform, useIBL, useAlbedoTexture,
+                                           uvTransform, uvRotation, texCoordIndex, flipV);
         } else {
             sh->SetMat4("u_Model", d.transform);
             sh->SetMat4("u_NormalMatrix", math::Mat4FromMat3(math::NormalMatrix(d.transform)));

@@ -325,7 +325,12 @@ IDescriptorSet* CreateDescriptorSetVK(DeviceVK* deviceObj, IPipelineLayout* layo
     allocInfo.pSetLayouts = &setLayout;
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     VkResult res = vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet);
-    if (res != VK_SUCCESS) return nullptr;
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF(
+            "CreateDescriptorSetVK: vkAllocateDescriptorSets failed (0x%x) — global descriptor pool may be exhausted (max sets / per-type limits).",
+            static_cast<unsigned>(res));
+        return nullptr;
+    }
     auto* ds = new DescriptorSetVK(deviceObj, pl);
     ds->m_descriptorSet = descriptorSet;
     ds->m_ownsDescriptorSet = true;

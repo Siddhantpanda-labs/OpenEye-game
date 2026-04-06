@@ -10,6 +10,7 @@ namespace asset {
 
 struct LoadedMaterial {
     std::string name;
+    /** Texture slot values are dashed texture asset GUIDs (single source of truth with .meta). */
     std::string albedoPath;
     std::string normalPath;
     std::string metallicPath;
@@ -34,7 +35,7 @@ struct LoadedMaterial {
     uint64_t materialShaderId = 0u;
     std::string fragmentSnippet;
     std::string shadingSnippet;
-    /** Optional MAT1 v3 trailer ("MATX"); persisted by MaterialReader::Write when non-empty. */
+    /** Optional MAT1 trailer ("MATX"); persisted by MaterialReader::Write when non-empty. */
     std::string shaderAssetPath;
     std::vector<std::pair<std::string, bool>> keywordPairs;
     std::vector<std::pair<std::string, float>> floatPairs;
@@ -47,7 +48,10 @@ class MaterialReader {
 public:
     static bool Read(const std::string& path, LoadedMaterial& out);
     static bool Read(const std::vector<uint8_t>& bytes, LoadedMaterial& out);
-    /** Writes MAT1 v3. Overwrites path when possible. */
+    /** Encodes LoadedMaterial to canonical MAT1 bytes (version MaterialFormat::kVersion). */
+    static bool EncodeToBuffer(const LoadedMaterial& in, std::vector<uint8_t>& out);
+
+    /** Writes MAT1. Overwrites path when possible. */
     static bool Write(const std::string& path, const LoadedMaterial& in);
 };
 

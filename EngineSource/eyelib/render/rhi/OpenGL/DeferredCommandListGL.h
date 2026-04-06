@@ -20,6 +20,7 @@ struct DeferredCommandListGL : ICommandList {
 
     void Begin() override;
     void End() override;
+    bool IsRecording() const override { return m_recording; }
 
     void SetRenderTarget(IRenderTarget* rt) override;
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;

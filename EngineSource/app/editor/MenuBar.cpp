@@ -65,7 +65,7 @@ static void RunOpenModal(EditorContext& ctx) {
                 if (ctx.assetRegistry) {
                     EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
                 }
-                ApplyScenePipelineModeToEditorPipelines(ctx);
+                RequestApplyScenePipelineModeToEditorPipelines(ctx);
                 ImGui::CloseCurrentPopup();
             }
         }

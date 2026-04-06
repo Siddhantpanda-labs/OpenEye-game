@@ -35,7 +35,7 @@ static void AppendBytes(std::vector<uint8_t>& buf, const std::string& s) {
     buf.insert(buf.end(), s.begin(), s.end());
 }
 
-/** Optional little-endian trailer after MAT1 v3 string blob: MATX + shader path + keyword/float/vec3/vec4 tables. */
+/** Optional little-endian trailer after MAT1 string blob: MATX + shader path + keyword/float/vec3/vec4 tables. */
 static bool ParseMatXTrailer(const uint8_t* data, size_t size, size_t& pos, LoadedMaterial& out) {
     out.shaderAssetPath.clear();
     out.keywordPairs.clear();
@@ -163,93 +163,14 @@ static void AppendMatXTrailer(std::vector<uint8_t>& buf, const LoadedMaterial& i
 }
 
 bool ParseMaterialBytes(const uint8_t* data, size_t size, LoadedMaterial& out) {
-    if (!data || size < sizeof(uint32_t) * 2u) return false;
-
     using namespace MaterialFormat;
-    const uint32_t magic = *reinterpret_cast<const uint32_t*>(data + 0);
-    const uint32_t version = *reinterpret_cast<const uint32_t*>(data + 4);
-    if (magic != kMagic) return false;
+    if (!data || size < sizeof(MaterialHeader)) return false;
 
-    out = LoadedMaterial{};
-    if (version == kVersionV1) {
-        struct V1Header {
-            uint32_t magic, version, nameLen, albedoPathLen, normalPathLen, metallicPathLen, roughnessPathLen;
-            float metallicValue, roughnessValue;
-        };
-        if (size < sizeof(V1Header)) return false;
-        V1Header h{};
-        std::memcpy(&h, data, sizeof(V1Header));
-        size_t pos = sizeof(V1Header);
-        auto readStr = [&](uint32_t len, std::string& s) -> bool {
-            if (len == 0) {
-                s.clear();
-                return true;
-            }
-            if (pos > size || static_cast<size_t>(len) > (size - pos)) return false;
-            s.assign(reinterpret_cast<const char*>(data + pos), len);
-            pos += len;
-            return true;
-        };
-        if (!readStr(h.nameLen, out.name)) return false;
-        if (!readStr(h.albedoPathLen, out.albedoPath)) return false;
-        if (!readStr(h.normalPathLen, out.normalPath)) return false;
-        if (!readStr(h.metallicPathLen, out.metallicPath)) return false;
-        if (!readStr(h.roughnessPathLen, out.roughnessPath)) return false;
-        out.metallicValue = h.metallicValue;
-        out.roughnessValue = h.roughnessValue;
-        out.albedoColorR = 1.f;
-        out.albedoColorG = 1.f;
-        out.albedoColorB = 1.f;
-        return true;
-    }
-
-    if (version == kVersionV3) {
-        if (size < sizeof(MaterialHeaderV3)) return false;
-        MaterialHeaderV3 h{};
-        std::memcpy(&h, data, sizeof(MaterialHeaderV3));
-        size_t pos = sizeof(MaterialHeaderV3);
-        auto readStr = [&](uint32_t len, std::string& s) -> bool {
-            if (len == 0) {
-                s.clear();
-                return true;
-            }
-            if (pos > size || static_cast<size_t>(len) > (size - pos)) return false;
-            s.assign(reinterpret_cast<const char*>(data + pos), len);
-            pos += len;
-            return true;
-        };
-        if (!readStr(h.nameLen, out.name)) return false;
-        if (!readStr(h.albedoPathLen, out.albedoPath)) return false;
-        if (!readStr(h.normalPathLen, out.normalPath)) return false;
-        if (!readStr(h.metallicPathLen, out.metallicPath)) return false;
-        if (!readStr(h.roughnessPathLen, out.roughnessPath)) return false;
-        out.metallicValue = h.metallicValue;
-        out.roughnessValue = h.roughnessValue;
-        out.albedoColorR = h.albedoColorR;
-        out.albedoColorG = h.albedoColorG;
-        out.albedoColorB = h.albedoColorB;
-        out.emissionR = h.emissionR;
-        out.emissionG = h.emissionG;
-        out.emissionB = h.emissionB;
-        out.aoValue = h.aoValue;
-        out.alpha = h.alpha;
-        if (!readStr(h.aoPathLen, out.aoPath)) return false;
-        if (!readStr(h.emissivePathLen, out.emissivePath)) return false;
-        if (!readStr(h.mrPathLen, out.metallicRoughnessPath)) return false;
-        if (!readStr(h.fragmentSnippetLen, out.fragmentSnippet)) return false;
-        if (!readStr(h.shadingSnippetLen, out.shadingSnippet)) return false;
-        out.shadingModel = h.shadingModel;
-        out.blending = h.blending;
-        out.flags = h.flags;
-        out.reflectiveStrength = h.reflectiveStrength;
-        out.materialShaderId = h.materialShaderId;
-        if (!ParseMatXTrailer(data, size, pos, out)) return false;
-        return true;
-    }
-
-    if (version != kVersion || size < sizeof(MaterialHeader)) return false;
     MaterialHeader h{};
     std::memcpy(&h, data, sizeof(MaterialHeader));
+    if (h.magic != kMagic || h.version != kVersion) return false;
+
+    out = LoadedMaterial{};
     size_t pos = sizeof(MaterialHeader);
     auto readStr = [&](uint32_t len, std::string& s) -> bool {
         if (len == 0) {
@@ -271,6 +192,22 @@ bool ParseMaterialBytes(const uint8_t* data, size_t size, LoadedMaterial& out) {
     out.albedoColorR = h.albedoColorR;
     out.albedoColorG = h.albedoColorG;
     out.albedoColorB = h.albedoColorB;
+    out.emissionR = h.emissionR;
+    out.emissionG = h.emissionG;
+    out.emissionB = h.emissionB;
+    out.aoValue = h.aoValue;
+    out.alpha = h.alpha;
+    if (!readStr(h.aoPathLen, out.aoPath)) return false;
+    if (!readStr(h.emissivePathLen, out.emissivePath)) return false;
+    if (!readStr(h.mrPathLen, out.metallicRoughnessPath)) return false;
+    if (!readStr(h.fragmentSnippetLen, out.fragmentSnippet)) return false;
+    if (!readStr(h.shadingSnippetLen, out.shadingSnippet)) return false;
+    out.shadingModel = h.shadingModel;
+    out.blending = h.blending;
+    out.flags = h.flags;
+    out.reflectiveStrength = h.reflectiveStrength;
+    out.materialShaderId = h.materialShaderId;
+    if (!ParseMatXTrailer(data, size, pos, out)) return false;
     return true;
 }
 
@@ -291,9 +228,9 @@ bool MaterialReader::Read(const std::vector<uint8_t>& bytes, LoadedMaterial& out
     return ParseMaterialBytes(bytes.data(), bytes.size(), out);
 }
 
-bool MaterialReader::Write(const std::string& path, const LoadedMaterial& in) {
+bool MaterialReader::EncodeToBuffer(const LoadedMaterial& in, std::vector<uint8_t>& out) {
     using namespace MaterialFormat;
-    MaterialHeaderV3 h{};
+    MaterialHeader h{};
     h.nameLen = static_cast<uint32_t>(in.name.size());
     h.albedoPathLen = static_cast<uint32_t>(in.albedoPath.size());
     h.normalPathLen = static_cast<uint32_t>(in.normalPath.size());
@@ -320,21 +257,26 @@ bool MaterialReader::Write(const std::string& path, const LoadedMaterial& in) {
     h.reflectiveStrength = in.reflectiveStrength;
     h.materialShaderId = in.materialShaderId;
 
-    std::vector<uint8_t> buf;
-    buf.resize(sizeof(MaterialHeaderV3));
-    std::memcpy(buf.data(), &h, sizeof(MaterialHeaderV3));
-    AppendBytes(buf, in.name);
-    AppendBytes(buf, in.albedoPath);
-    AppendBytes(buf, in.normalPath);
-    AppendBytes(buf, in.metallicPath);
-    AppendBytes(buf, in.roughnessPath);
-    AppendBytes(buf, in.aoPath);
-    AppendBytes(buf, in.emissivePath);
-    AppendBytes(buf, in.metallicRoughnessPath);
-    AppendBytes(buf, in.fragmentSnippet);
-    AppendBytes(buf, in.shadingSnippet);
-    AppendMatXTrailer(buf, in);
+    out.clear();
+    out.resize(sizeof(MaterialHeader));
+    std::memcpy(out.data(), &h, sizeof(MaterialHeader));
+    AppendBytes(out, in.name);
+    AppendBytes(out, in.albedoPath);
+    AppendBytes(out, in.normalPath);
+    AppendBytes(out, in.metallicPath);
+    AppendBytes(out, in.roughnessPath);
+    AppendBytes(out, in.aoPath);
+    AppendBytes(out, in.emissivePath);
+    AppendBytes(out, in.metallicRoughnessPath);
+    AppendBytes(out, in.fragmentSnippet);
+    AppendBytes(out, in.shadingSnippet);
+    AppendMatXTrailer(out, in);
+    return true;
+}
 
+bool MaterialReader::Write(const std::string& path, const LoadedMaterial& in) {
+    std::vector<uint8_t> buf;
+    if (!EncodeToBuffer(in, buf)) return false;
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     if (!f) return false;
     f.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size()));

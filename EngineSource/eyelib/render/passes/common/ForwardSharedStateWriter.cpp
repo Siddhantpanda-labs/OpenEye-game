@@ -47,7 +47,15 @@ bool WriteForwardSharedState(const ForwardSharedStateWriteParams& params) {
     }
     params.frameUbo->Update(frameUboData, 0, 320);
 
-    if (params.useShadows && params.shadowDepthTexture) params.passSet->UpdateTexture(0, params.shadowDepthTexture);
+    // Set 1 binding 0 is sampler2DArray in forward.frag; must always be written (IBL uses nullptr→fallback 2D/cube only).
+    rhi::ITexture* shadowForBinding0 = nullptr;
+    if (params.useShadows && params.shadowDepthTexture)
+        shadowForBinding0 = params.shadowDepthTexture;
+    else if (params.shadowMapArrayFallback)
+        shadowForBinding0 = params.shadowMapArrayFallback;
+    else if (params.cascadeShadowMap)
+        shadowForBinding0 = params.cascadeShadowMap->GetDepthTextureRHI();
+    params.passSet->UpdateTexture(0, shadowForBinding0);
     if (params.sceneLightingBuffer) {
         params.passSet->UpdateStorageBuffer(1, params.sceneLightingBuffer, 0, 0);
         rhi::IBuffer* clusterOrFallback = params.lightIndexBuffer ? params.lightIndexBuffer : params.sceneLightingBuffer;

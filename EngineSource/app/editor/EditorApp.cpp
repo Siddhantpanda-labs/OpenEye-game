@@ -108,9 +108,10 @@ public:
             if (!sid.IsValid()) sid = m_registry->LoadAssetDescriptorOnly("name:" + name, eyelib::api::AssetType::Shader);
             return GetShader(sid);
         };
-        auto resolveTexture = [this](const std::string& path) {
-            eyelib::api::AssetId tid = m_registry->GetId(path);
-            if (!tid.IsValid()) tid = m_registry->LoadAssetDescriptorOnly(path, eyelib::api::AssetType::Texture);
+        auto resolveTexture = [this](const std::string& textureAssetGuid) {
+            if (textureAssetGuid.empty()) return std::shared_ptr<eyelib::render::Texture2D>{};
+            eyelib::api::AssetId tid = eyelib::api::AssetId::FromString(textureAssetGuid);
+            if (!tid.IsValid()) return std::shared_ptr<eyelib::render::Texture2D>{};
             return GetTexture(tid);
         };
         auto mat = eyelib::render::CreateMaterialFromDescriptor(*desc, resolveShader, resolveTexture);
@@ -428,6 +429,7 @@ int RunEditor(int argc, char** argv) {
     eyelib::api::Renderer sceneViewRenderer;
     eyelib::api::RenderPipeline sceneViewPipeline;
     eyelib::api::RenderPipeline gameViewPipeline;
+    eyelib::api::RenderPipeline materialPreviewPipeline;
     if (!sceneViewRenderer.Initialize()) {
         std::fprintf(stderr, "Editor: Renderer init failed.\n");
     }
@@ -443,6 +445,12 @@ int RunEditor(int argc, char** argv) {
             : gameViewPipeline.InitializeWithSharedDevice(editorRenderDevice, 256, 256);
         if (!gamePipelineOk) {
             std::fprintf(stderr, "Editor: Game view pipeline init failed (debug camera preview disabled).\n");
+        }
+        bool matPreviewOk = scenePipelineOk
+            ? materialPreviewPipeline.InitializeWithSharedDevice(editorRenderDevice, 384, 384, &sceneViewPipeline)
+            : false;
+        if (!matPreviewOk) {
+            std::fprintf(stderr, "Editor: Material preview pipeline init failed (Inspector preview disabled).\n");
         }
         eyelib::api::core::Log::Info("Editor: both pipelines initialized, before AssetRegistry.Scan");
     }
@@ -462,6 +470,7 @@ int RunEditor(int argc, char** argv) {
     openeye::editor::EditorContext ctx;
     ctx.sceneViewPipeline = &sceneViewPipeline;
     ctx.gameViewPipeline = &gameViewPipeline;
+    ctx.materialPreviewPipeline = materialPreviewPipeline.GetDevice() ? &materialPreviewPipeline : nullptr;
     ctx.assetRegistry = &assetRegistry;
     ctx.assetRoots = { engineAssets };
     ctx.engineAssetsPath = engineAssets;
@@ -471,9 +480,13 @@ int RunEditor(int argc, char** argv) {
     };
     openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
     eyelib::api::core::Log::Info("Editor: ApplyScenePipelineModeToEditorPipelines done");
+    if (materialPreviewPipeline.GetDevice())
+        materialPreviewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
 
     if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
         eyelib::api::core::Log::InfoF("Editor: opened project '%s' at %s", ctx.projectName.c_str(), ctx.projectPath.c_str());
+        if (materialPreviewPipeline.GetDevice())
+            materialPreviewPipeline.SetMode(eyelib::api::RenderPipeline::Mode::Forward);
     }
 
     if (editorRenderDevice) {
@@ -522,7 +535,7 @@ int RunEditor(int argc, char** argv) {
                     ctx.assetRegistry->SetRenderDevice(editorRenderDevice);
                 EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
             }
-            openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
+            openeye::editor::RequestApplyScenePipelineModeToEditorPipelines(ctx);
             ctx.selectedEntity = ::eyelib::world::InvalidEntity;
             ctx.sceneSelected = false;
             eyelib::api::core::Log::Info("Game runtime stopped; editor asset registry restored.");
@@ -530,6 +543,9 @@ int RunEditor(int argc, char** argv) {
         window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
 
         eyelib::api::debug::Profiler::BeginFrame();
+
+        // Apply deferred GPU-facing editor mutations (pipeline mode, etc.) before any frame recording or scene uploads.
+        ctx.DrainGpuSafeWork();
 
         if (imgui.IsVulkan() && editorDevice) {
 #ifdef OPENEYE_IMGUI_VULKAN
@@ -547,6 +563,8 @@ int RunEditor(int argc, char** argv) {
 
         if (ctx.sceneViewPipeline)
             ctx.sceneViewPipeline->UpdateUploads();
+        if (ctx.materialPreviewPipeline)
+            ctx.materialPreviewPipeline->UpdateUploads();
 
         openeye::editor::ShowMenuBar(ctx);
 
@@ -566,25 +584,15 @@ int RunEditor(int argc, char** argv) {
             rhiDevice->BlitToDefaultFramebuffer(nullptr);
             rhiDevice->EndFrame();
             rhiDevice->Present();
-            // One-time readback: after frame 30, wait for GPU then read 1 pixel from scene pipeline output.
-            {
-                static int s_frameCount = 0;
-                if (ctx.sceneViewPipeline && ++s_frameCount == 30) {
-                    ctx.sceneViewPipeline->Finish();
-                    uint8_t px[4] = {};
-                    if (ctx.sceneViewPipeline->ReadOutputPixels(1, 1, px)) {
-                        eyelib::api::core::Log::InfoF("Scene output readback (1x1): R=%u G=%u B=%u A=%u (non-zero => draw wrote)", px[0], px[1], px[2], px[3]);
-                    } else {
-                        eyelib::api::core::Log::Info("Scene output readback: ReadOutputPixels failed");
-                    }
-                }
-            }
         } else {
             if (ctx.sceneViewPipeline)
                 ctx.sceneViewPipeline->RestoreDefaultFramebufferAndViewport(
                     static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
             if (ctx.gameViewPipeline)
                 ctx.gameViewPipeline->RestoreDefaultFramebufferAndViewport(
+                    static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
+            if (ctx.materialPreviewPipeline)
+                ctx.materialPreviewPipeline->RestoreDefaultFramebufferAndViewport(
                     static_cast<uint32_t>(window.Width()), static_cast<uint32_t>(window.Height()));
             ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
             window.SwapBuffers();
@@ -599,6 +607,7 @@ int RunEditor(int argc, char** argv) {
     }
     sceneViewPipeline.Shutdown();
     gameViewPipeline.Shutdown();
+    materialPreviewPipeline.Shutdown();
     assetRegistry.SetGPUResolver(nullptr);
     if (editorDevice) {
         eyelib::render::DebugDrawRenderer::Shutdown();

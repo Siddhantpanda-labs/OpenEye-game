@@ -25,7 +25,7 @@ struct CommandListVK : ICommandList {
     /** Set command buffer (used by device for immediate list after pool allocation). */
     void SetCommandBuffer(void* commandBuffer, bool isImmediate);
     bool IsImmediate() const { return m_isImmediate; }
-    bool IsRecording() const { return m_isRecording; }
+    bool IsRecording() const override { return m_isRecording; }
 
     void Begin() override;
     void End() override;

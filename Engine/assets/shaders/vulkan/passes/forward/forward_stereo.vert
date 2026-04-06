@@ -44,7 +44,8 @@ void main() {
     vec3 T = normalize(worldTangent - dot(worldTangent, worldNormal) * worldNormal);
     v_TBN = mat3(T, cross(worldNormal, T), worldNormal);
     v_Normal = worldNormal;
-    vec2 uv = a_TexCoord * pc.u_UVTransform.zw;
+    vec2 baseUv = mix(a_TexCoord, a_TexCoord1, step(0.5, pc.u_TexCoordIndex));
+    vec2 uv = baseUv * pc.u_UVTransform.zw;
     float c = cos(pc.u_UVRotation);
     float s = sin(pc.u_UVRotation);
     uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;

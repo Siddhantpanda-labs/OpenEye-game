@@ -66,9 +66,10 @@ std::shared_ptr<eyelib::render::Material> RendererGPUResourceCache::GetMaterial(
         if (!sid.IsValid()) sid = m_registry->LoadAssetDescriptorOnly("name:" + name, eyelib::api::AssetType::Shader);
         return GetShader(sid);
     };
-    auto resolveTexture = [this](const std::string& path) {
-        eyelib::api::AssetId tid = m_registry->GetId(path);
-        if (!tid.IsValid()) tid = m_registry->LoadAssetDescriptorOnly(path, eyelib::api::AssetType::Texture);
+    auto resolveTexture = [this](const std::string& textureAssetGuid) {
+        if (textureAssetGuid.empty()) return std::shared_ptr<eyelib::render::Texture2D>{};
+        eyelib::api::AssetId tid = eyelib::api::AssetId::FromString(textureAssetGuid);
+        if (!tid.IsValid()) return std::shared_ptr<eyelib::render::Texture2D>{};
         return GetTexture(tid);
     };
     auto mat = eyelib::render::CreateMaterialFromDescriptor(*desc, resolveShader, resolveTexture);

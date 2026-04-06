@@ -121,8 +121,15 @@ DeferredLightingPassExecuteParams DeferredLightingPassSystem::BuildParams(const 
     rhi::ITexture* gNorm = gbuffer->GetNormalTextureRHI();
     rhi::ITexture* gAlb = gbuffer->GetAlbedoTextureRHI();
     rhi::ITexture* gPbr = gbuffer->GetPBRParamsTextureRHI();
-    rhi::ITexture* gDepth = gbuffer->GetDepthTextureRHI();
-    rhi::ITexture* shadowDepth = params.cascadeForLighting ? params.cascadeForLighting->GetDepthTextureRHI() : nullptr;
+    rhi::ITexture* cascadeShadow = params.cascadeForLighting ? params.cascadeForLighting->GetDepthTextureRHI() : nullptr;
+    rhi::ITexture* fallbackShadow = nullptr;
+    if (params.device) {
+        if (rhi::IRenderTarget* dummyRt = params.device->GetSharedShadowMapArrayDummyRenderTarget()) {
+            if (rhi::ITexture* d = dummyRt->GetDepthTexture())
+                fallbackShadow = d;
+        }
+    }
+    rhi::ITexture* shadowDepthForShader = cascadeShadow ? cascadeShadow : fallbackShadow;
     rhi::IBuffer* sceneLighting = params.sceneLightingBuffer ? params.sceneLightingBuffer : m_fallbackStorageBuffer;
     rhi::IBuffer* lightSpaceBuf = params.cascadeForLighting ? params.cascadeForLighting->GetLightSpaceBufferRHI() : nullptr;
     rhi::ITexture* ir = (params.ibl && params.ibl->IsValid()) ? params.ibl->GetIrradianceTextureRHI() : nullptr;
@@ -133,7 +140,8 @@ DeferredLightingPassExecuteParams DeferredLightingPassSystem::BuildParams(const 
     passSet->UpdateTexture(1, gNorm ? gNorm : m_fallback2DTexture);
     passSet->UpdateTexture(2, gAlb ? gAlb : m_fallback2DTexture);
     passSet->UpdateTexture(3, gPbr ? gPbr : m_fallback2DTexture);
-    passSet->UpdateTexture(4, shadowDepth ? shadowDepth : (gDepth ? gDepth : m_fallback2DTexture));
+    // Binding 4: deferred/lighting.frag uses sampler2DArray — must match cascade depth array or 1-layer fallback array.
+    passSet->UpdateTexture(4, shadowDepthForShader ? shadowDepthForShader : m_fallback2DTexture);
     passSet->UpdateStorageBuffer(5, sceneLighting, 0, 0);
     passSet->UpdateUniformBuffer(6, lightSpaceBuf ? lightSpaceBuf : m_fallbackUniformBuffer, 0, 0);
     passSet->UpdateTexture(7, ir ? ir : m_fallbackCubeTexture);
@@ -151,9 +159,18 @@ bool DeferredLightingPassSystem::Execute(const DeferredLightingPassExecuteParams
     GBuffer* const gbuffer = params.build.gbuffer;
     if (!params.build.frameData || !lightingPass || !gbuffer)
         return false;
+    // Barriers before HDR SetRenderTarget — BarrierTexture mid dynamic-rendering pass ends the pass (Vulkan).
+    if (cmd) {
+        if (params.build.cascadeForLighting) {
+            if (rhi::ITexture* d = params.build.cascadeForLighting->GetDepthTextureRHI())
+                rhi::BarrierDepthTextureForShaderSampling(cmd, d);
+        } else if (device)
+            device->EnsureSharedShadowMapArrayDummyForShaderSampling(cmd);
+    }
     if (cmd && params.build.hdrRenderTarget)
         rhi::ClearAndSetRenderTargetWithViewport(cmd, params.build.hdrRenderTarget, 0, 0, params.build.width, params.build.height,
                                                  params.build.clearColor);
+
     RenderContext c{};
     c.device = device;
     c.cmd = cmd;

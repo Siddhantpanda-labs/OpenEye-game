@@ -105,69 +105,10 @@ void LoadedMaterialToDescriptor(const asset::LoadedMaterial& src, eyelib::render
             eyelib::math::Vec4(kv.second[0], kv.second[1], kv.second[2], kv.second[3]);
 }
 
-std::string JoinRelative(const std::string& a, const std::string& b) {
-    if (a.empty()) return b;
-    if (b.empty()) return a;
-    if (a.back() == '/') return a + b;
-    return a + "/" + b;
-}
-
 bool IsAbsolutePath(const std::string& p) {
     if (p.empty()) return false;
     if (p[0] == '/' || p[0] == '\\') return true;
     return p.size() >= 2 && ((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1] == ':';
-}
-
-std::string DirectoryOfPath(std::string p) {
-    std::replace(p.begin(), p.end(), '\\', '/');
-    const size_t slash = p.find_last_of('/');
-    if (slash == std::string::npos) return {};
-    return p.substr(0, slash);
-}
-
-std::string LastPathSegment(const std::string& p) {
-    const std::string dir = DirectoryOfPath(p);
-    if (dir.empty()) return p;
-    const size_t slash = p.find_last_of('/');
-    if (slash == std::string::npos) return p;
-    return p.substr(slash + 1);
-}
-
-void ResolveMaterialTexturePathsRelativeToMaterial(const std::string& assetRoot,
-                                                   const std::string& materialRelPath,
-                                                   eyelib::render::MaterialDescriptor& desc) {
-    const std::string materialDir = DirectoryOfPath(materialRelPath);
-    std::string modelBaseDir = materialDir;
-    const std::string lastDir = LastPathSegment(materialDir);
-    if (lastDir == "materials" || lastDir == "material")
-        modelBaseDir = DirectoryOfPath(materialDir);
-    for (auto& kv : desc.texturePaths) {
-        std::string& texPath = kv.second;
-        if (texPath.empty() || IsAbsolutePath(texPath)) continue;
-        std::string normalizedTexPath = texPath;
-        std::replace(normalizedTexPath.begin(), normalizedTexPath.end(), '\\', '/');
-        while (normalizedTexPath.size() > 1 && normalizedTexPath[0] == '/') normalizedTexPath.erase(0, 1);
-        const std::string rootRelativePath = JoinRelative(modelBaseDir, normalizedTexPath);
-        const std::string materialRelativePath = JoinRelative(materialDir, normalizedTexPath);
-
-        // Canonical-viewer-like behavior: prefer model folder root (sibling to material/ and textures/).
-        std::string resolved = rootRelativePath;
-        if (!assetRoot.empty()) {
-            const std::string asGivenAbs = fs::NormalizePath(assetRoot + "/" + normalizedTexPath);
-            const std::string rootRelativeAbs = fs::NormalizePath(assetRoot + "/" + rootRelativePath);
-            const std::string materialRelativeAbs = fs::NormalizePath(assetRoot + "/" + materialRelativePath);
-            if (fs::FileExists(asGivenAbs))
-                resolved = normalizedTexPath;
-            else if (fs::FileExists(rootRelativeAbs))
-                resolved = rootRelativePath;
-            else if (fs::FileExists(materialRelativeAbs))
-                resolved = materialRelativePath;
-        }
-
-        texPath = resolved;
-        std::replace(texPath.begin(), texPath.end(), '\\', '/');
-        while (texPath.size() > 1 && texPath[0] == '/') texPath.erase(0, 1);
-    }
 }
 
 void ImportMeshToDescriptor(const asset::ImportMesh& src, eyelib::render::MeshDescriptor& dst) {
@@ -483,9 +424,6 @@ const eyelib::render::MaterialDescriptor* AssetRegistry::GetMaterialDescriptor(c
     if (!loaded) return nullptr;
     eyelib::render::MaterialDescriptor& desc = m_impl->materialDescriptors[id];
     LoadedMaterialToDescriptor(*loaded, desc);
-    const std::string materialRelPath = m_impl->database.GetPath(ToGuid(id));
-    if (!materialRelPath.empty())
-        ResolveMaterialTexturePathsRelativeToMaterial(m_impl->assetRoot, materialRelPath, desc);
     return &m_impl->materialDescriptors[id];
 }
 
@@ -511,7 +449,10 @@ const eyelib::render::TextureDescriptor* AssetRegistry::GetTextureDescriptor(con
     std::string rel = m_impl->database.GetPath(ToGuid(id));
     if (rel.empty()) return nullptr;
     eyelib::render::TextureDescriptor& d = m_impl->textureDescriptors[id];
-    d.filePath = m_impl->assetRoot.empty() ? rel : (m_impl->assetRoot + "/" + rel);
+    if (!m_impl->assetRoot.empty() && !IsAbsolutePath(rel))
+        d.filePath = fs::NormalizePath(m_impl->assetRoot + "/" + rel);
+    else
+        d.filePath = fs::NormalizePath(rel);
     return &m_impl->textureDescriptors[id];
 }
 
@@ -522,7 +463,10 @@ const eyelib::render::ShaderDescriptor* AssetRegistry::GetShaderDescriptor(const
     std::string rel = m_impl->database.GetPath(ToGuid(id));
     if (rel.empty()) return nullptr;
     eyelib::render::ShaderDescriptor& d = m_impl->shaderDescriptors[id];
-    d.vertexPath = m_impl->assetRoot.empty() ? rel : (m_impl->assetRoot + "/" + rel);
+    if (!m_impl->assetRoot.empty() && !IsAbsolutePath(rel))
+        d.vertexPath = fs::NormalizePath(m_impl->assetRoot + "/" + rel);
+    else
+        d.vertexPath = fs::NormalizePath(rel);
     d.fragmentPath = d.vertexPath;
     return &m_impl->shaderDescriptors[id];
 }

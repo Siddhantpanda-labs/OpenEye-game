@@ -12,7 +12,7 @@ VulkanRenderSliceScope::VulkanRenderSliceScope(eyelib::render::rhi::IDevice* dev
     if (!m_cmd)
         return;
     m_cmd->Begin();
-    m_device->SetTransientRecordingCommandList(m_cmd);
+    m_device->PushTransientRecordingCommandList(m_cmd);
     m_active = true;
 }
 
@@ -47,7 +47,7 @@ void VulkanRenderSliceScope::Release() {
         m_active = false;
         return;
     }
-    m_device->SetTransientRecordingCommandList(nullptr);
+    m_device->PopTransientRecordingCommandList(m_cmd);
     m_cmd->End();
     m_device->EnqueueFrameSliceCommandList(m_cmd);
     m_cmd = nullptr;

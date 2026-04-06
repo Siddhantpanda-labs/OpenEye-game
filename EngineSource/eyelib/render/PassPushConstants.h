@@ -42,9 +42,17 @@ constexpr uint32_t kSkyboxBrightnessOffset = 128u;
 
 /** G-buffer geometry (`passes/deferred/gbuffer.vert` + `gbuffer.frag`), std430: VS block then FS float. */
 constexpr uint32_t kGBufferFragHasAlbedoOffset = 92u;
+/** Instanced G-buffer (`gbuffer_instanced.vert` + `.frag`): FS flag after 28-byte VS push. */
+constexpr uint32_t kGBufferInstancedFragHasAlbedoOffset = 28u;
+/** `gbuffer_skinned.vert`: `u_UsePerDrawTransformBuffer` after VS+FS shared region (92 + 4). */
+constexpr uint32_t kGBufferSkinnedUsePerDrawTransformOffset = 96u;
 
 struct ForwardVsPush {
     math::Mat4 model;
+    math::Vec4 uvTransform{};
+    float uvRotation = 0.f;
+    float texCoordIndex = 0.f;
+    float flipV = 0.f;
 };
 
 struct ForwardFsPush {
@@ -66,15 +74,22 @@ struct EntityIdFragPush {
     uint32_t entityId = 0u;
 };
 
-static_assert(sizeof(ForwardVsPush) == sizeof(math::Mat4), "ForwardVsPush ABI mismatch.");
+static_assert(sizeof(ForwardVsPush) == 92u, "ForwardVsPush ABI mismatch.");
 static_assert(sizeof(ForwardFsPush) == 8u, "ForwardFsPush ABI mismatch.");
 static_assert(sizeof(ShadowVsPush) == sizeof(math::Mat4), "ShadowVsPush ABI mismatch.");
 static_assert(sizeof(EntityIdVsPush) == sizeof(math::Mat4) * 3u, "EntityIdVsPush ABI mismatch.");
 static_assert(sizeof(EntityIdFragPush) == sizeof(uint32_t), "EntityIdFragPush ABI mismatch.");
 
-inline void WriteForwardPushConstants(rhi::ICommandList* cmd, const math::Mat4& model, int useIBL, int useAlbedoTexture) {
+inline void WriteForwardPushConstants(rhi::ICommandList* cmd, const math::Mat4& model, int useIBL, int useAlbedoTexture,
+                                      const math::Vec4& uvTransform = math::Vec4(0.f, 0.f, 1.f, 1.f),
+                                      float uvRotation = 0.f, float texCoordIndex = 0.f, float flipV = 0.f) {
     if (!cmd) return;
-    const ForwardVsPush vsPush{ model };
+    ForwardVsPush vsPush{};
+    vsPush.model = model;
+    vsPush.uvTransform = uvTransform;
+    vsPush.uvRotation = uvRotation;
+    vsPush.texCoordIndex = texCoordIndex;
+    vsPush.flipV = flipV;
     const ForwardFsPush fsPush{ useIBL, useAlbedoTexture };
     cmd->SetPushConstants(kForwardVsOffset, static_cast<uint32_t>(sizeof(vsPush)), &vsPush);
     cmd->SetPushConstants(kForwardFsOffset, static_cast<uint32_t>(sizeof(fsPush)), &fsPush);
@@ -197,6 +212,28 @@ inline void WriteGBufferGeometryPushConstants(rhi::ICommandList* cmd, const math
     vs.flipV = flipV;
     cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(vs)), &vs);
     cmd->SetPushConstants(kGBufferFragHasAlbedoOffset, sizeof(float), &hasAlbedoTexture);
+}
+
+/** Matches `GBufferInstancedPush` in `passes/deferred/gbuffer_instanced.vert` (std430). */
+struct GBufferInstancedVertPushStd430 {
+    math::Vec4 uvTransform{};
+    float uvRotation = 0.f;
+    float texCoordIndex = 0.f;
+    float flipV = 0.f;
+};
+
+static_assert(sizeof(GBufferInstancedVertPushStd430) == 28u, "GBufferInstancedVertPushStd430 ABI mismatch.");
+
+inline void WriteGBufferInstancedGeometryPushConstants(rhi::ICommandList* cmd, const math::Vec4& uvTransform, float uvRotation,
+                                                       float texCoordIndex, float flipV, float hasAlbedoTexture) {
+    if (!cmd) return;
+    GBufferInstancedVertPushStd430 vs{};
+    vs.uvTransform = uvTransform;
+    vs.uvRotation = uvRotation;
+    vs.texCoordIndex = texCoordIndex;
+    vs.flipV = flipV;
+    cmd->SetPushConstants(0u, static_cast<uint32_t>(sizeof(vs)), &vs);
+    cmd->SetPushConstants(kGBufferInstancedFragHasAlbedoOffset, sizeof(float), &hasAlbedoTexture);
 }
 
 /** `passes/deferred/lighting.frag`: `layout(push_constant) uniform LightingPush { int u_UseIBL; }`. */

@@ -19,6 +19,7 @@ struct CommandListDiligent : ICommandList {
 
     void Begin() override;
     void End() override;
+    bool IsRecording() const override { return false; }
 
     void SetRenderTarget(IRenderTarget* rt) override;
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;

@@ -231,7 +231,7 @@ static void FillMaterialFromDescriptor(
     Material& mat,
     const MaterialDescriptor& desc,
     const std::function<std::shared_ptr<Shader>(const std::string& name)>& resolveShader,
-    const std::function<std::shared_ptr<Texture2D>(const std::string& path)>& resolveTexture) {
+    const std::function<std::shared_ptr<Texture2D>(const std::string& textureAssetGuid)>& resolveTexture) {
     (void)resolveShader;
     if (!desc.shaderAssetPath.empty())
         mat.SetMaterialShaderId(MaterialShaderIds::PBR);
@@ -269,7 +269,7 @@ static void FillMaterialFromDescriptor(
 std::shared_ptr<Material> CreateMaterialFromDescriptor(
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
-    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
+    std::function<std::shared_ptr<Texture2D>(const std::string& textureAssetGuid)> resolveTexture) {
     auto mat = std::make_shared<Material>();
     FillMaterialFromDescriptor(*mat, desc, resolveShader, resolveTexture);
     return mat;
@@ -279,7 +279,7 @@ void ApplyMaterialFromDescriptor(
     Material& mat,
     const MaterialDescriptor& desc,
     std::function<std::shared_ptr<Shader>(const std::string& name)> resolveShader,
-    std::function<std::shared_ptr<Texture2D>(const std::string& path)> resolveTexture) {
+    std::function<std::shared_ptr<Texture2D>(const std::string& textureAssetGuid)> resolveTexture) {
     FillMaterialFromDescriptor(mat, desc, resolveShader, resolveTexture);
 }
 

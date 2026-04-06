@@ -3,6 +3,7 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/OpenGL/CommandListGL.h"
 #include <array>
+#include <mutex>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -79,6 +80,8 @@ struct DeviceGL : IDevice {
                                       uint32_t samples = 1,
                                       bool transient = false) override;
     IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) override;
+    IRenderTarget* GetSharedShadowMapArrayDummyRenderTarget() override;
+    void EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) override;
     IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                       const std::vector<RHITextureFormat>& colorFormats,
                                                       ITexture* sharedDepthTexture,
@@ -101,6 +104,8 @@ struct DeviceGL : IDevice {
 
     IBindlessHeap* CreateBindlessHeap() override;
     void DestroyBindlessHeap(IBindlessHeap* heap) override;
+    IBindlessHeap* GetOrCreateSharedBindlessHeap() override;
+    BindlessHandle GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) override;
 
     int GetMaxSamples(int requestedSamples) override;
 
@@ -147,7 +152,12 @@ private:
     std::unique_ptr<CommandListGL> m_immediateCommandList;
     IBuffer* m_fullscreenQuadVBO = nullptr;
     IBuffer* m_fullscreenQuadIBO = nullptr;
+    IRenderTarget* m_sharedShadowMapArrayDummyRt = nullptr;
+    bool m_sharedShadowMapArrayDummyBarrierDone = false;
     std::unordered_map<VAOCacheKey, unsigned int, VAOCacheKeyHash> m_vaoCache;
+    IBindlessHeap* m_sharedBindlessHeap = nullptr;
+    std::unordered_map<ITexture*, BindlessHandle> m_sharedBindlessTextureHandles;
+    std::mutex m_sharedBindlessMutex;
 };
 
 } // namespace rhi

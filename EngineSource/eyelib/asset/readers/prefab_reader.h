@@ -13,12 +13,12 @@ struct PrefabDrawable {
     Mat4 worldTransform;
 };
 
-/** One node in a prefab hierarchy. meshIndex is set by caller from mesh path -> entry index. */
+/** One node in a prefab hierarchy. meshIndex is a stable mesh-entry index when present. */
 struct PrefabNode {
     std::string name;
     float localTransform[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
     std::string meshPath;   // e.g. "model_0.mesh"
-    int meshIndex = -1;     // index into .omesh mesh entry list; set by caller
+    int meshIndex = -1;     // mesh entry index from prefab (preferred); caller may remap to submesh start
     std::vector<PrefabNode> children;
 };
 
@@ -29,7 +29,7 @@ public:
     static bool Read(const std::string& path, std::vector<PrefabDrawable>& outDrawables);
     static bool ReadFromText(const std::string& text, std::vector<PrefabDrawable>& outDrawables);
 
-    /** Parse prefab text into a hierarchy of nodes (name, local transform, mesh path, children). meshIndex left -1. */
+    /** Parse prefab text into a hierarchy of nodes (name, local transform, mesh path, optional meshIndex, children). */
     static bool ReadHierarchyFromText(const std::string& text, std::vector<PrefabNode>& outRoots);
 };
 

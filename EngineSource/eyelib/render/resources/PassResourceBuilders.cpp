@@ -2,6 +2,7 @@
 #include "eyelib/render/materials/Material.h"
 #include "eyelib/render/materials/MaterialInstance.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
+#include "eyelib/core/Log.h"
 
 namespace eyelib {
 namespace render {
@@ -19,7 +20,11 @@ rhi::IDescriptorSet* AcquireDynamicSet(
         rhi::IPipelineLayout* setLayout = device->GetResourceSetLayout(setType);
         if (!setLayout) return nullptr;
         rhi::IDescriptorSet* allocatedSet = device->CreateDescriptorSet(setLayout);
-        if (!allocatedSet) return nullptr;
+        if (!allocatedSet) {
+            core::Log::ErrorF("PassResourceBuilder: CreateDescriptorSet failed for dynamic ResourceSetType=%u (pool exhausted?)",
+                              static_cast<unsigned>(setType));
+            return nullptr;
+        }
         setPool.push_back(allocatedSet);
     }
     return setPool[setCursor++];

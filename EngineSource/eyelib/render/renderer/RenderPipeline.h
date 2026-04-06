@@ -84,7 +84,7 @@ public:
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
 
-    void SetMode(PipelineMode mode) { m_mode = mode; }
+    void SetMode(PipelineMode mode);
     PipelineMode GetMode() const { return m_mode; }
 
     /** Upload phase: CPU asset updates → staging → vkCmdCopy*. Call after BeginFrame, before Render. Ensures all uploads in one predictable stage. */
@@ -374,10 +374,8 @@ private:
     /** True after first frame's depth copy so cull can use occlusion. */
     bool m_havePrevDepth = false;
 
-    /** E9: Bindless heap (created when supportsBindless). */
+    /** E9: Device-shared bindless heap (owned by IDevice). */
     rhi::IBindlessHeap* m_bindlessHeap = nullptr;
-    /** E9: Cache ITexture* -> BindlessHandle for GetOrAllocateBindlessHandle. */
-    std::unordered_map<rhi::ITexture*, rhi::BindlessHandle> m_bindlessHandleCache;
 
     rhi::IRenderTarget* m_hdrRenderTarget = nullptr;
 

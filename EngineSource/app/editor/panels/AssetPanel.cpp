@@ -133,7 +133,7 @@ static std::string RelativeToProjectAssets(const std::string& fullPath, const st
     return rel;
 }
 
-/** Write minimal canonical .mat (MAT1 v3) and sibling .meta so AssetDatabase::Scan can index it. */
+/** Write minimal canonical .mat (MAT1) and sibling .meta so AssetDatabase::Scan can index it. */
 static bool CreateEmptyMaterialFile(const std::string& folderPath, openeye::editor::EditorContext* ctx) {
     std::string path = fs::NormalizePath(folderPath + "/NewMaterial.mat");
     int suffix = 0;
@@ -178,7 +178,8 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
     ImGui::PushID(fullPath.c_str());
     ImGui::BeginChild(name.c_str(), ImVec2(cardW, cardH), ImGuiChildFlags_Border | ImGuiChildFlags_AlwaysUseWindowPadding);
     ImGui::InvisibleButton("##card", ImVec2(-1, -1));
-    bool doubleClick = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0);
+    const bool cardHovered = ImGui::IsItemHovered();
+    const bool doubleClick = cardHovered && ImGui::IsMouseDoubleClicked(0);
     if (doubleClick) {
         if (isDir)
             s_currentPath = fullPath;
@@ -186,7 +187,18 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
             if (ctx->world.LoadScene(fullPath)) {
                 ctx->scenePath = fullPath;
                 EditorSceneBuilder::BindSceneAssets(ctx->world, ctx->assetRoots, *ctx->assetRegistry);
-                openeye::editor::ApplyScenePipelineModeToEditorPipelines(*ctx);
+                openeye::editor::RequestApplyScenePipelineModeToEditorPipelines(*ctx);
+            }
+        } else if (!isDir && ctx && IsMatFile(fullPath)) {
+            ctx->sceneSelected = false;
+            ctx->selectedEntity = ::eyelib::world::InvalidEntity;
+            if (!ctx->projectAssetsRoot.empty() && fullPath.size() >= ctx->projectAssetsRoot.size()
+                && fullPath.compare(0, ctx->projectAssetsRoot.size(), ctx->projectAssetsRoot) == 0) {
+                size_t start = ctx->projectAssetsRoot.size();
+                if (start < fullPath.size() && (fullPath[start] == '/' || fullPath[start] == '\\')) start++;
+                ctx->selectedMaterialAssetId = fullPath.substr(start);
+            } else {
+                ctx->selectedMaterialAssetId = fullPath;
             }
         }
     }
@@ -202,20 +214,6 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
         }
     }
     if (!isDir && IsMatFile(fullPath)) {
-        if (ImGui::IsItemClicked(0)) {
-            if (ctx) {
-                ctx->sceneSelected = false;
-                ctx->selectedEntity = ::eyelib::world::InvalidEntity;
-            }
-            if (ctx && !ctx->projectAssetsRoot.empty() && fullPath.size() >= ctx->projectAssetsRoot.size()
-                && fullPath.compare(0, ctx->projectAssetsRoot.size(), ctx->projectAssetsRoot) == 0) {
-                size_t start = ctx->projectAssetsRoot.size();
-                if (start < fullPath.size() && (fullPath[start] == '/' || fullPath[start] == '\\')) start++;
-                ctx->selectedMaterialAssetId = fullPath.substr(start);
-            } else if (ctx) {
-                ctx->selectedMaterialAssetId = fullPath;
-            }
-        }
         if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
             MaterialDragPayload payload{};
             std::snprintf(payload.path, sizeof(payload.path), "%.511s", fullPath.c_str());
@@ -230,6 +228,8 @@ static void DrawCard(EditorContext* ctx, const std::string& fullPath, const std:
     ImGui::PopStyleColor();
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2.0f);
     ImGui::TextWrapped("%s", name.c_str());
+    if (!isDir && IsMatFile(fullPath) && cardHovered)
+        ImGui::SetTooltip("Double-click to edit material\nDrag onto a mesh material field to assign");
     ImGui::EndChild();
 
     if (ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonRight)) {
@@ -423,6 +423,7 @@ void ShowAssetPanel(EditorContext* ctx) {
             if (dirs.empty() && files.empty()) {
                 ImGui::TextUnformatted("Empty folder.");
                 ImGui::TextUnformatted("Right-click here to create Scene or Folder.");
+                ImGui::TextDisabled("Double-click a .mat file to open the material editor.");
             }
 
             if (ImGui::BeginPopupContextWindow("AssetBackgroundContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {

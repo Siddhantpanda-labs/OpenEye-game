@@ -11,7 +11,7 @@
 #include <assimp/scene.h>
 #include "asset/core/import_scene.h"
 #include "asset/core/mesh_format.h"
-#include "asset/core/material_format.h"
+#include "asset/readers/material_reader.h"
 #include "asset/core/texture_format.h"
 #include "asset/writers/material_writer.h"
 #include "asset/writers/animation_writer.h"
@@ -130,27 +130,40 @@ bool SerializeMesh(const ImportMesh& mesh, std::vector<uint8_t>& out) {
     return true;
 }
 
+/** Replace importer-internal keys (textures/...) with dashed GUIDs from \a textureGuidByPath. */
+static void FinalizeImportMaterialTextureGuids(std::vector<ImportMaterial>& materials,
+                                             const std::unordered_map<std::string, std::string>& textureGuidByPath) {
+    auto fix = [&](TextureRef& ref) {
+        if (ref.textureAssetId.empty()) return;
+        std::string key = ref.textureAssetId;
+        std::replace(key.begin(), key.end(), '\\', '/');
+        while (!key.empty() && key[0] == '/') key.erase(0, 1);
+        if (key.find("textures/") != 0) key = "textures/" + key;
+        auto it = textureGuidByPath.find(key);
+        if (it != textureGuidByPath.end()) ref.textureAssetId = it->second;
+        else ref.textureAssetId.clear();
+    };
+    for (auto& mat : materials) {
+        fix(mat.albedo);
+        fix(mat.normal);
+        fix(mat.metallic);
+        fix(mat.roughness);
+    }
+}
+
 bool SerializeMaterial(const ImportMaterial& material, std::vector<uint8_t>& out) {
-    using namespace MaterialFormat;
-    out.clear();
-    MaterialHeader header;
-    header.nameLen = static_cast<uint32_t>(material.name.size());
-    header.albedoPathLen = static_cast<uint32_t>(material.albedo.path.size());
-    header.normalPathLen = static_cast<uint32_t>(material.normal.path.size());
-    header.metallicPathLen = static_cast<uint32_t>(material.metallic.path.size());
-    header.roughnessPathLen = static_cast<uint32_t>(material.roughness.path.size());
-    header.metallicValue = material.metallicValue;
-    header.roughnessValue = material.roughnessValue;
-    header.albedoColorR = material.albedoColorR;
-    header.albedoColorG = material.albedoColorG;
-    header.albedoColorB = material.albedoColorB;
-    AppendBytes(out, header);
-    if (!material.name.empty()) AppendRaw(out, material.name.data(), material.name.size());
-    if (!material.albedo.path.empty()) AppendRaw(out, material.albedo.path.data(), material.albedo.path.size());
-    if (!material.normal.path.empty()) AppendRaw(out, material.normal.path.data(), material.normal.path.size());
-    if (!material.metallic.path.empty()) AppendRaw(out, material.metallic.path.data(), material.metallic.path.size());
-    if (!material.roughness.path.empty()) AppendRaw(out, material.roughness.path.data(), material.roughness.path.size());
-    return true;
+    asset::LoadedMaterial lm;
+    lm.name = material.name;
+    lm.albedoPath = material.albedo.textureAssetId;
+    lm.normalPath = material.normal.textureAssetId;
+    lm.metallicPath = material.metallic.textureAssetId;
+    lm.roughnessPath = material.roughness.textureAssetId;
+    lm.metallicValue = material.metallicValue;
+    lm.roughnessValue = material.roughnessValue;
+    lm.albedoColorR = material.albedoColorR;
+    lm.albedoColorG = material.albedoColorG;
+    lm.albedoColorB = material.albedoColorB;
+    return asset::MaterialReader::EncodeToBuffer(lm, out);
 }
 
 bool SerializeAnimation(const ImportAnimation& animation, std::vector<uint8_t>& out) {
@@ -192,8 +205,11 @@ void WriteNodeText(std::ostringstream& out, const ImportScene& scene, int nodeIn
     out << indent << "  transform: [";
     for (int i = 0; i < 16; ++i) { if (i) out << ", "; out << node.localTransform.m[i]; }
     out << "]\n";
-    if (node.meshIndex >= 0 && node.meshIndex < static_cast<int>(scene.meshes.size()))
+    if (node.meshIndex >= 0 && node.meshIndex < static_cast<int>(scene.meshes.size())) {
         out << indent << "  mesh: \"" << scene.meshes[static_cast<size_t>(node.meshIndex)].name << ".mesh\"\n";
+        // Stable reference used by InstantiateOmesh; mesh path remains for readability/fallback.
+        out << indent << "  meshIndex: " << node.meshIndex << "\n";
+    }
     out << indent << "  children:\n";
     for (int c : node.children) WriteNodeText(out, scene, c, depth + 1);
 }
@@ -306,6 +322,14 @@ int main(int argc, char** argv) {
                            BuildMaterialMapBytes(importScene, mode == OutputMode::OmeshSplitMaterials)});
 
     if (mode == OutputMode::OeaOnly) {
+        std::unordered_map<std::string, std::string> oeaTextureGuidByPath;
+        for (const auto& tex : importScene.textures) {
+            if (tex.encodedData.empty()) continue;
+            const std::string n = tex.outputFileName.empty() ? (tex.name + ".png") : tex.outputFileName;
+            oeaTextureGuidByPath["textures/" + n] = asset::GenerateGuidString();
+        }
+        FinalizeImportMaterialTextureGuids(importScene.materials, oeaTextureGuidByPath);
+
         std::vector<OeaInputEntry> packageEntries = meshEntries;
         for (const auto& mat : importScene.materials) {
             std::vector<uint8_t> payload;
@@ -362,6 +386,8 @@ int main(int argc, char** argv) {
         }
     }
 
+    FinalizeImportMaterialTextureGuids(importScene.materials, textureGuidByPath);
+
     // Loose animations in model folder.
     for (const auto& anim : importScene.animations) {
         const fs::path p = modelDir / (anim.name + ".anim");
@@ -380,17 +406,13 @@ int main(int argc, char** argv) {
         if (ec) return 9;
         for (const auto& mat : importScene.materials) {
             std::vector<std::string> deps;
-            auto addDep = [&](const std::string& path) {
-                if (path.empty()) return;
-                std::string key = path;
-                if (key.find("textures/") != 0) key = "textures/" + key;
-                auto it = textureGuidByPath.find(key);
-                if (it != textureGuidByPath.end()) deps.push_back(it->second);
+            auto addDep = [&](const TextureRef& ref) {
+                if (!ref.textureAssetId.empty()) deps.push_back(ref.textureAssetId);
             };
-            addDep(mat.albedo.path);
-            addDep(mat.normal.path);
-            addDep(mat.metallic.path);
-            addDep(mat.roughness.path);
+            addDep(mat.albedo);
+            addDep(mat.normal);
+            addDep(mat.metallic);
+            addDep(mat.roughness);
             const fs::path p = matDir / (mat.name + ".mat");
             if (!MaterialWriter::Write(mat, p.string())) {
                 std::cerr << "[Importer] Failed to write " << p.string() << "\n";

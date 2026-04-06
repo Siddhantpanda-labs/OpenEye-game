@@ -21,6 +21,7 @@ layout(set = 4, binding = 1) readonly buffer InstanceModels {
 };
 
 layout(push_constant, std430) uniform ForwardPlusPush {
+    mat4 u_ModelUnused;
     vec4 u_UVTransform;
     float u_UVRotation;
     float u_TexCoordIndex;
@@ -43,7 +44,8 @@ void main() {
     vec3 worldTangent = length(a_Tangent) > 0.001 ? normalize(normalMatrix * a_Tangent) : (abs(v_WorldNormal.y) < 0.999 ? normalize(cross(vec3(0, 1, 0), v_WorldNormal)) : normalize(cross(vec3(1, 0, 0), v_WorldNormal)));
     vec3 T = normalize(worldTangent - dot(worldTangent, v_WorldNormal) * v_WorldNormal);
     v_TBN = mat3(T, cross(v_WorldNormal, T), v_WorldNormal);
-    vec2 uv = a_TexCoord * pc.u_UVTransform.zw;
+    vec2 baseUv = mix(a_TexCoord, a_TexCoord1, step(0.5, pc.u_TexCoordIndex));
+    vec2 uv = baseUv * pc.u_UVTransform.zw;
     float c = cos(pc.u_UVRotation);
     float s = sin(pc.u_UVRotation);
     uv = mat2(c, -s, s, c) * uv + pc.u_UVTransform.xy;

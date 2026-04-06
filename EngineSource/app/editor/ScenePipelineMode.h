@@ -25,11 +25,17 @@ inline void ApplyScenePipelineModeToEditorPipelines(EditorContext& ctx) {
     const eyelib::api::RenderPipeline::Mode mode = SceneModeStringToPipelineMode(ctx.world.GetRenderPipelineMode());
     if (ctx.sceneViewPipeline) ctx.sceneViewPipeline->SetMode(mode);
     if (ctx.gameViewPipeline) ctx.gameViewPipeline->SetMode(mode);
+    // Material preview pipeline stays Forward-only (see EditorApp + MaterialPreview); do not mirror Hybrid here.
+}
+
+/** Queue pipeline mode sync for the next GPU frame boundary (before BeginFrame). Safe from UI callbacks during recording. */
+inline void RequestApplyScenePipelineModeToEditorPipelines(EditorContext& ctx) {
+    ctx.EnqueueGpuSafeWork([&ctx]() { ApplyScenePipelineModeToEditorPipelines(ctx); });
 }
 
 inline void SetScenePipelineMode(EditorContext& ctx, eyelib::api::RenderPipeline::Mode mode) {
     (void)ctx.world.SetRenderPipelineMode(PipelineModeToSceneModeString(mode));
-    ApplyScenePipelineModeToEditorPipelines(ctx);
+    RequestApplyScenePipelineModeToEditorPipelines(ctx);
 }
 
 } // namespace openeye::editor

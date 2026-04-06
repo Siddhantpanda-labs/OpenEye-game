@@ -45,7 +45,6 @@
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/render/rhi/PipelineAttachmentFormatSets.h"
 #include <optional>
-#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/rhi/RHIUniformLayout.h"
 #include "eyelib/render/rhi/RHIUtils.h"
 #include "eyelib/render/rhi/Vulkan/commands/CommandListVK.h"
@@ -84,6 +83,13 @@ RenderPipeline::RenderPipeline() = default;
 
 void RenderPipeline::SetSkyboxBrightness(float multiplier) {
     m_skyboxBrightness = (multiplier < 0.f) ? 0.f : multiplier;
+}
+
+void RenderPipeline::SetMode(PipelineMode mode) {
+    if (m_mode == mode) return;
+    m_mode = mode;
+    if (m_renderGraphOrchestrator)
+        m_renderGraphOrchestrator->MarkNeedsCompile();
 }
 
 RenderPipeline::~RenderPipeline() {
@@ -148,13 +154,12 @@ void RenderPipeline::Shutdown() {
         m_gbufferPassSystem->Shutdown(m_device);
     m_gbufferPassSystem.reset();
     m_shaderCache = nullptr;
+    m_bindlessHeap = nullptr;
     m_usingShared = nullptr;
     m_sharedResources.reset();
     m_cascadeShadowMap.reset();
     m_gbuffer.reset();
     if (m_device) {
-        if (m_bindlessHeap) { m_device->DestroyBindlessHeap(m_bindlessHeap); m_bindlessHeap = nullptr; }
-        m_bindlessHandleCache.clear();
         if (m_instanceMatrixBuffer) { m_device->DestroyBuffer(m_instanceMatrixBuffer); m_instanceMatrixBuffer = nullptr; }
         if (m_prevFrameDepthRT) { m_device->DestroyRenderTarget(m_prevFrameDepthRT); m_prevFrameDepthRT = nullptr; }
         if (m_pointLightBuffer) { m_device->DestroyBuffer(m_pointLightBuffer); m_pointLightBuffer = nullptr; }
@@ -226,11 +231,9 @@ bool RenderPipeline::InitializeDeviceResources(uint32_t width, uint32_t height, 
         core::Log::Error("RenderPipeline::Initialize: CascadeShadowMap::Initialize failed");
         return false;
     }
-
     m_gbufferPassSystem = std::make_unique<GBufferPassSystem>();
     m_gbufferPassSystem->SetShaderCache(m_shaderCache);
-    if (backend::SupportsBindless(m_device))
-        m_bindlessHeap = m_device->CreateBindlessHeap();
+    m_bindlessHeap = m_device ? m_device->GetOrCreateSharedBindlessHeap() : nullptr;
     if (m_bindlessHeap)
         m_gbufferPassSystem->SetBindlessHeap(m_bindlessHeap);
     m_gbufferPassSystem->SetBindlessGetHandle([this](rhi::ITexture* t) { return GetOrAllocateBindlessHandle(t); });
@@ -453,15 +456,9 @@ rhi::ITexture* RenderPipeline::GetHDRColorTextureRHI() const {
 }
 
 rhi::BindlessHandle RenderPipeline::GetOrAllocateBindlessHandle(rhi::ITexture* texture) {
-    if (!texture || !m_bindlessHeap || !backend::SupportsBindless(m_device))
+    if (!texture || !m_device || !m_bindlessHeap || !backend::SupportsBindless(m_device))
         return rhi::kInvalidBindlessHandle;
-    auto it = m_bindlessHandleCache.find(texture);
-    if (it != m_bindlessHandleCache.end())
-        return it->second;
-    rhi::BindlessHandle h = m_bindlessHeap->AllocateTextureHandle(texture);
-    if (h != rhi::kInvalidBindlessHandle)
-        m_bindlessHandleCache[texture] = h;
-    return h;
+    return m_device->GetOrAllocateSharedBindlessTextureHandle(texture);
 }
 
 /** Enable CPU frustum culling once CPU uses raw (unadjusted) camera clip-space math. */
@@ -578,6 +575,8 @@ void RenderPipeline::PreparePersistentShaderReadInputs(rhi::ICommandList* cmd, c
         if (rhi::ITexture* ir = envProbe->GetIrradianceMap()) rhi::BarrierTextureForShaderRead(cmd, ir);
         if (rhi::ITexture* pf = envProbe->GetPrefilteredMap()) rhi::BarrierTextureForShaderRead(cmd, pf);
     }
+    if (m_device)
+        m_device->EnsureSharedShadowMapArrayDummyForShaderSampling(cmd);
 }
 
 uint32_t RenderPipeline::PrepareGpuCullFromView(const IRenderSceneView& view, const CameraView& cam) {
@@ -918,6 +917,12 @@ void RenderPipeline::BuildForwardPassSharedState(const RenderFrameData& frameDat
     writeParams.prevProjection = &m_prevProjection;
     writeParams.lightSpaceMatrix = &envState.lightSpaceMatrix;
     writeParams.cascadeShadowMap = m_cascadeShadowMap.get();
+    if (m_device) {
+        if (rhi::IRenderTarget* dummyRt = m_device->GetSharedShadowMapArrayDummyRenderTarget()) {
+            if (rhi::ITexture* d = dummyRt->GetDepthTexture())
+                writeParams.shadowMapArrayFallback = d;
+        }
+    }
     writeParams.shadowDepthTexture = envState.shadowDepthTexture;
     writeParams.irradianceTexture = envState.irradianceTexture;
     writeParams.prefilterTexture = envState.prefilterTexture;
@@ -929,6 +934,7 @@ void RenderPipeline::BuildForwardPassSharedState(const RenderFrameData& frameDat
 
 void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam,
                                                   const std::vector<Drawable>& opaqueDrawables) {
+    EnsureCurrentFrameResourceSets();
     ForwardOpaqueRenderContext ctx{};
     ctx.device = m_device;
     ctx.shaderCache = m_shaderCache;
@@ -943,6 +949,10 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
     ctx.cascadeShadowMap = m_cascadeShadowMap.get();
     ctx.reflectionProbeManager = m_reflectionProbeManager.get();
     ctx.ensureResourceSets = [this]() { EnsureCurrentFrameResourceSets(); };
+    ctx.getPassResourceBuilder = [this]() { return m_passResourceBuilder.get(); };
+    ctx.getFrameSet = [this]() { return m_frameSet; };
+    ctx.getMaterialSet = [this]() { return m_materialSet; };
+    ctx.getFrameUbo = [this]() { return m_frameUbo; };
     ctx.acquirePassDrawSet = [this]() { return AcquirePassDrawSet(); };
     ctx.acquireMaterialDrawSet = [this]() { return AcquireMaterialDrawSet(); };
     ctx.acquireSceneDrawSet = [this]() { return AcquireSceneDrawSet(); };
@@ -955,6 +965,7 @@ void RenderPipeline::RenderForwardOpaqueForCamera(rhi::ICommandList* cmd, const 
 }
 
 void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const RenderFrameData& frameData, const CameraView& cam) {
+    EnsureCurrentFrameResourceSets();
     ForwardTransparentRenderContext ctx{};
     ctx.device = m_device;
     ctx.shaderCache = m_shaderCache;
@@ -969,6 +980,10 @@ void RenderPipeline::RenderForwardTransparent(rhi::ICommandList* cmd, const Rend
     ctx.cascadeShadowMap = m_cascadeShadowMap.get();
     ctx.reflectionProbeManager = m_reflectionProbeManager.get();
     ctx.ensureResourceSets = [this]() { EnsureCurrentFrameResourceSets(); };
+    ctx.getPassResourceBuilder = [this]() { return m_passResourceBuilder.get(); };
+    ctx.getFrameSet = [this]() { return m_frameSet; };
+    ctx.getMaterialSet = [this]() { return m_materialSet; };
+    ctx.getFrameUbo = [this]() { return m_frameUbo; };
     ctx.acquirePassDrawSet = [this]() { return AcquirePassDrawSet(); };
     ctx.acquireMaterialDrawSet = [this]() { return AcquireMaterialDrawSet(); };
     ctx.acquireSceneDrawSet = [this]() { return AcquireSceneDrawSet(); };
@@ -1031,7 +1046,8 @@ void RenderPipeline::RenderStereo(const IRenderSceneView& view, const CameraView
 #ifndef NDEBUG
     m_rendering = true;
 #endif
-    cmd->Begin();
+    if (!cmd->IsRecording())
+        cmd->Begin();
     // Intentionally do not force GPU sync here; explicit sync is handled by Finish()/fences when needed.
 
     BuildAndExecuteForwardFrameGraphStereo(view, leftCam, rightCam);
@@ -1113,6 +1129,7 @@ void RenderPipeline::PrepareHybridTransparencyLighting(rhi::ICommandList* cmd, c
 }
 
 void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, const RenderFrameData& frameData) {
+    EnsureCurrentFrameResourceSets();
     ForwardPlusOpaqueRenderContext ctx{};
     ctx.device = m_device;
     ctx.shaderCache = m_shaderCache;
@@ -1128,6 +1145,10 @@ void RenderPipeline::RenderForwardPlusOpaqueBatched(rhi::ICommandList* cmd, cons
     ctx.cascadeShadowMap = m_cascadeShadowMap.get();
     ctx.reflectionProbeManager = m_reflectionProbeManager.get();
     ctx.ensureResourceSets = [this]() { EnsureCurrentFrameResourceSets(); };
+    ctx.getPassResourceBuilder = [this]() { return m_passResourceBuilder.get(); };
+    ctx.getFrameSet = [this]() { return m_frameSet; };
+    ctx.getMaterialSet = [this]() { return m_materialSet; };
+    ctx.getFrameUbo = [this]() { return m_frameUbo; };
     ctx.acquirePassDrawSet = [this]() { return AcquirePassDrawSet(); };
     ctx.acquireMaterialDrawSet = [this]() { return AcquireMaterialDrawSet(); };
     ctx.acquireSceneDrawSet = [this]() { return AcquireSceneDrawSet(); };
@@ -1155,7 +1176,8 @@ void RenderPipeline::Render(const IRenderSceneView& view, const std::vector<uint
 #ifndef NDEBUG
     m_rendering = true;
 #endif
-    cmd->Begin();
+    if (!cmd->IsRecording())
+        cmd->Begin();
     // Intentionally do not force GPU sync here; explicit sync is handled by Finish()/fences when needed.
 
     const CameraView cam = m_currentFrameData ? m_currentFrameData->camera : backend::AdjustCameraForBackend(m_device, view.GetCamera());

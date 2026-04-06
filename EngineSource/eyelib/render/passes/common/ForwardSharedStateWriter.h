@@ -32,6 +32,8 @@ struct ForwardSharedStateWriteParams {
     const math::Mat4* prevProjection = nullptr;
     const math::Mat4* lightSpaceMatrix = nullptr;
     const CascadeShadowMap* cascadeShadowMap = nullptr;
+    /** Depth from a 1×1×1 shadow map array when directional shadows are off; matches forward u_ShadowMap (sampler2DArray). */
+    rhi::ITexture* shadowMapArrayFallback = nullptr;
     rhi::ITexture* shadowDepthTexture = nullptr;
     rhi::ITexture* irradianceTexture = nullptr;
     rhi::ITexture* prefilterTexture = nullptr;

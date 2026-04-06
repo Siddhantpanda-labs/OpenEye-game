@@ -16,6 +16,7 @@
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanBindingUtils.h"
 #include "eyelib/render/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
 #include "eyelib/render/rhi/ResourceSetLayoutDesc.h"
+#include "eyelib/render/rhi/RHITypes.h"
 #include "eyelib/render/ShaderPathResolve.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
@@ -24,6 +25,7 @@
 #endif
 #include <vulkan/vulkan.h>
 #include <algorithm>
+#include <cassert>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -33,13 +35,22 @@
 #include <GLFW/glfw3.h>
 
 namespace {
+// Per-frame transient allocator/cache pools (reset each BeginFrame for the active ring slot).
 const VkDescriptorPoolSize kDescriptorPoolSizes[] = {
-    { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
-    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 256 },
-    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 },
+    { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 },
+    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024 },
+    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1024 },
 };
 const uint32_t kDescriptorPoolSizeCount = static_cast<uint32_t>(sizeof(kDescriptorPoolSizes) / sizeof(kDescriptorPoolSizes[0]));
-const uint32_t kDescriptorMaxSetsPerPool = 256;
+const uint32_t kDescriptorMaxSetsPerPool = 2048;
+// Long-lived global pool for CreateDescriptorSet (PassResourceBuilder dynamic draw sets, etc.); must scale with visible draw counts × frames in flight.
+const uint32_t kMainDescriptorPoolMaxSets = 16384;
+const VkDescriptorPoolSize kMainDescriptorPoolSizes[] = {
+    { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 65536 },
+    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16384 },
+    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384 },
+};
+const uint32_t kMainDescriptorPoolSizeCount = static_cast<uint32_t>(sizeof(kMainDescriptorPoolSizes) / sizeof(kMainDescriptorPoolSizes[0]));
 
 std::string GetPipelineCachePathForPhysicalDevice(VkPhysicalDevice phys) {
     if (phys == VK_NULL_HANDLE) return {};
@@ -98,13 +109,23 @@ DeviceVK::~DeviceVK() {
         DestroyTexture(m_fallbackShaderResourceTextureCube);
         m_fallbackShaderResourceTextureCube = nullptr;
     }
+    if (m_sharedBindlessHeap) {
+        delete static_cast<BindlessHeapVK*>(m_sharedBindlessHeap);
+        m_sharedBindlessHeap = nullptr;
+    }
+    m_sharedBindlessTextureHandles.clear();
+    if (m_sharedShadowMapArrayDummyRt) {
+        DestroyRenderTarget(m_sharedShadowMapArrayDummyRt);
+        m_sharedShadowMapArrayDummyRt = nullptr;
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
     if (device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i);
     }
     for (auto& bucket : m_frameSliceCommandListsByFrame)
         bucket.clear();
-    m_transientRecordingCommandList = nullptr;
+    m_transientRecordingStack.clear();
     m_immediateCommandList.reset();
     if (device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
@@ -463,17 +484,12 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         }
     }
 
-    VkDescriptorPoolSize poolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 256 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256 },
-    };
     VkDescriptorPoolCreateInfo poolCreateInfo = {};
     poolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolCreateInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolCreateInfo.maxSets = 256;
-    poolCreateInfo.poolSizeCount = static_cast<uint32_t>(sizeof(poolSizes) / sizeof(poolSizes[0]));
-    poolCreateInfo.pPoolSizes = poolSizes;
+    poolCreateInfo.maxSets = kMainDescriptorPoolMaxSets;
+    poolCreateInfo.poolSizeCount = kMainDescriptorPoolSizeCount;
+    poolCreateInfo.pPoolSizes = kMainDescriptorPoolSizes;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
     res = vkCreateDescriptorPool(device, &poolCreateInfo, nullptr, &descriptorPool);
     if (res != VK_SUCCESS) {
@@ -1149,8 +1165,20 @@ void DeviceVK::DestroyCommandList(ICommandList* list) {
 
 ICommandList* DeviceVK::GetImmediateCommandList() { return m_immediateCommandList.get(); }
 
-void DeviceVK::SetTransientRecordingCommandList(ICommandList* cmd) {
-    m_transientRecordingCommandList = cmd;
+ICommandList* DeviceVK::GetTransientRecordingCommandList() const {
+    return m_transientRecordingStack.empty() ? nullptr : m_transientRecordingStack.back();
+}
+
+void DeviceVK::PushTransientRecordingCommandList(ICommandList* cmd) {
+    if (cmd)
+        m_transientRecordingStack.push_back(cmd);
+}
+
+void DeviceVK::PopTransientRecordingCommandList(ICommandList* cmd) {
+    assert(!m_transientRecordingStack.empty() && m_transientRecordingStack.back() == cmd &&
+           "PopTransientRecordingCommandList: mismatched or empty stack");
+    if (!m_transientRecordingStack.empty() && m_transientRecordingStack.back() == cmd)
+        m_transientRecordingStack.pop_back();
 }
 
 void DeviceVK::EnqueueFrameSliceCommandList(ICommandList* cmd) {
@@ -1159,12 +1187,13 @@ void DeviceVK::EnqueueFrameSliceCommandList(ICommandList* cmd) {
 }
 
 CommandListVK* DeviceVK::GetRecordingCommandListVK() {
-    if (m_transientRecordingCommandList)
-        return static_cast<CommandListVK*>(m_transientRecordingCommandList);
+    if (!m_transientRecordingStack.empty())
+        return static_cast<CommandListVK*>(m_transientRecordingStack.back());
     return m_immediateCommandList.get();
 }
 
 void DeviceVK::BeginFrame() {
+    assert(m_gpuFramePhase == GpuFramePhase::BetweenFrames && "BeginFrame: phase must be BetweenFrames");
     if (!m_immediateCommandList || !m_device || !m_queues.GetGraphicsQueue()) return;
     m_currentFrameIndex = (m_currentFrameIndex + 1) % kMaxFrames;
     ++m_frameNumber;
@@ -1178,7 +1207,7 @@ void DeviceVK::BeginFrame() {
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
     // Free slice CBs from this ring slot only: same fence waited above covers their last submit.
     m_frameSliceCommandListsByFrame[m_currentFrameIndex].clear();
-    m_transientRecordingCommandList = nullptr;
+    m_transientRecordingStack.clear();
     m_deletionQueue.Tick(m_device, GetAllocator(), m_currentFrameIndex);
     RetirePendingTextureWrappers(false);
     ++m_ticksUntilDescriptorSetFree;
@@ -1200,6 +1229,7 @@ void DeviceVK::BeginFrame() {
     m_immediateCommandList->ResetCpuRecordingStateAfterPoolReset();
     m_immediateCommandList->SetRecordingState(false);
     m_frameOpen = true;
+    m_gpuFramePhase = GpuFramePhase::Recording;
 
     // Acquire swapchain image after command buffer is ready (allows recording while waiting in more complex setups).
     if (m_swapchain.swapchain && m_swapchain.GetImageCount() > 0) {
@@ -1225,7 +1255,10 @@ void DeviceVK::BeginFrame() {
 // Submission is device-owned: only EndFrame() / SubmitCommandList() submit to the queue. Renderer only records.
 void DeviceVK::EndFrame() {
     m_frameOpen = false;
+    assert(m_gpuFramePhase == GpuFramePhase::Recording && "EndFrame: expected Recording phase");
+    m_gpuFramePhase = GpuFramePhase::Submitting;
     if (!m_immediateCommandList || !m_queues.GetGraphicsQueue()) {
+        m_gpuFramePhase = GpuFramePhase::BetweenFrames;
         static bool once = false;
         if (!once) {
             core::Log::Warn("Vulkan EndFrame: skipped — no immediate command list or no graphics queue.");
@@ -1254,6 +1287,7 @@ void DeviceVK::EndFrame() {
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
     VkFence fence = static_cast<VkFence>(frame.fence);
     if (submitBuffers.empty() || fence == VK_NULL_HANDLE) {
+        m_gpuFramePhase = GpuFramePhase::BetweenFrames;
         static bool once = false;
         if (!once) {
             core::Log::Warn("Vulkan EndFrame: submit skipped — no command buffers or null fence.");
@@ -1284,6 +1318,7 @@ void DeviceVK::EndFrame() {
         }
     }
     vkQueueSubmit(queue, 1, &submitInfo, fence);
+    m_gpuFramePhase = GpuFramePhase::BetweenFrames;
 }
 
 void DeviceVK::SubmitCommandList(ICommandList* list) {
@@ -1365,6 +1400,10 @@ ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialDa
 void DeviceVK::DestroyTexture(ITexture* texture) {
     if (!texture) return;
     TextureVK* t = static_cast<TextureVK*>(texture);
+    {
+        std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+        m_sharedBindlessTextureHandles.erase(texture);
+    }
     if (t->m_retired) return;
     const uint32_t frameIndex = GetCurrentFrameIndex();
     if (t->m_imageView)
@@ -1532,6 +1571,27 @@ IRenderTarget* DeviceVK::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32
     return CreateDepthOnlyRenderTargetArrayVK(this, width, height, arrayLayers);
 }
 
+IRenderTarget* DeviceVK::GetSharedShadowMapArrayDummyRenderTarget() {
+    if (!m_sharedShadowMapArrayDummyRt) {
+        m_sharedShadowMapArrayDummyRt = CreateDepthOnlyRenderTargetArray(1u, 1u, 1u);
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
+    return m_sharedShadowMapArrayDummyRt;
+}
+
+void DeviceVK::EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) {
+    if (!cmd || m_sharedShadowMapArrayDummyBarrierDone)
+        return;
+    IRenderTarget* rt = GetSharedShadowMapArrayDummyRenderTarget();
+    if (!rt)
+        return;
+    ITexture* depth = rt->GetDepthTexture();
+    if (!depth)
+        return;
+    cmd->BarrierTexture(depth, ResourceState::Undefined, ResourceState::ShaderResource);
+    m_sharedShadowMapArrayDummyBarrierDone = true;
+}
+
 IRenderTarget* DeviceVK::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                            const std::vector<RHITextureFormat>& colorFormats,
                                                            ITexture* sharedDepthTexture,
@@ -1548,6 +1608,10 @@ IRenderTarget* DeviceVK::CreateRenderTargetFromTextureWithDepth(ITexture* colorT
 }
 
 void DeviceVK::DestroyRenderTarget(IRenderTarget* rt) {
+    if (rt == m_sharedShadowMapArrayDummyRt) {
+        m_sharedShadowMapArrayDummyRt = nullptr;
+        m_sharedShadowMapArrayDummyBarrierDone = false;
+    }
     DestroyRenderTargetVK(this, rt);
 }
 
@@ -1618,6 +1682,33 @@ void DeviceVK::EnqueueDestroyDescriptorSet(IDescriptorSet* set) {
 IBindlessHeap* DeviceVK::CreateBindlessHeap() { return new BindlessHeapVK(this); }
 
 void DeviceVK::DestroyBindlessHeap(IBindlessHeap* heap) { if (heap) delete static_cast<BindlessHeapVK*>(heap); }
+
+IBindlessHeap* DeviceVK::GetOrCreateSharedBindlessHeap() {
+    if (!m_caps.supportsBindless)
+        return nullptr;
+    std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+    if (!m_sharedBindlessHeap)
+        m_sharedBindlessHeap = CreateBindlessHeap();
+    return m_sharedBindlessHeap;
+}
+
+BindlessHandle DeviceVK::GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) {
+    if (!texture || !m_caps.supportsBindless)
+        return kInvalidBindlessHandle;
+    std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
+    if (!m_sharedBindlessHeap)
+        m_sharedBindlessHeap = CreateBindlessHeap();
+    IBindlessHeap* heap = m_sharedBindlessHeap;
+    if (!heap)
+        return kInvalidBindlessHandle;
+    auto it = m_sharedBindlessTextureHandles.find(texture);
+    if (it != m_sharedBindlessTextureHandles.end())
+        return it->second;
+    const BindlessHandle handle = heap->AllocateTextureHandle(texture);
+    if (handle != kInvalidBindlessHandle)
+        m_sharedBindlessTextureHandles.emplace(texture, handle);
+    return handle;
+}
 
 int DeviceVK::GetMaxSamples(int requestedSamples) { return std::min(requestedSamples, 4); }
 
