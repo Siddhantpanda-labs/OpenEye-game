@@ -36,8 +36,10 @@ layout(set = 1, binding = 2) uniform sampler2D u_NormalTexture;
 layout(set = 1, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
 /* After vertex GBufferPush (92 bytes). Without explicit offset, SPIR-V defaults to 0 and aliases the VS block. */
+// Shared ABI constants with C++ push writers.
+#include "../../common/gbuffer_push_offsets.glsl"
 layout(push_constant, std430) uniform GBufferFragPush {
-    layout(offset = 92) float u_HasAlbedoTexture;
+    layout(offset = OE_GBUFFER_FRAG_HAS_ALBEDO_OFFSET) float u_HasAlbedoTexture;
 } pc;
 
 #include "../../common/material_surface.glsl"

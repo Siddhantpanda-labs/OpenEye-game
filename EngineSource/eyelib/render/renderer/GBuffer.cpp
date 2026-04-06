@@ -66,6 +66,12 @@ void GBuffer::BindForGeometryPass(rhi::ICommandList* cmd) {
     rhi::ClearAndSetRenderTargetWithViewport(cmd, m_renderTargetRHI, 0, 0, m_width, m_height, clear);
 }
 
+void GBuffer::BindForGeometryPassNoClear(rhi::ICommandList* cmd) {
+    if (!cmd || !m_renderTargetRHI) return;
+    cmd->SetRenderTarget(m_renderTargetRHI);
+    cmd->SetViewport(0, 0, m_width, m_height);
+}
+
 void GBuffer::BindForLightingPass(rhi::ICommandList* cmd) {
     (void)cmd;
     // Deferred lighting uses Frame + DeferredLightingPass descriptor sets; no manual G-buffer texture binds.

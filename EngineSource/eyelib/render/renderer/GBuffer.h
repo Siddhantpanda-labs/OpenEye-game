@@ -23,6 +23,8 @@ public:
 
     /** Clears all G-buffer color targets + depth and binds them for the geometry pass. Must run once per frame before deferred lighting, even when zero meshes draw (empty scene). */
     void BindForGeometryPass(rhi::ICommandList* cmd);
+    /** Binds G-buffer targets for geometry pass without clearing (for additional draw chunks in the same pass). */
+    void BindForGeometryPassNoClear(rhi::ICommandList* cmd);
     /** No-op: deferred lighting binds G-buffer via descriptor sets. Kept for API compatibility. */
     void BindForLightingPass(rhi::ICommandList* cmd);
     void BindDepthTexture(unsigned int textureUnit);

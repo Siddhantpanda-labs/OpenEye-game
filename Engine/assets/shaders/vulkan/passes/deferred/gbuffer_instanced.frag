@@ -36,8 +36,10 @@ layout(set = 1, binding = 2) uniform sampler2D u_NormalTexture;
 layout(set = 1, binding = 3) uniform sampler2D u_MetallicRoughnessTexture;
 
 /* After GBufferInstancedPush in gbuffer_instanced.vert (vec4 + 3 floats = 28 bytes). */
+// Shared ABI constants with C++ push writers.
+#include "../../common/gbuffer_push_offsets.glsl"
 layout(push_constant, std430) uniform GBufferFragPush {
-    layout(offset = 28) float u_HasAlbedoTexture;
+    layout(offset = OE_GBUFFER_INSTANCED_FRAG_HAS_ALBEDO_OFFSET) float u_HasAlbedoTexture;
 } pc;
 
 #include "../../common/material_surface.glsl"

@@ -174,7 +174,8 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
                                         const math::Mat4& projection,
                                         const math::Mat4& prevView,
                                         const math::Mat4& prevProjection) const {
-    gbuffer.BindForGeometryPass(cmd);
+    // RenderOpaqueGeometry clears once at pass start; inner draw chunks must not clear.
+    gbuffer.BindForGeometryPassNoClear(cmd);
 
     if (cmd) {
         cmd->SetDepthTest(true);
@@ -260,7 +261,7 @@ void GBufferPassSystem::RenderDrawables(GBuffer& gbuffer,
                 abi::WriteGBufferGeometryPushConstants(cmd, d.transform, uvT, uvRot, texIdx, flipV, hasTex("u_AlbedoTexture"));
                 /* Skinned VS reads int at 96; keep 0 for bone path (indirect multi-draw sets 1 elsewhere). */
                 const int32_t usePerDrawTransform = 0;
-                cmd->SetPushConstants(abi::kGBufferSkinnedUsePerDrawTransformOffset, sizeof(int32_t), &usePerDrawTransform);
+                abi::WriteGBufferSkinnedUsePerDrawTransformPushConstant(cmd, usePerDrawTransform);
             }
         } else {
             shader->SetMat4("u_Model", d.transform);
@@ -430,7 +431,7 @@ void GBufferPassSystem::RenderIndirectWithPerDrawData(GBuffer& gbuffer,
             const math::Vec4 uvDef(0.0f, 0.0f, 1.0f, 1.0f);
             abi::WriteGBufferGeometryPushConstants(ctx.cmd, identity, uvDef, 0.0f, 0.0f, 1.0f, 0.0f);
             const int32_t usePerDraw = 1;
-            ctx.cmd->SetPushConstants(abi::kGBufferSkinnedUsePerDrawTransformOffset, sizeof(int32_t), &usePerDraw);
+            abi::WriteGBufferSkinnedUsePerDrawTransformPushConstant(ctx.cmd, usePerDraw);
         }
     }
 
@@ -474,7 +475,8 @@ void GBufferPassSystem::RenderInstanced(GBuffer& gbuffer,
         return;
     EnsureSceneBuffersDescriptorWrites(device, sceneSet);
 
-    gbuffer.BindForGeometryPass(cmd);
+    // RenderOpaqueGeometry clears once at pass start; instanced chunk just re-binds targets.
+    gbuffer.BindForGeometryPassNoClear(cmd);
     cmd->SetDepthTest(true);
     cmd->SetDepthWrite(true);
     for (uint32_t u = 0; u <= 7; ++u) cmd->UnbindTexture(u);

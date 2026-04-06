@@ -236,6 +236,12 @@ inline void WriteGBufferInstancedGeometryPushConstants(rhi::ICommandList* cmd, c
     cmd->SetPushConstants(kGBufferInstancedFragHasAlbedoOffset, sizeof(float), &hasAlbedoTexture);
 }
 
+/** `gbuffer_skinned.vert` bool-like int selector for BoneOrTransformBlock mode. */
+inline void WriteGBufferSkinnedUsePerDrawTransformPushConstant(rhi::ICommandList* cmd, int32_t usePerDrawTransformBuffer) {
+    if (!cmd) return;
+    cmd->SetPushConstants(kGBufferSkinnedUsePerDrawTransformOffset, sizeof(int32_t), &usePerDrawTransformBuffer);
+}
+
 /** `passes/deferred/lighting.frag`: `layout(push_constant) uniform LightingPush { int u_UseIBL; }`. */
 inline void WriteDeferredLightingUseIBL(rhi::ICommandList* cmd, int useIBL) {
     if (!cmd) return;

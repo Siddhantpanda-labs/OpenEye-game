@@ -1,25 +1,5 @@
 {
   "components": {
-    "Camera": {
-      "items": [
-        {
-          "data": {
-            "aspect": 1.7777777910232544,
-            "far": 1000.0,
-            "fov": 45.0,
-            "isPerspective": true,
-            "isPrimary": false,
-            "near": 0.10000000149011612,
-            "orthoSize": 10.0
-          },
-          "entity": {
-            "generation": 0,
-            "index": 1
-          }
-        }
-      ],
-      "version": 1
-    },
     "Collider": {
       "items": [
         {
@@ -36,11 +16,11 @@
               1.0,
               1.0
             ],
-            "type": 2
+            "type": 1
           },
           "entity": {
             "generation": 0,
-            "index": 7
+            "index": 4
           }
         },
         {
@@ -61,7 +41,28 @@
           },
           "entity": {
             "generation": 0,
-            "index": 6
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.4900000095367432,
+            "radius": 0.49000000953674316,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
           }
         },
         {
@@ -83,27 +84,6 @@
           "entity": {
             "generation": 0,
             "index": 0
-          }
-        },
-        {
-          "data": {
-            "center": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "height": 1.0,
-            "radius": 0.5,
-            "size": [
-              1.0,
-              1.0,
-              1.0
-            ],
-            "type": 0
-          },
-          "entity": {
-            "generation": 0,
-            "index": 3
           }
         }
       ],
@@ -117,24 +97,24 @@
             "color": [
               1.0,
               1.0,
-              1.0
+              0.0
             ],
             "innerCone": 15.0,
-            "intensity": 0.5,
+            "intensity": 1.0,
             "outerCone": 30.0,
-            "range": 10.0,
-            "type": 0
+            "range": 20.0,
+            "type": 1
           },
           "entity": {
             "generation": 0,
-            "index": 2
+            "index": 5
           }
         },
         {
           "data": {
             "castShadows": true,
             "color": [
-              0.0,
+              1.0,
               1.0,
               1.0
             ],
@@ -142,11 +122,11 @@
             "intensity": 1.0,
             "outerCone": 30.0,
             "range": 10.0,
-            "type": 1
+            "type": 0
           },
           "entity": {
             "generation": 0,
-            "index": 5
+            "index": 6
           }
         }
       ],
@@ -158,14 +138,14 @@
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "",
-            "meshAssetId": "builtin://Cone",
+            "materialAssetId": "NewMaterial.mat",
+            "meshAssetId": "builtin://Sphere",
             "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 7
+            "index": 4
           }
         },
         {
@@ -179,7 +159,35 @@
           },
           "entity": {
             "generation": 0,
-            "index": 6
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "NewMaterial.mat",
+            "meshAssetId": "builtin://Torus",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cone",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
           }
         },
         {
@@ -195,36 +203,41 @@
             "generation": 0,
             "index": 0
           }
-        },
+        }
+      ],
+      "version": 1
+    },
+    "RigidBody": {
+      "items": [
         {
           "data": {
-            "activeLOD": 0,
-            "lodMeshAssetIds": [],
-            "materialAssetId": "",
-            "meshAssetId": "builtin://Cube",
-            "submeshIndex": -1,
-            "visible": true
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
           },
           "entity": {
             "generation": 0,
-            "index": 3
-          }
-        },
-        {
-          "data": {
-            "activeLOD": 0,
-            "lodMeshAssetIds": [],
-            "materialAssetId": "",
-            "meshAssetId": "builtin://Torus",
-            "submeshIndex": -1,
-            "visible": true
-          },
-          "entity": {
-            "generation": 1,
             "index": 4
           }
         }
       ],
+      "version": 1
+    },
+    "Script": {
+      "items": [],
       "version": 1
     },
     "Transform": {
@@ -232,9 +245,9 @@
         {
           "data": {
             "position": [
-              0.0,
-              0.4730720520019531,
-              9.839341163635254
+              -0.14611351490020752,
+              0.0476071834564209,
+              12.237907409667969
             ],
             "rotation": [
               1.0,
@@ -243,9 +256,9 @@
               0.0
             ],
             "scale": [
-              7.925400257110596,
-              7.925400257110596,
-              7.925400257110596
+              7.3152995109558105,
+              7.3152995109558105,
+              7.3152995109558105
             ]
           },
           "entity": {
@@ -256,20 +269,20 @@
         {
           "data": {
             "position": [
-              8.087656021118164,
-              9.61054515838623,
-              -7.042542457580566
+              -0.5620434284210205,
+              6.329864501953125,
+              11.122316360473633
             ],
             "rotation": [
-              0.2891658544540405,
-              0.003135392442345619,
-              0.949362576007843,
-              0.12281695753335953
+              1.0,
+              0.0,
+              0.0,
+              0.0
             ],
             "scale": [
-              1.0001041889190674,
-              0.9999990463256836,
-              1.0001051425933838
+              5.934900283813477,
+              5.934900283813477,
+              5.934900283813477
             ]
           },
           "entity": {
@@ -280,20 +293,20 @@
         {
           "data": {
             "position": [
-              -0.3787674307823181,
-              11.813337326049805,
-              -4.715843677520752
+              -5.961455462966114e-05,
+              6.70313835144043,
+              10.721397399902344
             ],
             "rotation": [
-              0.6323618292808533,
-              -0.7742027640342712,
-              -0.020905153825879097,
-              -0.017075100913643837
+              1.0,
+              0.0,
+              0.0,
+              0.0
             ],
             "scale": [
-              1.0000040531158447,
-              1.0000141859054565,
-              1.0000056028366089
+              8.57518196105957,
+              8.57518196105957,
+              8.57518196105957
             ]
           },
           "entity": {
@@ -304,9 +317,9 @@
         {
           "data": {
             "position": [
-              0.0,
-              9.464734077453613,
-              -2.064940929412842
+              -6.020048141479492,
+              7.489574432373047,
+              8.868448257446289
             ],
             "rotation": [
               1.0,
@@ -315,9 +328,9 @@
               0.0
             ],
             "scale": [
-              0.9399999976158142,
-              0.9399999976158142,
-              0.9399999976158142
+              6.0839996337890625,
+              6.0839996337890625,
+              6.0839996337890625
             ]
           },
           "entity": {
@@ -328,33 +341,33 @@
         {
           "data": {
             "position": [
-              0.0,
-              6.693312644958496,
-              6.758646011352539
+              0.004220503848046064,
+              12.220060348510742,
+              10.88697338104248
             ],
             "rotation": [
-              0.9848172664642334,
-              -0.17359426617622375,
+              1.0,
+              0.0,
               0.0,
               0.0
             ],
             "scale": [
-              5.79644775390625,
-              3.798170804977417,
-              5.796452522277832
+              2.690000057220459,
+              2.690000057220459,
+              2.690000057220459
             ]
           },
           "entity": {
-            "generation": 1,
+            "generation": 0,
             "index": 4
           }
         },
         {
           "data": {
             "position": [
-              5.1544389724731445,
-              7.296697616577148,
-              4.286679744720459
+              -2.0320188999176025,
+              9.06053638458252,
+              9.074559211730957
             ],
             "rotation": [
               1.0,
@@ -377,7 +390,7 @@
           "data": {
             "position": [
               0.0,
-              5.8813557624816895,
+              0.0,
               0.0
             ],
             "rotation": [
@@ -387,45 +400,17 @@
               0.0
             ],
             "scale": [
-              4.459968090057373,
-              4.459968090057373,
-              4.459968090057373
+              1.0,
+              1.0,
+              1.0
             ]
           },
           "entity": {
             "generation": 0,
             "index": 6
           }
-        },
-        {
-          "data": {
-            "position": [
-              0.0,
-              6.167832374572754,
-              7.444504737854004
-            ],
-            "rotation": [
-              1.0,
-              0.0,
-              0.0,
-              0.0
-            ],
-            "scale": [
-              5.637598991394043,
-              5.637598991394043,
-              5.637598991394043
-            ]
-          },
-          "entity": {
-            "generation": 0,
-            "index": 7
-          }
         }
       ],
-      "version": 1
-    },
-    "XRCamera": {
-      "items": [],
       "version": 1
     }
   },
@@ -435,18 +420,34 @@
       {
         "entity": {
           "generation": 0,
-          "index": 7
+          "index": 4
         },
         "flags": 0,
-        "name": "Cone"
+        "name": "Sphere1"
       },
       {
         "entity": {
           "generation": 0,
-          "index": 6
+          "index": 3
         },
         "flags": 0,
         "name": "Sphere"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "Torus"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "Cone"
       },
       {
         "entity": {
@@ -459,30 +460,6 @@
       {
         "entity": {
           "generation": 0,
-          "index": 1
-        },
-        "flags": 0,
-        "name": "Camera"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 2
-        },
-        "flags": 0,
-        "name": "Directional Light"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 3
-        },
-        "flags": 0,
-        "name": "Cube1"
-      },
-      {
-        "entity": {
-          "generation": 0,
           "index": 5
         },
         "flags": 0,
@@ -490,11 +467,11 @@
       },
       {
         "entity": {
-          "generation": 1,
-          "index": 4
+          "generation": 0,
+          "index": 6
         },
         "flags": 0,
-        "name": "Torus"
+        "name": "Directional Light"
       }
     ],
     "tags": []
@@ -506,11 +483,12 @@
       0,
       0,
       0,
-      1,
       0,
       0,
       0
     ]
   },
+  "renderPipelineMode": "Hybrid",
+  "skybox": "procedural",
   "version": 1
 }
