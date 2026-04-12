@@ -219,6 +219,7 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(eyelib/physics)
     add_subdirectory(api/physics)
     add_subdirectory(eyelib/render)
+    add_subdirectory(eyelib/rendering)
     add_subdirectory(api/render)
     add_subdirectory(eyelib/geometry)
     add_subdirectory(api/geometry)
@@ -275,9 +276,16 @@ if(OPENEYE_BUILD_STREAMING)
     add_subdirectory(app/streaming)
 endif()
 
-if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR)
+if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR OR OPENEYE_BUILD_AI_PLAYGROUND)
     add_subdirectory(app/player)
-    add_dependencies(OpenEyePlayer CopyEngineAssets)
+    if(OPENEYE_BUILD_PLAYER)
+        add_dependencies(OpenEyePlayer CopyEngineAssets)
+    endif()
+endif()
+
+if(OPENEYE_BUILD_AI_PLAYGROUND)
+    add_subdirectory(app/ai_playground)
+    add_dependencies(OpenEyeAIPlayground CopyEngineAssets)
 endif()
 
 # --------------------------------------
@@ -291,6 +299,13 @@ endif()
 # Canonical viewer (loads asset .mesh, displays with default material)
 # --------------------------------------
 add_subdirectory(app/canonical_viewer)
+
+# --------------------------------------
+# Next-gen rendering module sandbox (EyelibRendering only; see eyelib/rendering/README.md)
+# --------------------------------------
+if(OPENEYE_BUILD_EYELIB AND OPENEYE_BUILD_RENDERING_SANDBOX)
+    add_subdirectory(app/rendering_sandbox)
+endif()
 
 # --------------------------------------
 # Transform hierarchy benchmark (100k entities; requires EyelibWorld)

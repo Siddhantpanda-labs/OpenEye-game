@@ -16,7 +16,7 @@ struct WindowConfig {
     bool debugContext = true;
     int glMajorVersion = 4;
     int glMinorVersion = 5;
-    /** When true, create window without OpenGL context (e.g. for Diligent Vulkan). No GLAD/SwapBuffers. */
+    /** When true, create window with GLFW_NO_API (Vulkan/Diligent surface); no GL context, no GLAD/SwapBuffers. */
     bool useNativeApiOnly = false;
 };
 

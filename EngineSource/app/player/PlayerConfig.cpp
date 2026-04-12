@@ -367,4 +367,65 @@ bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& erro
     return true;
 }
 
+void ApplyRuntimeDefaults(RuntimeOptions& options) {
+    if (options.assetRoots.empty()) {
+        std::string engineAssets = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
+        if (!engineAssets.empty()) {
+            engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineAssets + "/assets");
+        }
+        options.assetRoots.emplace_back(engineAssets.empty() ? "assets" : engineAssets);
+    }
+
+    if (options.fixedTimestep > 0.0f && !options.timeModeSet) {
+        options.timeMode = TimeMode::Fixed;
+        options.timeModeSet = true;
+    }
+
+    if (options.timeModeSet && options.timeMode == TimeMode::Replay && options.replayDelta <= 0.0f) {
+        options.replayDelta = 1.0f / 60.0f;
+    }
+
+    if (options.headless && options.overlay) {
+        options.overlay = false;
+    }
+}
+
+bool ApplyRuntimeProfile(RuntimeOptions& options, std::string& error) {
+    if (options.profile.empty()) {
+        return true;
+    }
+    if (options.profile == "dev") {
+        if (!options.overlaySet) {
+            options.overlay = true;
+        }
+        if (!options.statsSet) {
+            options.stats = true;
+        }
+        if (!options.strictAssetsSet) {
+            options.strictAssets = false;
+        }
+        if (!options.headlessSet) {
+            options.headless = false;
+        }
+        return true;
+    }
+    if (options.profile == "shipped") {
+        if (!options.overlaySet) {
+            options.overlay = false;
+        }
+        if (!options.statsSet) {
+            options.stats = false;
+        }
+        if (!options.strictAssetsSet) {
+            options.strictAssets = true;
+        }
+        if (!options.headlessSet) {
+            options.headless = false;
+        }
+        return true;
+    }
+    error = "Invalid profile: " + options.profile;
+    return false;
+}
+
 } // namespace openeye::player

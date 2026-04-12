@@ -7,6 +7,7 @@
 #include "eyelib/render/2d/Primitives.h"
 #include "eyelib/render/DebugDrawRenderer.h"
 #include "eyelib/render/renderer/RenderPipeline.h"
+#include "eyelib/render/shadows/CascadeShadowMap.h"
 #include "eyelib/render/backend/RenderBackendPolicy.h"
 #include "eyelib/render/rhi/RHI.h"
 #include "eyelib/platform/window/GraphicsDevice.h"
@@ -120,6 +121,29 @@ void* RenderPipeline::GetOutputColorTextureNativeHandle() const {
     if (!m_impl->pipeline) return nullptr;
     ::eyelib::render::rhi::ITexture* tex = m_impl->pipeline->GetCurrentFrameOutputColorTextureRHI();
     return tex ? tex->GetNativeTexture() : nullptr;
+}
+
+void* RenderPipeline::GetShadowDepthMapNativeViewForDebug() const {
+    if (!m_impl || !m_impl->pipeline) return nullptr;
+    ::eyelib::render::CascadeShadowMap* csm = m_impl->pipeline->GetCascadeShadowMap();
+    if (!csm) return nullptr;
+    ::eyelib::render::rhi::ITexture* tex = csm->GetDepthTextureRHI();
+    if (!tex) return nullptr;
+    // ImGui binds sampler2D; CSM depth is a 2D array — use a per-layer 2D view (VUID-vkCmdDrawIndexed-viewType-07752).
+    void* slice = tex->GetNativeTexture2DViewForArrayLayer(0);
+    return slice ? slice : tex->GetNativeTexture();
+}
+
+uint32_t RenderPipeline::GetShadowCascadeCountForDebug() const {
+    if (!m_impl || !m_impl->pipeline) return 0u;
+    ::eyelib::render::CascadeShadowMap* csm = m_impl->pipeline->GetCascadeShadowMap();
+    return csm ? csm->GetSplitCount() : 0u;
+}
+
+uint32_t RenderPipeline::GetShadowMapResolutionForDebug() const {
+    if (!m_impl || !m_impl->pipeline) return 0u;
+    ::eyelib::render::CascadeShadowMap* csm = m_impl->pipeline->GetCascadeShadowMap();
+    return csm ? csm->GetResolution() : 0u;
 }
 
 void RenderPipeline::RestoreDefaultFramebufferAndViewport(uint32_t width, uint32_t height) {

@@ -22,8 +22,12 @@ namespace openeye::player {
 
 class WorldAnimationBridge;
 
-/** Use World::CaptureRenderSnapshot(snapshot) once per frame, then BuildScene(snapshot, ...). Snapshot type is eyelib::api::world::World::RenderSnapshot. */
-
+/**
+ * Per-frame render snapshot wiring:
+ * - Call BindWorldSnapshotCapture(world) once after Initialize() when this bridge owns presentation with that world.
+ * - Call UnbindWorldSnapshotCapture(world) before destroying this bridge (GameRuntime::Shutdown does both).
+ * - Do not call World::SetCaptureSnapshotCallback from BuildScene or hosts; keeps Tick vs Render order safe.
+ */
 class WorldRenderBridge {
 public:
     /** Standalone: create pipeline and device from window (player app). Pass registry so GPU resolver is set. */
@@ -33,6 +37,20 @@ public:
     /** Editor Model A: use shared device (same as editor). Pass registry so GPU resolver is set. */
     bool Initialize(void* sharedDevice, uint32_t width, uint32_t height, eyelib::api::AssetRegistry* assetRegistry);
     void Shutdown();
+
+    /**
+     * Register ecs end-of-frame snapshot capture (scheduler callback) and seed first snapshot.
+     * Pair with UnbindWorldSnapshotCapture before this bridge is destroyed.
+     */
+    void BindWorldSnapshotCapture(eyelib::api::world::World& world);
+    /** Clear capture callback and frame snapshot pointer on \a world (safe if already unbound). */
+    void UnbindWorldSnapshotCapture(eyelib::api::world::World& world);
+
+    /**
+     * Game-thread: FlushTransforms + CaptureRenderSnapshot into this bridge's buffer and SetFrameSnapshot on \a world.
+     * Use when the host does not call World::Update (e.g. edit preview) so Render() matches the live ECS.
+     */
+    void CaptureRenderSnapshotNow(eyelib::api::world::World& world);
 
     /** Full render path (BuildScene + pipeline). Use only when render runs on same thread as game. */
     void Render(const RuntimeOptions& options, eyelib::api::world::World& world,
@@ -108,6 +126,12 @@ public:
     /** Device for asset loading / SetRenderDevice. Null if not initialized. */
     eyelib::api::RenderDevice GetDevice() const;
 
+    /**
+     * Standalone (owns swapchain): RHI BeginFrame before host records Vulkan UI and before RenderSceneOnly / BlitToScreen.
+     * No-op when embedded with shared device (editor owns frame) or not ready. OpenGL IDevice: empty implementation.
+     */
+    void BeginPresentFrame();
+
     /** Create default and skinned materials once after Initialize(). Call before BindAssets/scene build so primitives are visible. No-op if already created or headless. */
     void InitializeDefaultResources();
 
@@ -176,7 +200,6 @@ private:
     std::shared_ptr<eyelib::api::Shader> m_skinnedShader;
     std::vector<SkinnedMaterialEntry> m_skinnedMaterials;
     std::unordered_map<std::string, std::shared_ptr<eyelib::api::TextureCube>> m_skyboxCache;
-    bool m_captureCallbackSet = false;
     eyelib::api::world::World::RenderSnapshot m_frameSnapshot;
 
     ::eyelib::vr::IXRProvider* m_xrProvider = nullptr;

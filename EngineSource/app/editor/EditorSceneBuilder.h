@@ -25,7 +25,7 @@ public:
                                 const std::vector<std::string>& assetRoots,
                                 eyelib::api::AssetRegistry& registry);
 
-    /** \a world used for scene-level skybox (world->GetSkyboxAssetId()). Can be null. \a defaultMaterial when non-null is used for primitives/untextured meshes (avoids lazy creation in Build). */
+    /** \a world reserved for callers; skybox comes from \a snapshot.skyboxAssetId (filled by CaptureRenderSnapshot). \a defaultMaterial when non-null is used for primitives/untextured meshes (avoids lazy creation in Build). */
     void Build(eyelib::api::RenderScene& scene,
                const eyelib::api::world::World::RenderSnapshot& snapshot,
                const EditorCamera& editorCamera,

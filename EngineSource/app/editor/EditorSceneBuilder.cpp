@@ -306,6 +306,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
                               const eyelib::api::world::World* world,
                               std::vector<::eyelib::world::EntityId>* outDrawableToEntity,
                               std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity) {
+    (void)world;
     m_renderDevice = assetRegistry ? assetRegistry->GetRenderDevice() : eyelib::api::RenderDevice();
     ++m_buildFrameCounter;
     std::string rootsSig;
@@ -338,7 +339,7 @@ void EditorSceneBuilder::Build(eyelib::api::RenderScene& scene,
     scene.light.castShadows = true;
 
     scene.skybox.reset();
-    const std::string skyboxId = world ? world->GetSkyboxAssetId() : std::string();
+    const std::string& skyboxId = snapshot.skyboxAssetId;
     if (!eyelib::world::skybox::IsProceduralSkyboxId(skyboxId)) {
         auto it = m_skyboxCache.find(skyboxId);
         if (it != m_skyboxCache.end()) {

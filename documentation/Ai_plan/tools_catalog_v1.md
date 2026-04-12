@@ -1,0 +1,127 @@
+# AI Playground — tool & command catalog (v1)
+
+**Purpose:** Grounding for LLM prompts and human operators. **Version:** 1.0 · **Schema:** `openeye.world_observation.v1` (see `/observe` output).
+
+All **writes** go through `eyelib::api::world::World` (`CreateEntity`, `DestroyEntity`, `SetComponentJson`, …). The chat app may also run **`/plan`** batches that map to the same operations.
+
+---
+
+## 1. Slash commands (human or scripted)
+
+| Command | Effect |
+|---------|--------|
+| `/help` | List commands |
+| `/query` | Compact list: entity id, name, component **names** |
+| `/observe` | JSON snapshot: per-entity **component data** (bounded; may truncate large fields) |
+| `/plan <json-array>` | Execute ordered steps (see §2) |
+| `/ai demo` | Idempotent demo: `AI_PG_Ground` (plane), `AI_PG_Crate` (cube), `AI_PG_Sun` (directional light) |
+| `/create <name>` | Create empty named entity |
+| `/destroy <name>` | Destroy by metadata name |
+| `/get <name> <Component>` | Print `GetComponentJson` |
+| `/set <name> <Component> <json>` | `SetComponentJson` (JSON remainder of line) |
+| `/ask <goal>` | OpenAI Chat Completions + tools (`observe_world`, `query_world_text`, `run_world_plan`). Needs **`OPENAI_API_KEY`**; optional **`OPENAI_MODEL`**. HTTPS via **WinHTTP** on **Windows** only in this build. |
+
+---
+
+## 2. `/plan` step schema (JSON array)
+
+Each element is an object with **`op`**:
+
+### `create`
+
+```json
+{ "op": "create", "name": "MyEntity" }
+```
+
+### `destroy`
+
+```json
+{ "op": "destroy", "name": "MyEntity" }
+```
+
+### `set`
+
+`json` may be an **object** (preferred) or a **string** (raw JSON text).
+
+```json
+{
+  "op": "set",
+  "name": "MyEntity",
+  "component": "Transform",
+  "json": {
+    "position": [0, 1, 0],
+    "rotation": [1, 0, 0, 0],
+    "scale": [1, 1, 1]
+  }
+}
+```
+
+**Transform:** `position` `[x,y,z]`, `rotation` quaternion `[w,x,y,z]`, `scale` `[x,y,z]` (matches engine serialization).
+
+**Renderable:** e.g. `{ "meshAssetId": "builtin://Cube", "materialAssetId": "", "visible": true, "submeshIndex": -1 }`
+
+**Light:** e.g. `{ "type": 0, "color": [1,1,1], "intensity": 1.0, "range": 10.0, "innerCone": 15.0, "outerCone": 30.0, "castShadows": true }` — `type`: `0` directional, `1` point, `2` spot.
+
+---
+
+## 3. Builtin mesh IDs (`meshAssetId`)
+
+Prefix: `builtin://`
+
+| ID | Shape |
+|----|--------|
+| `builtin://Cube` | Cube |
+| `builtin://Sphere` | Sphere |
+| `builtin://Plane` | Plane |
+| `builtin://Cylinder` | Cylinder |
+| `builtin://Cone` | Cone |
+| `builtin://Torus` | Torus |
+
+---
+
+## 4. Component names (common)
+
+Registered with the world serializer (typical set): `Transform`, `Renderable`, `MeshRenderer`, `Light`, `Camera`, `RigidBody`, `Collider`, `Name`, … — use **`/query`** / **`/observe`** on a live scene to see which components exist per entity.
+
+---
+
+## 5. Phase 1 extensions (world module)
+
+Mutations that are **not** expressible with the above may be added as **temporary world commands** (same command discipline as core world), then exposed here and in the executor. Retire or promote them after the MVP slice is stable.
+
+---
+
+## 6. Example `/plan` (minimal)
+
+```json
+[
+  { "op": "create", "name": "DemoBox" },
+  {
+    "op": "set",
+    "name": "DemoBox",
+    "component": "Transform",
+    "json": {
+      "position": [0, 2, 0],
+      "rotation": [1, 0, 0, 0],
+      "scale": [1, 1, 1]
+    }
+  },
+  {
+    "op": "set",
+    "name": "DemoBox",
+    "component": "Renderable",
+    "json": {
+      "meshAssetId": "builtin://Cube",
+      "materialAssetId": "",
+      "visible": true,
+      "submeshIndex": -1
+    }
+  }
+]
+```
+
+Paste as a single chat message after `/plan ` (multiline input supported in the playground).
+
+---
+
+*Update this file when tools or component JSON shapes change; bump version in the title.*

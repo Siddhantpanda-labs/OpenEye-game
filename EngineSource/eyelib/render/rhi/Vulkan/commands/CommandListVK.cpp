@@ -143,6 +143,31 @@ void CommandListVK::EndRenderingIfActive() {
     m_currentRenderTarget = nullptr;
 }
 
+void CommandListVK::BeginRenderingSwapchainColor(void* colorImageView, uint32_t width, uint32_t height, bool clear,
+                                                 const float clearColor[4]) {
+    if (!colorImageView || width == 0 || height == 0 || !m_isRecording || !m_commandBuffer || !m_device) return;
+    EndRenderingIfActive();
+    VkRenderingAttachmentInfo att = {};
+    att.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    att.imageView = static_cast<VkImageView>(colorImageView);
+    att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    att.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att.clearValue.color.float32[0] = clearColor[0];
+    att.clearValue.color.float32[1] = clearColor[1];
+    att.clearValue.color.float32[2] = clearColor[2];
+    att.clearValue.color.float32[3] = clearColor[3];
+    VkRenderingInfo renderingInfo = {};
+    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderingInfo.renderArea = { { 0, 0 }, { width, height } };
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &att;
+    vkCmdBeginRendering(static_cast<VkCommandBuffer>(m_commandBuffer), &renderingInfo);
+    m_isRenderingActive = true;
+    m_currentRenderTarget = nullptr;
+}
+
 void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions) {
     if (!rtVK || !m_isRecording || !m_commandBuffer || !m_device) return;
     const uint32_t colorCount = rtVK->GetColorAttachmentCount();

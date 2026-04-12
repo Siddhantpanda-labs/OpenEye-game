@@ -11,6 +11,7 @@
 #include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
 #include "api/render/All.h"
+#include "api/render/RenderBackend.h"
 #include "api/world/All.h"
 
 #include <array>
@@ -37,6 +38,11 @@ namespace openeye::player {
  * Initialize with world, asset registry, roots; optional window (null = headless); then Tick(dt)
  * and Render(w, h) each frame. GetOutputColorTextureNativeHandle() returns the pipeline output for ImGui.
  * No render thread; overlay is drawn by the host after Render().
+ *
+ * ECS render snapshot capture: GameRuntime wires WorldRenderBridge::BindWorldSnapshotCapture on Initialize
+ * and UnbindWorldSnapshotCapture on Shutdown. Hosts (Player, Editor, AI Playground) must not call
+ * World::SetCaptureSnapshotCallback for the play GameRuntime path. Edit-style hosts that skip Tick should call
+ * RefreshRenderSnapshotFromWorld() before Render() so the snapshot matches the live world.
  */
 class GameRuntime {
 public:
@@ -70,7 +76,19 @@ public:
     /** Advance simulation: physics step, sync to world, animation, audio, scripting, world update. */
     void Tick(float deltaSeconds);
 
-    /** Build scene from world and render to pipeline. Call after Tick. No-op when headless; returns null. */
+    /**
+     * Standalone present path: RHI BeginFrame once per frame before Vulkan host UI and before Render().
+     * Pairs with EndFrame inside pipeline BlitToScreen. No-op when headless or embedded (shared device).
+     */
+    void BeginPresentFrame();
+
+    /**
+     * When set, Render() replaces the scene camera from BuildScene with this raw view (same convention as editor:
+     * BuildFreeFlyCameraView / world camera). RenderPipeline adjusts per backend once — do not pre-adjust here.
+     */
+    void SetFrameCameraOverride(const eyelib::api::CameraView* view);
+
+    /** Build scene from world and render to pipeline. No-op when headless; returns null. */
     void* Render(uint32_t width, uint32_t height);
 
     /** Pipeline output texture handle (ImTextureID). Valid after Render(); null when headless or not ready. */
@@ -81,6 +99,19 @@ public:
 
     /** Reload shaders (e.g. after ShaderWatcher copy). No-op when headless. */
     void ReloadShaders();
+
+    /**
+     * Rebuild physics, animation, scripting, and audio bridges from the current world without recreating the GPU device.
+     * Call after World::LoadScene (e.g. restoring a play-session snapshot on Stop). No-op when not ready.
+     */
+    void ResyncFromWorld();
+
+    /**
+     * Refill the ECS render snapshot from the current world (FlushTransforms + CaptureRenderSnapshot).
+     * Call each frame before Render() when not using Tick() (e.g. AI Playground edit mode) so the viewport matches chat/tools.
+     * No-op when headless or not ready. When simulation runs via Tick(), the scheduler callback already captures — skip this to avoid redundant work.
+     */
+    void RefreshRenderSnapshotFromWorld();
 
 #ifdef OPENEYE_BUILD_STREAMING
     /** Start VR streaming server (discovery + stream port). No-op when headless. */
@@ -114,6 +145,8 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_ready = false;
+    bool m_frameCameraOverrideActive = false;
+    eyelib::api::CameraView m_frameCameraOverride{};
     AssetBindStats m_assetBindStats{};
 
 #ifdef OPENEYE_BUILD_STREAMING

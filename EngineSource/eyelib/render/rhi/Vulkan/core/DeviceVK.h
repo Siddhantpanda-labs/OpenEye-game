@@ -323,6 +323,14 @@ private:
     std::vector<RetiredTextureEntry> m_pendingTextureWrapperRetires;
     void RetirePendingTextureWrappers(bool forceAll);
     void EnsureImGuiDescriptorPool();
+    /** HDR/SDR swapchain compose: fullscreen shader (lazy); invalidated when swapchain VkFormat changes. */
+    void DestroyPresentResolveResources();
+    bool EnsurePresentResolveResources();
+    IPipeline* m_presentResolvePipeline = nullptr;
+    uint32_t m_presentResolveSwapchainVkFormat = 0;
+    IBuffer* m_presentResolveFrameUBO = nullptr;
+    IDescriptorSet* m_presentResolveFrameSet = nullptr;
+    std::array<IDescriptorSet*, kMaxFrames> m_presentResolvePostSets = {};
     IBindlessHeap* m_sharedBindlessHeap = nullptr;
     std::unordered_map<ITexture*, BindlessHandle> m_sharedBindlessTextureHandles;
     std::mutex m_sharedBindlessMutex;

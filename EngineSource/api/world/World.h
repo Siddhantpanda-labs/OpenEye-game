@@ -206,6 +206,9 @@ public:
         std::vector<::eyelib::math::Quat> transformRotations;
         std::vector<::eyelib::math::Vec3> transformScales;
 
+        /** Scene-level skybox id at capture time (same source as `World::GetSkyboxAssetId()` during capture). */
+        std::string skyboxAssetId;
+
         std::optional<::eyelib::world::components::Transform> GetTransform(::eyelib::world::EntityId entity) const;
     };
 

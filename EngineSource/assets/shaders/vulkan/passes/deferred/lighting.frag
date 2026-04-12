@@ -1,5 +1,27 @@
 #version 460
 // Resource-space: set 0 = Frame (viewProj), set 1 = DeferredLightingPass (gbuffer 0-3, shadow 4, scene lighting 5, light space 6, IBL 7-9).
+//
+// Shadow debug (defaults off). Recompile SPIR-V after editing:
+//   glslc EngineSource/assets/shaders/vulkan/passes/deferred/lighting.frag -o .../lighting.frag.spv
+// Or: python EngineSource/tools/compile_vulkan_shaders.py
+//
+// OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER: -1 = use normal farBounds cascade; 0..3 = always sample that layer.
+// OE_DEBUG_SHADOW_VISUALIZE: 1 = bypass lighting, show raw shadow map depth (grayscale) for forced or cascade 0 UVs.
+// OE_DEBUG_SHADOW_OOB_AS_SHADOW: 1 = UV/Z outside [0,1] counts as full shadow (was 0 = lit); use to see OOB rate.
+// OE_DEBUG_SHADOW_INVERT_COMPARE: 1 = flip receiver-vs-depth test (Vulkan depth convention experiments).
+
+#ifndef OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER
+#define OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER -1
+#endif
+#ifndef OE_DEBUG_SHADOW_VISUALIZE
+#define OE_DEBUG_SHADOW_VISUALIZE 0
+#endif
+#ifndef OE_DEBUG_SHADOW_OOB_AS_SHADOW
+#define OE_DEBUG_SHADOW_OOB_AS_SHADOW 0
+#endif
+#ifndef OE_DEBUG_SHADOW_INVERT_COMPARE
+#define OE_DEBUG_SHADOW_INVERT_COMPARE 0
+#endif
 
 layout(location = 0) in vec2 v_TexCoord;
 
@@ -18,7 +40,7 @@ struct SceneLightHeader {
     int useShadows; float pad13; float pad14; float pad15;
     int pointLightCount; int spotLightCount; float pad16; float pad17;
     int cascadeCount; float pad18; float pad19; float pad20;
-    vec4 farBounds;
+    vec4 farBounds; // clip.z/clip.w thresholds (CPU: cascade far-plane center in ViewProj)
 };
 struct PointLightData {
     vec3 position; float pad0;
@@ -71,18 +93,30 @@ float shadowFactor(vec3 worldPos) {
     int cascades = sceneLight.header.cascadeCount;
     if (cascades <= 0) return 0.0;
     vec4 clip = u_ViewProj * vec4(worldPos, 1.0);
-    float ndcZ = clip.z / clip.w;
+    float clipZW = clip.z / clip.w; // same metric as CascadeShadowMap farBounds
     int c = 0;
     for (int i = 0; i < MAX_CASCADES - 1 && i < cascades; i++)
-        if (ndcZ > sceneLight.header.farBounds[i]) c = i + 1;
+        if (clipZW > sceneLight.header.farBounds[i]) c = i + 1;
     c = min(c, cascades - 1);
+#if OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER >= 0
+    c = min(OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER, cascades - 1);
+#endif
     vec4 lightSpacePos = lightSpace[c] * vec4(worldPos, 1.0);
     vec3 ndc = lightSpacePos.xyz / lightSpacePos.w;
     ndc = ndc * 0.5 + 0.5;
-    if (ndc.z > 1.0 || ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0)
+    if (ndc.z > 1.0 || ndc.x < 0.0 || ndc.x > 1.0 || ndc.y < 0.0 || ndc.y > 1.0) {
+#if OE_DEBUG_SHADOW_OOB_AS_SHADOW
+        return 1.0;
+#else
         return 0.0;
+#endif
+    }
     float depth = texture(u_ShadowMap, vec3(ndc.xy, float(c))).r;
-    return (ndc.z - sceneLight.header.shadowBias > depth) ? 1.0 : 0.0;
+    bool inShadow = (ndc.z - sceneLight.header.shadowBias > depth);
+#if OE_DEBUG_SHADOW_INVERT_COMPARE
+    inShadow = !inShadow;
+#endif
+    return inShadow ? 1.0 : 0.0;
 }
 
 vec3 evalPointLight(vec3 pos, vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
@@ -132,6 +166,22 @@ vec3 evalSpotLight(vec3 pos, vec3 N, vec3 V, vec3 albedo, float metallic, float 
 
 void main() {
     vec3 pos = texture(u_Position, v_TexCoord).rgb;
+#if OE_DEBUG_SHADOW_VISUALIZE
+    {
+        int cascades = max(sceneLight.header.cascadeCount, 1);
+        int layer = 0;
+#if OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER >= 0
+        layer = min(OE_DEBUG_SHADOW_FORCE_CASCADE_LAYER, cascades - 1);
+#endif
+        vec4 lsp = lightSpace[layer] * vec4(pos, 1.0);
+        vec3 ndc = lsp.xyz / max(abs(lsp.w), 1e-6);
+        ndc = ndc * 0.5 + 0.5;
+        vec2 uv = clamp(ndc.xy, vec2(0.001), vec2(0.999));
+        float d = texture(u_ShadowMap, vec3(uv, float(layer))).r;
+        o_Color = vec4(d, d, d, 1.0);
+        return;
+    }
+#endif
     vec3 N = normalize(texture(u_Normal, v_TexCoord).rgb);
     vec3 albedo = texture(u_Albedo, v_TexCoord).rgb;
     vec2 mr = texture(u_PBR, v_TexCoord).rg;

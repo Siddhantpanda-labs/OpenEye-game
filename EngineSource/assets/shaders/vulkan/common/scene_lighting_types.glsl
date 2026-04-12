@@ -17,7 +17,7 @@ struct SceneLightHeader {
     int useShadows; float pad13; float pad14; float pad15;
     int pointLightCount; int spotLightCount; float pad16; float pad17;
     int cascadeCount; float pad18; float pad19; float pad20;
-    vec4 farBounds;
+    vec4 farBounds; // clip.z/clip.w at cascade far-plane centers (same as u_ViewProj metric)
 };
 
 struct PointLightData {

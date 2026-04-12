@@ -1205,6 +1205,7 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.transformPositions.clear();
     out.transformRotations.clear();
     out.transformScales.clear();
+    out.skyboxAssetId.clear();
     if (!m_impl) return;
     // Architectural contract: snapshots always observe latest world transforms, independent of scheduler timing.
     m_impl->world.FlushTransforms();
@@ -1232,6 +1233,8 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
         out.rigidBodies.push_back({ entity, comp });
     for (const auto& [entity, comp] : obs.GetCollidersView())
         out.colliders.push_back({ entity, comp });
+
+    out.skyboxAssetId = GetSkyboxAssetId();
 }
 
 void World::SetFrameSnapshot(const RenderSnapshot* snapshot) {

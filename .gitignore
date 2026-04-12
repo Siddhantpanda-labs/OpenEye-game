@@ -79,6 +79,11 @@ Thumbs.db
 .idea/
 *.code-workspace
 
+# Local API keys and secrets (never commit)
+chatgpt.key.txt
+*openai*key*.txt
+*api*key*.txt
+
 # Nested / duplicate tree (do not commit)
 OpenEye-game-forwardgl/
 

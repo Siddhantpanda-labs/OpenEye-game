@@ -3,6 +3,7 @@
 #include "eyelib/render/rhi/Vulkan/commands/CommandListVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/RenderTargetVK.h"
 #include "eyelib/render/rhi/Vulkan/resources/TextureVK.h"
+#include "eyelib/render/rhi/Vulkan/utils/VulkanEnums.h"
 #include "eyelib/core/Log.h"
 
 #include <vulkan/vulkan.h>
@@ -210,46 +211,160 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     }
 
-    VkImageMemoryBarrier barrierSrc = {};
-    barrierSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrierSrc.srcAccessMask = srcOldAccess;
-    barrierSrc.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrierSrc.oldLayout = srcOldLayout;
-    barrierSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    barrierSrc.image = srcImage;
-    barrierSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierSrc);
+    const VkFormat srcVkFmt = ToVkFormat(tex->GetFormat());
+    const VkFormat dstVkFmt = static_cast<VkFormat>(m_swapchain.format);
+    const bool useVkCopy = (srcVkFmt != VK_FORMAT_UNDEFINED && srcVkFmt == dstVkFmt);
+
     VkImageMemoryBarrier barrierDst = {};
     barrierDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrierDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrierDst.image = dstImage;
     barrierDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
-    VkImageCopy copy = {};
-    copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    copy.extent = { w, h, 1 };
-    vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    barrierDst.image = dstImage;
 
-    VkImageMemoryBarrier restoreSrc = {};
-    restoreSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    restoreSrc.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    restoreSrc.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    restoreSrc.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    restoreSrc.image = srcImage;
-    restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
-    BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
+    VkAccessFlags dstPostComposeAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+    VkImageLayout dstPostComposeLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    VkPipelineStageFlags dstPostComposeSrcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    auto clearSwapchainViaTransfer = [&]() {
+        barrierDst.srcAccessMask = 0;
+        barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrierDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        VkClearColorValue clearColor = {};
+        clearColor.float32[0] = 0.12f;
+        clearColor.float32[1] = 0.12f;
+        clearColor.float32[2] = 0.15f;
+        clearColor.float32[3] = 1.0f;
+        VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdClearColorImage(cmd, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1, &range);
+        dstPostComposeAccess = VK_ACCESS_TRANSFER_WRITE_BIT;
+        dstPostComposeLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        dstPostComposeSrcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    };
+
+    if (useVkCopy) {
+        static bool loggedCopyPath = false;
+        if (!loggedCopyPath) {
+            core::Log::InfoF("Vulkan present: using vkCmdCopyImage path (format match 0x%x).", static_cast<unsigned>(dstVkFmt));
+            loggedCopyPath = true;
+        }
+        VkImageMemoryBarrier barrierSrc = {};
+        barrierSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrierSrc.srcAccessMask = srcOldAccess;
+        barrierSrc.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrierSrc.oldLayout = srcOldLayout;
+        barrierSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrierSrc.image = srcImage;
+        barrierSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierSrc);
+        barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrierDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        VkImageCopy copy = {};
+        copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        copy.extent = { w, h, 1 };
+        vkCmdCopyImage(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        VkImageMemoryBarrier restoreSrc = {};
+        restoreSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        restoreSrc.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        restoreSrc.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        restoreSrc.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        restoreSrc.image = srcImage;
+        restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
+        BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
+    } else {
+        static bool loggedResolvePath = false;
+        if (!loggedResolvePath) {
+            core::Log::InfoF("Vulkan present: using present_resolve shader path (src=0x%x dst=0x%x).",
+                             static_cast<unsigned>(srcVkFmt), static_cast<unsigned>(dstVkFmt));
+            loggedResolvePath = true;
+        }
+        if (!EnsurePresentResolveResources()) {
+            static bool once = false;
+            if (!once) {
+                core::Log::Warn("Vulkan present: HDR→swapchain resolve skipped (EnsurePresentResolveResources failed).");
+                once = true;
+            }
+            clearSwapchainViaTransfer();
+        } else {
+            VkImageMemoryBarrier toSample = {};
+            toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            toSample.srcAccessMask = srcOldAccess;
+            toSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            toSample.oldLayout = srcOldLayout;
+            toSample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            toSample.image = srcImage;
+            toSample.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            barrierDst.srcAccessMask = 0;
+            barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            vkCmdPipelineBarrier(cmd, srcStage | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                  0, 0, nullptr, 0, nullptr, 1, &toSample);
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+
+            void* swapView = m_swapchain.GetImageView(imageIndex);
+            bool renderedResolve = false;
+            if (swapView) {
+                const float clearCol[4] = { 0.12f, 0.12f, 0.15f, 1.f };
+                rec->BeginRenderingSwapchainColor(swapView, m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, clearCol);
+                rec->SetViewport(0, 0, m_swapchain.GetWidth(), m_swapchain.GetHeight());
+                rec->SetDepthTest(false);
+                rec->SetDepthWrite(false);
+                rec->SetCullFace(false);
+                rec->BindPipeline(m_presentResolvePipeline);
+                IDescriptorSet* postSet = m_presentResolvePostSets[m_currentFrameIndex % kMaxFrames];
+                if (!m_presentResolveFrameSet || !postSet) {
+                    static bool once = false;
+                    if (!once) {
+                        core::Log::Warn("Vulkan present: resolve descriptor set unavailable; presenting clear-color fallback.");
+                        once = true;
+                    }
+                } else {
+                    postSet->UpdateTexture(0, color0);
+                    IDescriptorSet* sets[2] = { m_presentResolveFrameSet, postSet };
+                    rec->BindDescriptorSets(0, 2, sets);
+                    rec->DrawFullscreenQuad(m_presentResolvePipeline);
+                    renderedResolve = true;
+                }
+                rec->EndRenderingIfActive();
+                (void)renderedResolve;
+                dstPostComposeAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                dstPostComposeLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                dstPostComposeSrcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            } else {
+                static bool once = false;
+                if (!once) {
+                    core::Log::Warn("Vulkan present: swapchain image view missing; presenting clear-color fallback.");
+                    once = true;
+                }
+                clearSwapchainViaTransfer();
+            }
+
+            VkImageMemoryBarrier restoreSrc = {};
+            restoreSrc.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            restoreSrc.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            restoreSrc.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            restoreSrc.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            restoreSrc.image = srcImage;
+            restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
+            BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
+        }
+    }
 
     if (m_postBlitCallback && m_swapchain.GetRenderPass() != nullptr && m_swapchain.GetFramebuffer(imageIndex) != nullptr) {
-        barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.srcAccessMask = dstPostComposeAccess;
         barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrierDst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrierDst.oldLayout = dstPostComposeLayout;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        vkCmdPipelineBarrier(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
         VkRenderPass rp = static_cast<VkRenderPass>(m_swapchain.GetRenderPass());
         VkFramebuffer fb = static_cast<VkFramebuffer>(m_swapchain.GetFramebuffer(imageIndex));
         VkClearValue clearVal = {};
@@ -264,12 +379,124 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         m_postBlitCallback(cmd);
         vkCmdEndRenderPass(cmd);
     } else {
-        barrierDst.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrierDst.srcAccessMask = dstPostComposeAccess;
         barrierDst.dstAccessMask = 0;
-        barrierDst.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrierDst.oldLayout = dstPostComposeLayout;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        vkCmdPipelineBarrier(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
     }
+}
+
+void DeviceVK::DestroyPresentResolveResources() {
+    if (m_presentResolvePipeline) {
+        DestroyPipeline(m_presentResolvePipeline);
+        m_presentResolvePipeline = nullptr;
+    }
+    m_presentResolveSwapchainVkFormat = 0;
+    if (m_presentResolveFrameSet) {
+        DestroyDescriptorSet(m_presentResolveFrameSet);
+        m_presentResolveFrameSet = nullptr;
+    }
+    for (IDescriptorSet*& set : m_presentResolvePostSets) {
+        if (set) {
+            DestroyDescriptorSet(set);
+            set = nullptr;
+        }
+    }
+    if (m_presentResolveFrameUBO) {
+        DestroyBuffer(m_presentResolveFrameUBO);
+        m_presentResolveFrameUBO = nullptr;
+    }
+}
+
+bool DeviceVK::EnsurePresentResolveResources() {
+    const uint32_t swapFmtU = m_swapchain.format;
+    if (swapFmtU == 0)
+        return false;
+    IPipelineLayout* frameLayoutWr = GetResourceSetLayout(ResourceSetType::Frame);
+    IPipelineLayout* postLayoutWr = GetResourceSetLayout(ResourceSetType::PostPass);
+    if (!frameLayoutWr || !postLayoutWr)
+        return false;
+
+    if (!m_presentResolveFrameUBO) {
+        BufferDesc bd = {};
+        bd.sizeInBytes = 256;
+        bd.usage = BufferUsage::Uniform;
+        bd.memoryHint = BufferMemoryHint::HostVisible;
+        m_presentResolveFrameUBO = CreateBuffer(bd, nullptr);
+        if (!m_presentResolveFrameUBO)
+            return false;
+    }
+    if (!m_presentResolveFrameSet) {
+        m_presentResolveFrameSet = CreateDescriptorSet(frameLayoutWr);
+        if (!m_presentResolveFrameSet)
+            return false;
+        m_presentResolveFrameSet->UpdateUniformBuffer(0, m_presentResolveFrameUBO, 0, 128);
+        m_presentResolveFrameSet->UpdateUniformBuffer(1, m_presentResolveFrameUBO, 128, 128);
+    }
+    for (uint32_t i = 0; i < kMaxFrames; ++i) {
+        if (m_presentResolvePostSets[i])
+            continue;
+        m_presentResolvePostSets[i] = CreateDescriptorSet(postLayoutWr);
+        if (!m_presentResolvePostSets[i])
+            return false;
+        for (uint32_t b = 0; b < 7; ++b)
+            m_presentResolvePostSets[i]->UpdateTexture(b, nullptr);
+    }
+
+    if (m_presentResolvePipeline && m_presentResolveSwapchainVkFormat == swapFmtU)
+        return true;
+
+    if (m_presentResolvePipeline) {
+        DestroyPipeline(m_presentResolvePipeline);
+        m_presentResolvePipeline = nullptr;
+    }
+
+    RHITextureFormat swapColorRhi = RHITextureFormat::BGRA8;
+    switch (static_cast<VkFormat>(swapFmtU)) {
+    case VK_FORMAT_B8G8R8A8_UNORM:
+        swapColorRhi = RHITextureFormat::BGRA8;
+        break;
+    case VK_FORMAT_R8G8B8A8_UNORM:
+        swapColorRhi = RHITextureFormat::RGBA8;
+        break;
+    default: {
+        static bool once = false;
+        if (!once) {
+            core::Log::WarnF("Vulkan present: swapchain format 0x%x has no present_resolve mapping; extend DeviceVK::EnsurePresentResolveResources.",
+                              static_cast<unsigned>(swapFmtU));
+            once = true;
+        }
+        return false;
+    }
+    }
+
+    VertexLayout vl = {};
+    vl.strideInBytes = 4u * sizeof(float);
+    vl.attributes = {
+        {0u, VertexAttributeType::Float2, 0u},
+        {1u, VertexAttributeType::Float2, 2u * sizeof(float)},
+    };
+
+    ShaderGraphicsPipelineCreateInfo info = {};
+    info.assetPath = "passes/post/present_resolve";
+    info.vertexLayout = vl;
+    info.topology = PrimitiveTopology::TriangleList;
+    info.layoutKind = PipelineLayoutKind::Post;
+    info.useDepthStencilOverride = true;
+    info.depthStencilOverride.depthTest = false;
+    info.depthStencilOverride.depthWrite = false;
+    info.sourcePolicy = ShaderSourcePolicy::CompileFromSource;
+    PipelineAttachmentFormats af;
+    af.color = { swapColorRhi };
+    af.depthStencil = RHITextureFormat::None;
+    info.attachmentFormats = af;
+
+    m_presentResolvePipeline = CreateGraphicsPipelineFromShaderAsset(info);
+    if (!m_presentResolvePipeline)
+        return false;
+    m_presentResolveSwapchainVkFormat = swapFmtU;
+    return true;
 }
 
 void DeviceVK::BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) { (void)nativeFbo; (void)width; (void)height; }

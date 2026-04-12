@@ -58,4 +58,9 @@ std::string FindConfigPath(int argc, char** argv);
 bool LoadConfig(const std::string& path, RuntimeOptions& options, std::string& error);
 bool ParseArgs(int argc, char** argv, RuntimeOptions& options, std::string& error);
 
+/** Asset roots, timestep defaults, headless/overlay consistency. */
+void ApplyRuntimeDefaults(RuntimeOptions& options);
+/** Profile dev | shipped; returns false and sets \a error if profile name is invalid. */
+bool ApplyRuntimeProfile(RuntimeOptions& options, std::string& error);
+
 } // namespace openeye::player

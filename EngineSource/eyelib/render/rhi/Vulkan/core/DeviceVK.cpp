@@ -101,6 +101,7 @@ DeviceVK::~DeviceVK() {
 
     if (m_fullscreenQuadVBO) { DestroyBuffer(m_fullscreenQuadVBO); m_fullscreenQuadVBO = nullptr; }
     if (m_fullscreenQuadIBO) { DestroyBuffer(m_fullscreenQuadIBO); m_fullscreenQuadIBO = nullptr; }
+    DestroyPresentResolveResources();
     if (m_fallbackShaderResourceTexture2D) {
         DestroyTexture(m_fallbackShaderResourceTexture2D);
         m_fallbackShaderResourceTexture2D = nullptr;
@@ -1406,6 +1407,11 @@ void DeviceVK::DestroyTexture(ITexture* texture) {
     }
     if (t->m_retired) return;
     const uint32_t frameIndex = GetCurrentFrameIndex();
+    for (void* sliceView : t->m_slice2DViewsByLayer) {
+        if (sliceView)
+            m_deletionQueue.EnqueueImageView(frameIndex, m_device, sliceView);
+    }
+    t->m_slice2DViewsByLayer.clear();
     if (t->m_imageView)
         m_deletionQueue.EnqueueImageView(frameIndex, m_device, t->m_imageView);
     if (t->m_image) {

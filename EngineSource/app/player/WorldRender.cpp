@@ -18,6 +18,7 @@
 #include "api/asset/AssetManager.h"
 #include "eyelib/vr/XRViewHelpers.h"
 #include "eyelib/world/SkyboxAssetId.h"
+#include "eyelib/render/rhi/RHI.h"
 
 #include <algorithm>
 #include <cassert>
@@ -213,6 +214,28 @@ void WorldRenderBridge::Shutdown() {
     m_ready = false;
 }
 
+void WorldRenderBridge::BindWorldSnapshotCapture(eyelib::api::world::World& world) {
+    world.SetCaptureSnapshotCallback([this, &world]() {
+        world.FlushTransforms();
+        world.CaptureRenderSnapshot(m_frameSnapshot);
+        world.SetFrameSnapshot(&m_frameSnapshot);
+    });
+    world.FlushTransforms();
+    world.CaptureRenderSnapshot(m_frameSnapshot);
+    world.SetFrameSnapshot(&m_frameSnapshot);
+}
+
+void WorldRenderBridge::UnbindWorldSnapshotCapture(eyelib::api::world::World& world) {
+    world.SetCaptureSnapshotCallback(nullptr);
+    world.SetFrameSnapshot(nullptr);
+}
+
+void WorldRenderBridge::CaptureRenderSnapshotNow(eyelib::api::world::World& world) {
+    world.FlushTransforms();
+    world.CaptureRenderSnapshot(m_frameSnapshot);
+    world.SetFrameSnapshot(&m_frameSnapshot);
+}
+
 void* WorldRenderBridge::GetOutputColorTextureNativeHandle() const {
     return m_ready ? m_pipeline.GetOutputColorTextureNativeHandle() : nullptr;
 }
@@ -321,6 +344,17 @@ void WorldRenderBridge::IssueStreamingReadback() {
 
 eyelib::api::RenderDevice WorldRenderBridge::GetDevice() const {
     return m_pipeline.GetDevice();
+}
+
+void WorldRenderBridge::BeginPresentFrame() {
+    if (!m_ready || !m_ownsPresentation) {
+        return;
+    }
+    void* dev = m_pipeline.GetDevice().Get();
+    if (!dev) {
+        return;
+    }
+    static_cast<eyelib::render::rhi::IDevice*>(dev)->BeginFrame();
 }
 
 void WorldRenderBridge::InitializeDefaultResources() {
@@ -470,25 +504,8 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
                                    api::FrameAllocator* frameAlloc) {
-    if (!m_captureCallbackSet) {
-        world.SetCaptureSnapshotCallback([this, &world]() {
-            world.FlushTransforms();
-            world.CaptureRenderSnapshot(m_frameSnapshot);
-            world.SetFrameSnapshot(&m_frameSnapshot);
-        });
-        m_captureCallbackSet = true;
-        world.FlushTransforms();
-        world.CaptureRenderSnapshot(m_frameSnapshot);
-        world.SetFrameSnapshot(&m_frameSnapshot);
-    }
+    (void)world;
     BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
-
-    const std::string skyboxId = world.GetSkyboxAssetId();
-    if (eyelib::world::skybox::IsProceduralSkyboxId(skyboxId)) {
-        scene.skybox.reset();
-    } else {
-        scene.skybox = GetOrLoadSkybox(skyboxId, options.assetRoots);
-    }
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
@@ -515,6 +532,12 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapsh
     BuildSceneFromViews(snapshot.renderables, snapshot.meshRenderers, snapshot.cameras, snapshot.xrCameras, snapshot.lights,
                         [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); },
                         options, animationBridge, assetRegistry, scene, frameAlloc);
+
+    if (eyelib::world::skybox::IsProceduralSkyboxId(snapshot.skyboxAssetId)) {
+        scene.skybox.reset();
+    } else {
+        scene.skybox = GetOrLoadSkybox(snapshot.skyboxAssetId, options.assetRoots);
+    }
 }
 
 void WorldRenderBridge::BuildSceneFromViews(

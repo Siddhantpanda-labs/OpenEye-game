@@ -26,6 +26,34 @@ RHITextureFormat TextureVK::GetFormat() const { return m_format; }
 
 void* TextureVK::GetNativeTexture() { return m_imageView; }
 
+void* TextureVK::GetNativeTexture2DViewForArrayLayer(uint32_t layer) {
+    if (m_retired || !m_image || m_slice2DViewsByLayer.empty())
+        return nullptr;
+    if (layer >= m_slice2DViewsByLayer.size())
+        return nullptr;
+    if (m_slice2DViewsByLayer[layer])
+        return m_slice2DViewsByLayer[layer];
+    VkDevice device = static_cast<VkDevice>(m_device->GetDevice());
+    if (device == VK_NULL_HANDLE)
+        return nullptr;
+    VkImage image = static_cast<VkImage>(m_image);
+    VkImageViewCreateInfo viewInfo = {};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = ToVkFormat(m_format);
+    viewInfo.subresourceRange.aspectMask = ToVkImageAspect(m_format);
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = m_mipLevels;
+    viewInfo.subresourceRange.baseArrayLayer = layer;
+    viewInfo.subresourceRange.layerCount = 1;
+    VkImageView sliceView = VK_NULL_HANDLE;
+    if (vkCreateImageView(device, &viewInfo, nullptr, &sliceView) != VK_SUCCESS)
+        return nullptr;
+    m_slice2DViewsByLayer[layer] = sliceView;
+    return sliceView;
+}
+
 bool TextureVK::IsGpuBindable() const { return !m_retired && m_imageView != nullptr; }
 
 namespace {
@@ -668,9 +696,12 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     t->m_depthOrArray = layerCount;
     t->m_type = desc.type;
     t->m_format = desc.format;
+    t->m_mipLevels = desc.mipLevels;
     t->m_image = image;
     t->m_imageView = imageView;
     t->m_allocation = allocation;
+    if (desc.type == TextureType::Texture2DArray)
+        t->m_slice2DViewsByLayer.assign(layerCount, nullptr);
     return t;
 }
 

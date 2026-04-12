@@ -93,6 +93,13 @@ public:
     /** Native texture handle of pipeline output (after Render). For ImGui: use as ImTextureID. OpenGL: texture ID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
+    /** Debug: Vulkan `VkImageView` (void*) of directional CSM depth (2D array), or GL depth texture name; null if unavailable. Valid after pipeline resources exist; content updates when Render runs (Hybrid/Forward paths that use cascades). */
+    void* GetShadowDepthMapNativeViewForDebug() const;
+    /** Debug: cascade split count for CSM (0 if no shadow map). */
+    uint32_t GetShadowCascadeCountForDebug() const;
+    /** Debug: shadow depth map width/height (single cascade resolution). */
+    uint32_t GetShadowMapResolutionForDebug() const;
+
     /** Read current frame output as RGBA8. Call after Render() and Finish(). outRGBA must be at least width*height*4 bytes. Returns false if readback not supported. */
     bool ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) const;
     /** Read pixels from an arbitrary render target (e.g. streaming 960x540 RT). outRGBA must be at least target width*height*4. Call after Finish() if target was just blitted to. */

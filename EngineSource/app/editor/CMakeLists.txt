@@ -22,6 +22,7 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/SceneViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/GameViewPanel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/panels/ProfilerPanel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/panels/ShadowDebugPanel.cpp
 )
 if(WIN32)
     list(APPEND EDITOR_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/OpenEyeEditor.rc)

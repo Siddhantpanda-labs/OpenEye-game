@@ -203,6 +203,14 @@ bool WorldPhysicsBridge::BuildFromWorld(eyelib::api::world::World& world) {
     if (!m_ready) {
         return false;
     }
+    for (auto& binding : m_bindings) {
+        if (binding.body) {
+            eyelib::api::physics::RigidBody::Destroy(*m_physics, binding.body);
+        }
+        if (binding.shape) {
+            m_physics->DestroyShape(binding.shape);
+        }
+    }
     m_bindings.clear();
     m_contactPairs.clear();
     const auto obs = world.GetObservation();

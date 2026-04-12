@@ -92,6 +92,7 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
         }
         assetRegistry.SetRenderDevice(m_render->GetDevice());
         m_render->InitializeDefaultResources();
+        m_render->BindWorldSnapshotCapture(world);
     }
 
     world.FlushTransforms();
@@ -122,14 +123,31 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
 
     m_width = width;
     m_height = height;
+    m_frameCameraOverrideActive = false;
     m_ready = true;
     return true;
+}
+
+void GameRuntime::SetFrameCameraOverride(const eyelib::api::CameraView* view) {
+    if (view) {
+        m_frameCameraOverrideActive = true;
+        m_frameCameraOverride = *view;
+    } else {
+        m_frameCameraOverrideActive = false;
+    }
 }
 
 void GameRuntime::Shutdown() {
     if (!m_ready) return;
 
     m_ready = false;
+    m_frameCameraOverrideActive = false;
+    if (m_world && m_render) {
+        m_render->UnbindWorldSnapshotCapture(*m_world);
+    } else if (m_world) {
+        m_world->SetCaptureSnapshotCallback(nullptr);
+        m_world->SetFrameSnapshot(nullptr);
+    }
     if (m_audio) {
         m_audio->Shutdown();
         m_audio.reset();
@@ -154,6 +172,13 @@ void GameRuntime::Shutdown() {
     m_world = nullptr;
     m_assetRegistry = nullptr;
     m_assetRoots.clear();
+}
+
+void GameRuntime::BeginPresentFrame() {
+    if (!m_ready || !m_render) {
+        return;
+    }
+    m_render->BeginPresentFrame();
 }
 
 void GameRuntime::Tick(float deltaSeconds) {
@@ -181,6 +206,10 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
 
     ResetScene();
     m_render->BuildScene(*m_world, m_options, m_animation.get(), m_assetRegistry, m_scene, &m_frameAlloc);
+    if (m_frameCameraOverrideActive) {
+        // Raw camera only — RenderPipeline::PrepareFrameData applies AdjustCameraForBackend once (matches editor / BuildScene).
+        m_scene.camera = m_frameCameraOverride;
+    }
     m_render->ApplySceneRenderPipelineMode(m_world->GetRenderPipelineMode());
     m_render->RenderSceneOnly(m_scene, m_width, m_height);
 
@@ -243,6 +272,32 @@ eyelib::api::RenderDevice GameRuntime::GetDevice() const {
 void GameRuntime::ReloadShaders() {
     if (m_render) {
         m_render->ReloadShaders();
+    }
+}
+
+void GameRuntime::RefreshRenderSnapshotFromWorld() {
+    if (!m_ready || !m_world || !m_render) {
+        return;
+    }
+    m_render->CaptureRenderSnapshotNow(*m_world);
+}
+
+void GameRuntime::ResyncFromWorld() {
+    if (!m_ready || !m_world || !m_assetRegistry) {
+        return;
+    }
+    m_world->FlushTransforms();
+    if (m_physics) {
+        (void)m_physics->BuildFromWorld(*m_world);
+    }
+    if (m_animation) {
+        m_animation->BuildFromWorld(*m_world, *m_assetRegistry);
+    }
+    if (m_scripting) {
+        m_scripting->BuildFromWorld(*m_world, m_assetRoots);
+    }
+    if (m_audio) {
+        m_audio->BuildFromWorld(*m_world);
     }
 }
 

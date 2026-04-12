@@ -194,6 +194,8 @@ The public **api/world** layer (not under eyelib/world) exposes:
 
 CaptureRenderSnapshot is called once per frame (or when building the scene); it fills a **RenderSnapshot** from the current world state (including world transforms from TransformStore). The render bridge then uses this snapshot to build drawables and light arrays.
 
+**SetCaptureSnapshotCallback** — For **GameRuntime** / **WorldRenderBridge** play sessions, binding is centralized: `WorldRenderBridge::BindWorldSnapshotCapture` after bridge init and `UnbindWorldSnapshotCapture` before teardown (`GameRuntime::Shutdown`). Do not register the callback from `BuildScene` or duplicate clears in editor/player hosts.
+
 ---
 
 ## 8. Conventions

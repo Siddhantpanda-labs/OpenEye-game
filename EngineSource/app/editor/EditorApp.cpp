@@ -9,6 +9,7 @@
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
+#include "panels/ShadowDebugPanel.h"
 #include "panels/GameViewPanel.h"
 #include "panels/AssetPanel.h"
 #include "panels/ProfilerPanel.h"
@@ -292,7 +293,8 @@ private:
     VkDescriptorSetLayout m_viewportSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_viewportDescriptorPool = VK_NULL_HANDLE;
     static constexpr uint32_t kViewportFramesInFlight = 3;
-    static constexpr uint32_t kViewportSlots = 2;
+    /** Unique ImGui-bound textures per frame (scene, game, shadow debug, material preview, inspector slots, …). */
+    static constexpr uint32_t kViewportSlots = 8;
     static constexpr uint32_t kViewportSetCount = kViewportFramesInFlight * kViewportSlots;
     VkDescriptorSet m_viewportSets[kViewportSetCount] = {};
     uint32_t m_resolveCallIndex = 0;
@@ -511,11 +513,10 @@ int RunEditor(int argc, char** argv) {
             lastFramebufferHeight = framebufferHeight;
         }
         if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
-            ctx.world.SetFrameSnapshot(nullptr);
-            ctx.world.SetCaptureSnapshotCallback(nullptr);
             try {
                 ctx.gameRuntime.reset();
             } catch (...) {}
+            // GameRuntime::~GameRuntime / Shutdown clears snapshot capture via WorldRenderBridge::UnbindWorldSnapshotCapture.
             ctx.world.SetFrameSnapshot(nullptr);
             ctx.gameRuntimeStopRequested = false;
             // Revert world to pre-Play snapshot so edits during Play are discarded.
@@ -577,6 +578,7 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowSceneViewPanel(&ctx);
         openeye::editor::panels::ShowGameViewPanel(&ctx);
         openeye::editor::panels::ShowProfilerPanel(&ctx);
+        openeye::editor::panels::ShowShadowDebugPanel(&ctx);
 
         ImGui::Render();
         if (imgui.IsVulkan() && editorDevice) {

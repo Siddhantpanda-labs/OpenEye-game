@@ -97,7 +97,7 @@
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "NewFolder\\Red.mat",
+            "materialAssetId": "",
             "meshAssetId": "builtin://Cube",
             "submeshIndex": -1,
             "visible": true
@@ -111,7 +111,7 @@
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "NewFolder\\Blue.mat",
+            "materialAssetId": "",
             "meshAssetId": "builtin://Cube",
             "submeshIndex": -1,
             "visible": true

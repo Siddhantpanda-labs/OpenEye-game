@@ -387,6 +387,12 @@ struct ITexture {
     virtual RHITextureFormat GetFormat() const = 0;
     /** Backend-native texture handle (e.g. GL texture id as void*). For interop only. */
     virtual void* GetNativeTexture() = 0;
+    /**
+     * Vulkan: for Texture2DArray (and similar), GetNativeTexture() is often a 2D array image view.
+     * Code that binds into a sampler2D / Dim=2D path must use a single-layer 2D view instead.
+     * Returns nullptr if unsupported or layer out of range (callers use GetNativeTexture()).
+     */
+    virtual void* GetNativeTexture2DViewForArrayLayer(uint32_t layer) { (void)layer; return nullptr; }
     /** False after GPU resources are torn down (e.g. Vulkan deferred destroy with live wrapper). */
     virtual bool IsGpuBindable() const { return true; }
 };

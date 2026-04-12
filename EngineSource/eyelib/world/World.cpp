@@ -1,6 +1,7 @@
 #include "World.h"
 
 #include "Commands/CommandTypes.h"
+
 #include "eyelib/world/components/RigidBody.h"
 #include "Events/WorldEvents.h"
 #include "eyelib/world/components/SystemBindings.h"

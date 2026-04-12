@@ -53,12 +53,15 @@ cmake --build . --config Debug
 - **Libraries**: `Eyelib*` modules + `Eyelib*API` modules (e.g. `EyelibWorld` and `EyelibWorldAPI`).
 - **Executable(s)**:
   - `OpenEyePlayer` (from `EngineSource/app/player/`) when `OPENEYE_BUILD_PLAYER=ON` (default).
+  - `OpenEyeAIPlayground` (from `EngineSource/app/ai_playground/`) when `OPENEYE_BUILD_AI_PLAYGROUND=ON` (default): scene + chat shell for AI tooling; see `EngineSource/app/ai_playground/README.md`.
+  - `OpenEyeRenderingSandbox` (from `EngineSource/app/rendering_sandbox/`) when `OPENEYE_BUILD_RENDERING_SANDBOX=ON` (default): isolated harness for `EyelibRendering` (`eyelib/rendering/`); does not link `EyelibRender`. Set `OPENEYE_BUILD_RENDERING_SANDBOX=OFF` to skip.
   - `OpenEyeApiTests` (from `EngineSource/app/test/`) when `OPENEYE_BUILD_TESTS=ON` and `app/test` exists.
   - A “game app” is scaffolded to live under `app/openmeta`, but game/editor targets are currently forced off in the root CMake configuration.
 
 ### Useful CMake options
 
 - `OPENEYE_BUILD_EYELIB` (default ON): build the `eyelib/` + `api/` module set
+- `OPENEYE_BUILD_AI_PLAYGROUND` (default ON): build `OpenEyeAIPlayground` (pulls in `app/player` for `OpenEyeGameRuntime`)
 - `OPENEYE_BUILD_TESTS` (default ON): build `OpenEyeApiTests`
 - `OPENEYE_USE_LZ4`, `OPENEYE_USE_ZSTD`: compression toggles used by serialization/assets
 

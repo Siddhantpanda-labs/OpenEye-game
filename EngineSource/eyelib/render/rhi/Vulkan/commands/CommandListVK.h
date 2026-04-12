@@ -124,6 +124,8 @@ struct CommandListVK : ICommandList {
     bool GetCullFrontFace() const { return m_cullFrontFace; }
 
     void EndRenderingIfActive();
+    /** Begin dynamic rendering into a swapchain color image view (image must already be in COLOR_ATTACHMENT_OPTIMAL). */
+    void BeginRenderingSwapchainColor(void* colorImageView, uint32_t width, uint32_t height, bool clear, const float clearColor[4]);
     /** Begin dynamic rendering with given RT. */
     void BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions);
     /** Push current graphics constants for the currently bound pipeline layout (if available). */

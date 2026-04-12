@@ -130,52 +130,6 @@ static void ResolveLogPathToExeDir(RuntimeOptions& options) {
     }
 }
 
-void ApplyDefaults(RuntimeOptions& options) {
-    if (options.assetRoots.empty()) {
-        std::string engineAssets = eyelib::api::platform::filesystem::GetEngineAssetsRoot();
-        if (!engineAssets.empty())
-            engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineAssets + "/assets");
-        options.assetRoots.emplace_back(engineAssets.empty() ? "assets" : engineAssets);
-    }
-
-    if (options.fixedTimestep > 0.0f && !options.timeModeSet) {
-        options.timeMode = TimeMode::Fixed;
-        options.timeModeSet = true;
-    }
-
-    if (options.timeModeSet
-        && options.timeMode == TimeMode::Replay
-        && options.replayDelta <= 0.0f) {
-        options.replayDelta = 1.0f / 60.0f;
-    }
-
-    if (options.headless && options.overlay) {
-        options.overlay = false;
-    }
-}
-
-bool ApplyProfile(RuntimeOptions& options, std::string& error) {
-    if (options.profile.empty()) {
-        return true;
-    }
-    if (options.profile == "dev") {
-        if (!options.overlaySet) options.overlay = true;
-        if (!options.statsSet) options.stats = true;
-        if (!options.strictAssetsSet) options.strictAssets = false;
-        if (!options.headlessSet) options.headless = false;
-        return true;
-    }
-    if (options.profile == "shipped") {
-        if (!options.overlaySet) options.overlay = false;
-        if (!options.statsSet) options.stats = false;
-        if (!options.strictAssetsSet) options.strictAssets = true;
-        if (!options.headlessSet) options.headless = false;
-        return true;
-    }
-    error = "Invalid profile: " + options.profile;
-    return false;
-}
-
 void LogOptions(const RuntimeOptions& options) {
     eyelib::api::core::Log::Info("OpenEye unified runtime player starting.");
     eyelib::api::core::Log::InfoF("Scene: %s", options.scenePath.c_str());
@@ -227,14 +181,14 @@ int RunPlayer(int argc, char** argv) {
         return static_cast<int>(ExitCode::Ok);
     }
 
-    if (!ApplyProfile(options, error)) {
+    if (!ApplyRuntimeProfile(options, error)) {
         if (!error.empty()) {
             std::cerr << error << "\n";
         }
         return static_cast<int>(ExitCode::InvalidArgs);
     }
 
-    ApplyDefaults(options);
+    ApplyRuntimeDefaults(options);
     options.scenePath = NormalizePath(options.scenePath);
     options.assetRoots = NormalizeRoots(options.assetRoots);
     ResolveLogPathToExeDir(options);
@@ -300,7 +254,9 @@ int RunPlayer(int argc, char** argv) {
         windowConfig.width = options.width;
         windowConfig.height = options.height;
         windowConfig.vsync = options.vsync;
-        windowConfig.useNativeApiOnly = (options.renderBackend == eyelib::render::RenderBackend::Diligent);
+        windowConfig.useNativeApiOnly =
+            (options.renderBackend == eyelib::render::RenderBackend::Vulkan ||
+             options.renderBackend == eyelib::render::RenderBackend::Diligent);
         if (!windowGuard.Initialize(window, windowConfig)) {
             eyelib::api::core::Log::Error("Failed to initialize window.");
             return static_cast<int>(ExitCode::WindowInitFailed);
@@ -433,6 +389,7 @@ int RunPlayer(int argc, char** argv) {
                     }
 #endif
                 }
+                gameRuntime.BeginPresentFrame();
                 if (overlay.IsVulkan() && options.overlay && overlay.IsReady()) {
                     overlay.Render(snap);
                 }
