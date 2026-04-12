@@ -173,6 +173,22 @@ void AIPlaygroundUI::Render(const AIPlaygroundSnapshot& snapshot, AIPlaygroundCh
             ImGui::Separator();
         }
         ImGui::Text("Scene: %s", snapshot.scenePath.c_str());
+        if (playgroundMenu && playgroundMenu->onSaveScene) {
+            const bool canSave = snapshot.simulationCanStart;
+            if (!canSave) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Button("Save scene")) {
+                playgroundMenu->onSaveScene();
+            }
+            if (!canSave) {
+                ImGui::EndDisabled();
+            }
+            if (!canSave) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("(open a project or --scene)");
+            }
+        }
         ImGui::Text("FPS: %.1f", snapshot.fps);
         ImGui::Text("Frame: %.3f ms", snapshot.frameTimeMs);
         ImGui::Text("Entities: %zu", snapshot.entityCount);
@@ -260,7 +276,8 @@ void AIPlaygroundUI::Render(const AIPlaygroundSnapshot& snapshot, AIPlaygroundCh
     ImGui::SetNextWindowBgAlpha(0.92f);
     if (ImGui::Begin("World commands##chat", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-        ImGui::TextUnformatted("Chat → World (Phase 1: /observe /plan /ai demo; /ask + OPENAI_API_KEY)");
+        ImGui::TextUnformatted("Chat → World (/observe /plan /ai demo; /ask uses provider below)");
+        ImGui::Combo("LLM for /ask", &chat.llmProviderIndex, "ChatGPT (OpenAI)\0Gemini (Google)\0");
         ImGui::Separator();
         const float footer = 110.0f;
         const float historyH = std::max(120.0f, ImGui::GetContentRegionAvail().y - footer);

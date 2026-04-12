@@ -31,15 +31,15 @@ std::wstring Utf8ToWide(const std::string& utf8) {
 
 } // namespace
 
-bool HttpPostJsonOpenAI(const std::string& hostUtf8,
-                        const uint16_t port,
-                        const std::string& pathAndQueryUtf8,
-                        const std::string& authorizationBearerValue,
-                        const std::string& requestBodyUtf8,
-                        const unsigned timeoutMs,
-                        long& outHttpStatus,
-                        std::string& responseBodyUtf8,
-                        std::string& errorMessage) {
+bool HttpPostJsonWithHeaders(const std::string& hostUtf8,
+                             const uint16_t port,
+                             const std::string& pathAndQueryUtf8,
+                             const std::string& headerBlockUtf8,
+                             const std::string& requestBodyUtf8,
+                             const unsigned timeoutMs,
+                             long& outHttpStatus,
+                             std::string& responseBodyUtf8,
+                             std::string& errorMessage) {
     outHttpStatus = 0;
     responseBodyUtf8.clear();
     errorMessage.clear();
@@ -48,7 +48,7 @@ bool HttpPostJsonOpenAI(const std::string& hostUtf8,
     const std::wstring hostW = Utf8ToWide(hostUtf8);
     const std::wstring pathW = Utf8ToWide(pathAndQueryUtf8);
     if (hostW.empty() || pathW.empty()) {
-        errorMessage = "HttpPostJsonOpenAI: invalid host or path (UTF-8 conversion failed).";
+        errorMessage = "HttpPostJsonWithHeaders: invalid host or path (UTF-8 conversion failed).";
         return false;
     }
 
@@ -79,11 +79,7 @@ bool HttpPostJsonOpenAI(const std::string& hostUtf8,
         return false;
     }
 
-    std::ostringstream hdr;
-    hdr << "Content-Type: application/json\r\n";
-    hdr << "Authorization: Bearer " << authorizationBearerValue << "\r\n";
-    const std::string hdrUtf8 = hdr.str();
-    const std::wstring hdrW = Utf8ToWide(hdrUtf8);
+    const std::wstring hdrW = Utf8ToWide(headerBlockUtf8);
     const wchar_t* hdrPtr = hdrW.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : hdrW.c_str();
     const DWORD hdrLen = hdrW.empty() ? 0u : static_cast<DWORD>(-1);
 
@@ -141,12 +137,28 @@ bool HttpPostJsonOpenAI(const std::string& hostUtf8,
     (void)hostUtf8;
     (void)port;
     (void)pathAndQueryUtf8;
-    (void)authorizationBearerValue;
+    (void)headerBlockUtf8;
     (void)requestBodyUtf8;
     (void)timeoutMs;
-    errorMessage = "OpenAI HTTP is only implemented on Windows (WinHTTP). Build on Windows or add a portable client.";
+    errorMessage = "HTTPS JSON POST is only implemented on Windows (WinHTTP). Build on Windows or add a portable client.";
     return false;
 #endif
+}
+
+bool HttpPostJsonOpenAI(const std::string& hostUtf8,
+                        const uint16_t port,
+                        const std::string& pathAndQueryUtf8,
+                        const std::string& authorizationBearerValue,
+                        const std::string& requestBodyUtf8,
+                        const unsigned timeoutMs,
+                        long& outHttpStatus,
+                        std::string& responseBodyUtf8,
+                        std::string& errorMessage) {
+    std::ostringstream hdr;
+    hdr << "Content-Type: application/json\r\n";
+    hdr << "Authorization: Bearer " << authorizationBearerValue << "\r\n";
+    return HttpPostJsonWithHeaders(hostUtf8, port, pathAndQueryUtf8, hdr.str(), requestBodyUtf8, timeoutMs, outHttpStatus,
+        responseBodyUtf8, errorMessage);
 }
 
 } // namespace openeye::ai_playground

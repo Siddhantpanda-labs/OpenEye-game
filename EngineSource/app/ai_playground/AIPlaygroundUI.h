@@ -31,6 +31,8 @@ struct AIPlaygroundSnapshot {
 struct AIPlaygroundChatState {
     std::vector<std::string> messages;
     char inputBuffer[2048]{};
+    /** 0 = ChatGPT (OpenAI), 1 = Gemini (Google). Used for `/ask` routing. */
+    int llmProviderIndex = 0;
 };
 
 /** Called after the user sends a line; append assistant/system lines to \a chat.messages. */
@@ -49,6 +51,8 @@ struct PlaygroundUIMenu {
     /** Host-owned; begin/end simulation (editor-style Play / Stop). */
     std::function<void()> onSimulationPlay;
     std::function<void()> onSimulationStop;
+    /** Host-owned; write current world to the active scene file (playground or --scene path). */
+    std::function<void()> onSaveScene;
 };
 
 /**

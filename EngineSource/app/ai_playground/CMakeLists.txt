@@ -7,7 +7,8 @@ set(AI_PLAYGROUND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldToolBridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundWorldObservation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundOpenAIHttp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundOpenAIAgent.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundOpenAiCoordinator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundGeminiCoordinator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/PlaygroundProject.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../player/PlayerConfig.cpp
 )

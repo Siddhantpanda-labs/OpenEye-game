@@ -63,6 +63,10 @@ _deps
 # Shaders
 *.spv
 
+# Local LLM API keys (never commit)
+gemini.key.txt
+chatgpt.key.txt
+
 # Logs
 *.log
 

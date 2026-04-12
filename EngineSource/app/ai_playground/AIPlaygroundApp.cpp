@@ -1,6 +1,7 @@
 #include "AIPlaygroundApp.h"
 #include "AIPlaygroundUI.h"
-#include "PlaygroundOpenAIAgent.h"
+#include "PlaygroundGeminiCoordinator.h"
+#include "PlaygroundOpenAiCoordinator.h"
 #include "PlaygroundProject.h"
 #include "WorldToolBridge.h"
 
@@ -597,10 +598,38 @@ int RunAIPlayground(int argc, char** argv) {
     };
     playgroundMenu.onSimulationPlay = [startSimulation]() { startSimulation(); };
     playgroundMenu.onSimulationStop = [stopSimulation]() { stopSimulation(); };
+    playgroundMenu.onSaveScene = [&]() {
+        if (!gameRuntime.IsReady()) {
+            lastProjectError = "Save: runtime not ready.";
+            return;
+        }
+        std::string path;
+        if (!session.sceneAbs.empty()) {
+            path = session.sceneAbs;
+        } else if (userExplicitScene && !options.scenePath.empty()) {
+            path = options.scenePath;
+        }
+        if (path.empty()) {
+            lastProjectError = "Save: open a playground or pass --scene.";
+            return;
+        }
+        lastProjectError.clear();
+        if (!world.SaveScene(path)) {
+            lastProjectError = "Save failed: " + path;
+            eyelib::api::core::Log::ErrorF("AI Playground Save: SaveScene failed for %s", path.c_str());
+            return;
+        }
+        chat.messages.push_back("system: Scene saved.");
+        eyelib::api::core::Log::InfoF("AI Playground: scene saved to %s", path.c_str());
+    };
 
     WorldToolBridge toolBridge(world);
+    OpenAiAskAsyncCoordinator openAiCoordinator;
+    GeminiAskAsyncCoordinator geminiCoordinator;
+
     chat.messages.push_back(
-        "system: Type /help for commands. Phase 1: /observe, /plan, /ai demo; `/ask <goal>` when OPENAI_API_KEY is set. "
+        "system: Type /help for commands. Phase 1: /observe, /plan, /ai demo; `/ask <goal>` uses the **LLM for /ask** combo "
+        "(ChatGPT needs OPENAI_API_KEY; Gemini needs GEMINI_API_KEY or **gemini.key.txt** at workspace root). "
         "Catalog: documentation/Ai_plan/tools_catalog_v1.md. **New/Open Playground** → Projects/AI_Playground/<name>.");
 
     ChatSubmitHandler onChat = [&](AIPlaygroundChatState& chatState, const std::string& userLine) {
@@ -617,21 +646,14 @@ int RunAIPlayground(int argc, char** argv) {
         static const std::string kAsk = "/ask ";
         if (t.size() >= kAsk.size() && t.compare(0, kAsk.size(), kAsk) == 0) {
             const std::string goal = trimChat(t.substr(kAsk.size()));
-            if (goal.empty()) {
-                chatState.messages.push_back("assistant: Usage: /ask <natural language goal>");
+            if (openAiCoordinator.IsBusy() || geminiCoordinator.IsBusy()) {
+                chatState.messages.push_back("assistant: Wait for the current LLM request to finish.");
                 return;
             }
-            std::string err;
-            std::vector<std::string> replies;
-            if (RunOpenAIAsk(goal, workspaceRoot, toolBridge, replies, err)) {
-                for (std::string& r : replies) {
-                    chatState.messages.push_back(std::move(r));
-                }
-                if (gameRuntime.IsReady()) {
-                    gameRuntime.ResyncFromWorld();
-                }
+            if (chatState.llmProviderIndex == 1) {
+                (void)geminiCoordinator.TryStart(goal, workspaceRoot, chatState.messages);
             } else {
-                chatState.messages.push_back("assistant: " + err);
+                (void)openAiCoordinator.TryStart(goal, workspaceRoot, chatState.messages);
             }
             return;
         }
@@ -657,6 +679,15 @@ int RunAIPlayground(int argc, char** argv) {
             framePacer.WaitForNextFrame();
         }
         world.SetFrameSnapshot(nullptr);
+        if (gameRuntime.IsReady()) {
+            const auto resync = [&]() {
+                if (gameRuntime.IsReady()) {
+                    gameRuntime.ResyncFromWorld();
+                }
+            };
+            openAiCoordinator.Poll(toolBridge, chat.messages, resync);
+            geminiCoordinator.Poll(toolBridge, chat.messages, resync);
+        }
         if (options.maxFrames > 0) {
             frameCount += 1;
             if (frameCount >= options.maxFrames) {
@@ -830,6 +861,8 @@ int RunAIPlayground(int argc, char** argv) {
     if (!options.headless) {
         window.MakeContextCurrent();
     }
+    openAiCoordinator.ShutdownJoin();
+    geminiCoordinator.ShutdownJoin();
     gameRuntime.Shutdown();
 
     eyelib::api::core::Log::Info("AI Playground shutdown complete.");
