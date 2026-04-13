@@ -1,4 +1,5 @@
 # Build directories
+_build_verify/
 build/
 build_eyelib/
 build1/
