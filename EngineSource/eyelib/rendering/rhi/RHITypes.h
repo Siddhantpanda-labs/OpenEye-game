@@ -354,6 +354,14 @@ struct DispatchIndirectCommand {
 
 enum class QueryType {
     Timestamp,
+    Occlusion, ///< Samples that pass depth/stencil tests; pair with `ICommandList::ResetQueryPool` before use.
+};
+
+/** Request for Vulkan swapchain `VkPresentModeKHR`; backend picks a supported mode (FIFO is always the safe fallback). */
+enum class SwapchainPresentMode {
+    Fifo,      ///< V-sync (FIFO); typically always available.
+    Mailbox,   ///< Prefer low-latency triple-buffer when supported.
+    Immediate, ///< Prefer lowest latency; may tear when supported.
 };
 
 // ---- Bindless (Phase 4.4 skeleton) ----
@@ -385,6 +393,16 @@ struct RHICapabilities {
     /** When true, GetResourceSetLayout returns valid layouts and BindDescriptorSets applies correctly.
      *  Vulkan: true. OpenGL: false until shaders use descriptor_binding_table layout(binding=N). */
     bool supportsResourceSpaceBindPath = false;
+    /** Vulkan: surface lists `VK_PRESENT_MODE_MAILBOX_KHR` (low-latency / triple-buffer style when used). */
+    bool supportsPresentMailbox = false;
+    /** Vulkan: surface lists `VK_PRESENT_MODE_IMMEDIATE_KHR` (may tear). */
+    bool supportsPresentImmediate = false;
+    /** Vulkan: `VkPhysicalDeviceLimits::timestampPeriod` > 0 (GPU timestamp queries usable). */
+    bool supportsGpuTimestampQueries = false;
+    /** Vulkan: `VkPhysicalDeviceFeatures::occlusionQuery` (occlusion query pools). */
+    bool supportsOcclusionQueries = false;
+    /** Vulkan: `VkPhysicalDeviceHostQueryResetFeatures::hostQueryReset` — `vkResetQueryPool` on host (`IDevice::ResetQueryPoolOnHost`). */
+    bool supportsHostQueryReset = false;
 };
 
 } // namespace rhi

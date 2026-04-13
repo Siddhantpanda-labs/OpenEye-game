@@ -11,6 +11,10 @@ namespace rhi {
 struct DeviceVK;
 struct TextureVK;
 
+/** Color and optional depth textures for rendering. **Dynamic rendering** uses `GetColorImageView` / `GetDepthImageView`
+ *  (`CommandListVK::BeginRenderingWithTarget`). Optional `m_colorAttachmentViews` / `m_depthAttachmentView` /
+ *  `m_depthLayerViews` select mips or array layers; `m_framebuffer` is for legacy framebuffer-based paths when non-null.
+ *  Textures may be owned (`m_colorTextures`) or external (`m_externalColorTextures`). */
 struct RenderTargetVK : IRenderTarget {
     explicit RenderTargetVK(DeviceVK* device);
     ~RenderTargetVK() override;
@@ -43,8 +47,7 @@ struct RenderTargetVK : IRenderTarget {
     std::vector<void*> m_colorAttachmentViews;
     void* m_depthAttachmentView = nullptr;
     std::vector<void*> m_depthLayerViews;
-    // VkFramebuffer or dynamic rendering (filled when implemented)
-    void* m_framebuffer = nullptr;
+    void* m_framebuffer = nullptr;  // VkFramebuffer when used; often null (dynamic rendering only)
 };
 
 IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t height,

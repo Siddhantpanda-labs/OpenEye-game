@@ -4,6 +4,7 @@
 #include "eyelib/rendering/rhi/Vulkan/pipelines/PipelineLayoutVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/TextureVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/BufferVK.h"
+#include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
 
 namespace eyelib {
@@ -26,7 +27,11 @@ BindlessHeapVK::BindlessHeapVK(DeviceVK* device) : m_device(device) {
     poolInfo.poolSizeCount = 2;
     poolInfo.pPoolSizes = poolSizes;
     VkDescriptorPool pool = VK_NULL_HANDLE;
-    if (vkCreateDescriptorPool(vkDevice, &poolInfo, nullptr, &pool) != VK_SUCCESS) return;
+    VkResult poolRes = vkCreateDescriptorPool(vkDevice, &poolInfo, nullptr, &pool);
+    if (poolRes != VK_SUCCESS) {
+        core::Log::ErrorF("BindlessHeapVK: vkCreateDescriptorPool failed (0x%x)", static_cast<unsigned>(poolRes));
+        return;
+    }
     m_descriptorPool = pool;
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -34,7 +39,9 @@ BindlessHeapVK::BindlessHeapVK(DeviceVK* device) : m_device(device) {
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &layout;
     VkDescriptorSet set = VK_NULL_HANDLE;
-    if (vkAllocateDescriptorSets(vkDevice, &allocInfo, &set) != VK_SUCCESS) {
+    VkResult allocRes = vkAllocateDescriptorSets(vkDevice, &allocInfo, &set);
+    if (allocRes != VK_SUCCESS) {
+        core::Log::ErrorF("BindlessHeapVK: vkAllocateDescriptorSets failed (0x%x)", static_cast<unsigned>(allocRes));
         vkDestroyDescriptorPool(vkDevice, pool, nullptr);
         m_descriptorPool = nullptr;
         return;

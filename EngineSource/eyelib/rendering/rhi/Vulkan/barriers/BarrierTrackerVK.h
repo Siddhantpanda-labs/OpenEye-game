@@ -12,13 +12,23 @@ namespace rhi {
 struct CommandListVK;
 
 /**
- * Tracks current resource state and records barriers on Transition. Call TransitionBuffer/TransitionImage,
- * then FlushBarriers(cmdList) to record all pending barriers. Reset() at frame start to clear tracked state.
- * Map keys are raw VkBuffer/VkImage (void*), not engine Resource* — avoids aliasing and multi-view issues.
- * Future: subresource state (e.g. mip 0 COLOR_ATTACHMENT, mip 1 SHADER_READ) for AAA-level correctness.
+ * Tracks **logical** resource state and batches **`vkCmdPipelineBarrier`** calls. Keys are raw **`VkBuffer` / `VkImage`**
+ * handles (`void*`), not `ITexture*` / `IBuffer*` — one entry per GPU resource.
+ *
+ * **Workflow:** `TransitionBuffer` / `TransitionImage` → `FlushBarriers` (often via `DeviceVK::FlushBarrierTracker`, which
+ * ends active dynamic rendering first). Pending barriers are merged into **one** `vkCmdPipelineBarrier` per flush.
+ *
+ * **Reset (`BeginFrame`):** Clears **buffer** state and all **pending** lists. **Does not** clear **image** state: layouts
+ * persist across frames so blits/uploads do not regress to spurious `UNDEFINED` → attachment transitions (see
+ * `BarrierTrackerVK::Reset` implementation comment).
+ *
+ * **Not exhaustive:** some paths emit barriers directly (e.g. texture upload, swapchain presentation in `DeviceVKPresentation`)
+ * — those must stay consistent with tracked state or use `SetImageState` / `RemoveImageState` when appropriate.
+ *
+ * **Future:** per-subresource tracking (mip/layer) for full correctness on partial transitions.
  */
 struct BarrierTrackerVK {
-    /** Clear tracked state and pending barriers (e.g. at BeginFrame). */
+    /** Clear buffer tracking and pending barriers; preserve image layout cache. Typically `BeginFrame`. */
     static void Reset(BarrierTrackerVK* tracker);
 
     /** Transition buffer to newState. buffer is VkBuffer (as void*). No-op if already in newState. */

@@ -11,6 +11,10 @@ namespace rhi {
 
 struct DeviceVK;
 
+/** **`IDescriptorSet`** for Vulkan: holds **`VkDescriptorSet`**. **`Update*`** calls **`vkUpdateDescriptorSets`** immediately
+ *  (caller must finish updates **before** the **`VkCommandBuffer`** records draws that read the set). **`m_writtenBindingMask`**
+ *  tracks bindings with index less than **`kTrackedBindings`** for **`IsCompleteForBind`** (stale-bind guard). **`m_ownsDescriptorSet`:** wrapper sets
+ *  (e.g. bindless) are not freed by **`DestroyDescriptorSetVK`**. */
 struct DescriptorSetVK : IDescriptorSet {
     explicit DescriptorSetVK(DeviceVK* device, PipelineLayoutVK* layout);
     ~DescriptorSetVK() override;

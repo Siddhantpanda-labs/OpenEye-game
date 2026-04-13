@@ -1,4 +1,5 @@
 #include "eyelib/rendering/rhi/Vulkan/core/SwapchainVK.h"
+#include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
 #include <algorithm>
@@ -7,6 +8,42 @@
 namespace eyelib {
 namespace rendering {
 namespace rhi {
+
+namespace {
+
+bool PresentModeListed(const std::vector<VkPresentModeKHR>& modes, VkPresentModeKHR m) {
+    return std::find(modes.begin(), modes.end(), m) != modes.end();
+}
+
+VkPresentModeKHR SelectVkPresentMode(const std::vector<VkPresentModeKHR>& modes, SwapchainPresentMode pref) {
+    if (modes.empty()) return VK_PRESENT_MODE_FIFO_KHR;
+    switch (pref) {
+    case SwapchainPresentMode::Mailbox:
+        if (PresentModeListed(modes, VK_PRESENT_MODE_MAILBOX_KHR)) return VK_PRESENT_MODE_MAILBOX_KHR;
+        if (PresentModeListed(modes, VK_PRESENT_MODE_IMMEDIATE_KHR)) return VK_PRESENT_MODE_IMMEDIATE_KHR;
+        break;
+    case SwapchainPresentMode::Immediate:
+        if (PresentModeListed(modes, VK_PRESENT_MODE_IMMEDIATE_KHR)) return VK_PRESENT_MODE_IMMEDIATE_KHR;
+        if (PresentModeListed(modes, VK_PRESENT_MODE_MAILBOX_KHR)) return VK_PRESENT_MODE_MAILBOX_KHR;
+        break;
+    case SwapchainPresentMode::Fifo:
+    default:
+        break;
+    }
+    if (PresentModeListed(modes, VK_PRESENT_MODE_FIFO_KHR)) return VK_PRESENT_MODE_FIFO_KHR;
+    return modes[0];
+}
+
+uint32_t SelectSwapchainImageCount(const VkSurfaceCapabilitiesKHR& caps, VkPresentModeKHR vkMode) {
+    uint32_t n = caps.minImageCount + 1;
+    if (vkMode == VK_PRESENT_MODE_MAILBOX_KHR)
+        n = (std::max)({caps.minImageCount + 1u, 3u});
+    if (caps.maxImageCount > 0 && n > caps.maxImageCount) n = caps.maxImageCount;
+    if (n < caps.minImageCount) n = caps.minImageCount;
+    return n;
+}
+
+} // namespace
 
 /** Create one binary semaphore per swapchain image for render-finished (submit signals, present waits). */
 static bool CreateRenderFinishedSemaphores(SwapchainVK* sw) {
@@ -17,8 +54,17 @@ static bool CreateRenderFinishedSemaphores(SwapchainVK* sw) {
     semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     for (size_t i = 0; i < sw->images.size(); ++i) {
         VkSemaphore sem = VK_NULL_HANDLE;
-        if (vkCreateSemaphore(dev, &semInfo, nullptr, &sem) != VK_SUCCESS)
+        VkResult sr = vkCreateSemaphore(dev, &semInfo, nullptr, &sem);
+        if (sr != VK_SUCCESS) {
+            core::Log::ErrorF("SwapchainVK: vkCreateSemaphore (renderFinished) image %zu failed (0x%x)", i, static_cast<unsigned>(sr));
+            for (size_t j = 0; j < i; ++j) {
+                if (sw->renderFinishedSemaphores[j])
+                    vkDestroySemaphore(dev, static_cast<VkSemaphore>(sw->renderFinishedSemaphores[j]), nullptr);
+                sw->renderFinishedSemaphores[j] = nullptr;
+            }
+            sw->renderFinishedSemaphores.clear();
             return false;
+        }
         sw->renderFinishedSemaphores[i] = sem;
     }
     return true;
@@ -61,7 +107,11 @@ static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
     rpInfo.subpassCount = 1;
     rpInfo.pSubpasses = &subpass;
     VkRenderPass rp = VK_NULL_HANDLE;
-    if (vkCreateRenderPass(device, &rpInfo, nullptr, &rp) != VK_SUCCESS) return;
+    VkResult rpRes = vkCreateRenderPass(device, &rpInfo, nullptr, &rp);
+    if (rpRes != VK_SUCCESS) {
+        core::Log::ErrorF("SwapchainVK: vkCreateRenderPass (overlay LOAD) failed (0x%x)", static_cast<unsigned>(rpRes));
+        return;
+    }
     sw->renderPass = rp;
 
     // Overlay-clear pass: use when no scene blit (clear then draw overlay).
@@ -76,7 +126,9 @@ static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
     attClear.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     rpInfo.pAttachments = &attClear;
     VkRenderPass rpClear = VK_NULL_HANDLE;
-    if (vkCreateRenderPass(device, &rpInfo, nullptr, &rpClear) != VK_SUCCESS) {
+    rpRes = vkCreateRenderPass(device, &rpInfo, nullptr, &rpClear);
+    if (rpRes != VK_SUCCESS) {
+        core::Log::ErrorF("SwapchainVK: vkCreateRenderPass (overlay CLEAR) failed (0x%x)", static_cast<unsigned>(rpRes));
         vkDestroyRenderPass(device, rp, nullptr);
         sw->renderPass = nullptr;
         return;
@@ -106,7 +158,8 @@ static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
     }
 }
 
-bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, void* surface, uint32_t width, uint32_t height) {
+bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, void* surface, uint32_t width, uint32_t height,
+                         DeviceVK* debugNameDevice, SwapchainPresentMode presentPreference) {
     if (!out || !device || !physicalDevice || !surface) return false;
     width = std::max(1u, width);
     height = std::max(1u, height);
@@ -135,15 +188,13 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, presentModes.data());
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (VkPresentModeKHR pm : presentModes) {
-        if (pm == VK_PRESENT_MODE_FIFO_KHR) { presentMode = pm; break; }
-    }
+    const VkPresentModeKHR presentMode = SelectVkPresentMode(presentModes, presentPreference);
+    core::Log::InfoF("SwapchainVK::Create: present preference=%d, selected VkPresentModeKHR=%d",
+                     static_cast<int>(presentPreference), static_cast<int>(presentMode));
     VkExtent2D extent = {};
     extent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
     extent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
-    uint32_t imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
+    uint32_t imageCount = SelectSwapchainImageCount(caps, presentMode);
 
     VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -203,6 +254,8 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
         Destroy(out, device);
         return false;
     }
+    if (debugNameDevice && out->swapchain)
+        SetDebugNameSwapchain(debugNameDevice, out->swapchain, "OpenEye_Swapchain");
     return true;
 }
 
@@ -243,7 +296,8 @@ void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
     sw->format = 0;
 }
 
-void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate) {
+void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* debugNameDevice,
+                         SwapchainPresentMode presentPreference) {
     w = std::max(1u, w);
     h = std::max(1u, h);
     if (!forceRecreate && w == width && h == height) return;
@@ -304,15 +358,11 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate) {
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, presentModes.data());
-    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-    for (VkPresentModeKHR pm : presentModes) {
-        if (pm == VK_PRESENT_MODE_FIFO_KHR) { presentMode = pm; break; }
-    }
+    const VkPresentModeKHR presentMode = SelectVkPresentMode(presentModes, presentPreference);
     VkExtent2D extent = {};
     extent.width = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
     extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
-    uint32_t imageCount = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) imageCount = caps.maxImageCount;
+    uint32_t imageCount = SelectSwapchainImageCount(caps, presentMode);
 
     VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -364,6 +414,8 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate) {
     }
     EnsureRenderPassAndFramebuffers(this);
     CreateRenderFinishedSemaphores(this);
+    if (debugNameDevice && swapchain)
+        SetDebugNameSwapchain(debugNameDevice, swapchain, "OpenEye_Swapchain");
 }
 
 int SwapchainVK::Acquire(void* semaphoreToSignal, uint64_t timeoutMs, uint32_t* outImageIndex) {

@@ -64,6 +64,26 @@ bool SupportsConditionalRender(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsConditionalRender;
 }
 
+bool SupportsPresentMailbox(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsPresentMailbox;
+}
+
+bool SupportsPresentImmediate(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsPresentImmediate;
+}
+
+bool SupportsGpuTimestampQueries(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsGpuTimestampQueries;
+}
+
+bool SupportsOcclusionQueries(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsOcclusionQueries;
+}
+
+bool SupportsHostQueryReset(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsHostQueryReset;
+}
+
 }  // namespace backend
 }  // namespace rendering
 }  // namespace eyelib

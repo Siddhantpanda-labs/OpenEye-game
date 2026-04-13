@@ -1,6 +1,7 @@
 #include "eyelib/rendering/rhi/Vulkan/commands/CommandListVK.h"
 #include "eyelib/rendering/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/rendering/rhi/Vulkan/sync/FenceVK.h"
+#include "eyelib/rendering/rhi/Vulkan/sync/QueryPoolVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/BufferVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/TextureVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/RenderTargetVK.h"
@@ -8,6 +9,7 @@
 #include "eyelib/rendering/rhi/Vulkan/descriptors/DescriptorSetVK.h"
 #include "eyelib/rendering/rhi/Vulkan/pipelines/PipelineVK.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/VulkanEnums.h"
+#include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include <vulkan/vulkan.h>
 #include "eyelib/core/Log.h"
 #include <cstdint>
@@ -46,6 +48,12 @@ static uint32_t BindlessHeapDescriptorSetIndex(PipelineLayoutKind kind) {
     default:
         return UINT32_MAX;
     }
+}
+
+static VkBuffer VkBufferFromRhi(IBuffer* buffer) {
+    if (!buffer) return VK_NULL_HANDLE;
+    BufferVK* bv = static_cast<BufferVK*>(buffer);
+    return bv->m_buffer ? static_cast<VkBuffer>(bv->m_buffer) : VK_NULL_HANDLE;
 }
 } // namespace
 
@@ -110,8 +118,11 @@ void CommandListVK::Begin() {
         VkCommandBufferBeginInfo beginInfoImm = {};
         beginInfoImm.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfoImm.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        if (vkBeginCommandBuffer(bufImm, &beginInfoImm) == VK_SUCCESS)
+        VkResult br = vkBeginCommandBuffer(bufImm, &beginInfoImm);
+        if (br == VK_SUCCESS)
             m_isRecording = true;
+        else
+            core::Log::ErrorF("CommandListVK::Begin: vkBeginCommandBuffer failed (immediate, 0x%x)", br);
         return;
     }
     m_isRecording = false;
@@ -123,8 +134,11 @@ void CommandListVK::Begin() {
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (vkBeginCommandBuffer(buf, &beginInfo) == VK_SUCCESS)
+    VkResult br = vkBeginCommandBuffer(buf, &beginInfo);
+    if (br == VK_SUCCESS)
         m_isRecording = true;
+    else
+        core::Log::ErrorF("CommandListVK::Begin: vkBeginCommandBuffer failed (deferred, 0x%x)", br);
 }
 
 void CommandListVK::End() {
@@ -322,6 +336,18 @@ void CommandListVK::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearVal
 }
 
 void CommandListVK::ClearDefaultFramebuffer(const ClearValue& clear) { (void)clear; }
+
+void CommandListVK::PushDebugUtilsLabel(const char* name, const float colorRgba[4]) {
+    if (!m_isRecording || !m_commandBuffer || !m_device || !name) return;
+    static const float kDefaultRgba[4] = { 0.78f, 0.78f, 0.82f, 1.f };
+    const float* c = colorRgba ? colorRgba : kDefaultRgba;
+    CmdDebugUtilsBeginLabel(m_device, m_commandBuffer, name, c);
+}
+
+void CommandListVK::PopDebugUtilsLabel() {
+    if (!m_isRecording || !m_commandBuffer || !m_device) return;
+    CmdDebugUtilsEndLabel(m_device, m_commandBuffer);
+}
 
 void CommandListVK::SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
     if (!m_isRecording || !m_commandBuffer) return;
@@ -751,12 +777,78 @@ void CommandListVK::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstInde
     PushGraphicsConstantsIfPossible();
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, instanceCount, firstIndex, vertexOffset, 0);
 }
-void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
-void CommandListVK::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
-void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
-void CommandListVK::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) { (void)indirectBuffer; (void)offset; (void)drawCount; (void)stride; }
-void CommandListVK::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) { (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride; }
-void CommandListVK::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) { (void)indirectBuffer; (void)indirectOffset; (void)countBuffer; (void)countBufferOffset; (void)maxDrawCount; (void)stride; }
+void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), 1u,
+                      sizeof(VkDrawIndirectCommand));
+}
+void CommandListVK::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndexedIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), 1u,
+                             sizeof(VkDrawIndexedIndirectCommand));
+}
+void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive || drawCount == 0) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    const uint32_t s = stride ? stride : static_cast<uint32_t>(sizeof(VkDrawIndirectCommand));
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), drawCount, s);
+}
+void CommandListVK::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive || drawCount == 0) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    const uint32_t s = stride ? stride : static_cast<uint32_t>(sizeof(VkDrawIndexedIndirectCommand));
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndexedIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), drawCount, s);
+}
+void CommandListVK::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer,
+                                                 size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    if (!m_device || !m_isRecording || !m_commandBuffer) return;
+    if (!m_device->GetCapabilities().supportsMultiDrawIndirectCount) {
+        static int once = 0;
+        if (once++ == 0)
+            core::Log::Warn("MultiDrawArraysIndirectCount: drawIndirectCount not supported on this device.");
+        return;
+    }
+    if (!m_isRenderingActive || maxDrawCount == 0) return;
+    VkBuffer ind = VkBufferFromRhi(indirectBuffer);
+    VkBuffer cnt = VkBufferFromRhi(countBuffer);
+    if (ind == VK_NULL_HANDLE || cnt == VK_NULL_HANDLE) return;
+    const uint32_t s = stride ? stride : static_cast<uint32_t>(sizeof(VkDrawIndirectCommand));
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndirectCount(static_cast<VkCommandBuffer>(m_commandBuffer), ind, static_cast<VkDeviceSize>(indirectOffset), cnt,
+                           static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, s);
+}
+void CommandListVK::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer,
+                                                  size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    if (!m_device || !m_isRecording || !m_commandBuffer) return;
+    if (!m_device->GetCapabilities().supportsMultiDrawIndirectCount) {
+        static int once = 0;
+        if (once++ == 0)
+            core::Log::Warn("MultiDrawIndexedIndirectCount: drawIndirectCount not supported on this device.");
+        return;
+    }
+    if (!m_isRenderingActive || maxDrawCount == 0) return;
+    VkBuffer ind = VkBufferFromRhi(indirectBuffer);
+    VkBuffer cnt = VkBufferFromRhi(countBuffer);
+    if (ind == VK_NULL_HANDLE || cnt == VK_NULL_HANDLE) return;
+    const uint32_t s = stride ? stride : static_cast<uint32_t>(sizeof(VkDrawIndexedIndirectCommand));
+    PushGraphicsConstantsIfPossible();
+    vkCmdDrawIndexedIndirectCount(static_cast<VkCommandBuffer>(m_commandBuffer), ind, static_cast<VkDeviceSize>(indirectOffset),
+                                  cnt, static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, s);
+}
 void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
     PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
@@ -780,10 +872,100 @@ void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
         vkCmdDispatch(static_cast<VkCommandBuffer>(m_commandBuffer), x, y, z);
     }
 }
-void CommandListVK::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) { (void)indirectBuffer; (void)offset; }
+void CommandListVK::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
+    if (!m_isRecording || !m_commandBuffer || !m_device) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
+    if (!pVK || !pVK->m_isCompute || pVK->m_pipeline == VK_NULL_HANDLE) return;
+    VkPipelineLayout computeLayout = static_cast<VkPipelineLayout>(pVK->m_layoutKind != PipelineLayoutKind::PushOnly ? pVK->m_nativePipelineLayout : m_device->GetComputePipelineLayout());
+    if (computeLayout != VK_NULL_HANDLE) {
+        if (pVK->m_layoutKind == PipelineLayoutKind::PushOnly) {
+            m_device->UpdateComputeSet0(this);
+            VkDescriptorSet computeSet0 = static_cast<VkDescriptorSet>(m_device->GetComputeSet0());
+            VkDescriptorSet emptyBindless = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+            VkDescriptorSet sets[2] = { computeSet0, emptyBindless };
+            vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 2, sets, 0, nullptr);
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 16, m_pushConstants);
+        } else {
+            vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 256, m_pushConstants);
+        }
+    }
+    vkCmdDispatchIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset));
+}
 
-void CommandListVK::BeginQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
-void CommandListVK::EndQuery(IQueryPool* pool, uint32_t index) { (void)pool; (void)index; }
+void CommandListVK::ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
+    if (!m_isRecording || !m_commandBuffer || !pool || queryCount == 0) return;
+    QueryPoolVK* qvk = static_cast<QueryPoolVK*>(pool);
+    VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
+    if (qp == VK_NULL_HANDLE) return;
+    const uint64_t end = static_cast<uint64_t>(firstQuery) + static_cast<uint64_t>(queryCount);
+    if (end > static_cast<uint64_t>(qvk->m_count)) {
+        core::Log::ErrorF("CommandListVK::ResetQueryPool: range exceeds pool count (first=%u count=%u poolCount=%u).", firstQuery,
+                          queryCount, qvk->m_count);
+        return;
+    }
+    if (m_isRenderingActive) {
+        if (m_device && m_device->GetCapabilities().supportsHostQueryReset) {
+            m_device->ResetQueryPoolOnHost(pool, firstQuery, queryCount);
+            return;
+        }
+        core::Log::Error("CommandListVK::ResetQueryPool: vkCmdResetQueryPool is not valid inside dynamic rendering (enable host query reset or end the pass).");
+        return;
+    }
+    vkCmdResetQueryPool(static_cast<VkCommandBuffer>(m_commandBuffer), qp, firstQuery, queryCount);
+}
+
+void CommandListVK::BeginQuery(IQueryPool* pool, uint32_t index) {
+    if (!m_isRecording || !m_commandBuffer || !pool) return;
+    QueryPoolVK* qvk = static_cast<QueryPoolVK*>(pool);
+    VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
+    if (qp == VK_NULL_HANDLE) return;
+    if (qvk->GetType() == QueryType::Timestamp) {
+        if (index + 1u >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::BeginQuery: timestamp pair needs index+1 < pool count (index=%u count=%u).", index,
+                              qvk->m_count);
+            return;
+        }
+        if (m_device && m_device->GetCapabilities().supportsHostQueryReset)
+            m_device->ResetQueryPoolOnHost(pool, index, 2u);
+        else if (m_isRenderingActive) {
+            core::Log::Error("CommandListVK::BeginQuery(Timestamp): vkCmdResetQueryPool is not valid inside dynamic rendering; "
+                             "enable host query reset, or call BeginQuery after ending the pass.");
+            return;
+        } else {
+            vkCmdResetQueryPool(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index, 2u);
+        }
+        vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, index);
+    } else if (qvk->GetType() == QueryType::Occlusion) {
+        if (index >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::BeginQuery(Occlusion): index out of range (index=%u count=%u).", index, qvk->m_count);
+            return;
+        }
+        vkCmdBeginQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index, 0u);
+    }
+}
+
+void CommandListVK::EndQuery(IQueryPool* pool, uint32_t index) {
+    if (!m_isRecording || !m_commandBuffer || !pool) return;
+    QueryPoolVK* qvk = static_cast<QueryPoolVK*>(pool);
+    VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
+    if (qp == VK_NULL_HANDLE) return;
+    if (qvk->GetType() == QueryType::Timestamp) {
+        if (index + 1u >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::EndQuery: timestamp pair needs index+1 < pool count (index=%u count=%u).", index,
+                              qvk->m_count);
+            return;
+        }
+        vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, index + 1u);
+    } else if (qvk->GetType() == QueryType::Occlusion) {
+        if (index >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::EndQuery(Occlusion): index out of range (index=%u count=%u).", index, qvk->m_count);
+            return;
+        }
+        vkCmdEndQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index);
+    }
+}
 
 void CommandListVK::BindTransformFeedbackBuffer(uint32_t slot, IBuffer* buffer, size_t offset, size_t size) { (void)slot; (void)buffer; (void)offset; (void)size; }
 void CommandListVK::BeginTransformFeedback(PrimitiveTopology primitiveMode) { (void)primitiveMode; }

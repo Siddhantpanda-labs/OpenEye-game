@@ -7,7 +7,8 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Resource-space descriptor set layouts and pipeline layouts. Binding conventions: see documentation/vulkan/descriptor_binding_table.md */
+/** Resource-space **`VkDescriptorSetLayout` / `VkPipelineLayout`** factories. Set indices and bindings follow **`descriptor_binding_table.md`**.
+ *  Push constant **ranges** are defined in **`VulkanResourceSpaces.cpp`** (**`kPushConstantSize`**) and must match **`vkCmdPushConstants`** in **`CommandListVK`**. */
 
 namespace vkres {
 

@@ -310,7 +310,13 @@ void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipe
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateComputePipelines(vkDevice, cache, 1, &createInfo, nullptr, &pipeline);
-    return (res == VK_SUCCESS && pipeline) ? pipeline : nullptr;
+    if (res != VK_SUCCESS || pipeline == VK_NULL_HANDLE) {
+        core::Log::ErrorF(
+            "vkCreateComputePipelines failed: VkResult=%d (0x%08X)",
+            static_cast<int>(res), static_cast<unsigned int>(static_cast<uint32_t>(res)));
+        return nullptr;
+    }
+    return pipeline;
 }
 
 IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) {
@@ -423,6 +429,7 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
         const std::string fsrc = ApplyKeywordDefinesString(info.fragmentSourceOverride, info.keywordDefines);
         if (!compilePair(vsrc, fsrc)) {
             destroyStages();
+            core::Log::ErrorF("CreateGraphicsPipelineFromShaderAssetVK: GLSL compile failed for %s", debugNameCstr);
             return nullptr;
         }
     } else {
@@ -449,6 +456,7 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
             const std::string fsrc = ApplyKeywordDefinesString(fraw, info.keywordDefines);
             if (!compilePair(vsrc, fsrc)) {
                 destroyStages();
+                core::Log::ErrorF("CreateGraphicsPipelineFromShaderAssetVK: GLSL compile failed for %s", debugNameCstr);
                 return nullptr;
             }
             break;
@@ -470,6 +478,7 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
                 const std::string fsrc = ApplyKeywordDefinesString(fraw, info.keywordDefines);
                 if (!compilePair(vsrc, fsrc)) {
                     destroyStages();
+                    core::Log::ErrorF("CreateGraphicsPipelineFromShaderAssetVK: GLSL compile failed for %s", debugNameCstr);
                     return nullptr;
                 }
             }

@@ -8,7 +8,10 @@ namespace rhi {
 
 struct DeviceVK;
 
-/** Per-frame descriptor pools. Reset the current frame's pool each BeginFrame; allocate transient sets from it. */
+/** **Ring of `VkDescriptorPool`s** (`kMaxFrames`, aligned with frame-in-flight). Each frame: **`Reset`** after the GPU fence
+ *  for that slot has completed, then **`Allocate`** transient sets. Pools use **`VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT`**
+ *  so individual sets can be freed if needed; typical use is reset-the-whole-pool each frame (no fragmentation within a frame).
+ *  **`vkAllocateDescriptorSets`** failures (e.g. **`VK_ERROR_OUT_OF_POOL_MEMORY`**) are logged — tune **`maxSetsPerPool`** / **`VkDescriptorPoolSize`** counts from **`DeviceVK`** setup. */
 struct DescriptorAllocatorVK {
     static constexpr uint32_t kMaxFrames = 3;
 

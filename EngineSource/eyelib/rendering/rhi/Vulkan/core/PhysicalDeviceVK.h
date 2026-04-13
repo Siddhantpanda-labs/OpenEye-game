@@ -4,7 +4,8 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Thin wrapper over VkPhysicalDevice. Selects preferred GPU from instance (discrete/integrated, else first). */
+/** Thin wrapper over VkPhysicalDevice. Selects a GPU from the instance: first discrete or integrated in
+ *  enumeration order, else the first enumerated device. Logs name, type, and reported API version at selection. */
 struct PhysicalDeviceVK {
     void* handle = nullptr;  // VkPhysicalDevice
 

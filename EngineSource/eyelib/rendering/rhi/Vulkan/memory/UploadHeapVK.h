@@ -12,6 +12,7 @@ namespace rhi {
  * Ring staging buffer for CPU→GPU uploads with per-frame regions.
  * Persistently mapped; each frame has a fixed region. BeginFrame(device, fence, frameIndex) waits fence and resets that frame's region.
  * Allocate(frameIndex, ...) suballocates from the frame's region — no stall when ring would wrap (frame 0/1/2 upload in parallel).
+ * BeginFrame uses vkWaitForFences(..., UINT64_MAX); the frame fence must be signaled when GPU work for that frame is complete.
  */
 struct UploadHeapVK {
     static constexpr uint32_t kMaxFrames = 3;

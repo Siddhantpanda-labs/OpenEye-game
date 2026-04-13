@@ -36,7 +36,16 @@ struct QueryPoolVK;
 struct FenceVK;
 struct BindlessHeapVK;
 
-/** Vulkan RHI device. Handles are opaque (void*) to avoid requiring vulkan.h in this header. */
+/** Vulkan RHI device. Handles are opaque (void*) to avoid requiring vulkan.h in this header.
+ *  Queue policy: swapchain **present** and main frame work use the **graphics** queue; see `QueuesVK`.
+ *
+ * **Threading:** Intended use is a **single render thread** for `Initialize`, resource create or destroy,
+ *  `BeginFrame` / `EndFrame`, recording `ICommandList`, and present. Do not record the same command list from
+ *  multiple threads; deferred lists follow the submit and free path documented on `SubmitCommandList` / `DestroyCommandList`.
+ *
+ * **Lifetime:** The instance, device, surface, and swapchain are owned by `DeviceVK` for its lifetime (destructor tears down).
+ *  Do not use `ITexture`, `IBuffer`, or other RHI objects after the matching `Destroy*` call. Swapchain image indices and
+ *  views are only valid until the next `SwapchainVK::Resize` or device teardown. */
 struct DeviceVK : IDevice {
     DeviceVK();
     ~DeviceVK() override;
@@ -109,6 +118,7 @@ struct DeviceVK : IDevice {
 
     IQueryPool* CreateQueryPool(QueryType type, uint32_t count) override;
     void DestroyQueryPool(IQueryPool* pool) override;
+    void ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) override;
 
     IPipelineLayout* CreatePipelineLayout(const PipelineLayoutDesc& desc) override;
     void DestroyPipelineLayout(IPipelineLayout* layout) override;
@@ -124,11 +134,14 @@ struct DeviceVK : IDevice {
 
     int GetMaxSamples(int requestedSamples) override;
 
+    /** Frame ring (`kMaxFrames`): BeginFrame waits this slot’s fence, ticks deferred deletion, resets pool/fence, acquires swapchain image; EndFrame submits command buffers with that fence and (if presenting) waits `imageAvailable` and signals `renderFinished`. Present runs on the graphics queue. */
     void BeginFrame() override;
     void EndFrame() override;
     GpuFramePhase GetGpuFramePhase() const override { return m_gpuFramePhase; }
     void Present() override;
     void OnWindowResized(uint32_t width, uint32_t height) override;
+    void SetSwapchainPresentMode(SwapchainPresentMode mode) override;
+    SwapchainPresentMode GetSwapchainPresentMode() const override { return m_swapchainPresentMode; }
     void Finish() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
@@ -284,6 +297,7 @@ private:
     uint64_t m_timelineValue = 0;           // next value to signal on submit
     void* m_surface = nullptr;              // VkSurfaceKHR
     SwapchainVK m_swapchain;                 // swapchain, images, views, framebuffers, render pass
+    SwapchainPresentMode m_swapchainPresentMode = SwapchainPresentMode::Fifo;
     bool m_pendingPresent = false;           // set by BeginFrame when Acquire succeeds; cleared by Present (submit uses imageAvailable/renderFinished)
     struct GraphicsPipelineCacheEntry {
         void* vkPipeline = nullptr;
@@ -312,6 +326,13 @@ private:
     void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui
     DeletionQueueVK m_deletionQueue;
     bool m_supportsExtendedDynamicState = false;
+    /** True when VkPhysicalDeviceVulkan12Features::drawIndirectCount is enabled (vkCmd*IndirectCount). */
+    bool m_supportsDrawIndirectCount = false;
+    /** From `vkGetPhysicalDeviceFeatures2` after query (optional stages for pipelines). */
+    bool m_supportsTessellationShader = false;
+    bool m_supportsGeometryShader = false;
+    bool m_supportsOcclusionQuery = false;
+    bool m_supportsHostQueryReset = false;
     /** Descriptor sets to free after 3 frame boundaries (so no CB still references them). */
     std::vector<IDescriptorSet*> m_pendingDescriptorSetsToFree;
     uint32_t m_ticksUntilDescriptorSetFree = 0;

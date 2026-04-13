@@ -51,6 +51,16 @@ bool SupportsShaderSubroutines(const rhi::IDevice* device);
 bool SupportsTransformFeedback(const rhi::IDevice* device);
 /** @return true when conditional render (predicate queries) is supported. */
 bool SupportsConditionalRender(const rhi::IDevice* device);
+/** @return true when swapchain surface supports mailbox present (Vulkan). */
+bool SupportsPresentMailbox(const rhi::IDevice* device);
+/** @return true when swapchain surface supports immediate present (Vulkan). */
+bool SupportsPresentImmediate(const rhi::IDevice* device);
+/** @return true when GPU timestamp queries are supported (`timestampPeriod` > 0). */
+bool SupportsGpuTimestampQueries(const rhi::IDevice* device);
+/** @return true when occlusion query pools are supported. */
+bool SupportsOcclusionQueries(const rhi::IDevice* device);
+/** @return true when host `vkResetQueryPool` is available (`IDevice::ResetQueryPoolOnHost`). */
+bool SupportsHostQueryReset(const rhi::IDevice* device);
 
 }  // namespace backend
 }  // namespace rendering

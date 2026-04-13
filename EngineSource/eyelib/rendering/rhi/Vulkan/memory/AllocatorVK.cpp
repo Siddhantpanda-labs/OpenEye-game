@@ -22,6 +22,10 @@ bool AllocatorVK::Create(AllocatorVK* out, void* physicalDevice, void* device, v
         return false;
     }
     out->handle = allocator;
+    core::Log::InfoF("Vulkan: VMA allocator created (Vulkan API version %u.%u.%u for allocator).",
+                     VK_VERSION_MAJOR(vulkanApiVersion),
+                     VK_VERSION_MINOR(vulkanApiVersion),
+                     VK_VERSION_PATCH(vulkanApiVersion));
     return true;
 }
 

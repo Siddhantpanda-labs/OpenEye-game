@@ -9,7 +9,11 @@ namespace rhi {
 
 struct DeviceVK;
 
-/** Vulkan bindless heap: one descriptor set with texture array (binding 0) and buffer array (binding 1). */
+/** **Bindless** table: one **`VkDescriptorSet`**, binding **0** = **`COMBINED_IMAGE_SAMPLER`** array (**`kMaxTextures`**),
+ *  binding **1** = **`STORAGE_BUFFER`** array (**`kMaxBuffers`**). Pool uses **`VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT`**
+ *  with the device’s **`GetBindlessSetLayout`** (descriptor indexing / **`UPDATE_AFTER_BIND`** must match **`DeviceVK`** creation).
+ *  **`BindlessHandle`** is **1 + array index**; **`Allocate*`** failures log pool/alloc errors. Freeing a handle recycles the slot
+ *  index only (does not zero GPU descriptors — shaders must treat freed indices as invalid). */
 struct BindlessHeapVK : IBindlessHeap {
     explicit BindlessHeapVK(DeviceVK* device);
     ~BindlessHeapVK() override;

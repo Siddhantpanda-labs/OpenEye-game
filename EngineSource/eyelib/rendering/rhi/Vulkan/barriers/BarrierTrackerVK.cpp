@@ -12,8 +12,8 @@ void BarrierTrackerVK::Reset(BarrierTrackerVK* tracker) {
     tracker->m_bufferState.clear();
     tracker->m_pendingBuffers.clear();
     tracker->m_pendingImages.clear();
-    // Keep m_imageState: GPU image layouts persist across frames; clearing caused
-    // UNDEFINED->COLOR barriers after Blit left sources in TRANSFER_SRC.
+    // Intentionally keep m_imageState: GPU image layouts persist across frames. Clearing image state
+    // previously caused incorrect UNDEFINED→attachment transitions after blits (sources still in TRANSFER_SRC, etc.).
 }
 
 void BarrierTrackerVK::TransitionBuffer(BarrierTrackerVK* tracker, void* buffer, ResourceState newState) {

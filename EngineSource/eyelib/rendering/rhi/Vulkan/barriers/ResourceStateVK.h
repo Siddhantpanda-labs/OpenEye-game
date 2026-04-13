@@ -6,7 +6,8 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Vulkan barrier state: use RHI ResourceState (Undefined, ShaderResource, RenderTarget, TransferSrc/Dst, etc.). */
+/** Vulkan backend uses the portable `ResourceState` enum (`RHITypes.h`) for barrier planning.
+ *  `utils/VulkanEnums.h` maps states to `VkImageLayout`, `VkAccessFlags`, and `VkPipelineStageFlags`. */
 using ResourceStateVK = ResourceState;
 
 } // namespace rhi

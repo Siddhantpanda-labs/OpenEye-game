@@ -94,6 +94,8 @@ bool DescriptorCacheVK::GetOrCreate(DescriptorCacheVK* cache, void* device, uint
         if (res == VK_SUCCESS) {
             fc.hashToSet[layoutHash] = set;
             *outSet = set;
+            if (debugName && deviceVKForName)
+                SetDebugNameDescriptorSet(deviceVKForName, set, debugName);
             return true;
         }
         return false;
@@ -124,8 +126,6 @@ bool DescriptorCacheVK::GetOrCreate(DescriptorCacheVK* cache, void* device, uint
         fc.extraPools.pop_back();
         return false;
     }
-    if (debugName && deviceVKForName)
-        SetDebugNameDescriptorSet(deviceVKForName, *outSet, debugName);
     return true;
 }
 

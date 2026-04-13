@@ -9,6 +9,9 @@ namespace rhi {
 
 struct DeviceVK;
 
+/** 2D/cube `VkImage` + main `VkImageView`; optional per-array-layer 2D views for interop. `RHITextureFormat` maps through
+ *  `ToVkFormat` / aspect helpers (`VulkanEnums.h`). Layout and barriers: internal `vkCmdPipelineBarrier` during upload and
+ *  `BarrierTrackerVK` when bound through the render path; **`m_retired`** is set when destroy is deferred to the deletion queue. */
 struct TextureVK : ITexture {
     explicit TextureVK(DeviceVK* device);
     ~TextureVK() override;
@@ -31,8 +34,7 @@ struct TextureVK : ITexture {
     bool m_owned = true;
     // True after DestroyTexture schedules this wrapper for deferred retire.
     bool m_retired = false;
-    // VkImage + VkImageView + VmaAllocation
-    void* m_image = nullptr;
+    void* m_image = nullptr;       // VkImage
     void* m_imageView = nullptr;
     void* m_allocation = nullptr;
     /** Lazily created VK_IMAGE_VIEW_TYPE_2D views (one slot per array layer); used for ImGui sampler2D interop. */

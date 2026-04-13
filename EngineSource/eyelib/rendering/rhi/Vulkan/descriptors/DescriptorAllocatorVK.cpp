@@ -64,7 +64,12 @@ bool DescriptorAllocatorVK::Allocate(DescriptorAllocatorVK* alloc, void* device,
     VkDescriptorSet set = VK_NULL_HANDLE;
     VkResult res = vkAllocateDescriptorSets(dev, &allocInfo, &set);
     if (res != VK_SUCCESS) {
-        core::Log::ErrorF("DescriptorAllocatorVK::Allocate failed (0x%x)", res);
+        if (res == VK_ERROR_OUT_OF_POOL_MEMORY)
+            core::Log::ErrorF(
+                "DescriptorAllocatorVK::Allocate failed: OUT_OF_POOL_MEMORY (0x%x) — increase max sets or per-type pool counts.",
+                static_cast<unsigned>(res));
+        else
+            core::Log::ErrorF("DescriptorAllocatorVK::Allocate failed (0x%x)", static_cast<unsigned>(res));
         return false;
     }
     *outSet = set;

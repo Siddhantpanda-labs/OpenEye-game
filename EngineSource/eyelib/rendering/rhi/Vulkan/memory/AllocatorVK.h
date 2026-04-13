@@ -6,7 +6,9 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Thin wrapper over VMA (VkMemAlloc) allocator. */
+/** Thin wrapper over VMA (Vulkan Memory Allocator). All `VkBuffer` / `VkImage` memory in
+ *  `eyelib/rendering/rhi/Vulkan` is allocated through this allocator (`BufferVK`, `TextureVK`,
+ *  `UploadHeapVK`, `DeletionQueueVK`); there is no parallel raw `vkAllocateMemory` path in this module. */
 struct AllocatorVK {
     void* handle = nullptr;  // VmaAllocator
 

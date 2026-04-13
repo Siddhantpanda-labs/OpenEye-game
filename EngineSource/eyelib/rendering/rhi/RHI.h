@@ -157,6 +157,13 @@ struct IDevice {
 
     virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;
     virtual void DestroyQueryPool(IQueryPool* pool) = 0;
+    /** Vulkan: `vkResetQueryPool` on the host when `GetCapabilities().supportsHostQueryReset`. No-op otherwise.
+     *  Caller must ensure each query in `[firstQuery, firstQuery+queryCount)` is in the **unavailable** state (synchronize with GPU) per the Vulkan spec. */
+    virtual void ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
+        (void)pool;
+        (void)firstQuery;
+        (void)queryCount;
+    }
 
     /** Create pipeline layout (describes bindings for descriptor sets). Used for Vulkan VkPipelineLayout; OpenGL emulates. */
     virtual IPipelineLayout* CreatePipelineLayout(const PipelineLayoutDesc& desc) = 0;
@@ -199,6 +206,10 @@ struct IDevice {
     virtual void EnqueueDestroyDescriptorSet(IDescriptorSet* set) { if (set) DestroyDescriptorSet(set); }
     /** Notify backend that output window framebuffer size changed; backend may recreate swapchain/default backbuffer resources. */
     virtual void OnWindowResized(uint32_t width, uint32_t height) { (void)width; (void)height; }
+    /** Vulkan: recreate swapchain with the given present mode when possible. Other backends: no-op.
+     *  Prefer `GetCapabilities().supportsPresentMailbox` / `supportsPresentImmediate` before requesting Mailbox/Immediate. */
+    virtual void SetSwapchainPresentMode(SwapchainPresentMode mode) { (void)mode; }
+    virtual SwapchainPresentMode GetSwapchainPresentMode() const { return SwapchainPresentMode::Fifo; }
     /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */
     virtual void Finish() {}
     /** Optional: barrier tracker for batched transitions (e.g. Vulkan BarrierTrackerVK). Returns nullptr if not supported. */
@@ -346,6 +357,12 @@ struct ICommandList {
     /** Dispatch compute with group counts read from indirectBuffer at offset (DispatchIndirectCommand). Same pipeline requirements as Dispatch. Gated by supportsCompute. */
     virtual void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) = 0;
 
+    /** Vulkan: `vkCmdResetQueryPool` for [firstQuery, firstQuery+queryCount), or host `vkResetQueryPool` when `supportsHostQueryReset` while inside dynamic rendering. Cmd reset must be outside active dynamic rendering. No-op default. */
+    virtual void ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
+        (void)pool;
+        (void)firstQuery;
+        (void)queryCount;
+    }
     virtual void BeginQuery(IQueryPool* pool, uint32_t index) = 0;
     virtual void EndQuery(IQueryPool* pool, uint32_t index) = 0;
 
@@ -481,7 +498,8 @@ struct IQueryPool {
     virtual ~IQueryPool() = default;
     virtual QueryType GetType() const = 0;
     virtual uint32_t GetCount() const = 0;
-    virtual uint64_t GetResult(uint32_t index) = 0;  // timestamp in nanoseconds
+    /** Timestamp: nanoseconds (`BeginQuery(i)`/`EndQuery(i)` use slots `i` and `i+1`). Occlusion: samples passed (uint64). */
+    virtual uint64_t GetResult(uint32_t index) = 0;
 };
 
 } // namespace rhi

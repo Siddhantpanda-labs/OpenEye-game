@@ -14,7 +14,17 @@ struct BufferVK;
 struct TextureVK;
 struct RenderTargetVK;
 
-/** Vulkan backend: records into VkCommandBuffer; submitted to queue. */
+/** Vulkan `ICommandList`: records into a **primary** `VkCommandBuffer`.
+ *
+ * **Immediate list** (per device): buffer is rebound each `DeviceVK::BeginFrame` after **fence wait** and
+ * `vkResetCommandPool`; `Begin()`/`End()` wrap `vkBeginCommandBuffer`/`vkEndCommandBuffer` for the frame workload.
+ * **Deferred lists** are constructed with buffer + pool; submitted via `DeviceVK::SubmitCommandList` (optional
+ * timeline signal), then freed with `DeviceVK::FreeCommandBuffer`.
+ *
+ * **Rendering:** HDR/offscreen/swapchain-resolve paths use **`vkCmdBeginRendering`** / `vkCmdEndRendering` (dynamic
+ * rendering). Active pass extent is tracked in `m_activeDynamicRenderWidth/Height` for draws (including fullscreen).
+ * Swapchain **classic** `VkRenderPass` usage lives in presentation code, not here.
+ */
 struct CommandListVK : ICommandList {
     /** For immediate list: device creates and sets buffer via SetCommandBuffer(buf, true). */
     explicit CommandListVK(DeviceVK* device);
@@ -92,6 +102,7 @@ struct CommandListVK : ICommandList {
     void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
     void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) override;
 
+    void ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) override;
     void BeginQuery(IQueryPool* pool, uint32_t index) override;
     void EndQuery(IQueryPool* pool, uint32_t index) override;
 
@@ -108,6 +119,10 @@ struct CommandListVK : ICommandList {
 
     /** Backend: VkCommandBuffer (opaque to avoid including vulkan.h in header). */
     void* GetCommandBuffer() const { return m_commandBuffer; }
+
+    /** Vulkan-only: nested **debug regions** for RenderDoc / GPU captures (**`VK_EXT_debug_utils`**). No-op if unsupported. */
+    void PushDebugUtilsLabel(const char* name, const float colorRgba[4] = nullptr);
+    void PopDebugUtilsLabel();
     /** For compute UpdateComputeSet0: current bound texture at binding (null if unbound). */
     rhi::ITexture* GetBoundTexture(uint32_t binding) const;
     /** For compute UpdateComputeSet0: current bound storage buffer at binding. */

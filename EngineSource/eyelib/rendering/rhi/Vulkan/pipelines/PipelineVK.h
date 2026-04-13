@@ -8,15 +8,22 @@ namespace rhi {
 
 struct DeviceVK;
 
-/** Build VkGraphicsPipeline from desc (dynamic rendering). Returns VkPipeline or nullptr. Used by DeviceVK. */
+/** Build **`VkGraphicsPipeline`** for **dynamic rendering** (`renderPass` = null; **`VkPipelineRenderingCreateInfo`** in the chain).
+ *  Color attachment count, formats, and depth/stencil formats must match **`PipelineDesc::attachmentFormats`** when set; otherwise
+ *  **`InferAttachmentFormatsFromLayoutKind`** supplies defaults (Post warns once if unspecified — prefer explicit formats for LDR/BGRA).
+ *  **Dynamic state** matches **`CommandListVK`**: viewport, scissor; if **`DeviceVK::SupportsExtendedDynamicState`**, also cull mode and depth test/write/compare.
+ *  Logs **`vkCreateGraphicsPipelines`** failures with **`VkResult`**, layout kind, attachment count, **`debugName`**. */
 void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void* pipelineLayout, void* pipelineCache);
-/** Build VkComputePipeline from a shader module. Returns VkPipeline or nullptr. */
+/** Build **`VkComputePipeline`**. Logs **`vkCreateComputePipelines`** failures. */
 void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipelineCache, void* shaderModule);
 IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc);
 IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const ShaderGraphicsPipelineCreateInfo& info);
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader);
 IPipeline* CreateComputePipelineVK(DeviceVK* device, void* computeShader, PipelineLayoutKind layoutKind);
 
+/** Vulkan **`IPipeline`**: holds **`VkPipeline`**, cached graphics hash (see **`DeviceVK`** refcount), layout kind, and **`m_requiredSetCount`**
+ *  from **`vkres::GetRequiredDescriptorSetCount`** for descriptor binding. Graphics pipelines sharing the same **`HashPipelineDesc`**
+ *  reuse one **`VkPipeline`** via the device cache. */
 struct PipelineVK : IPipeline {
     explicit PipelineVK(DeviceVK* device);
     ~PipelineVK() override;

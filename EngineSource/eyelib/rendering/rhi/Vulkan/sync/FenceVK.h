@@ -9,7 +9,9 @@ namespace rhi {
 
 struct DeviceVK;
 
-/** Fence backed by device timeline semaphore; signals when the submit that contained InsertFence() completes. */
+/** CPU wait object implemented with the device **timeline semaphore** (`DeviceVK::GetTimelineSemaphore`), not a `VkFence`.
+ *  `InsertFence` / `ReserveTimelineValue` pairs a monotonic value; `WaitFence` uses `vkWaitSemaphores` on that value.
+ *  This path is separate from **per-frame** `VkFence` in `FrameContextVK` (used by `BeginFrame`/`EndFrame`). */
 struct FenceVK : IFence {
     explicit FenceVK(DeviceVK* device, uint64_t timelineValue);
     ~FenceVK() override;

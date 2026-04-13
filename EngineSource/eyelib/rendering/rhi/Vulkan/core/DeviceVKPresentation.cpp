@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <vector>
 
+/** Presentation helpers: **`Present`** waits on **per-image** **`renderFinished`** (or frame fallback), **`BlitToDefaultFramebuffer`**
+ *  copies or **shader-resolves** scene color to the acquired swapchain image, optional **`m_postBlitCallback`** overlay via **LOAD** render pass,
+ *  then transitions to **`PRESENT_SRC`**. **`EnsurePresentResolveResources`** builds **`passes/post/present_resolve`** when HDR and swapchain formats differ.
+ *  **`OnWindowResized`** forwards to **`SwapchainVK::Resize`**. */
+
 namespace eyelib {
 namespace rendering {
 namespace rhi {
@@ -31,13 +36,21 @@ void DeviceVK::Present() {
     int presentRes = m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished, imageIndex);
     m_pendingPresent = false;
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR) {
-        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true);
+        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
+    } else if (presentRes == static_cast<int>(VK_SUBOPTIMAL_KHR)) {
+        static bool s_suboptimalOnce = false;
+        if (!s_suboptimalOnce) {
+            core::Log::Warn("Vulkan Present: VK_SUBOPTIMAL_KHR — swapchain still presented; recreate if window surface changed.");
+            s_suboptimalOnce = true;
+        }
+    } else if (presentRes != static_cast<int>(VK_SUCCESS)) {
+        core::Log::ErrorF("Vulkan Present: vkQueuePresentKHR failed (0x%x)", static_cast<unsigned>(presentRes));
     }
 }
 
 void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
     if (!m_device || !m_swapchain.surface) return;
-    m_swapchain.Resize(width, height);
+    m_swapchain.Resize(width, height, false, this, m_swapchainPresentMode);
 }
 
 void DeviceVK::Finish() {

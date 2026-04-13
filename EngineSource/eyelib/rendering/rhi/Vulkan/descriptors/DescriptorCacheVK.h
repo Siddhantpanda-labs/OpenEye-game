@@ -11,7 +11,11 @@ namespace rhi {
 
 struct DeviceVK;
 
-/** Per-frame descriptor set cache: layoutHash -> VkDescriptorSet per frame. Safe across frame overlap; no use-after-free. */
+/** **Per-frame** cache: **`layoutHash` → `VkDescriptorSet`** so repeated passes reuse one set per layout per frame slot.
+ *  **`Reset`** clears the map and **`vkResetDescriptorPool`** on the primary pool (and **`extraPools`**). If allocation fails
+ *  (pool full), **`GetOrCreate`** allocates another pool with the same **`VkDescriptorPoolSize`** profile (**grow** list).
+ *  **`layoutHash`** must be **stable per `VkDescriptorSetLayout` identity** (collisions would bind the wrong layout’s set).
+ *  Updates to a set are visible to subsequent **`vkCmd`** in the same submission order as **`vkUpdateDescriptorSets`** (host writes before submit). */
 struct DescriptorCacheVK {
     static constexpr uint32_t kMaxFrames = 3;
 

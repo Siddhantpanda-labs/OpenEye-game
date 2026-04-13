@@ -1,7 +1,6 @@
 #pragma once
 
 #include "eyelib/rendering/rhi/RHI.h"
-#include <vector>
 
 namespace eyelib {
 namespace rendering {
@@ -20,8 +19,9 @@ struct QueryPoolVK : IQueryPool {
     DeviceVK* m_device = nullptr;
     QueryType m_type = QueryType::Timestamp;
     uint32_t m_count = 0;
-    // VkQueryPool (filled when implemented)
     void* m_queryPool = nullptr;
+    /** Nanoseconds per timestamp counter tick (`VkPhysicalDeviceLimits::timestampPeriod`). */
+    double m_timestampPeriodNs = 1.0;
 };
 
 IQueryPool* CreateQueryPoolVK(DeviceVK* device, QueryType type, uint32_t count);

@@ -11,17 +11,30 @@ namespace {
 
 using PFN_vkSetDebugUtilsObjectNameEXT = VkResult (VKAPI_PTR *)(VkDevice, const VkDebugUtilsObjectNameInfoEXT*);
 static PFN_vkSetDebugUtilsObjectNameEXT s_pfnSetDebugUtilsObjectName = nullptr;
+using PFN_vkCmdBeginDebugUtilsLabelEXT = void (VKAPI_PTR *)(VkCommandBuffer, const VkDebugUtilsLabelEXT*);
+using PFN_vkCmdEndDebugUtilsLabelEXT = void (VKAPI_PTR *)(VkCommandBuffer);
+static PFN_vkCmdBeginDebugUtilsLabelEXT s_pfnCmdBeginDebugUtilsLabel = nullptr;
+static PFN_vkCmdEndDebugUtilsLabelEXT s_pfnCmdEndDebugUtilsLabel = nullptr;
 
-static void EnsureLoaded(VkDevice device) {
+static void EnsureObjectNameLoaded(VkDevice device) {
     if (s_pfnSetDebugUtilsObjectName != nullptr) return;
     if (!device) return;
     s_pfnSetDebugUtilsObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
         vkGetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT"));
 }
 
+static void EnsureCmdLabelLoaded(VkDevice device) {
+    if (s_pfnCmdBeginDebugUtilsLabel != nullptr) return;
+    if (!device) return;
+    s_pfnCmdBeginDebugUtilsLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+        vkGetDeviceProcAddr(device, "vkCmdBeginDebugUtilsLabelEXT"));
+    s_pfnCmdEndDebugUtilsLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+        vkGetDeviceProcAddr(device, "vkCmdEndDebugUtilsLabelEXT"));
+}
+
 static void SetDebugName(VkDevice device, VkObjectType objectType, uint64_t objectHandle, const char* name) {
     if (!name || *name == '\0') return;
-    EnsureLoaded(device);
+    EnsureObjectNameLoaded(device);
     if (!s_pfnSetDebugUtilsObjectName) return;
     VkDebugUtilsObjectNameInfoEXT info = {};
     info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
@@ -33,6 +46,12 @@ static void SetDebugName(VkDevice device, VkObjectType objectType, uint64_t obje
 }
 
 } // namespace
+
+void SetDebugNameDevice(DeviceVK* device, const char* name) {
+    if (!device || !device->GetDevice()) return;
+    VkDevice dev = static_cast<VkDevice>(device->GetDevice());
+    SetDebugName(dev, VK_OBJECT_TYPE_DEVICE, reinterpret_cast<uint64_t>(dev), name);
+}
 
 void SetDebugNameBuffer(DeviceVK* device, void* vkBuffer, const char* name) {
     if (!device || !vkBuffer) return;
@@ -62,6 +81,35 @@ void SetDebugNameDescriptorSet(DeviceVK* device, void* vkDescriptorSet, const ch
     if (!device || !vkDescriptorSet) return;
     VkDevice dev = static_cast<VkDevice>(device->GetDevice());
     SetDebugName(dev, VK_OBJECT_TYPE_DESCRIPTOR_SET, reinterpret_cast<uint64_t>(vkDescriptorSet), name);
+}
+
+void SetDebugNameSwapchain(DeviceVK* device, void* vkSwapchainKHR, const char* name) {
+    if (!device || !vkSwapchainKHR) return;
+    VkDevice dev = static_cast<VkDevice>(device->GetDevice());
+    SetDebugName(dev, VK_OBJECT_TYPE_SWAPCHAIN_KHR, reinterpret_cast<uint64_t>(vkSwapchainKHR), name);
+}
+
+void CmdDebugUtilsBeginLabel(DeviceVK* device, void* vkCommandBuffer, const char* name, const float colorRgba[4]) {
+    if (!device || !vkCommandBuffer || !name || !colorRgba) return;
+    VkDevice dev = static_cast<VkDevice>(device->GetDevice());
+    EnsureCmdLabelLoaded(dev);
+    if (!s_pfnCmdBeginDebugUtilsLabel) return;
+    VkDebugUtilsLabelEXT label = {};
+    label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    label.pLabelName = name;
+    label.color[0] = colorRgba[0];
+    label.color[1] = colorRgba[1];
+    label.color[2] = colorRgba[2];
+    label.color[3] = colorRgba[3];
+    s_pfnCmdBeginDebugUtilsLabel(static_cast<VkCommandBuffer>(vkCommandBuffer), &label);
+}
+
+void CmdDebugUtilsEndLabel(DeviceVK* device, void* vkCommandBuffer) {
+    if (!device || !vkCommandBuffer) return;
+    VkDevice dev = static_cast<VkDevice>(device->GetDevice());
+    EnsureCmdLabelLoaded(dev);
+    if (!s_pfnCmdEndDebugUtilsLabel) return;
+    s_pfnCmdEndDebugUtilsLabel(static_cast<VkCommandBuffer>(vkCommandBuffer));
 }
 
 } // namespace rhi

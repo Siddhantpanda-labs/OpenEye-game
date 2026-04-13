@@ -9,7 +9,9 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Per-frame deferred destruction. Resources enqueued for frame F are destroyed when Tick(device, allocator, F) is called (after that frame's fence has been waited). */
+/** Per-frame deferred destruction. Resources enqueued for frame F are destroyed when Tick(device, allocator, F) is called
+ *  **after** that frame's fence has been waited (see DeviceVK::BeginFrame). VMA-backed buffers/images are freed with vmaDestroy*;
+ *  Tick destroys **framebuffer → image view → image** so dependents are torn down before images. */
 struct DeletionQueueVK {
     static constexpr uint32_t kMaxFrames = 3;
 

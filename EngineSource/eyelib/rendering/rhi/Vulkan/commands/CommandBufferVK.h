@@ -4,7 +4,7 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Thin wrapper over VkCommandBuffer (primary). */
+/** Primary `VkCommandBuffer` allocate/free. This RHI uses **primary** buffers only (no secondary command buffers). */
 struct CommandBufferVK {
     void* handle = nullptr;  // VkCommandBuffer
 

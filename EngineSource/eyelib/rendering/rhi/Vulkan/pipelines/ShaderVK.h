@@ -8,6 +8,8 @@ namespace rhi {
 
 struct DeviceVK;
 
+/** **`IShader`** implementation: **`m_module`** is **`VkShaderModule`**. Create via **`CreateShaderVK`** (GLSL → SPIR-V via **`VulkanCompileGlslToSpirv`** / shaderc)
+ *  or **`CreateShaderFromBinaryVK`** (precompiled SPIR-V). **`vkCreateShaderModule`** failures are logged. */
 struct ShaderVK : IShader {
     explicit ShaderVK(DeviceVK* device);
     ~ShaderVK() override;

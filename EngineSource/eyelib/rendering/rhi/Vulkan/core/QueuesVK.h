@@ -6,7 +6,9 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-/** Holds graphics, compute, and transfer queue handles and their family indices. Opaque VkQueue. */
+/** Holds graphics, compute, and transfer queue handles and their family indices. Opaque VkQueue.
+ *  **Presentation** (`vkQueuePresentKHR`) uses the **graphics** queue (see `DeviceVKPresentation.cpp`).
+ *  Compute/transfer may share a family with graphics when the device exposes a single queue family. */
 struct QueuesVK {
     void* graphics = nullptr;   // VkQueue
     void* compute = nullptr;   // VkQueue

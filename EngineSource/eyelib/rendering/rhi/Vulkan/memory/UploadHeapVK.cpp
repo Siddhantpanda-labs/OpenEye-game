@@ -62,9 +62,9 @@ bool UploadHeapVK::Allocate(UploadHeapVK* heap, uint32_t frameIndex, size_t size
     if (alignment == 0) alignment = 1;
     size_t base = frameIndex * heap->m_regionSize;
     size_t regionEnd = base + heap->m_regionSize;
-    size_t alignMask = alignment - 1;
     size_t head = heap->m_writeHeadPerFrame[frameIndex];
-    size_t alignedHead = (head + alignMask) & ~alignMask;
+    // Round up to any alignment >= 1 (not only power-of-two bitmask).
+    size_t alignedHead = ((head + alignment - 1) / alignment) * alignment;
     if (alignedHead + size > regionEnd) return false;
     *outOffset = alignedHead;
     *outMappedPtr = static_cast<char*>(heap->m_mapped) + alignedHead;

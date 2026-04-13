@@ -31,6 +31,7 @@
 #include <fstream>
 #include <vector>
 #include <set>
+#include <string>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -71,7 +72,6 @@ namespace rhi {
 
 DeviceVK::DeviceVK() : m_caps{} {
     m_immediateCommandList = std::make_unique<CommandListVK>(this);
-    QueryCapabilities();
 }
 
 DeviceVK::~DeviceVK() {
@@ -297,6 +297,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     if (!InstanceVK::Create(&m_instanceVK)) {
         return false;
     }
+    core::Log::InfoF("Vulkan instance API version %u.%u.%u",
+                     VK_VERSION_MAJOR(m_instanceVK.apiVersion),
+                     VK_VERSION_MINOR(m_instanceVK.apiVersion),
+                     VK_VERSION_PATCH(m_instanceVK.apiVersion));
     VkInstance instance = static_cast<VkInstance>(m_instanceVK.GetHandle());
 
     if (windowHandle && width > 0 && height > 0) {
@@ -337,6 +341,9 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
     if (computeFamily == UINT32_MAX) computeFamily = graphicsFamily;
     if (transferFamily == UINT32_MAX) transferFamily = graphicsFamily;
+
+    core::Log::InfoF("Vulkan queue families: graphics=%u compute=%u transfer=%u (present uses graphics queue).",
+                     graphicsFamily, computeFamily, transferFamily);
 
     VkPhysicalDeviceProperties physicalProps = {};
     vkGetPhysicalDeviceProperties(physicalDevice, &physicalProps);
@@ -411,10 +418,33 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     dynamicRendering.pNext = &vulkan11Features;
 
+    VkPhysicalDeviceVulkan12Features vulkan12Features = {};
+    const bool chainVulkan12 =
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) > 1u) ||
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) == 1u && VK_VERSION_MINOR(physicalProps.apiVersion) >= 2u);
+    if (chainVulkan12) {
+        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        vulkan11Features.pNext = &vulkan12Features;
+    }
+
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extendedDynamicState = {};
     extendedDynamicState.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
-    vulkan11Features.pNext = hasExtendedDynamicStateExt ? &extendedDynamicState : nullptr;
-    extendedDynamicState.pNext = nullptr;
+    VkPhysicalDeviceHostQueryResetFeatures hostQueryResetFeatures = {};
+    hostQueryResetFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+    if (chainVulkan12) {
+        if (hasExtendedDynamicStateExt)
+            vulkan12Features.pNext = &extendedDynamicState;
+        else
+            vulkan12Features.pNext = &hostQueryResetFeatures;
+    } else {
+        if (hasExtendedDynamicStateExt)
+            vulkan11Features.pNext = &extendedDynamicState;
+        else
+            vulkan11Features.pNext = &hostQueryResetFeatures;
+    }
+    if (hasExtendedDynamicStateExt)
+        extendedDynamicState.pNext = &hostQueryResetFeatures;
+    hostQueryResetFeatures.pNext = nullptr;
 
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     if (dynamicRendering.dynamicRendering != VK_TRUE) {
@@ -434,6 +464,31 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
                      hasExtendedDynamicStateExt ? 1 : 0,
                      m_supportsExtendedDynamicState ? 1 : 0);
 
+    m_supportsDrawIndirectCount = false;
+    if (chainVulkan12) {
+        if (vulkan12Features.drawIndirectCount == VK_TRUE) {
+            m_supportsDrawIndirectCount = true;
+            vulkan12Features.drawIndirectCount = VK_TRUE;
+        } else {
+            vulkan12Features.drawIndirectCount = VK_FALSE;
+        }
+    }
+    core::Log::InfoF("Vulkan: drawIndirectCount (1.2) supported=%d", m_supportsDrawIndirectCount ? 1 : 0);
+
+    m_supportsTessellationShader = (features2.features.tessellationShader == VK_TRUE);
+    m_supportsGeometryShader = (features2.features.geometryShader == VK_TRUE);
+    // Vulkan 1.4+ headers omit `occlusionQuery` from `VkPhysicalDeviceFeatures` (baseline / promoted);
+    // `VK_QUERY_TYPE_OCCLUSION` remains in core. Enable the cap for the standard desktop Vulkan path.
+    m_supportsOcclusionQuery = true;
+    m_supportsHostQueryReset = (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
+    if (m_supportsHostQueryReset)
+        hostQueryResetFeatures.hostQueryReset = VK_TRUE;
+    else
+        hostQueryResetFeatures.hostQueryReset = VK_FALSE;
+    core::Log::InfoF("Vulkan: physical tessellationShader=%d geometryShader=%d occlusionQueries=%d hostQueryReset=%d",
+                     m_supportsTessellationShader ? 1 : 0, m_supportsGeometryShader ? 1 : 0, m_supportsOcclusionQuery ? 1 : 0,
+                     m_supportsHostQueryReset ? 1 : 0);
+
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.pNext = &features2;
@@ -451,6 +506,16 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         return false;
     }
     m_device = device;
+    SetDebugNameDevice(this, "OpenEye_VkDevice");
+    {
+        std::string extJoined;
+        for (size_t i = 0; i < deviceExtensions.size(); ++i) {
+            if (i) extJoined += ", ";
+            extJoined += deviceExtensions[i];
+        }
+        core::Log::InfoF("Vulkan logical device extensions (%u): %s",
+                         static_cast<uint32_t>(deviceExtensions.size()), extJoined.c_str());
+    }
 
     if (!QueuesVK::Create(&m_queues, device, graphicsFamily, computeFamily, transferFamily)) {
         core::Log::Error("DeviceVK::Initialize: QueuesVK::Create failed");
@@ -994,7 +1059,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
 
     if (m_surface != nullptr) {
-        if (!SwapchainVK::Create(&m_swapchain, device, m_physicalDeviceVK.GetHandle(), m_surface, width, height)) {
+        if (!SwapchainVK::Create(&m_swapchain, device, m_physicalDeviceVK.GetHandle(), m_surface, width, height, this,
+                                 m_swapchainPresentMode)) {
             core::Log::ErrorF("DeviceVK::Initialize: SwapchainVK::Create failed");
         }
     }
@@ -1017,8 +1083,16 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     else
         core::Log::Warn("DeviceVK::Initialize: failed to create nearest sampler, falling back to default linear sampler for all textures.");
 
+    QueryCapabilities();
     core::Log::Info("Vulkan device initialized");
     return true;
+}
+
+void DeviceVK::SetSwapchainPresentMode(SwapchainPresentMode mode) {
+    if (m_swapchainPresentMode == mode) return;
+    m_swapchainPresentMode = mode;
+    if (m_device && m_surface && m_swapchain.swapchain)
+        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
 }
 
 void DeviceVK::QueryCapabilities() {
@@ -1026,9 +1100,9 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsResourceSpaceBindPath = true;
     m_caps.supportsCompute = true;
     m_caps.supportsMultiDrawIndirect = true;
-    m_caps.supportsMultiDrawIndirectCount = true;
+    m_caps.supportsMultiDrawIndirectCount = m_supportsDrawIndirectCount;
     m_caps.supportsGpuDrivenPerDrawTransformIndirect = true;
-    m_caps.supportsAsyncCompute = true;
+    m_caps.supportsAsyncCompute = false;
     m_caps.supportsBindless = true;  // descriptor indexing
     m_caps.supportsRayTracing = false;
     m_caps.supportsTessellation = true;
@@ -1039,6 +1113,36 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsSparseBuffer = false;
     m_caps.supportsAtomicCounters = false;
     m_caps.supportsShaderSubroutines = false;
+
+    m_caps.supportsPresentMailbox = false;
+    m_caps.supportsPresentImmediate = false;
+    m_caps.supportsGpuTimestampQueries = false;
+    VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(m_physicalDeviceVK.GetHandle());
+    if (phys != VK_NULL_HANDLE) {
+        VkPhysicalDeviceProperties props = {};
+        vkGetPhysicalDeviceProperties(phys, &props);
+        m_caps.supportsGpuTimestampQueries = props.limits.timestampPeriod > 0.f;
+    }
+    VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(m_surface);
+    if (surface != VK_NULL_HANDLE && phys != VK_NULL_HANDLE) {
+        uint32_t modeCount = 0;
+        if (vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &modeCount, nullptr) == VK_SUCCESS && modeCount > 0) {
+            std::vector<VkPresentModeKHR> modes(modeCount);
+            if (vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surface, &modeCount, modes.data()) == VK_SUCCESS) {
+                for (VkPresentModeKHR m : modes) {
+                    if (m == VK_PRESENT_MODE_MAILBOX_KHR) m_caps.supportsPresentMailbox = true;
+                    if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) m_caps.supportsPresentImmediate = true;
+                }
+            }
+        }
+    }
+    m_caps.supportsOcclusionQueries = m_supportsOcclusionQuery;
+    m_caps.supportsHostQueryReset = m_supportsHostQueryReset;
+    core::Log::InfoF("Vulkan caps: present mailbox=%d immediate=%d gpuTimestamps=%d tess=%d geom=%d occlusion=%d hostQueryReset=%d",
+                     m_caps.supportsPresentMailbox ? 1 : 0, m_caps.supportsPresentImmediate ? 1 : 0,
+                     m_caps.supportsGpuTimestampQueries ? 1 : 0, m_caps.supportsTessellation ? 1 : 0,
+                     m_caps.supportsGeometryShader ? 1 : 0, m_caps.supportsOcclusionQueries ? 1 : 0,
+                     m_caps.supportsHostQueryReset ? 1 : 0);
 }
 
 void DeviceVK::EnsureFullscreenQuad() {
@@ -1237,7 +1341,7 @@ void DeviceVK::BeginFrame() {
         uint32_t acquiredIndex = 0xFFFFFFFFu;
         int acquireRes = m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX, &acquiredIndex);
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR) {
-            m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true);
+            m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
             m_pendingPresent = false;
             frame.swapchainImageIndex = 0xFFFFFFFFu;
         } else if (acquireRes == VK_SUCCESS || acquireRes == VK_SUBOPTIMAL_KHR) {
@@ -1246,6 +1350,11 @@ void DeviceVK::BeginFrame() {
         } else {
             m_pendingPresent = false;
             frame.swapchainImageIndex = 0xFFFFFFFFu;
+            static int s_acquireFailLog = 0;
+            if (s_acquireFailLog < 6) {
+                ++s_acquireFailLog;
+                core::Log::WarnF("Vulkan BeginFrame: vkAcquireNextImageKHR failed (0x%x)", static_cast<unsigned>(acquireRes));
+            }
         }
     } else {
         m_pendingPresent = false;
@@ -1318,7 +1427,9 @@ void DeviceVK::EndFrame() {
             once = true;
         }
     }
-    vkQueueSubmit(queue, 1, &submitInfo, fence);
+    VkResult submitRes = vkQueueSubmit(queue, 1, &submitInfo, fence);
+    if (submitRes != VK_SUCCESS)
+        core::Log::ErrorF("Vulkan EndFrame: vkQueueSubmit failed (0x%x)", submitRes);
     m_gpuFramePhase = GpuFramePhase::BetweenFrames;
 }
 
@@ -1340,7 +1451,9 @@ void DeviceVK::SubmitCommandList(ICommandList* list) {
     submitInfo.pCommandBuffers = &buf;
     submitInfo.signalSemaphoreCount = (signalValue != 0) ? 1u : 0u;
     submitInfo.pSignalSemaphores = (signalValue != 0) ? &timelineSem : nullptr;
-    vkQueueSubmit(static_cast<VkQueue>(m_queues.GetGraphicsQueue()), 1, &submitInfo, VK_NULL_HANDLE);
+    VkResult submitRes = vkQueueSubmit(static_cast<VkQueue>(m_queues.GetGraphicsQueue()), 1, &submitInfo, VK_NULL_HANDLE);
+    if (submitRes != VK_SUCCESS)
+        core::Log::ErrorF("Vulkan SubmitCommandList: vkQueueSubmit failed (0x%x)", submitRes);
     if (signalValue != 0)
         cl->ClearPendingTimelineValue();
 }
@@ -1631,6 +1744,20 @@ IQueryPool* DeviceVK::CreateQueryPool(QueryType type, uint32_t count) {
 }
 
 void DeviceVK::DestroyQueryPool(IQueryPool* pool) { DestroyQueryPoolVK(pool); }
+
+void DeviceVK::ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
+    if (!m_supportsHostQueryReset || !m_device || !pool || queryCount == 0) return;
+    auto* qvk = static_cast<QueryPoolVK*>(pool);
+    VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
+    if (qp == VK_NULL_HANDLE) return;
+    const uint64_t end = static_cast<uint64_t>(firstQuery) + static_cast<uint64_t>(queryCount);
+    if (end > static_cast<uint64_t>(qvk->m_count)) {
+        core::Log::ErrorF("DeviceVK::ResetQueryPoolOnHost: range exceeds pool count (first=%u count=%u poolCount=%u).", firstQuery,
+                          queryCount, qvk->m_count);
+        return;
+    }
+    vkResetQueryPool(static_cast<VkDevice>(m_device), qp, firstQuery, queryCount);
+}
 
 IPipelineLayout* DeviceVK::CreatePipelineLayout(const PipelineLayoutDesc& desc) {
     return CreatePipelineLayoutVK(this, desc);

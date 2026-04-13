@@ -8,6 +8,10 @@ namespace rhi {
 
 struct DeviceVK;
 
+/** GPU buffer backed by VMA (`VkBuffer` + `VmaAllocation`). `BufferMemoryHint` maps to CPU vs GPU memory;
+ *  device-local initial data uses a one-shot upload (`SubmitDeviceLocalBufferUpload` in `BufferVK.cpp`).
+ *  **Uniform buffers:** callers must size and align suballocations per `VkPhysicalDeviceLimits::minUniformBufferOffsetAlignment`
+ *  (RHI does not pad `BufferDesc::sizeInBytes` automatically). */
 struct BufferVK : IBuffer {
     explicit BufferVK(DeviceVK* device);
     ~BufferVK() override;
@@ -20,9 +24,8 @@ struct BufferVK : IBuffer {
     DeviceVK* m_device = nullptr;
     size_t m_size = 0;
     BufferMemoryHint m_hint = BufferMemoryHint::DeviceOnly;
-    // VkBuffer + VmaAllocation (filled in when memory system is implemented)
-    void* m_buffer = nullptr;
-    void* m_allocation = nullptr;
+    void* m_buffer = nullptr;       // VkBuffer
+    void* m_allocation = nullptr;   // VmaAllocation
 };
 
 IBuffer* CreateBufferVK(DeviceVK* device, const BufferDesc& desc, const void* initialData);

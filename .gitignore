@@ -23,6 +23,8 @@ EngineSource/thirdparty/diligent/
 EngineSource/thirdparty/OpenXR-SDK/
 EngineSource/thirdparty/libjpeg-turbo/
 EngineSource/thirdparty/Aespinosa_vulkan/
+EngineSource/thirdparty/Wicked_engine/
+EngineSource/thirdparty/Vulkan_Samples/
 *.user
 *.suo
 *.sdf
