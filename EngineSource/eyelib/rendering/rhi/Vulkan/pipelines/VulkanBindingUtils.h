@@ -15,7 +15,7 @@ bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
                        VkDescriptorSetLayout* outLayout, VkDescriptorSet* outSet);
 
 bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeSet0Layout, VkDescriptorSetLayout bindlessSetLayout,
-                                 VkPipelineLayout* outPipelineLayout);
+                                 bool useIndependentSets, VkPipelineLayout* outPipelineLayout);
 
 void UpdateComputeSet0(DeviceVK* device, CommandListVK* cmd);
 

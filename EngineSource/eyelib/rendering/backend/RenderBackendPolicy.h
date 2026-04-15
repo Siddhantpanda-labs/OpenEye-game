@@ -35,6 +35,10 @@ CameraView AdjustCameraForBackend(const rhi::IDevice* device, const CameraView& 
 bool SupportsBindless(const rhi::IDevice* device);
 /** @return true when device can run compute shaders (dispatch). */
 bool SupportsCompute(const rhi::IDevice* device);
+/** @return true when device exposes a dedicated async compute queue path. */
+bool SupportsAsyncCompute(const rhi::IDevice* device);
+/** @return true when async compute is supported and the device is not in `AsyncComputeSubmitPolicy::ForceGraphicsQueue` (Vulkan deferred submits may use the compute queue). */
+bool AllowsAsyncComputeQueueRouting(const rhi::IDevice* device);
 /** @return true when device supports multi-draw indirect (MDI). */
 bool SupportsMultiDrawIndirect(const rhi::IDevice* device);
 /** @return true when device supports MDI with GPU-written draw count (indirect parameters). */
@@ -61,6 +65,24 @@ bool SupportsGpuTimestampQueries(const rhi::IDevice* device);
 bool SupportsOcclusionQueries(const rhi::IDevice* device);
 /** @return true when host `vkResetQueryPool` is available (`IDevice::ResetQueryPoolOnHost`). */
 bool SupportsHostQueryReset(const rhi::IDevice* device);
+/** @return true when pipeline statistics query pools are supported. */
+bool SupportsPipelineStatisticsQueries(const rhi::IDevice* device);
+/** @return true when Vulkan synchronization2 barriers are enabled (`vkCmdPipelineBarrier2`). */
+bool SupportsSynchronization2(const rhi::IDevice* device);
+/** @return true when Vulkan buffer device address is enabled (`vkGetBufferDeviceAddress`). */
+bool SupportsBufferDeviceAddress(const rhi::IDevice* device);
+/** @return true when `VK_EXT_descriptor_buffer` capability is enabled. */
+bool SupportsDescriptorBuffer(const rhi::IDevice* device);
+/** @return true when `VK_EXT_graphics_pipeline_library` capability is enabled. */
+bool SupportsGraphicsPipelineLibrary(const rhi::IDevice* device);
+/** @return true when `VK_EXT_swapchain_colorspace` is enabled (HDR / wide-gamut surface formats). */
+bool SupportsSwapchainColorspace(const rhi::IDevice* device);
+/** @return true when `VK_KHR_present_wait` is enabled (`IDevice::WaitForPresent`). */
+bool SupportsPresentWait(const rhi::IDevice* device);
+/** @return true when `VK_KHR_pipeline_executable_properties` was enabled at device create (`RHICapabilities::supportsPipelineExecutableProperties`). */
+bool SupportsPipelineExecutableProperties(const rhi::IDevice* device);
+/** @return true when `VK_EXT_device_fault` was enabled at device create (`RHICapabilities::supportsDeviceFault`). */
+bool SupportsDeviceFault(const rhi::IDevice* device);
 
 }  // namespace backend
 }  // namespace rendering

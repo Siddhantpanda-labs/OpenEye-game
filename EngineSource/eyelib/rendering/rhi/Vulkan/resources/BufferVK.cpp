@@ -1,4 +1,5 @@
 #include "eyelib/rendering/rhi/Vulkan/resources/BufferVK.h"
+#include "eyelib/rendering/rhi/Vulkan/barriers/BarrierTrackerVK.h"
 #include "eyelib/rendering/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/VulkanEnums.h"
 #include "eyelib/rendering/rhi/Vulkan/memory/vk_mem_alloc.h"
@@ -11,6 +12,28 @@ namespace rendering {
 namespace rhi {
 
 namespace {
+
+static ResourceState ResourceStateFromBufferDescForTracker(const BufferDesc& desc) {
+    if (HasUsage(desc.usage, BufferUsage::IndirectDraw)) return ResourceState::IndirectDraw;
+    if (HasUsage(desc.usage, BufferUsage::DescriptorBuffer)) return ResourceState::ShaderResource;
+    if (HasUsage(desc.usage, BufferUsage::Storage)) return ResourceState::ShaderResource;
+    if (HasUsage(desc.usage, BufferUsage::Uniform)) return ResourceState::UniformBuffer;
+    if (HasUsage(desc.usage, BufferUsage::Index)) return ResourceState::IndexBuffer;
+    return ResourceState::VertexBuffer;
+}
+
+/** Matches `FinalBufferAccessFromUsage` / one-shot upload final barrier semantics. */
+static ResourceState ResourceStateFromVkBufferUsageForTracker(VkBufferUsageFlags u) {
+    u &= static_cast<VkBufferUsageFlags>(~VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+#if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (u & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) return ResourceState::ShaderResource;
+#endif
+    if (u & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT) return ResourceState::IndirectDraw;
+    if (u & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) return ResourceState::ShaderResource;
+    if (u & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) return ResourceState::UniformBuffer;
+    if (u & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) return ResourceState::IndexBuffer;
+    return ResourceState::VertexBuffer;
+}
 
 static void FinalBufferAccessFromUsage(VkBufferUsageFlags u, VkAccessFlags* outAccess, VkPipelineStageFlags* outStage) {
     VkAccessFlags acc = 0;
@@ -35,6 +58,12 @@ static void FinalBufferAccessFromUsage(VkBufferUsageFlags u, VkAccessFlags* outA
         acc |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
         st |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
     }
+#if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (u & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) {
+        acc |= VK_ACCESS_SHADER_READ_BIT;
+        st |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    }
+#endif
     if (acc == 0) {
         acc = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
         st = VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
@@ -107,25 +136,34 @@ static bool SubmitDeviceLocalBufferUpload(DeviceVK* deviceObj, VkBuffer dst, VkD
         return false;
     }
 
-    VkBufferMemoryBarrier barriers[2] = {};
-    barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barriers[0].srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    VkBufferMemoryBarrier2 barriers[2] = {};
+    barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barriers[0].srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+    barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barriers[0].dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
     barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[0].buffer = staging;
     barriers[0].offset = 0;
     barriers[0].size = size;
 
-    barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barriers[1].dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[1].buffer = dst;
     barriers[1].offset = 0;
     barriers[1].size = size;
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, barriers, 0, nullptr);
+    VkDependencyInfo depToCopy = {};
+    depToCopy.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToCopy.bufferMemoryBarrierCount = 2;
+    depToCopy.pBufferMemoryBarriers = barriers;
+    vkCmdPipelineBarrier2(cmd, &depToCopy);
 
     VkBufferCopy copy = {};
     copy.size = size;
@@ -135,16 +173,22 @@ static bool SubmitDeviceLocalBufferUpload(DeviceVK* deviceObj, VkBuffer dst, VkD
     VkPipelineStageFlags finalSt;
     FinalBufferAccessFromUsage(usageAfterTransfer & ~VK_BUFFER_USAGE_TRANSFER_DST_BIT, &finalAcc, &finalSt);
 
-    VkBufferMemoryBarrier done = {};
-    done.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    done.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    done.dstAccessMask = finalAcc;
+    VkBufferMemoryBarrier2 done = {};
+    done.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    done.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    done.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    done.dstStageMask = static_cast<VkPipelineStageFlags2>(finalSt);
+    done.dstAccessMask = static_cast<VkAccessFlags2>(finalAcc);
     done.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     done.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     done.buffer = dst;
     done.offset = 0;
     done.size = size;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, finalSt, 0, 0, nullptr, 1, &done, 0, nullptr);
+    VkDependencyInfo depDone = {};
+    depDone.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depDone.bufferMemoryBarrierCount = 1;
+    depDone.pBufferMemoryBarriers = &done;
+    vkCmdPipelineBarrier2(cmd, &depDone);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         vkFreeCommandBuffers(device, pool, 1, &cmd);
@@ -219,6 +263,16 @@ void BufferVK::Update(const void* data, size_t offset, size_t size) {
     }
 }
 
+void BufferVK::FlushHostVisibleWrites(size_t offset, size_t size) {
+    if (!m_device || !m_allocation) return;
+    if (offset >= m_size) return;
+    VmaAllocator allocator = static_cast<VmaAllocator>(m_device->GetAllocator());
+    if (!allocator) return;
+    VkDeviceSize flushSize = size == 0 ? static_cast<VkDeviceSize>(m_size - offset) : static_cast<VkDeviceSize>(size);
+    if (flushSize == 0) return;
+    vmaFlushAllocation(allocator, static_cast<VmaAllocation>(m_allocation), static_cast<VkDeviceSize>(offset), flushSize);
+}
+
 IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void* initialData) {
     if (!deviceObj || desc.sizeInBytes == 0) return nullptr;
     VmaAllocator allocator = static_cast<VmaAllocator>(deviceObj->GetAllocator());
@@ -228,6 +282,18 @@ IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void*
     bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufInfo.size = desc.sizeInBytes;
     VkBufferUsageFlags vkUsage = ToVkBufferUsage(desc.usage);
+    const bool supportsBufferDeviceAddress = deviceObj->SupportsBufferDeviceAddress();
+    const bool requestsDeviceAddress = HasUsage(desc.usage, BufferUsage::ShaderDeviceAddress);
+    const bool requestsDescriptorBuffer = HasUsage(desc.usage, BufferUsage::DescriptorBuffer);
+    if (requestsDescriptorBuffer && !requestsDeviceAddress) {
+        core::Log::Error("CreateBufferVK: DescriptorBuffer usage requires BufferUsage::ShaderDeviceAddress for Vulkan binding.");
+        return nullptr;
+    }
+    if (requestsDeviceAddress && !supportsBufferDeviceAddress) {
+        core::Log::Error("CreateBufferVK: BufferUsage::ShaderDeviceAddress requested but device does not support buffer device address.");
+        return nullptr;
+    }
+    const bool deviceAddressCapable = (vkUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
     const bool deviceLocalUpload =
         initialData && desc.sizeInBytes > 0 && desc.memoryHint == BufferMemoryHint::DeviceOnly;
     if (deviceLocalUpload)
@@ -253,6 +319,7 @@ IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void*
     b->m_hint = desc.memoryHint;
     b->m_buffer = vkBuffer;
     b->m_allocation = allocation;
+    b->m_deviceAddressCapable = deviceAddressCapable;
 
     if (initialData && desc.sizeInBytes > 0) {
         if (desc.memoryHint == BufferMemoryHint::HostVisible || desc.memoryHint == BufferMemoryHint::HostVisiblePersistent) {
@@ -270,6 +337,12 @@ IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void*
                 return nullptr;
             }
         }
+        if (BarrierTrackerVK* tr = static_cast<BarrierTrackerVK*>(deviceObj->GetBarrierTracker())) {
+            if (desc.memoryHint == BufferMemoryHint::DeviceOnly)
+                BarrierTrackerVK::SetBufferState(tr, vkBuffer, ResourceStateFromVkBufferUsageForTracker(vkUsage));
+            else
+                BarrierTrackerVK::SetBufferState(tr, vkBuffer, ResourceStateFromBufferDescForTracker(desc));
+        }
     }
     return b;
 }
@@ -277,6 +350,8 @@ IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void*
 void DestroyBufferVK(DeviceVK* deviceObj, IBuffer* buffer) {
     if (!deviceObj || !buffer) return;
     BufferVK* b = static_cast<BufferVK*>(buffer);
+    if (b->m_buffer)
+        BarrierTrackerVK::RemoveBufferState(static_cast<BarrierTrackerVK*>(deviceObj->GetBarrierTracker()), b->m_buffer);
     VmaAllocator allocator = static_cast<VmaAllocator>(deviceObj->GetAllocator());
     if (allocator && b->m_buffer != VK_NULL_HANDLE) {
         vmaDestroyBuffer(allocator, static_cast<VkBuffer>(b->m_buffer), static_cast<VmaAllocation>(b->m_allocation));

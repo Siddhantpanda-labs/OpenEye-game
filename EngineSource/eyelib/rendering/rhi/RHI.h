@@ -55,6 +55,8 @@ struct IDevice {
 
     /** Backend capabilities; use these instead of branching on backend type. */
     virtual const RHICapabilities& GetCapabilities() const = 0;
+    /** Vulkan: true after `VK_ERROR_DEVICE_LOST` on a tracked queue/surface path; `VkDevice` and child handles are invalid until teardown and full re-init. Default false. */
+    virtual bool IsDeviceLost() const { return false; }
 
     /** Typed backend identity (avoid string matching). */
     virtual ::eyelib::rendering::RenderBackend GetRenderBackend() const = 0;
@@ -91,9 +93,14 @@ struct IDevice {
     virtual void EnqueueFrameSliceCommandList(ICommandList* cmd) { (void)cmd; }
     /** Replay a deferred list (or no-op for immediate). Must be called on the render thread. Submit lists in order for deterministic execution. */
     virtual void SubmitCommandList(ICommandList* list) = 0;
+    /** Vulkan: override deferred-list queue routing (`AsyncComputeSubmitPolicy`). Other backends: no-op / default. */
+    virtual void SetAsyncComputeSubmitPolicy(AsyncComputeSubmitPolicy policy) { (void)policy; }
+    virtual AsyncComputeSubmitPolicy GetAsyncComputeSubmitPolicy() const { return AsyncComputeSubmitPolicy::Automatic; }
 
     virtual IBuffer* CreateBuffer(const BufferDesc& desc, const void* initialData = nullptr) = 0;
     virtual void DestroyBuffer(IBuffer* buffer) = 0;
+    /** Vulkan: returns `vkGetBufferDeviceAddress` for buffers created with shader-device-address usage; 0 when unsupported/unavailable. */
+    virtual uint64_t GetBufferDeviceAddress(IBuffer* buffer) { (void)buffer; return 0; }
 
     virtual ITexture* CreateTexture(const TextureDesc& desc, const void* initialData = nullptr) = 0;
     virtual void DestroyTexture(ITexture* texture) = 0;
@@ -155,7 +162,8 @@ struct IDevice {
     /** Transition shared dummy depth to shader-read once (never rendered as attachment). No-op if unsupported or already done. */
     virtual void EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) { (void)cmd; }
 
-    virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count) = 0;
+    /** @param pipelineStatisticsMask bits compatible with `VkQueryPipelineStatisticFlagBits` when `type == QueryType::PipelineStatistics`; `0` uses `kDefaultPipelineStatisticsFlags`. Ignored for other types. */
+    virtual IQueryPool* CreateQueryPool(QueryType type, uint32_t count, PipelineStatisticsFlags pipelineStatisticsMask = 0) = 0;
     virtual void DestroyQueryPool(IQueryPool* pool) = 0;
     /** Vulkan: `vkResetQueryPool` on the host when `GetCapabilities().supportsHostQueryReset`. No-op otherwise.
      *  Caller must ensure each query in `[firstQuery, firstQuery+queryCount)` is in the **unavailable** state (synchronize with GPU) per the Vulkan spec. */
@@ -210,6 +218,20 @@ struct IDevice {
      *  Prefer `GetCapabilities().supportsPresentMailbox` / `supportsPresentImmediate` before requesting Mailbox/Immediate. */
     virtual void SetSwapchainPresentMode(SwapchainPresentMode mode) { (void)mode; }
     virtual SwapchainPresentMode GetSwapchainPresentMode() const { return SwapchainPresentMode::Fifo; }
+    /** Vulkan: request HDR/wide-gamut swapchain when `VK_EXT_swapchain_colorspace` + surface support allow (recreates swapchain). */
+    virtual void SetSwapchainOutputMode(SwapchainOutputMode mode) { (void)mode; }
+    virtual SwapchainOutputMode GetSwapchainOutputMode() const { return SwapchainOutputMode::SdrSrgb; }
+    /** Vulkan: current swapchain `VkFormat` / `VkColorSpaceKHR` (as uint32_t); zeros if no swapchain or non-Vulkan. */
+    virtual void GetSwapchainSurfaceColorInfo(uint32_t* outVkFormat, uint32_t* outVkColorSpaceKHR) const {
+        if (outVkFormat) *outVkFormat = 0;
+        if (outVkColorSpaceKHR) *outVkColorSpaceKHR = 0;
+    }
+    /** Vulkan: block until `presentId` is processed (requires `supportsPresentWait`). Timeout in nanoseconds (`UINT64_MAX` = wait indefinitely). */
+    virtual bool WaitForPresent(uint64_t presentId, uint64_t timeoutNs = UINT64_MAX) { (void)presentId; (void)timeoutNs; return false; }
+    /** Vulkan: `WaitForPresent(GetLastPresentId(), timeoutNs)` when present-wait is enabled and a present id was recorded; otherwise false. If last id is 0, returns true (nothing to wait on). */
+    virtual bool WaitForPreviousPresent(uint64_t timeoutNs = UINT64_MAX) { (void)timeoutNs; return false; }
+    /** Vulkan: last `VkPresentIdKHR` submitted to `vkQueuePresentKHR` (0 if present-id path off). */
+    virtual uint64_t GetLastPresentId() const { return 0; }
     /** Wait until all previously submitted GPU work has completed (e.g. glFinish). Use before swap to avoid flicker from presenting before blit completes. */
     virtual void Finish() {}
     /** Optional: barrier tracker for batched transitions (e.g. Vulkan BarrierTrackerVK). Returns nullptr if not supported. */
@@ -498,8 +520,17 @@ struct IQueryPool {
     virtual ~IQueryPool() = default;
     virtual QueryType GetType() const = 0;
     virtual uint32_t GetCount() const = 0;
-    /** Timestamp: nanoseconds (`BeginQuery(i)`/`EndQuery(i)` use slots `i` and `i+1`). Occlusion: samples passed (uint64). */
+    /** Timestamp: nanoseconds (`BeginQuery(i)`/`EndQuery(i)` use slots `i` and `i+1`). Occlusion: samples passed (uint64). Pipeline statistics: use `GetPipelineStatistics` (this returns 0). */
     virtual uint64_t GetResult(uint32_t index) = 0;
+    /** For `QueryType::PipelineStatistics`: number of `uint64_t` counters per query (popcount of pool mask). Else 0. */
+    virtual uint32_t GetPipelineStatisticsSlotCount() const { return 0; }
+    /** For `QueryType::PipelineStatistics`: writes up to `min(maxSlots, GetPipelineStatisticsSlotCount())` words for `queryIndex`. Returns words written, or 0. */
+    virtual uint32_t GetPipelineStatistics(uint32_t queryIndex, uint64_t* outSlots, uint32_t maxSlots) {
+        (void)queryIndex;
+        (void)outSlots;
+        (void)maxSlots;
+        return 0;
+    }
 };
 
 } // namespace rhi

@@ -52,6 +52,7 @@ const VkDescriptorPoolSize kMainDescriptorPoolSizes[] = {
     { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384 },
 };
 const uint32_t kMainDescriptorPoolSizeCount = static_cast<uint32_t>(sizeof(kMainDescriptorPoolSizes) / sizeof(kMainDescriptorPoolSizes[0]));
+constexpr uint32_t kCorePipelineStatisticsMask = 0x7FFu;
 
 std::string GetPipelineCachePathForPhysicalDevice(VkPhysicalDevice phys) {
     if (phys == VK_NULL_HANDLE) return {};
@@ -258,8 +259,9 @@ DeviceVK::~DeviceVK() {
         vkDestroySemaphore(device, timelineSem, nullptr);
         m_timelineSemaphore = nullptr;
     }
+    DestroyCrossQueueBridge();
     if (device != VK_NULL_HANDLE) {
-        SwapchainVK::Destroy(&m_swapchain, device);
+        SwapchainVK::Destroy(&m_swapchain, device, this);
         VkDescriptorPool imguiPool = static_cast<VkDescriptorPool>(m_imGuiDescriptorPool);
         if (imguiPool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device, imguiPool, nullptr);
@@ -342,11 +344,45 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     if (computeFamily == UINT32_MAX) computeFamily = graphicsFamily;
     if (transferFamily == UINT32_MAX) transferFamily = graphicsFamily;
 
-    core::Log::InfoF("Vulkan queue families: graphics=%u compute=%u transfer=%u (present uses graphics queue).",
-                     graphicsFamily, computeFamily, transferFamily);
+    const bool hasDedicatedComputeFamily = (computeFamily != graphicsFamily);
+    core::Log::InfoF("Vulkan queue families: graphics=%u compute=%u transfer=%u dedicatedCompute=%d (present uses graphics queue).",
+                     graphicsFamily, computeFamily, transferFamily, hasDedicatedComputeFamily ? 1 : 0);
 
     VkPhysicalDeviceProperties physicalProps = {};
     vkGetPhysicalDeviceProperties(physicalDevice, &physicalProps);
+    VkPhysicalDeviceDescriptorIndexingProperties descriptorIndexingProps = {};
+    descriptorIndexingProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+    VkPhysicalDeviceProperties2 physicalProps2 = {};
+    physicalProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    physicalProps2.pNext = &descriptorIndexingProps;
+    vkGetPhysicalDeviceProperties2(physicalDevice, &physicalProps2);
+    const uint32_t requiredBindlessSampledImages = BindlessHeapVK::kMaxTextures;
+    const uint32_t requiredBindlessStorageBuffers = BindlessHeapVK::kMaxBuffers;
+    const uint32_t requiredBindlessPoolDescriptors = requiredBindlessSampledImages + requiredBindlessStorageBuffers;
+    if (descriptorIndexingProps.maxDescriptorSetUpdateAfterBindSampledImages < requiredBindlessSampledImages) {
+        core::Log::ErrorF(
+            "DeviceVK::Initialize: maxDescriptorSetUpdateAfterBindSampledImages (%u) is below required bindless texture capacity (%u).",
+            descriptorIndexingProps.maxDescriptorSetUpdateAfterBindSampledImages, requiredBindlessSampledImages);
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (descriptorIndexingProps.maxDescriptorSetUpdateAfterBindStorageBuffers < requiredBindlessStorageBuffers) {
+        core::Log::ErrorF(
+            "DeviceVK::Initialize: maxDescriptorSetUpdateAfterBindStorageBuffers (%u) is below required bindless buffer capacity (%u).",
+            descriptorIndexingProps.maxDescriptorSetUpdateAfterBindStorageBuffers, requiredBindlessStorageBuffers);
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (descriptorIndexingProps.maxUpdateAfterBindDescriptorsInAllPools < requiredBindlessPoolDescriptors) {
+        core::Log::ErrorF(
+            "DeviceVK::Initialize: maxUpdateAfterBindDescriptorsInAllPools (%u) is below required bindless descriptor pool capacity (%u).",
+            descriptorIndexingProps.maxUpdateAfterBindDescriptorsInAllPools, requiredBindlessPoolDescriptors);
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
     const bool instanceSupportsCoreDynamicRendering =
         (VK_VERSION_MAJOR(m_instanceVK.apiVersion) > 1) ||
         (VK_VERSION_MAJOR(m_instanceVK.apiVersion) == 1 && VK_VERSION_MINOR(m_instanceVK.apiVersion) >= 3);
@@ -360,10 +396,40 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     std::vector<VkExtensionProperties> availableExts(availableExtCount);
     if (availableExtCount > 0)
         vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &availableExtCount, availableExts.data());
+    const auto hasDeviceExtension = [&availableExts](const char* extensionName) -> bool {
+        return std::any_of(availableExts.begin(), availableExts.end(), [extensionName](const VkExtensionProperties& e) {
+            return std::strcmp(e.extensionName, extensionName) == 0;
+        });
+    };
     const bool hasDynamicRenderingExt = std::any_of(availableExts.begin(), availableExts.end(),
         [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_KHR_dynamic_rendering") == 0; });
     const bool hasExtendedDynamicStateExt = std::any_of(availableExts.begin(), availableExts.end(),
         [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_extended_dynamic_state") == 0; });
+    const bool hasSynchronization2Ext = std::any_of(availableExts.begin(), availableExts.end(),
+        [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_KHR_synchronization2") == 0; });
+    const bool hasBufferDeviceAddressExt = std::any_of(availableExts.begin(), availableExts.end(),
+        [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_KHR_buffer_device_address") == 0; });
+    const bool hasDescriptorBufferExt = std::any_of(availableExts.begin(), availableExts.end(),
+        [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_descriptor_buffer") == 0; });
+    const bool hasGraphicsPipelineLibraryExt = std::any_of(availableExts.begin(), availableExts.end(),
+        [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_graphics_pipeline_library") == 0; });
+    const bool hasPipelineExecutablePropertiesExt = hasDeviceExtension("VK_KHR_pipeline_executable_properties");
+    const bool hasDeviceFaultExt = hasDeviceExtension("VK_EXT_device_fault");
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT)
+    if (hasDescriptorBufferExt) {
+        VkPhysicalDeviceDescriptorBufferPropertiesEXT dbProps = {};
+        dbProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT;
+        VkPhysicalDeviceProperties2 props2 = {};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &dbProps;
+        vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+        m_descriptorBufferCombinedImgSize = dbProps.combinedImageSamplerDescriptorSize;
+        m_descriptorBufferStorageBufSize = dbProps.storageBufferDescriptorSize;
+        if (dbProps.descriptorBufferOffsetAlignment != 0u)
+            m_descriptorBufferOffsetAlignment = dbProps.descriptorBufferOffsetAlignment;
+    }
+#endif
 
     std::vector<const char*> deviceExtensions = {
         "VK_KHR_swapchain",
@@ -377,9 +443,56 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         }
         deviceExtensions.push_back("VK_KHR_dynamic_rendering");
     }
+    const bool instanceSupportsCoreSynchronization2 =
+        (VK_VERSION_MAJOR(m_instanceVK.apiVersion) > 1) ||
+        (VK_VERSION_MAJOR(m_instanceVK.apiVersion) == 1 && VK_VERSION_MINOR(m_instanceVK.apiVersion) >= 3);
+    const bool physicalSupportsCoreSynchronization2 =
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) > 1) ||
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) == 1 && VK_VERSION_MINOR(physicalProps.apiVersion) >= 3);
+    const bool hasCoreSynchronization2 = instanceSupportsCoreSynchronization2 && physicalSupportsCoreSynchronization2;
+    if (!hasCoreSynchronization2) {
+        if (!hasSynchronization2Ext) {
+            core::Log::Error("DeviceVK::Initialize: synchronization2 required, but neither Vulkan 1.3 nor VK_KHR_synchronization2 is available.");
+            InstanceVK::Destroy(&m_instanceVK);
+            PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+            return false;
+        }
+        deviceExtensions.push_back("VK_KHR_synchronization2");
+    }
+    const bool instanceSupportsCoreBufferDeviceAddress =
+        (VK_VERSION_MAJOR(m_instanceVK.apiVersion) > 1) ||
+        (VK_VERSION_MAJOR(m_instanceVK.apiVersion) == 1 && VK_VERSION_MINOR(m_instanceVK.apiVersion) >= 2);
+    const bool physicalSupportsCoreBufferDeviceAddress =
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) > 1) ||
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) == 1 && VK_VERSION_MINOR(physicalProps.apiVersion) >= 2);
+    const bool hasCoreBufferDeviceAddress = instanceSupportsCoreBufferDeviceAddress && physicalSupportsCoreBufferDeviceAddress;
+    if (!hasCoreBufferDeviceAddress && hasBufferDeviceAddressExt) {
+        deviceExtensions.push_back("VK_KHR_buffer_device_address");
+    }
     if (hasExtendedDynamicStateExt)
         deviceExtensions.push_back("VK_EXT_extended_dynamic_state");
-    uint32_t deviceExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    if (hasDeviceExtension("VK_EXT_swapchain_colorspace")) {
+        deviceExtensions.push_back("VK_EXT_swapchain_colorspace");
+        m_supportsSwapchainColorspace = true;
+    } else {
+        m_supportsSwapchainColorspace = false;
+    }
+    std::vector<const char*> missingRequiredDeviceExtensions;
+    for (const char* requiredExtension : deviceExtensions) {
+        if (!hasDeviceExtension(requiredExtension))
+            missingRequiredDeviceExtensions.push_back(requiredExtension);
+    }
+    if (!missingRequiredDeviceExtensions.empty()) {
+        std::string missingJoined;
+        for (size_t i = 0; i < missingRequiredDeviceExtensions.size(); ++i) {
+            if (i) missingJoined += ", ";
+            missingJoined += missingRequiredDeviceExtensions[i];
+        }
+        core::Log::ErrorF("DeviceVK::Initialize: missing required device extension(s): %s", missingJoined.c_str());
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
 
     float queuePriority = 1.0f;
     std::set<uint32_t> uniqueFamilies = { graphicsFamily, computeFamily, transferFamily };
@@ -397,58 +510,218 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.features.fragmentStoresAndAtomics = VK_TRUE;
 
-    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing = {};
-    descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-    descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
-    descriptorIndexing.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-    descriptorIndexing.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
-    features2.pNext = &descriptorIndexing;
-
-    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures = {};
-    timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-    timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
-    descriptorIndexing.pNext = &timelineSemaphoreFeatures;
-
-    VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering = {};
-    dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
-    dynamicRendering.dynamicRendering = VK_TRUE;
-    timelineSemaphoreFeatures.pNext = &dynamicRendering;
-
-    VkPhysicalDeviceVulkan11Features vulkan11Features = {};
-    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    dynamicRendering.pNext = &vulkan11Features;
-
-    VkPhysicalDeviceVulkan12Features vulkan12Features = {};
+    // Vulkan 1.2+ / 1.3+: promoted feature structs must not duplicate VkPhysicalDeviceVulkan12Features /
+    // VkPhysicalDeviceVulkan13Features (VUID-VkDeviceCreateInfo-pNext-02830 and related).
     const bool chainVulkan12 =
         (VK_VERSION_MAJOR(physicalProps.apiVersion) > 1u) ||
         (VK_VERSION_MAJOR(physicalProps.apiVersion) == 1u && VK_VERSION_MINOR(physicalProps.apiVersion) >= 2u);
-    if (chainVulkan12) {
-        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-        vulkan11Features.pNext = &vulkan12Features;
-    }
+    const bool chainVulkan13 =
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) > 1u) ||
+        (VK_VERSION_MAJOR(physicalProps.apiVersion) == 1u && VK_VERSION_MINOR(physicalProps.apiVersion) >= 3u);
+
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexing = {};
+    descriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemaphoreFeatures = {};
+    timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+    VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering = {};
+    dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    VkPhysicalDeviceSynchronization2Features synchronization2 = {};
+    synchronization2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+    VkPhysicalDeviceVulkan11Features vulkan11Features = {};
+    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features vulkan12Features = {};
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+    VkPhysicalDeviceVulkan13Features vulkan13Features = {};
+#endif
 
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extendedDynamicState = {};
     extendedDynamicState.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
     VkPhysicalDeviceHostQueryResetFeatures hostQueryResetFeatures = {};
     hostQueryResetFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
+    bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+
     if (chainVulkan12) {
-        if (hasExtendedDynamicStateExt)
-            vulkan12Features.pNext = &extendedDynamicState;
-        else
-            vulkan12Features.pNext = &hostQueryResetFeatures;
+        vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        vulkan12Features.descriptorIndexing = VK_TRUE;
+        vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
+        vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        vulkan12Features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+        vulkan12Features.timelineSemaphore = VK_TRUE;
+        vulkan12Features.hostQueryReset = VK_TRUE;
+        vulkan12Features.bufferDeviceAddress = VK_TRUE;
+
+        features2.pNext = &vulkan11Features;
+        vulkan11Features.pNext = &vulkan12Features;
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+        if (chainVulkan13 && hasCoreDynamicRendering && hasCoreSynchronization2) {
+            vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+            vulkan13Features.dynamicRendering = VK_TRUE;
+            vulkan13Features.synchronization2 = VK_TRUE;
+            vulkan12Features.pNext = &vulkan13Features;
+            if (hasExtendedDynamicStateExt) {
+                vulkan13Features.pNext = &extendedDynamicState;
+                extendedDynamicState.pNext = nullptr;
+            } else {
+                vulkan13Features.pNext = nullptr;
+            }
+        } else
+#endif
+        {
+            dynamicRendering.dynamicRendering = VK_TRUE;
+            synchronization2.synchronization2 = VK_TRUE;
+            vulkan12Features.pNext = &dynamicRendering;
+            dynamicRendering.pNext = &synchronization2;
+            if (hasExtendedDynamicStateExt) {
+                synchronization2.pNext = &extendedDynamicState;
+                extendedDynamicState.pNext = nullptr;
+            } else {
+                synchronization2.pNext = nullptr;
+            }
+        }
     } else {
+        descriptorIndexing.descriptorBindingPartiallyBound = VK_TRUE;
+        descriptorIndexing.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        descriptorIndexing.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+        features2.pNext = &descriptorIndexing;
+        timelineSemaphoreFeatures.timelineSemaphore = VK_TRUE;
+        descriptorIndexing.pNext = &timelineSemaphoreFeatures;
+        dynamicRendering.dynamicRendering = VK_TRUE;
+        timelineSemaphoreFeatures.pNext = &dynamicRendering;
+        synchronization2.synchronization2 = VK_TRUE;
+        dynamicRendering.pNext = &synchronization2;
+        synchronization2.pNext = &vulkan11Features;
+        vulkan11Features.pNext = nullptr;
         if (hasExtendedDynamicStateExt)
             vulkan11Features.pNext = &extendedDynamicState;
         else
             vulkan11Features.pNext = &hostQueryResetFeatures;
+        if (hasExtendedDynamicStateExt)
+            extendedDynamicState.pNext = &hostQueryResetFeatures;
+        hostQueryResetFeatures.pNext = &bufferDeviceAddressFeatures;
+        bufferDeviceAddressFeatures.pNext = nullptr;
     }
-    if (hasExtendedDynamicStateExt)
-        extendedDynamicState.pNext = &hostQueryResetFeatures;
-    hostQueryResetFeatures.pNext = nullptr;
+
+    bool probeSwapchainMaint1 = false;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT)
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapchainMaint1Features = {};
+    probeSwapchainMaint1 = hasDeviceExtension("VK_EXT_swapchain_maintenance1");
+    if (probeSwapchainMaint1) {
+        swapchainMaint1Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT;
+        swapchainMaint1Features.pNext = nullptr;
+        if (chainVulkan12) {
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+            if (chainVulkan13 && hasCoreDynamicRendering && hasCoreSynchronization2) {
+                if (hasExtendedDynamicStateExt)
+                    extendedDynamicState.pNext = &swapchainMaint1Features;
+                else
+                    vulkan13Features.pNext = &swapchainMaint1Features;
+            } else
+#endif
+            {
+                if (hasExtendedDynamicStateExt)
+                    extendedDynamicState.pNext = &swapchainMaint1Features;
+                else
+                    synchronization2.pNext = &swapchainMaint1Features;
+            }
+        } else {
+            bufferDeviceAddressFeatures.pNext = &swapchainMaint1Features;
+        }
+    }
+#endif
 
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
-    if (dynamicRendering.dynamicRendering != VK_TRUE) {
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT)
+    if (probeSwapchainMaint1 && swapchainMaint1Features.swapchainMaintenance1 == VK_TRUE) {
+        deviceExtensions.push_back("VK_EXT_swapchain_maintenance1");
+        swapchainMaint1Features.swapchainMaintenance1 = VK_TRUE;
+        m_supportsSwapchainMaintenance1 = true;
+    } else {
+        if (probeSwapchainMaint1) {
+            if (!chainVulkan12) {
+                bufferDeviceAddressFeatures.pNext = nullptr;
+            } else {
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+                if (chainVulkan13 && hasCoreDynamicRendering && hasCoreSynchronization2) {
+                    if (hasExtendedDynamicStateExt)
+                        extendedDynamicState.pNext = nullptr;
+                    else
+                        vulkan13Features.pNext = nullptr;
+                } else
+#endif
+                {
+                    if (hasExtendedDynamicStateExt)
+                        extendedDynamicState.pNext = nullptr;
+                    else
+                        synchronization2.pNext = nullptr;
+                }
+            }
+        }
+        m_supportsSwapchainMaintenance1 = false;
+    }
+#else
+    m_supportsSwapchainMaintenance1 = false;
+#endif
+    if (features2.features.fragmentStoresAndAtomics != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: fragmentStoresAndAtomics is not supported by the selected physical device.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    const VkBool32 partiallyBound =
+        chainVulkan12 ? vulkan12Features.descriptorBindingPartiallyBound : descriptorIndexing.descriptorBindingPartiallyBound;
+    const VkBool32 sampledUab =
+        chainVulkan12 ? vulkan12Features.descriptorBindingSampledImageUpdateAfterBind
+                      : descriptorIndexing.descriptorBindingSampledImageUpdateAfterBind;
+    const VkBool32 storageUab =
+        chainVulkan12 ? vulkan12Features.descriptorBindingStorageBufferUpdateAfterBind
+                      : descriptorIndexing.descriptorBindingStorageBufferUpdateAfterBind;
+    if (partiallyBound != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: descriptorBindingPartiallyBound is not supported; required by bindless descriptor path.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (sampledUab != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: descriptorBindingSampledImageUpdateAfterBind is not supported; required by bindless descriptor path.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (storageUab != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: descriptorBindingStorageBufferUpdateAfterBind is not supported; required by bindless descriptor path.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    const VkBool32 timelineOk = chainVulkan12 ? vulkan12Features.timelineSemaphore : timelineSemaphoreFeatures.timelineSemaphore;
+    if (timelineOk != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: timelineSemaphore is not supported by the selected physical device.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+    const bool useVulkan13DynamicAndSync2 =
+        chainVulkan12 && chainVulkan13 && hasCoreDynamicRendering && hasCoreSynchronization2;
+    const VkBool32 dynamicRenderingOk =
+        useVulkan13DynamicAndSync2 ? vulkan13Features.dynamicRendering : dynamicRendering.dynamicRendering;
+    const VkBool32 synchronization2Ok =
+        useVulkan13DynamicAndSync2 ? vulkan13Features.synchronization2 : synchronization2.synchronization2;
+#else
+    const VkBool32 dynamicRenderingOk = dynamicRendering.dynamicRendering;
+    const VkBool32 synchronization2Ok = synchronization2.synchronization2;
+#endif
+    if (dynamicRenderingOk != VK_TRUE) {
         core::Log::Error("DeviceVK::Initialize: dynamicRendering feature is not supported by the selected physical device.");
+        InstanceVK::Destroy(&m_instanceVK);
+        PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
+        return false;
+    }
+    if (synchronization2Ok != VK_TRUE) {
+        core::Log::Error("DeviceVK::Initialize: synchronization2 feature is not supported by the selected physical device.");
         InstanceVK::Destroy(&m_instanceVK);
         PhysicalDeviceVK::Destroy(&m_physicalDeviceVK);
         return false;
@@ -480,21 +753,206 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     // Vulkan 1.4+ headers omit `occlusionQuery` from `VkPhysicalDeviceFeatures` (baseline / promoted);
     // `VK_QUERY_TYPE_OCCLUSION` remains in core. Enable the cap for the standard desktop Vulkan path.
     m_supportsOcclusionQuery = true;
-    m_supportsHostQueryReset = (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
-    if (m_supportsHostQueryReset)
-        hostQueryResetFeatures.hostQueryReset = VK_TRUE;
+    m_supportsHostQueryReset =
+        chainVulkan12 ? (vulkan12Features.hostQueryReset == VK_TRUE) : (hostQueryResetFeatures.hostQueryReset == VK_TRUE);
+    if (m_supportsHostQueryReset) {
+        if (chainVulkan12)
+            vulkan12Features.hostQueryReset = VK_TRUE;
+        else
+            hostQueryResetFeatures.hostQueryReset = VK_TRUE;
+    } else {
+        if (chainVulkan12)
+            vulkan12Features.hostQueryReset = VK_FALSE;
+        else
+            hostQueryResetFeatures.hostQueryReset = VK_FALSE;
+    }
+    m_supportsPipelineStatisticsQuery = (features2.features.pipelineStatisticsQuery == VK_TRUE);
+    if (m_supportsPipelineStatisticsQuery)
+        features2.features.pipelineStatisticsQuery = VK_TRUE;
     else
-        hostQueryResetFeatures.hostQueryReset = VK_FALSE;
-    core::Log::InfoF("Vulkan: physical tessellationShader=%d geometryShader=%d occlusionQueries=%d hostQueryReset=%d",
-                     m_supportsTessellationShader ? 1 : 0, m_supportsGeometryShader ? 1 : 0, m_supportsOcclusionQuery ? 1 : 0,
-                     m_supportsHostQueryReset ? 1 : 0);
+        features2.features.pipelineStatisticsQuery = VK_FALSE;
+    m_supportsBufferDeviceAddress = chainVulkan12 ? (vulkan12Features.bufferDeviceAddress == VK_TRUE)
+                                                 : (bufferDeviceAddressFeatures.bufferDeviceAddress == VK_TRUE);
+    if (m_supportsBufferDeviceAddress) {
+        if (chainVulkan12)
+            vulkan12Features.bufferDeviceAddress = VK_TRUE;
+        else
+            bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
+    } else {
+        if (chainVulkan12)
+            vulkan12Features.bufferDeviceAddress = VK_FALSE;
+        else
+            bufferDeviceAddressFeatures.bufferDeviceAddress = VK_FALSE;
+    }
+    m_supportsSynchronization2 = true;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES)
+    if (chainVulkan12 && chainVulkan13 && hasCoreDynamicRendering && hasCoreSynchronization2)
+        vulkan13Features.synchronization2 = VK_TRUE;
+    else
+#endif
+        synchronization2.synchronization2 = VK_TRUE;
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT)
+    VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptorBufferFeatures = {};
+    descriptorBufferFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+    bool descriptorBufferSupported = false;
+    if (hasDescriptorBufferExt) {
+        VkPhysicalDeviceFeatures2 descriptorBufferProbe = {};
+        descriptorBufferProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        descriptorBufferProbe.pNext = &descriptorBufferFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &descriptorBufferProbe);
+        descriptorBufferSupported = (descriptorBufferFeatures.descriptorBuffer == VK_TRUE);
+    }
+    if (descriptorBufferSupported) {
+        deviceExtensions.push_back("VK_EXT_descriptor_buffer");
+        descriptorBufferFeatures.descriptorBuffer = VK_TRUE;
+        VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+        while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+        tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&descriptorBufferFeatures);
+        m_supportsDescriptorBuffer = true;
+    } else {
+        m_supportsDescriptorBuffer = false;
+    }
+#else
+    (void)hasDescriptorBufferExt;
+    m_supportsDescriptorBuffer = false;
+#endif
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT)
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphicsPipelineLibraryFeatures = {};
+    graphicsPipelineLibraryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
+    bool graphicsPipelineLibrarySupported = false;
+    if (hasGraphicsPipelineLibraryExt) {
+        VkPhysicalDeviceFeatures2 gplProbe = {};
+        gplProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        gplProbe.pNext = &graphicsPipelineLibraryFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &gplProbe);
+        graphicsPipelineLibrarySupported = (graphicsPipelineLibraryFeatures.graphicsPipelineLibrary == VK_TRUE);
+    }
+    if (graphicsPipelineLibrarySupported) {
+        deviceExtensions.push_back("VK_EXT_graphics_pipeline_library");
+        graphicsPipelineLibraryFeatures.graphicsPipelineLibrary = VK_TRUE;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&graphicsPipelineLibraryFeatures);
+        }
+        m_supportsGraphicsPipelineLibrary = true;
+    } else {
+        m_supportsGraphicsPipelineLibrary = false;
+    }
+#else
+    (void)hasGraphicsPipelineLibraryExt;
+    m_supportsGraphicsPipelineLibrary = false;
+#endif
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR) && defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR)
+    VkPhysicalDevicePresentIdFeaturesKHR presentIdFeaturesKHR = {};
+    VkPhysicalDevicePresentWaitFeaturesKHR presentWaitFeaturesKHR = {};
+    presentIdFeaturesKHR.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR;
+    presentWaitFeaturesKHR.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR;
+    presentIdFeaturesKHR.pNext = &presentWaitFeaturesKHR;
+    presentWaitFeaturesKHR.pNext = nullptr;
+    VkPhysicalDeviceFeatures2 presentProbe = {};
+    presentProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    presentProbe.pNext = &presentIdFeaturesKHR;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &presentProbe);
+
+    const bool wantPresentWait =
+        hasDeviceExtension("VK_KHR_present_id") && hasDeviceExtension("VK_KHR_present_wait") &&
+        presentIdFeaturesKHR.presentId == VK_TRUE && presentWaitFeaturesKHR.presentWait == VK_TRUE;
+    if (wantPresentWait) {
+        deviceExtensions.push_back("VK_KHR_present_id");
+        deviceExtensions.push_back("VK_KHR_present_wait");
+        presentIdFeaturesKHR.presentId = VK_TRUE;
+        presentWaitFeaturesKHR.presentWait = VK_TRUE;
+        m_supportsPresentWait = true;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&presentIdFeaturesKHR);
+        }
+    } else {
+        m_supportsPresentWait = false;
+    }
+#else
+    m_supportsPresentWait = false;
+#endif
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR)
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipelineExecutablePropertiesFeatures = {};
+    pipelineExecutablePropertiesFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR;
+    bool pipelineExecutablePropertiesSupported = false;
+    if (hasPipelineExecutablePropertiesExt) {
+        VkPhysicalDeviceFeatures2 pepProbe = {};
+        pepProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        pepProbe.pNext = &pipelineExecutablePropertiesFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &pepProbe);
+        pipelineExecutablePropertiesSupported = (pipelineExecutablePropertiesFeatures.pipelineExecutableProperties == VK_TRUE);
+    }
+    if (pipelineExecutablePropertiesSupported) {
+        deviceExtensions.push_back("VK_KHR_pipeline_executable_properties");
+        pipelineExecutablePropertiesFeatures.pipelineExecutableProperties = VK_TRUE;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&pipelineExecutablePropertiesFeatures);
+        }
+        m_supportsPipelineExecutableProperties = true;
+    } else {
+        m_supportsPipelineExecutableProperties = false;
+    }
+#else
+    (void)hasPipelineExecutablePropertiesExt;
+    m_supportsPipelineExecutableProperties = false;
+#endif
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT)
+    VkPhysicalDeviceFaultFeaturesEXT faultFeatures = {};
+    faultFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+    bool deviceFaultSupported = false;
+    if (hasDeviceFaultExt) {
+        VkPhysicalDeviceFeatures2 faultProbe = {};
+        faultProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        faultProbe.pNext = &faultFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &faultProbe);
+        deviceFaultSupported = (faultFeatures.deviceFault == VK_TRUE);
+    }
+    if (deviceFaultSupported) {
+        deviceExtensions.push_back("VK_EXT_device_fault");
+        faultFeatures.deviceFault = VK_TRUE;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&faultFeatures);
+        }
+        m_supportsDeviceFault = true;
+    } else {
+        m_supportsDeviceFault = false;
+    }
+#else
+    (void)hasDeviceFaultExt;
+    m_supportsDeviceFault = false;
+#endif
+
+    core::Log::InfoF(
+        "Vulkan required feature status: fragmentStoresAndAtomics=%d descriptorPartiallyBound=%d descriptorSampledImageUpdateAfterBind=%d descriptorStorageBufferUpdateAfterBind=%d timelineSemaphore=%d dynamicRendering=%d synchronization2=%d shaderDrawParameters=%d",
+        1, 1, 1, 1, 1, 1, 1, 1);
+    core::Log::InfoF(
+        "Vulkan optional feature status: drawIndirectCount=%d extendedDynamicState=%d hostQueryReset=%d pipelineStatisticsQuery=%d bufferDeviceAddress=%d descriptorBuffer=%d graphicsPipelineLibrary=%d tessellationShader=%d geometryShader=%d occlusionQueries=%d swapchainMaintenance1=%d swapchainColorspace=%d presentWait=%d pipelineExecutableProperties=%d deviceFault=%d",
+        m_supportsDrawIndirectCount ? 1 : 0, m_supportsExtendedDynamicState ? 1 : 0,
+        m_supportsHostQueryReset ? 1 : 0, m_supportsPipelineStatisticsQuery ? 1 : 0,
+        m_supportsBufferDeviceAddress ? 1 : 0, m_supportsDescriptorBuffer ? 1 : 0, m_supportsGraphicsPipelineLibrary ? 1 : 0,
+        m_supportsTessellationShader ? 1 : 0,
+        m_supportsGeometryShader ? 1 : 0, m_supportsOcclusionQuery ? 1 : 0, m_supportsSwapchainMaintenance1 ? 1 : 0,
+        m_supportsSwapchainColorspace ? 1 : 0, m_supportsPresentWait ? 1 : 0, m_supportsPipelineExecutableProperties ? 1 : 0, m_supportsDeviceFault ? 1 : 0);
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceCreateInfo.pNext = &features2;
     deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
     deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceCreateInfo.enabledExtensionCount = deviceExtensionCount;
+    deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
     deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     VkDevice device = VK_NULL_HANDLE;
@@ -516,6 +974,38 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         core::Log::InfoF("Vulkan logical device extensions (%u): %s",
                          static_cast<uint32_t>(deviceExtensions.size()), extJoined.c_str());
     }
+    if (m_supportsSwapchainMaintenance1) {
+        m_pfnReleaseSwapchainImagesEXT =
+            reinterpret_cast<PFN_vkReleaseSwapchainImagesEXT>(vkGetDeviceProcAddr(device, "vkReleaseSwapchainImagesEXT"));
+        if (!m_pfnReleaseSwapchainImagesEXT)
+            core::Log::Warn("Vulkan: VK_EXT_swapchain_maintenance1 enabled but vkReleaseSwapchainImagesEXT was not loaded.");
+    }
+    if (m_supportsPresentWait) {
+        m_pfnWaitForPresentKHR = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkWaitForPresentKHR"));
+        if (!m_pfnWaitForPresentKHR)
+            core::Log::Warn("Vulkan: present wait enabled but vkWaitForPresentKHR was not loaded.");
+    }
+    if (m_supportsDescriptorBuffer) {
+        m_pfnGetDescriptorSetLayoutSizeEXT = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetDescriptorSetLayoutSizeEXT"));
+        m_pfnGetDescriptorSetLayoutBindingOffsetEXT =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetDescriptorSetLayoutBindingOffsetEXT"));
+        m_pfnGetDescriptorEXT = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetDescriptorEXT"));
+        m_pfnCmdBindDescriptorBuffersEXT = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdBindDescriptorBuffersEXT"));
+        m_pfnCmdSetDescriptorBufferOffsetsEXT =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdSetDescriptorBufferOffsetsEXT"));
+        const bool missingRequiredDescriptorBufferEntryPoints =
+            !m_pfnGetDescriptorSetLayoutSizeEXT || !m_pfnGetDescriptorSetLayoutBindingOffsetEXT || !m_pfnGetDescriptorEXT ||
+            !m_pfnCmdBindDescriptorBuffersEXT || !m_pfnCmdSetDescriptorBufferOffsetsEXT;
+        if (missingRequiredDescriptorBufferEntryPoints) {
+            core::Log::Warn("Vulkan: descriptor buffer extension enabled but one or more entry points were not loaded; disabling descriptor-buffer capability.");
+            m_supportsDescriptorBuffer = false;
+            m_pfnGetDescriptorSetLayoutSizeEXT = nullptr;
+            m_pfnGetDescriptorSetLayoutBindingOffsetEXT = nullptr;
+            m_pfnGetDescriptorEXT = nullptr;
+            m_pfnCmdBindDescriptorBuffersEXT = nullptr;
+            m_pfnCmdSetDescriptorBufferOffsetsEXT = nullptr;
+        }
+    }
 
     if (!QueuesVK::Create(&m_queues, device, graphicsFamily, computeFamily, transferFamily)) {
         core::Log::Error("DeviceVK::Initialize: QueuesVK::Create failed");
@@ -526,7 +1016,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         return false;
     }
 
-    if (!AllocatorVK::Create(&m_allocatorVK, physicalDevice, device, instance, m_instanceVK.apiVersion)) {
+    if (!AllocatorVK::Create(&m_allocatorVK, physicalDevice, device, instance, m_instanceVK.apiVersion, m_supportsBufferDeviceAddress)) {
         core::Log::Error("DeviceVK::Initialize: AllocatorVK::Create failed");
         vkDestroyDevice(device, nullptr);
         InstanceVK::Destroy(&m_instanceVK);
@@ -701,6 +1191,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     bindlessLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     bindlessLayoutInfo.pNext = &bindingFlagsInfo;
     bindlessLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+#if defined(VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (m_supportsDescriptorBuffer)
+        bindlessLayoutInfo.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+#endif
     bindlessLayoutInfo.bindingCount = 2;
     bindlessLayoutInfo.pBindings = bindlessBindings;
     VkDescriptorSetLayout bindlessSetLayout = VK_NULL_HANDLE;
@@ -745,7 +1239,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     m_defaultPipelineLayout = defaultPipelineLayout;
 
     VkPipelineLayout computePipelineLayout = VK_NULL_HANDLE;
-    if (!vkhelpers::CreateComputePipelineLayout(device, computeSet0Layout, bindlessSetLayout, &computePipelineLayout)) {
+    if (!vkhelpers::CreateComputePipelineLayout(device, computeSet0Layout, bindlessSetLayout, m_supportsDescriptorBuffer,
+                                                &computePipelineLayout)) {
         core::Log::Error("DeviceVK::Initialize: failed to create compute pipeline layout");
         vkDestroyPipelineLayout(device, defaultPipelineLayout, nullptr);
         m_defaultPipelineLayout = nullptr;
@@ -901,10 +1396,12 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_iblPassSetLayout = iblPassLayout;
         m_emptyResourceSetLayout = emptyLayout;
 
-        VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout, sceneLayout);
+        VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout,
+                                                                        sceneLayout, m_supportsDescriptorBuffer);
         VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout);
         VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout);
-        VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout);
+        VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout,
+                                                                      m_supportsDescriptorBuffer);
         VkPipelineLayout deferredLightingPl = vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout);
         VkPipelineLayout computeLightCullPl = vkres::CreateComputeLightCullPipelineLayout(device, frameLayout, lightCullPassLayout, sceneLayout, emptyLayout);
         VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout, emptyLayout);
@@ -1059,10 +1556,14 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     }
 
     if (m_surface != nullptr) {
-        if (!SwapchainVK::Create(&m_swapchain, device, m_physicalDeviceVK.GetHandle(), m_surface, width, height, this,
-                                 m_swapchainPresentMode)) {
+        if (!SwapchainVK::Create(&m_swapchain, device, m_physicalDeviceVK.GetHandle(), m_surface, width, height, this, m_swapchainPresentMode,
+                                 m_supportsSwapchainMaintenance1)) {
             core::Log::ErrorF("DeviceVK::Initialize: SwapchainVK::Create failed");
         }
+    }
+
+    if (!CreateCrossQueueBridgeResources()) {
+        core::Log::Warn("Vulkan: cross-queue buffer ownership bridge (graphics↔compute) could not be initialized; deferred compute lists with copies/barriers may fall back to the graphics queue.");
     }
 
     // Integer textures (e.g. entity ID R32UI) cannot be linearly filtered.
@@ -1095,6 +1596,45 @@ void DeviceVK::SetSwapchainPresentMode(SwapchainPresentMode mode) {
         m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
 }
 
+void DeviceVK::SetSwapchainOutputMode(SwapchainOutputMode mode) {
+    if (m_swapchainOutputMode == mode) return;
+    m_swapchainOutputMode = mode;
+    if (m_device && m_surface && m_swapchain.swapchain)
+        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
+}
+
+void DeviceVK::GetSwapchainSurfaceColorInfo(uint32_t* outVkFormat, uint32_t* outVkColorSpaceKHR) const {
+    if (outVkFormat) *outVkFormat = m_swapchain.GetFormat();
+    if (outVkColorSpaceKHR) *outVkColorSpaceKHR = m_swapchain.GetColorSpace();
+}
+
+bool DeviceVK::WaitForPresent(uint64_t presentId, uint64_t timeoutNs) {
+    if (!m_device || !m_supportsPresentWait || !m_pfnWaitForPresentKHR || !m_swapchain.swapchain)
+        return false;
+    if (presentId == 0)
+        return false;
+    auto* pfn = reinterpret_cast<PFN_vkWaitForPresentKHR>(m_pfnWaitForPresentKHR);
+    VkResult r = pfn(static_cast<VkDevice>(m_device), static_cast<VkSwapchainKHR>(m_swapchain.swapchain), presentId, timeoutNs);
+    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
+        core::Log::WarnF("Vulkan WaitForPresent: vkWaitForPresentKHR returned 0x%x", static_cast<unsigned>(r));
+        return false;
+    }
+    return true;
+}
+
+bool DeviceVK::WaitForPreviousPresent(uint64_t timeoutNs) {
+    if (!m_supportsPresentWait)
+        return false;
+    const uint64_t id = GetLastPresentId();
+    if (id == 0)
+        return true;
+    return WaitForPresent(id, timeoutNs);
+}
+
+uint64_t DeviceVK::GetLastPresentId() const {
+    return m_swapchain.GetLastPresentId();
+}
+
 void DeviceVK::QueryCapabilities() {
     m_caps = RHICapabilities{};
     m_caps.supportsResourceSpaceBindPath = true;
@@ -1102,7 +1642,7 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsMultiDrawIndirect = true;
     m_caps.supportsMultiDrawIndirectCount = m_supportsDrawIndirectCount;
     m_caps.supportsGpuDrivenPerDrawTransformIndirect = true;
-    m_caps.supportsAsyncCompute = false;
+    m_caps.supportsAsyncCompute = (m_queues.GetComputeQueue() != nullptr) && (m_queues.GetComputeQueueFamily() != m_queues.GetGraphicsQueueFamily());
     m_caps.supportsBindless = true;  // descriptor indexing
     m_caps.supportsRayTracing = false;
     m_caps.supportsTessellation = true;
@@ -1138,11 +1678,27 @@ void DeviceVK::QueryCapabilities() {
     }
     m_caps.supportsOcclusionQueries = m_supportsOcclusionQuery;
     m_caps.supportsHostQueryReset = m_supportsHostQueryReset;
-    core::Log::InfoF("Vulkan caps: present mailbox=%d immediate=%d gpuTimestamps=%d tess=%d geom=%d occlusion=%d hostQueryReset=%d",
-                     m_caps.supportsPresentMailbox ? 1 : 0, m_caps.supportsPresentImmediate ? 1 : 0,
-                     m_caps.supportsGpuTimestampQueries ? 1 : 0, m_caps.supportsTessellation ? 1 : 0,
-                     m_caps.supportsGeometryShader ? 1 : 0, m_caps.supportsOcclusionQueries ? 1 : 0,
-                     m_caps.supportsHostQueryReset ? 1 : 0);
+    m_caps.supportsPipelineStatisticsQueries = m_supportsPipelineStatisticsQuery;
+    m_caps.supportsSynchronization2 = m_supportsSynchronization2;
+    m_caps.supportsBufferDeviceAddress = m_supportsBufferDeviceAddress;
+    m_caps.supportsDescriptorBuffer = m_supportsDescriptorBuffer;
+    m_caps.supportsGraphicsPipelineLibrary = m_supportsGraphicsPipelineLibrary;
+    m_caps.supportsPipelineExecutableProperties = m_supportsPipelineExecutableProperties;
+    m_caps.supportsDeviceFault = m_supportsDeviceFault;
+    m_caps.supportsSwapchainMaintenance1 = m_supportsSwapchainMaintenance1;
+    m_caps.supportsSwapchainColorspace = m_supportsSwapchainColorspace;
+    m_caps.supportsPresentWait = m_supportsPresentWait;
+    core::Log::InfoF(
+        "Vulkan caps: present mailbox=%d immediate=%d gpuTimestamps=%d tess=%d geom=%d occlusion=%d hostQueryReset=%d pipelineStats=%d sync2=%d bda=%d descriptorBuffer=%d graphicsPipelineLibrary=%d pipelineExecutableProperties=%d deviceFault=%d asyncCompute=%d swapchainMaint1=%d swapchainColorspace=%d presentWait=%d",
+        m_caps.supportsPresentMailbox ? 1 : 0, m_caps.supportsPresentImmediate ? 1 : 0,
+        m_caps.supportsGpuTimestampQueries ? 1 : 0, m_caps.supportsTessellation ? 1 : 0,
+        m_caps.supportsGeometryShader ? 1 : 0, m_caps.supportsOcclusionQueries ? 1 : 0,
+        m_caps.supportsHostQueryReset ? 1 : 0, m_caps.supportsPipelineStatisticsQueries ? 1 : 0,
+        m_caps.supportsSynchronization2 ? 1 : 0, m_caps.supportsBufferDeviceAddress ? 1 : 0, m_caps.supportsDescriptorBuffer ? 1 : 0,
+        m_caps.supportsGraphicsPipelineLibrary ? 1 : 0,
+        m_caps.supportsPipelineExecutableProperties ? 1 : 0, m_caps.supportsDeviceFault ? 1 : 0,
+        m_caps.supportsAsyncCompute ? 1 : 0, m_caps.supportsSwapchainMaintenance1 ? 1 : 0,
+        m_caps.supportsSwapchainColorspace ? 1 : 0, m_caps.supportsPresentWait ? 1 : 0);
 }
 
 void DeviceVK::EnsureFullscreenQuad() {
@@ -1291,6 +1847,23 @@ void DeviceVK::EnqueueFrameSliceCommandList(ICommandList* cmd) {
     m_frameSliceCommandListsByFrame[m_currentFrameIndex].push_back(std::unique_ptr<ICommandList>(cmd));
 }
 
+void DeviceVK::NoteVulkanDeviceLost(const char* context, int vkResult) {
+#if defined(VK_ERROR_DEVICE_LOST)
+    if (static_cast<VkResult>(vkResult) != VK_ERROR_DEVICE_LOST)
+        return;
+#else
+    if (vkResult != -4) // VK_ERROR_DEVICE_LOST
+        return;
+#endif
+    if (m_deviceLost)
+        return;
+    m_deviceLost = true;
+    core::Log::ErrorF(
+        "Vulkan: VK_ERROR_DEVICE_LOST (%s) — `VkDevice` and dependent RHI objects are invalid; destroy this device and "
+        "rebuild swapchain, pipelines, and GPU resources from a fresh init (see `documentation/vulkan/steps_todo.md` Phase E).",
+        context ? context : "?");
+}
+
 CommandListVK* DeviceVK::GetRecordingCommandListVK() {
     if (!m_transientRecordingStack.empty())
         return static_cast<CommandListVK*>(m_transientRecordingStack.back());
@@ -1309,7 +1882,8 @@ void DeviceVK::BeginFrame() {
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(frame.commandBuffer.GetHandle());
     if (fence == VK_NULL_HANDLE || pool == VK_NULL_HANDLE || buf == VK_NULL_HANDLE) return;
 
-    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    const VkResult fenceWait = vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+    NoteVulkanDeviceLost("BeginFrame vkWaitForFences", static_cast<int>(fenceWait));
     // Free slice CBs from this ring slot only: same fence waited above covers their last submit.
     m_frameSliceCommandListsByFrame[m_currentFrameIndex].clear();
     m_transientRecordingStack.clear();
@@ -1340,6 +1914,7 @@ void DeviceVK::BeginFrame() {
     if (m_swapchain.swapchain && m_swapchain.GetImageCount() > 0) {
         uint32_t acquiredIndex = 0xFFFFFFFFu;
         int acquireRes = m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX, &acquiredIndex);
+        NoteVulkanDeviceLost("BeginFrame vkAcquireNextImageKHR", acquireRes);
         if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR) {
             m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
             m_pendingPresent = false;
@@ -1347,6 +1922,8 @@ void DeviceVK::BeginFrame() {
         } else if (acquireRes == VK_SUCCESS || acquireRes == VK_SUBOPTIMAL_KHR) {
             m_pendingPresent = true;
             frame.swapchainImageIndex = acquiredIndex;
+            if (void* acqImg = m_swapchain.GetImage(acquiredIndex))
+                BarrierTrackerVK::SetImageState(&m_barrierTracker, acqImg, ResourceState::Undefined);
         } else {
             m_pendingPresent = false;
             frame.swapchainImageIndex = 0xFFFFFFFFu;
@@ -1430,30 +2007,402 @@ void DeviceVK::EndFrame() {
     VkResult submitRes = vkQueueSubmit(queue, 1, &submitInfo, fence);
     if (submitRes != VK_SUCCESS)
         core::Log::ErrorF("Vulkan EndFrame: vkQueueSubmit failed (0x%x)", submitRes);
+    NoteVulkanDeviceLost("EndFrame vkQueueSubmit", static_cast<int>(submitRes));
     m_gpuFramePhase = GpuFramePhase::BetweenFrames;
 }
 
+void DeviceVK::ReleaseSwapchainImagesForMaintenance(void* vkSwapchain, uint32_t imageCount) {
+#if defined(VK_STRUCTURE_TYPE_RELEASE_SWAPCHAIN_IMAGES_INFO_EXT)
+    if (!m_supportsSwapchainMaintenance1 || !m_pfnReleaseSwapchainImagesEXT || !vkSwapchain || imageCount == 0)
+        return;
+    VkDevice dev = static_cast<VkDevice>(m_device);
+    if (dev == VK_NULL_HANDLE)
+        return;
+    std::vector<uint32_t> indices(imageCount);
+    for (uint32_t i = 0; i < imageCount; ++i)
+        indices[i] = i;
+    VkReleaseSwapchainImagesInfoEXT info = {};
+    info.sType = VK_STRUCTURE_TYPE_RELEASE_SWAPCHAIN_IMAGES_INFO_EXT;
+    info.swapchain = static_cast<VkSwapchainKHR>(vkSwapchain);
+    info.imageIndexCount = imageCount;
+    info.pImageIndices = indices.data();
+    auto pfn = reinterpret_cast<PFN_vkReleaseSwapchainImagesEXT>(m_pfnReleaseSwapchainImagesEXT);
+    VkResult r = pfn(dev, &info);
+    if (r != VK_SUCCESS)
+        core::Log::WarnF("Vulkan: vkReleaseSwapchainImagesEXT failed (0x%x) before swapchain destroy.", static_cast<unsigned>(r));
+#else
+    (void)vkSwapchain;
+    (void)imageCount;
+#endif
+}
+
+void DeviceVK::DestroyCrossQueueBridge() {
+    VkDevice device = static_cast<VkDevice>(m_device);
+    if (device != VK_NULL_HANDLE) {
+        if (m_crossQueueReleasePool) {
+            vkDestroyCommandPool(device, static_cast<VkCommandPool>(m_crossQueueReleasePool), nullptr);
+            m_crossQueueReleasePool = nullptr;
+            m_crossQueueReleaseCmd = nullptr;
+        }
+        if (m_crossQueueAcquirePool) {
+            vkDestroyCommandPool(device, static_cast<VkCommandPool>(m_crossQueueAcquirePool), nullptr);
+            m_crossQueueAcquirePool = nullptr;
+            m_crossQueueAcquireCmd = nullptr;
+        }
+    } else {
+        m_crossQueueReleasePool = nullptr;
+        m_crossQueueReleaseCmd = nullptr;
+        m_crossQueueAcquirePool = nullptr;
+        m_crossQueueAcquireCmd = nullptr;
+    }
+    m_crossQueueBridgeReady = false;
+}
+
+bool DeviceVK::CreateCrossQueueBridgeResources() {
+    DestroyCrossQueueBridge();
+    VkDevice device = static_cast<VkDevice>(m_device);
+    if (device == VK_NULL_HANDLE)
+        return false;
+    const uint32_t gfxFam = m_queues.GetGraphicsQueueFamily();
+    const uint32_t cmpFam = m_queues.GetComputeQueueFamily();
+    if (gfxFam == cmpFam)
+        return true;
+
+    VkCommandPool releasePool = VK_NULL_HANDLE;
+    VkCommandPool acquirePool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo pci = {};
+    pci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = gfxFam;
+    if (vkCreateCommandPool(device, &pci, nullptr, &releasePool) != VK_SUCCESS)
+        return false;
+    pci.queueFamilyIndex = cmpFam;
+    if (vkCreateCommandPool(device, &pci, nullptr, &acquirePool) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, releasePool, nullptr);
+        return false;
+    }
+    VkCommandBufferAllocateInfo ai = {};
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = releasePool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer releaseCmd = VK_NULL_HANDLE;
+    VkCommandBuffer acquireCmd = VK_NULL_HANDLE;
+    if (vkAllocateCommandBuffers(device, &ai, &releaseCmd) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, acquirePool, nullptr);
+        vkDestroyCommandPool(device, releasePool, nullptr);
+        return false;
+    }
+    ai.commandPool = acquirePool;
+    if (vkAllocateCommandBuffers(device, &ai, &acquireCmd) != VK_SUCCESS) {
+        vkDestroyCommandPool(device, acquirePool, nullptr);
+        vkDestroyCommandPool(device, releasePool, nullptr);
+        return false;
+    }
+    m_crossQueueReleasePool = releasePool;
+    m_crossQueueReleaseCmd = releaseCmd;
+    m_crossQueueAcquirePool = acquirePool;
+    m_crossQueueAcquireCmd = acquireCmd;
+    m_crossQueueBridgeReady = true;
+    return true;
+}
+
+void DeviceVK::SetAsyncComputeSubmitPolicy(AsyncComputeSubmitPolicy policy) {
+    m_asyncComputeSubmitPolicy = policy;
+}
+
+AsyncComputeSubmitPolicy DeviceVK::GetAsyncComputeSubmitPolicy() const {
+    return m_asyncComputeSubmitPolicy;
+}
+
+/*
+ * Deferred SubmitCommandList — compute vs graphics queue (canonical eligibility: documentation/vulkan/steps_todo.md Phase C).
+ *
+ * CommandListVK::IsComputeQueueEligible() == (m_computeQueueEligible && m_hasComputeWork && !m_hasGraphicsWork).
+ * Graphics work or clearing eligibility: BindPipeline(graphics), draws, render passes, clears, most blits/copies that mark graphics, etc.
+ * m_computeQueueEligible cleared: BarrierTexture when tracker layout was Undefined; MemoryBarrierStorage; host/transfer barriers on
+ * host-visible paths (BarrierBufferTransferReadToHostWrite, BarrierHostVisibleBufferToTransferRead); many graphics-only paths.
+ * RequiresQueueOwnershipTransfers: BarrierBuffer, BarrierTexture, CopyBuffer, descriptor-buffer bind barrier path, etc.
+ * CrossQueueOwnershipUnsafe: global memory barriers, host-visible buffer barriers, texture barrier from Undefined (cannot bridge safely).
+ *
+ * Submit routing:
+ * - If policy is ForceGraphicsQueue: always graphics queue (timeline ordering unchanged).
+ * - Else if useResourceBridge: graphics release submit (queue-family release) then compute submit (acquire + user CB), timeline-linked.
+ * - Else canUseComputeQueue: dedicated compute family AND no ownership transfers required, OR same family; else graphics fallback + warn when eligible but unsafe.
+ */
 void DeviceVK::SubmitCommandList(ICommandList* list) {
     if (!list || !m_queues.GetGraphicsQueue()) return;
     CommandListVK* cl = static_cast<CommandListVK*>(list);
     VkCommandBuffer buf = static_cast<VkCommandBuffer>(cl->GetCommandBuffer());
     if (buf == VK_NULL_HANDLE) return;
+    bool wantsComputeQueue = cl->IsComputeQueueEligible();
+    if (m_asyncComputeSubmitPolicy == AsyncComputeSubmitPolicy::ForceGraphicsQueue)
+        wantsComputeQueue = false;
+    if (wantsComputeQueue && !m_caps.supportsAsyncCompute) {
+        core::Log::Warn("Vulkan SubmitCommandList: command list marked compute-queue-eligible, but async compute is unsupported; falling back to graphics queue.");
+    }
+    if (wantsComputeQueue && !m_queues.GetComputeQueue()) {
+        core::Log::Warn("Vulkan SubmitCommandList: command list marked compute-queue-eligible, but compute queue is unavailable; falling back to graphics queue.");
+    }
+    const uint32_t gfxFam = m_queues.GetGraphicsQueueFamily();
+    const uint32_t cmpFam = m_queues.GetComputeQueueFamily();
+    const bool hasDedicatedComputeFamily = (cmpFam != gfxFam);
+    const bool requiresOwnershipTransfers = cl->RequiresQueueOwnershipTransfers();
+    const bool ownershipUnsafe = cl->CrossQueueOwnershipUnsafe();
+    const std::vector<void*>& bridgeBuffers = cl->GetCrossQueueBuffers();
+    const std::vector<CrossQueueImageMeta>& bridgeImages = cl->GetCrossQueueImages();
+    const bool useResourceBridge = m_crossQueueBridgeReady && m_caps.supportsAsyncCompute && wantsComputeQueue && m_queues.GetComputeQueue() &&
+                                   hasDedicatedComputeFamily && requiresOwnershipTransfers && !ownershipUnsafe &&
+                                   (!bridgeBuffers.empty() || !bridgeImages.empty()) &&
+                                   (static_cast<VkSemaphore>(m_timelineSemaphore) != VK_NULL_HANDLE);
+
+    if (wantsComputeQueue && hasDedicatedComputeFamily && requiresOwnershipTransfers && !useResourceBridge) {
+        core::Log::Warn(
+            "Vulkan SubmitCommandList: queue-ownership-sensitive work cannot use the async compute queue (no buffer/image bridge or unsafe barriers); falling back to graphics queue.");
+    }
+
     VkSemaphore timelineSem = static_cast<VkSemaphore>(m_timelineSemaphore);
     uint64_t signalValue = cl->GetPendingTimelineValue();
+    if (signalValue == 0) {
+        signalValue = ++m_timelineValue;
+    } else if (signalValue > m_timelineValue) {
+        m_timelineValue = signalValue;
+    }
+    const uint64_t waitValue = m_lastDeferredSubmitTimelineValue;
+    const bool needTimelineSync = (timelineSem != VK_NULL_HANDLE);
+
+    if (useResourceBridge) {
+        uint64_t releaseValue = ++m_timelineValue;
+        if (signalValue <= releaseValue) {
+            signalValue = releaseValue + 1;
+            m_timelineValue = signalValue;
+        }
+        const bool waitTimeline = needTimelineSync && (waitValue != 0);
+        const bool signalTimeline = needTimelineSync && (releaseValue != 0);
+        const bool signalFinalTimeline = needTimelineSync && (signalValue != 0);
+
+        VkCommandBuffer releaseCmd = static_cast<VkCommandBuffer>(m_crossQueueReleaseCmd);
+        VkCommandBuffer acquireCmd = static_cast<VkCommandBuffer>(m_crossQueueAcquireCmd);
+        vkResetCommandBuffer(releaseCmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+        VkCommandBufferBeginInfo beginRel = {};
+        beginRel.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginRel.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(releaseCmd, &beginRel);
+        std::vector<VkBufferMemoryBarrier2> relBarriers;
+        relBarriers.reserve(bridgeBuffers.size());
+        for (void* h : bridgeBuffers) {
+            VkBuffer vkBuf = static_cast<VkBuffer>(h);
+            if (vkBuf == VK_NULL_HANDLE)
+                continue;
+            VkBufferMemoryBarrier2 b = {};
+            b.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            b.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            b.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            b.dstAccessMask = 0;
+            b.srcQueueFamilyIndex = gfxFam;
+            b.dstQueueFamilyIndex = cmpFam;
+            b.buffer = vkBuf;
+            b.offset = 0;
+            b.size = VK_WHOLE_SIZE;
+            relBarriers.push_back(b);
+        }
+        std::vector<VkImageMemoryBarrier2> relImgBarriers;
+        relImgBarriers.reserve(bridgeImages.size());
+        for (const CrossQueueImageMeta& im : bridgeImages) {
+            if (!im.vkImage)
+                continue;
+            const VkImageAspectFlags aspect = static_cast<VkImageAspectFlags>(im.aspectMask);
+            const bool depthish = (aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0;
+            VkImageLayout layout = ToVkImageLayout(im.ownershipLayout);
+            if (depthish && im.ownershipLayout == ResourceState::RenderTarget)
+                layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            VkImageMemoryBarrier2 ib = {};
+            ib.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            ib.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            ib.srcAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            ib.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            ib.dstAccessMask = 0;
+            ib.oldLayout = layout;
+            ib.newLayout = layout;
+            ib.srcQueueFamilyIndex = gfxFam;
+            ib.dstQueueFamilyIndex = cmpFam;
+            ib.image = static_cast<VkImage>(im.vkImage);
+            ib.subresourceRange.aspectMask = aspect;
+            ib.subresourceRange.baseMipLevel = im.baseMipLevel;
+            ib.subresourceRange.levelCount = im.levelCount;
+            ib.subresourceRange.baseArrayLayer = im.baseArrayLayer;
+            ib.subresourceRange.layerCount = im.arrayLayerCount;
+            relImgBarriers.push_back(ib);
+        }
+        if (!relBarriers.empty() || !relImgBarriers.empty()) {
+            VkDependencyInfo depRel = {};
+            depRel.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            depRel.bufferMemoryBarrierCount = static_cast<uint32_t>(relBarriers.size());
+            depRel.pBufferMemoryBarriers = relBarriers.empty() ? nullptr : relBarriers.data();
+            depRel.imageMemoryBarrierCount = static_cast<uint32_t>(relImgBarriers.size());
+            depRel.pImageMemoryBarriers = relImgBarriers.empty() ? nullptr : relImgBarriers.data();
+            vkCmdPipelineBarrier2(releaseCmd, &depRel);
+        }
+        vkEndCommandBuffer(releaseCmd);
+
+        vkResetCommandBuffer(acquireCmd, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+        VkCommandBufferBeginInfo beginAcq = {};
+        beginAcq.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginAcq.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(acquireCmd, &beginAcq);
+        std::vector<VkBufferMemoryBarrier2> acqBarriers;
+        acqBarriers.reserve(bridgeBuffers.size());
+        for (void* h : bridgeBuffers) {
+            VkBuffer vkBuf = static_cast<VkBuffer>(h);
+            if (vkBuf == VK_NULL_HANDLE)
+                continue;
+            VkBufferMemoryBarrier2 b = {};
+            b.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            b.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            b.srcAccessMask = 0;
+            b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            b.srcQueueFamilyIndex = gfxFam;
+            b.dstQueueFamilyIndex = cmpFam;
+            b.buffer = vkBuf;
+            b.offset = 0;
+            b.size = VK_WHOLE_SIZE;
+            acqBarriers.push_back(b);
+        }
+        std::vector<VkImageMemoryBarrier2> acqImgBarriers;
+        acqImgBarriers.reserve(bridgeImages.size());
+        for (const CrossQueueImageMeta& im : bridgeImages) {
+            if (!im.vkImage)
+                continue;
+            const VkImageAspectFlags aspect = static_cast<VkImageAspectFlags>(im.aspectMask);
+            const bool depthish = (aspect & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0;
+            VkImageLayout layout = ToVkImageLayout(im.ownershipLayout);
+            if (depthish && im.ownershipLayout == ResourceState::RenderTarget)
+                layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            VkImageMemoryBarrier2 ib = {};
+            ib.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            ib.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            ib.srcAccessMask = 0;
+            ib.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            ib.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+            ib.oldLayout = layout;
+            ib.newLayout = layout;
+            ib.srcQueueFamilyIndex = gfxFam;
+            ib.dstQueueFamilyIndex = cmpFam;
+            ib.image = static_cast<VkImage>(im.vkImage);
+            ib.subresourceRange.aspectMask = aspect;
+            ib.subresourceRange.baseMipLevel = im.baseMipLevel;
+            ib.subresourceRange.levelCount = im.levelCount;
+            ib.subresourceRange.baseArrayLayer = im.baseArrayLayer;
+            ib.subresourceRange.layerCount = im.arrayLayerCount;
+            acqImgBarriers.push_back(ib);
+        }
+        if (!acqBarriers.empty() || !acqImgBarriers.empty()) {
+            VkDependencyInfo depAcq = {};
+            depAcq.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            depAcq.bufferMemoryBarrierCount = static_cast<uint32_t>(acqBarriers.size());
+            depAcq.pBufferMemoryBarriers = acqBarriers.empty() ? nullptr : acqBarriers.data();
+            depAcq.imageMemoryBarrierCount = static_cast<uint32_t>(acqImgBarriers.size());
+            depAcq.pImageMemoryBarriers = acqImgBarriers.empty() ? nullptr : acqImgBarriers.data();
+            vkCmdPipelineBarrier2(acquireCmd, &depAcq);
+        }
+        vkEndCommandBuffer(acquireCmd);
+
+        VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        VkTimelineSemaphoreSubmitInfo timelineInfoG = {};
+        timelineInfoG.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineInfoG.waitSemaphoreValueCount = waitTimeline ? 1u : 0u;
+        timelineInfoG.pWaitSemaphoreValues = waitTimeline ? &waitValue : nullptr;
+        timelineInfoG.signalSemaphoreValueCount = signalTimeline ? 1u : 0u;
+        timelineInfoG.pSignalSemaphoreValues = &releaseValue;
+        VkSubmitInfo submitG = {};
+        submitG.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitG.pNext = needTimelineSync ? &timelineInfoG : nullptr;
+        submitG.commandBufferCount = 1;
+        submitG.pCommandBuffers = &releaseCmd;
+        submitG.waitSemaphoreCount = waitTimeline ? 1u : 0u;
+        submitG.pWaitSemaphores = waitTimeline ? &timelineSem : nullptr;
+        submitG.pWaitDstStageMask = waitTimeline ? &waitStageMask : nullptr;
+        submitG.signalSemaphoreCount = signalTimeline ? 1u : 0u;
+        submitG.pSignalSemaphores = signalTimeline ? &timelineSem : nullptr;
+        VkQueue gfxQueue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
+        VkResult gr = vkQueueSubmit(gfxQueue, 1, &submitG, VK_NULL_HANDLE);
+        if (gr != VK_SUCCESS) {
+            core::Log::ErrorF("Vulkan SubmitCommandList: graphics release submit failed (0x%x)", gr);
+            NoteVulkanDeviceLost("SubmitCommandList vkQueueSubmit (graphics release)", static_cast<int>(gr));
+            if (signalValue != 0)
+                cl->ClearPendingTimelineValue();
+            return;
+        }
+
+        VkCommandBuffer computeCmds[2] = { acquireCmd, buf };
+        VkTimelineSemaphoreSubmitInfo timelineInfoC = {};
+        timelineInfoC.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineInfoC.waitSemaphoreValueCount = signalTimeline ? 1u : 0u;
+        timelineInfoC.pWaitSemaphoreValues = signalTimeline ? &releaseValue : nullptr;
+        timelineInfoC.signalSemaphoreValueCount = signalFinalTimeline ? 1u : 0u;
+        timelineInfoC.pSignalSemaphoreValues = &signalValue;
+        VkSubmitInfo submitC = {};
+        submitC.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitC.pNext = needTimelineSync ? &timelineInfoC : nullptr;
+        submitC.commandBufferCount = 2;
+        submitC.pCommandBuffers = computeCmds;
+        submitC.waitSemaphoreCount = signalTimeline ? 1u : 0u;
+        submitC.pWaitSemaphores = signalTimeline ? &timelineSem : nullptr;
+        submitC.pWaitDstStageMask = signalTimeline ? &waitStageMask : nullptr;
+        submitC.signalSemaphoreCount = signalFinalTimeline ? 1u : 0u;
+        submitC.pSignalSemaphores = signalFinalTimeline ? &timelineSem : nullptr;
+        VkQueue cmpQueue = static_cast<VkQueue>(m_queues.GetComputeQueue());
+        VkResult cr = vkQueueSubmit(cmpQueue, 1, &submitC, VK_NULL_HANDLE);
+        if (cr != VK_SUCCESS) {
+            core::Log::ErrorF("Vulkan SubmitCommandList: compute acquire+list submit failed (0x%x)", cr);
+            NoteVulkanDeviceLost("SubmitCommandList vkQueueSubmit (compute acquire+list)", static_cast<int>(cr));
+        } else if (signalFinalTimeline)
+            m_lastDeferredSubmitTimelineValue = signalValue;
+        if (signalValue != 0)
+            cl->ClearPendingTimelineValue();
+        return;
+    }
+
+    const bool waitTimeline = needTimelineSync && (waitValue != 0);
+    const bool signalTimeline = needTimelineSync && (signalValue != 0);
+    if (signalTimeline && waitTimeline && signalValue <= waitValue) {
+        signalValue = waitValue + 1;
+        if (signalValue > m_timelineValue)
+            m_timelineValue = signalValue;
+        core::Log::WarnF("Vulkan SubmitCommandList: adjusted timeline signal value to preserve ordering (wait=%llu signal=%llu).",
+                         static_cast<unsigned long long>(waitValue),
+                         static_cast<unsigned long long>(signalValue));
+    }
+    VkPipelineStageFlags waitStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkTimelineSemaphoreSubmitInfo timelineInfo = {};
     timelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    timelineInfo.signalSemaphoreValueCount = (signalValue != 0) ? 1u : 0u;
+    timelineInfo.waitSemaphoreValueCount = waitTimeline ? 1u : 0u;
+    timelineInfo.pWaitSemaphoreValues = waitTimeline ? &waitValue : nullptr;
+    timelineInfo.signalSemaphoreValueCount = signalTimeline ? 1u : 0u;
     timelineInfo.pSignalSemaphoreValues = &signalValue;
     VkSubmitInfo submitInfo = {};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.pNext = (signalValue != 0) ? &timelineInfo : nullptr;
+    submitInfo.pNext = needTimelineSync ? &timelineInfo : nullptr;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &buf;
-    submitInfo.signalSemaphoreCount = (signalValue != 0) ? 1u : 0u;
-    submitInfo.pSignalSemaphores = (signalValue != 0) ? &timelineSem : nullptr;
-    VkResult submitRes = vkQueueSubmit(static_cast<VkQueue>(m_queues.GetGraphicsQueue()), 1, &submitInfo, VK_NULL_HANDLE);
-    if (submitRes != VK_SUCCESS)
+    submitInfo.waitSemaphoreCount = waitTimeline ? 1u : 0u;
+    submitInfo.pWaitSemaphores = waitTimeline ? &timelineSem : nullptr;
+    submitInfo.pWaitDstStageMask = waitTimeline ? &waitStageMask : nullptr;
+    submitInfo.signalSemaphoreCount = signalTimeline ? 1u : 0u;
+    submitInfo.pSignalSemaphores = signalTimeline ? &timelineSem : nullptr;
+    VkQueue submitQueue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
+    const bool canUseComputeQueue = m_caps.supportsAsyncCompute && wantsComputeQueue && m_queues.GetComputeQueue() &&
+                                    (!hasDedicatedComputeFamily || !requiresOwnershipTransfers);
+    if (canUseComputeQueue)
+        submitQueue = static_cast<VkQueue>(m_queues.GetComputeQueue());
+    VkResult submitRes = vkQueueSubmit(submitQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (submitRes != VK_SUCCESS) {
         core::Log::ErrorF("Vulkan SubmitCommandList: vkQueueSubmit failed (0x%x)", submitRes);
+        NoteVulkanDeviceLost("SubmitCommandList vkQueueSubmit", static_cast<int>(submitRes));
+    } else if (signalTimeline)
+        m_lastDeferredSubmitTimelineValue = signalValue;
     if (signalValue != 0)
         cl->ClearPendingTimelineValue();
 }
@@ -1467,7 +2416,19 @@ void DeviceVK::TransitionTextureToState(ITexture* texture, ResourceState newStat
     TextureVK* texVK = static_cast<TextureVK*>(texture);
     if (texVK->m_retired || !texVK->m_image) return;
     VkImageAspectFlags aspect = static_cast<VkImageAspectFlags>(ToVkImageAspect(texVK->GetFormat()));
-    BarrierTrackerVK::TransitionImage(&m_barrierTracker, texVK->m_image, aspect, newState);
+    const uint32_t mipLevels = (std::max)(1u, texVK->m_mipLevels);
+    uint32_t arrayLayers = 1u;
+    switch (texVK->m_type) {
+    case TextureType::TextureCube:
+        arrayLayers = 6u;
+        break;
+    case TextureType::Texture2DArray:
+        arrayLayers = (std::max)(1u, texVK->m_depthOrArray);
+        break;
+    default:
+        break;
+    }
+    BarrierTrackerVK::TransitionImage(&m_barrierTracker, texVK->m_image, aspect, 0u, mipLevels, 0u, arrayLayers, newState, true);
 }
 
 void DeviceVK::FlushBarrierTracker(ICommandList* cmd) {
@@ -1492,6 +2453,7 @@ void DeviceVK::DestroyBuffer(IBuffer* buffer) {
     if (!buffer) return;
     BufferVK* b = static_cast<BufferVK*>(buffer);
     if (b->m_buffer) {
+        BarrierTrackerVK::RemoveBufferState(&m_barrierTracker, b->m_buffer);
         m_deletionQueue.EnqueueBuffer(GetCurrentFrameIndex(), GetAllocator(), b->m_buffer, b->m_allocation);
         b->m_buffer = nullptr;
         b->m_allocation = nullptr;
@@ -1499,15 +2461,38 @@ void DeviceVK::DestroyBuffer(IBuffer* buffer) {
     delete b;
 }
 
+uint64_t DeviceVK::GetBufferDeviceAddress(IBuffer* buffer) {
+    if (!buffer) {
+        core::Log::Error("DeviceVK::GetBufferDeviceAddress: buffer is null.");
+        return 0;
+    }
+    if (!m_device) {
+        core::Log::Error("DeviceVK::GetBufferDeviceAddress: device is null.");
+        return 0;
+    }
+    if (!m_supportsBufferDeviceAddress) {
+        core::Log::Error("DeviceVK::GetBufferDeviceAddress: buffer device address is not supported/enabled on this device.");
+        return 0;
+    }
+    auto* b = static_cast<BufferVK*>(buffer);
+    VkBuffer vkBuffer = static_cast<VkBuffer>(b->m_buffer);
+    if (vkBuffer == VK_NULL_HANDLE) {
+        core::Log::Error("DeviceVK::GetBufferDeviceAddress: VkBuffer handle is null.");
+        return 0;
+    }
+    if (!b->m_deviceAddressCapable) {
+        core::Log::Error("DeviceVK::GetBufferDeviceAddress: buffer was created without SHADER_DEVICE_ADDRESS usage.");
+        return 0;
+    }
+    VkBufferDeviceAddressInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = vkBuffer;
+    return static_cast<uint64_t>(vkGetBufferDeviceAddress(static_cast<VkDevice>(m_device), &info));
+}
+
 ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialData) {
     ITexture* t = CreateTextureVK(this, desc, initialData);
-    if (t && initialData && desc.type == TextureType::Texture2D && !desc.transient &&
-        desc.format != RHITextureFormat::Depth24 && desc.format != RHITextureFormat::Depth24Stencil8 &&
-        desc.format != RHITextureFormat::None) {
-        auto* tv = static_cast<TextureVK*>(t);
-        if (tv->m_image)
-            BarrierTrackerVK::SetImageState(&m_barrierTracker, tv->m_image, ResourceState::ShaderResource);
-    }
+    (void)initialData;
     return t;
 }
 
@@ -1739,14 +2724,58 @@ ITexture* DeviceVK::CreateTextureWrapper(void* nativeTextureId, uint32_t width, 
     return nullptr;
 }
 
-IQueryPool* DeviceVK::CreateQueryPool(QueryType type, uint32_t count) {
-    return CreateQueryPoolVK(this, type, count);
+IQueryPool* DeviceVK::CreateQueryPool(QueryType type, uint32_t count, PipelineStatisticsFlags pipelineStatisticsMask) {
+    if (count == 0) {
+        core::Log::Error("DeviceVK::CreateQueryPool: count must be > 0.");
+        return nullptr;
+    }
+    if (type != QueryType::Timestamp && type != QueryType::Occlusion && type != QueryType::PipelineStatistics) {
+        core::Log::Error("DeviceVK::CreateQueryPool: unsupported query type.");
+        return nullptr;
+    }
+    if (type == QueryType::Timestamp && !m_caps.supportsGpuTimestampQueries) {
+        core::Log::Error("DeviceVK::CreateQueryPool: timestamp queries are unsupported on this device.");
+        return nullptr;
+    }
+    if (type == QueryType::Occlusion && !m_caps.supportsOcclusionQueries) {
+        core::Log::Error("DeviceVK::CreateQueryPool: occlusion queries are unsupported on this device.");
+        return nullptr;
+    }
+    if (type == QueryType::PipelineStatistics) {
+        if (!m_caps.supportsPipelineStatisticsQueries) {
+            core::Log::Error("DeviceVK::CreateQueryPool: pipeline statistics queries are unsupported on this device.");
+            return nullptr;
+        }
+        if (pipelineStatisticsMask != 0 && (pipelineStatisticsMask & kCorePipelineStatisticsMask) == 0) {
+            core::Log::Error("DeviceVK::CreateQueryPool: pipeline statistics mask becomes empty after core-mask sanitization.");
+            return nullptr;
+        }
+    } else if (pipelineStatisticsMask != 0) {
+        core::Log::Error("DeviceVK::CreateQueryPool: pipelineStatisticsMask is only valid for QueryType::PipelineStatistics.");
+        return nullptr;
+    }
+    return CreateQueryPoolVK(this, type, count, pipelineStatisticsMask);
 }
 
 void DeviceVK::DestroyQueryPool(IQueryPool* pool) { DestroyQueryPoolVK(pool); }
 
 void DeviceVK::ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
-    if (!m_supportsHostQueryReset || !m_device || !pool || queryCount == 0) return;
+    if (!m_supportsHostQueryReset) {
+        core::Log::Error("DeviceVK::ResetQueryPoolOnHost: host query reset is not supported.");
+        return;
+    }
+    if (!m_device) {
+        core::Log::Error("DeviceVK::ResetQueryPoolOnHost: VkDevice is null.");
+        return;
+    }
+    if (!pool) {
+        core::Log::Error("DeviceVK::ResetQueryPoolOnHost: query pool is null.");
+        return;
+    }
+    if (queryCount == 0) {
+        core::Log::Error("DeviceVK::ResetQueryPoolOnHost: queryCount must be > 0.");
+        return;
+    }
     auto* qvk = static_cast<QueryPoolVK*>(pool);
     VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
     if (qp == VK_NULL_HANDLE) return;

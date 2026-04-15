@@ -2,10 +2,24 @@
 
 #include "eyelib/rendering/rhi/RHI.h"
 #include <cstdint>
+#include <unordered_set>
+#include <vector>
 
 namespace eyelib {
 namespace rendering {
 namespace rhi {
+
+/** Metadata for graphics→compute queue-family release/acquire of a `VkImage` (see `DeviceVK::SubmitCommandList`). */
+struct CrossQueueImageMeta {
+    void* vkImage = nullptr;
+    uint32_t aspectMask = 0;
+    uint32_t baseMipLevel = 0;
+    uint32_t levelCount = 1;
+    uint32_t baseArrayLayer = 0;
+    uint32_t arrayLayerCount = 1;
+    /** Layout used for both sides of the ownership transfer (must match pre-transition layout in the user command buffer). */
+    ResourceState ownershipLayout = ResourceState::Undefined;
+};
 
 struct DeviceVK;
 struct RenderTargetVK;
@@ -134,6 +148,17 @@ struct CommandListVK : ICommandList {
     /** Timeline value to signal on next submit (0 = none). Set by InsertFence; read/cleared by DeviceVK::SubmitCommandList. */
     uint64_t GetPendingTimelineValue() const { return m_pendingTimelineValue; }
     void ClearPendingTimelineValue() { m_pendingTimelineValue = 0; }
+    bool HasGraphicsWork() const { return m_hasGraphicsWork; }
+    bool HasComputeWork() const { return m_hasComputeWork; }
+    /** True when this list recorded compute only and no path disabled async routing; see `DeviceVK::SubmitCommandList` + `documentation/vulkan/steps_todo.md` Phase C. */
+    bool IsComputeQueueEligible() const { return m_computeQueueEligible && m_hasComputeWork && !m_hasGraphicsWork; }
+    bool RequiresQueueOwnershipTransfers() const { return m_requiresQueueOwnershipTransfers; }
+    /** True when cross-queue submit cannot use the buffer/image release+acquire bridge (e.g. host barriers, global memory barrier, texture with unknown prior layout). */
+    bool CrossQueueOwnershipUnsafe() const { return m_crossQueueOwnershipUnsafe; }
+    /** VkBuffer handles (as void*) touched by copies/barriers that need a graphics→compute ownership handoff. */
+    const std::vector<void*>& GetCrossQueueBuffers() const { return m_crossQueueBuffers; }
+    /** Images (and pre-transition layout) for the same bridge; empty if only buffers or unsafe paths. */
+    const std::vector<CrossQueueImageMeta>& GetCrossQueueImages() const { return m_crossQueueImages; }
     bool GetDepthTestEnabled() const { return m_depthTestEnabled; }
     bool GetDepthWriteEnabled() const { return m_depthWriteEnabled; }
     bool GetDepthFuncLess() const { return m_depthFuncLess; }
@@ -159,6 +184,9 @@ struct CommandListVK : ICommandList {
     }
     /** After vkResetCommandPool + vkBeginCommandBuffer: GPU CB has no RT/pipeline/bind state; CPU must match. */
     void ResetCpuRecordingStateAfterPoolReset();
+    void NoteCrossQueueBuffer(void* vkBuffer);
+    void NoteCrossQueueImage(void* vkImage, uint32_t aspectMask, uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer,
+                             uint32_t arrayLayerCount, ResourceState ownershipLayout);
 
 private:
     DeviceVK* m_device = nullptr;
@@ -195,6 +223,15 @@ private:
     bool m_cullFaceEnabled = false;
     bool m_cullFrontFace = false;
     bool m_pushModelSet = false;
+    bool m_hasGraphicsWork = false;
+    bool m_hasComputeWork = false;
+    bool m_computeQueueEligible = true;
+    bool m_requiresQueueOwnershipTransfers = false;
+    bool m_crossQueueOwnershipUnsafe = false;
+    std::vector<void*> m_crossQueueBuffers;
+    std::unordered_set<uint64_t> m_crossQueueBufferSet;
+    std::vector<CrossQueueImageMeta> m_crossQueueImages;
+    std::unordered_set<uint64_t> m_activeQueryKeys;
 };
 
 } // namespace rhi

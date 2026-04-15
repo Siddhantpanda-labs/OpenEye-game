@@ -20,6 +20,9 @@ enum class BufferUsage : uint32_t {
     TransferSrc = 1u << 4,
     TransferDst = 1u << 5,
     IndirectDraw = 1u << 6,  ///< Buffer holds DrawIndirectCommand(s); required for Draw*Indirect. Vulkan: VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT.
+    ShaderDeviceAddress = 1u << 7,  ///< Buffer may be queried via `IDevice::GetBufferDeviceAddress`. Vulkan: VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
+    /** Vulkan `VK_EXT_descriptor_buffer`: holds encoded descriptors for bindless / descriptor-buffer bind path. */
+    DescriptorBuffer = 1u << 8,
 };
 inline BufferUsage operator|(BufferUsage a, BufferUsage b) {
     return static_cast<BufferUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -34,6 +37,14 @@ enum class BufferMemoryHint {
     DeviceOnly,            // GPU only
     HostVisible,          // CPU visible (upload or readback)
     HostVisiblePersistent, // CPU visible, persistent map (ARB_buffer_storage; high-throughput streaming)
+};
+
+/** `IDevice::SubmitCommandList` (Vulkan): how deferred command lists choose the submit queue when a dedicated compute family exists. */
+enum class AsyncComputeSubmitPolicy : uint8_t {
+    /** Use `CommandListVK` eligibility + `RHICapabilities::supportsAsyncCompute` + ownership-bridge rules (default). */
+    Automatic = 0,
+    /** Submit deferred lists on the graphics queue only (debug, deterministic ordering, or “compute after graphics” without async overlap). */
+    ForceGraphicsQueue = 1,
 };
 
 struct VertexLayout;  // forward
@@ -67,6 +78,8 @@ enum class RHITextureFormat {
     RGBA8_SRGB,
     ///< B8G8R8A8 UNORM; matches typical Windows Vulkan swapchain for transfer copy.
     BGRA8,
+    ///< A2B10G10R10 UNORM; common HDR10 swapchain / wide color (Vulkan `VK_FORMAT_A2B10G10R10_UNORM_PACK32`).
+    BGR10A2,
     RGB16F,
     RGBA16F,
     R32UI,  ///< Single-channel unsigned int (e.g. entity ID buffer)
@@ -352,9 +365,18 @@ struct DispatchIndirectCommand {
 
 // ---- Query ----
 
+/** Bit mask compatible with `VkQueryPipelineStatisticFlagBits` (core bits only). */
+using PipelineStatisticsFlags = uint32_t;
+
+/** Default pipeline-statistics counters when `pipelineStatisticsMask == 0` in `IDevice::CreateQueryPool`: IA vertices, IA primitives, VS invocations, FS invocations. */
+inline constexpr PipelineStatisticsFlags kDefaultPipelineStatisticsFlags =
+    (1u << 0) | (1u << 1) | (1u << 2) | (1u << 7); // IA_VERTICES, IA_PRIMITIVES, VS_INVOCATIONS, FS_INVOCATIONS
+
 enum class QueryType {
     Timestamp,
     Occlusion, ///< Samples that pass depth/stencil tests; pair with `ICommandList::ResetQueryPool` before use.
+    /** `vkCmdBeginQuery`/`vkCmdEndQuery` with `VK_QUERY_TYPE_PIPELINE_STATISTICS`; read via `IQueryPool::GetPipelineStatistics`. */
+    PipelineStatistics,
 };
 
 /** Request for Vulkan swapchain `VkPresentModeKHR`; backend picks a supported mode (FIFO is always the safe fallback). */
@@ -363,6 +385,22 @@ enum class SwapchainPresentMode {
     Mailbox,   ///< Prefer low-latency triple-buffer when supported.
     Immediate, ///< Prefer lowest latency; may tear when supported.
 };
+
+/** Vulkan swapchain surface format / color space preference (requires `VK_EXT_swapchain_colorspace` + driver support for HDR modes). */
+enum class SwapchainOutputMode : uint8_t {
+    /** 8-bit sRGB non-linear (e.g. `B8G8R8A8_UNORM` + `SRGB_NONLINEAR`). */
+    SdrSrgb,
+    /** HDR10 / ST2084 PQ (e.g. `A2B10G10R10` + `HDR10_ST2084_EXT`). */
+    Hdr10St2084,
+    /** scRGB-style extended linear (e.g. `R16G16B16A16_SFLOAT` + `EXTENDED_SRGB_LINEAR_EXT`). */
+    HdrExtendedSrgbLinear,
+};
+
+/** Maps a nominal frame cap (Hz) to nanoseconds for `IDevice::WaitForPresent` / `WaitForPreviousPresent` timeouts. `0` → `UINT64_MAX` (no timeout budget). */
+inline uint64_t PresentWaitTimeoutNsFromTargetHz(uint32_t targetHz) {
+    if (targetHz == 0) return UINT64_MAX;
+    return 1000000000ull / static_cast<uint64_t>(targetHz);
+}
 
 // ---- Bindless (Phase 4.4 skeleton) ----
 
@@ -403,6 +441,26 @@ struct RHICapabilities {
     bool supportsOcclusionQueries = false;
     /** Vulkan: `VkPhysicalDeviceHostQueryResetFeatures::hostQueryReset` — `vkResetQueryPool` on host (`IDevice::ResetQueryPoolOnHost`). */
     bool supportsHostQueryReset = false;
+    /** Vulkan: `VkPhysicalDeviceFeatures::pipelineStatisticsQuery` (pipeline statistics query pools). */
+    bool supportsPipelineStatisticsQueries = false;
+    /** Vulkan: `VkPhysicalDeviceSynchronization2Features::synchronization2` (`vkCmdPipelineBarrier2` path). */
+    bool supportsSynchronization2 = false;
+    /** Vulkan: `VkPhysicalDeviceBufferDeviceAddressFeatures::bufferDeviceAddress` (`vkGetBufferDeviceAddress`). */
+    bool supportsBufferDeviceAddress = false;
+    /** Vulkan: optional `VK_EXT_swapchain_maintenance1` (device + swapchain present-mode chain when supported). */
+    bool supportsSwapchainMaintenance1 = false;
+    /** Vulkan: `VK_EXT_swapchain_colorspace` enabled (additional `VkSurfaceFormatKHR` pairs for wide gamut / HDR). */
+    bool supportsSwapchainColorspace = false;
+    /** Vulkan: `VK_KHR_present_id` + `VK_KHR_present_wait` (`vkWaitForPresentKHR` for present completion). */
+    bool supportsPresentWait = false;
+    /** Vulkan: `VK_EXT_descriptor_buffer` feature enabled (descriptor-buffer API path available). */
+    bool supportsDescriptorBuffer = false;
+    /** Vulkan: `VK_EXT_graphics_pipeline_library` feature enabled (monolithic create may chain `VkGraphicsPipelineLibraryCreateInfoEXT`). */
+    bool supportsGraphicsPipelineLibrary = false;
+    /** Vulkan: `VK_KHR_pipeline_executable_properties` enabled (`vkGetPipelineExecutablePropertiesKHR` path available; first slice is cap + optional device create only). */
+    bool supportsPipelineExecutableProperties = false;
+    /** Vulkan: `VK_EXT_device_fault` enabled (driver may report fault info; first slice is cap + optional device create + log-only). */
+    bool supportsDeviceFault = false;
 };
 
 } // namespace rhi

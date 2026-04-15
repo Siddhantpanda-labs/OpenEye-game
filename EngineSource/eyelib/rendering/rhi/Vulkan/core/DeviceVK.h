@@ -51,6 +51,7 @@ struct DeviceVK : IDevice {
     ~DeviceVK() override;
 
     const RHICapabilities& GetCapabilities() const override;
+    bool IsDeviceLost() const override { return m_deviceLost; }
     ::eyelib::rendering::RenderBackend GetRenderBackend() const override { return ::eyelib::rendering::RenderBackend::Vulkan; }
     const char* GetShaderBackendName() const override;
     const char* GetShaderVertexExtension() const override;
@@ -65,6 +66,8 @@ struct DeviceVK : IDevice {
     void PopTransientRecordingCommandList(ICommandList* cmd) override;
     void EnqueueFrameSliceCommandList(ICommandList* cmd) override;
     void SubmitCommandList(ICommandList* list) override;
+    void SetAsyncComputeSubmitPolicy(AsyncComputeSubmitPolicy policy) override;
+    AsyncComputeSubmitPolicy GetAsyncComputeSubmitPolicy() const override;
 
     void* GetBarrierTracker() override;
     void TransitionTextureToState(ITexture* texture, ResourceState newState) override;
@@ -72,6 +75,7 @@ struct DeviceVK : IDevice {
 
     IBuffer* CreateBuffer(const BufferDesc& desc, const void* initialData) override;
     void DestroyBuffer(IBuffer* buffer) override;
+    uint64_t GetBufferDeviceAddress(IBuffer* buffer) override;
 
     ITexture* CreateTexture(const TextureDesc& desc, const void* initialData) override;
     void DestroyTexture(ITexture* texture) override;
@@ -116,7 +120,7 @@ struct DeviceVK : IDevice {
 
     ITexture* CreateTextureWrapper(void* nativeTextureId, uint32_t width, uint32_t height, RHITextureFormat format) override;
 
-    IQueryPool* CreateQueryPool(QueryType type, uint32_t count) override;
+    IQueryPool* CreateQueryPool(QueryType type, uint32_t count, PipelineStatisticsFlags pipelineStatisticsMask = 0) override;
     void DestroyQueryPool(IQueryPool* pool) override;
     void ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) override;
 
@@ -142,6 +146,20 @@ struct DeviceVK : IDevice {
     void OnWindowResized(uint32_t width, uint32_t height) override;
     void SetSwapchainPresentMode(SwapchainPresentMode mode) override;
     SwapchainPresentMode GetSwapchainPresentMode() const override { return m_swapchainPresentMode; }
+    void SetSwapchainOutputMode(SwapchainOutputMode mode) override;
+    SwapchainOutputMode GetSwapchainOutputMode() const override { return m_swapchainOutputMode; }
+    void GetSwapchainSurfaceColorInfo(uint32_t* outVkFormat, uint32_t* outVkColorSpaceKHR) const override;
+    bool WaitForPresent(uint64_t presentId, uint64_t timeoutNs = UINT64_MAX) override;
+    bool WaitForPreviousPresent(uint64_t timeoutNs = UINT64_MAX) override;
+    uint64_t GetLastPresentId() const override;
+    /** True when `VK_EXT_swapchain_colorspace` was enabled at device create (HDR/wide-gamut surface pairs). */
+    bool SupportsSwapchainColorspace() const { return m_supportsSwapchainColorspace; }
+    /** True when `VK_KHR_present_id` + `VK_KHR_present_wait` are enabled (`vkWaitForPresentKHR`). */
+    bool SupportsPresentWait() const { return m_supportsPresentWait; }
+    /** True when `VK_EXT_descriptor_buffer` is enabled (`VkPhysicalDeviceDescriptorBufferFeaturesEXT::descriptorBuffer`). */
+    bool SupportsDescriptorBuffer() const { return m_supportsDescriptorBuffer; }
+    /** True when `VK_EXT_graphics_pipeline_library` is enabled (`VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT::graphicsPipelineLibrary`). */
+    bool SupportsGraphicsPipelineLibrary() const { return m_supportsGraphicsPipelineLibrary; }
     void Finish() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
@@ -162,6 +180,8 @@ struct DeviceVK : IDevice {
 
     /** Initialize Vulkan instance and device. Called by CreateVulkanDevice. Returns false on failure. */
     bool Initialize(void* windowHandle, uint32_t width, uint32_t height);
+    /** Sets `m_deviceLost` and logs once per `VK_ERROR_DEVICE_LOST` from queue/surface operations. */
+    void NoteVulkanDeviceLost(const char* context, int vkResult);
     /** Opaque Vulkan instance (VkInstance). */
     void* GetInstance() const { return m_instanceVK.GetHandle(); }
     /** Opaque Vulkan device (VkDevice). */
@@ -186,6 +206,19 @@ struct DeviceVK : IDevice {
     void* GetPipelineCache() const { return m_pipelineCache; }
     /** True when VK_EXT_extended_dynamic_state is enabled on the device. */
     bool SupportsExtendedDynamicState() const { return m_supportsExtendedDynamicState; }
+    /** True when synchronization2 barriers are enabled (`vkCmdPipelineBarrier2`). */
+    bool SupportsSynchronization2() const { return m_supportsSynchronization2; }
+    /** True when buffer device address feature is enabled (`vkGetBufferDeviceAddress`). */
+    bool SupportsBufferDeviceAddress() const { return m_supportsBufferDeviceAddress; }
+    /** Descriptor-buffer encoded sizes from `VkPhysicalDeviceDescriptorBufferPropertiesEXT` (0 when unavailable). */
+    uint32_t DescriptorBufferCombinedImageSamplerDescriptorSize() const { return m_descriptorBufferCombinedImgSize; }
+    uint32_t DescriptorBufferStorageBufferDescriptorSize() const { return m_descriptorBufferStorageBufSize; }
+    uint64_t DescriptorBufferOffsetAlignment() const { return m_descriptorBufferOffsetAlignment; }
+    void* DescriptorBufferFnGetDescriptorEXT() const { return m_pfnGetDescriptorEXT; }
+    void* DescriptorBufferFnGetSetLayoutSizeEXT() const { return m_pfnGetDescriptorSetLayoutSizeEXT; }
+    void* DescriptorBufferFnGetBindingOffsetEXT() const { return m_pfnGetDescriptorSetLayoutBindingOffsetEXT; }
+    void* DescriptorBufferFnCmdBindBuffersEXT() const { return m_pfnCmdBindDescriptorBuffersEXT; }
+    void* DescriptorBufferFnCmdSetOffsetsEXT() const { return m_pfnCmdSetDescriptorBufferOffsetsEXT; }
     /** Default pipeline layout: PushOnly (0 sets, push constants only). Used for graphics pipelines without a resource-space layout (e.g. BRDF LUT, fullscreen quads). */
     void* GetDefaultPipelineLayout() const { return m_defaultPipelineLayout; }
     /** Bindless descriptor set layout (set 1: textures binding 0, buffers binding 1). */
@@ -242,6 +275,8 @@ struct DeviceVK : IDevice {
     ITexture* GetFallbackShaderResourceTexture2D();
     /** 1x1 RGBA8 cubemap for cube/samplerCube bindings in the same situation. */
     ITexture* GetFallbackShaderResourceTextureCube();
+    /** `VK_EXT_swapchain_maintenance1`: release all image indices for `vkSwapchain` before `vkDestroySwapchainKHR`. No-op if unsupported. */
+    void ReleaseSwapchainImagesForMaintenance(void* vkSwapchain, uint32_t imageCount);
 
 private:
     void QueryCapabilities();
@@ -295,9 +330,12 @@ private:
     rhi::IBuffer* m_legacyComputeParamsUBO = nullptr; // 256 bytes, binding 1 (ParamsBlock for light_cull)
     void* m_timelineSemaphore = nullptr;     // VkSemaphore (timeline, for fence sync)
     uint64_t m_timelineValue = 0;           // next value to signal on submit
+    uint64_t m_lastDeferredSubmitTimelineValue = 0; // preserves deferred submit order across graphics/compute queues
+    AsyncComputeSubmitPolicy m_asyncComputeSubmitPolicy = AsyncComputeSubmitPolicy::Automatic;
     void* m_surface = nullptr;              // VkSurfaceKHR
     SwapchainVK m_swapchain;                 // swapchain, images, views, framebuffers, render pass
     SwapchainPresentMode m_swapchainPresentMode = SwapchainPresentMode::Fifo;
+    SwapchainOutputMode m_swapchainOutputMode = SwapchainOutputMode::SdrSrgb;
     bool m_pendingPresent = false;           // set by BeginFrame when Acquire succeeds; cleared by Present (submit uses imageAvailable/renderFinished)
     struct GraphicsPipelineCacheEntry {
         void* vkPipeline = nullptr;
@@ -323,6 +361,7 @@ private:
     BarrierTrackerVK m_barrierTracker;
     std::function<void(void*)> m_postBlitCallback;
     bool m_frameOpen = false;               // true between BeginFrame() and EndFrame()
+    bool m_deviceLost = false;              // set on VK_ERROR_DEVICE_LOST; VkDevice unusable until full re-init
     void* m_imGuiDescriptorPool = nullptr;  // VkDescriptorPool for ImGui
     DeletionQueueVK m_deletionQueue;
     bool m_supportsExtendedDynamicState = false;
@@ -333,6 +372,31 @@ private:
     bool m_supportsGeometryShader = false;
     bool m_supportsOcclusionQuery = false;
     bool m_supportsHostQueryReset = false;
+    bool m_supportsPipelineStatisticsQuery = false;
+    bool m_supportsSynchronization2 = false;
+    bool m_supportsBufferDeviceAddress = false;
+    bool m_supportsSwapchainMaintenance1 = false;
+    bool m_supportsSwapchainColorspace = false;
+    bool m_supportsPresentWait = false;
+    bool m_supportsDescriptorBuffer = false;
+    bool m_supportsGraphicsPipelineLibrary = false;
+    bool m_supportsPipelineExecutableProperties = false;
+    bool m_supportsDeviceFault = false;
+    uint32_t m_descriptorBufferCombinedImgSize = 0;
+    uint32_t m_descriptorBufferStorageBufSize = 0;
+    uint64_t m_descriptorBufferOffsetAlignment = 256;
+    void* m_pfnReleaseSwapchainImagesEXT = nullptr; // PFN_vkReleaseSwapchainImagesEXT
+    void* m_pfnWaitForPresentKHR = nullptr;         // PFN_vkWaitForPresentKHR
+    void* m_pfnGetDescriptorSetLayoutSizeEXT = nullptr;          // PFN_vkGetDescriptorSetLayoutSizeEXT
+    void* m_pfnGetDescriptorSetLayoutBindingOffsetEXT = nullptr; // PFN_vkGetDescriptorSetLayoutBindingOffsetEXT
+    void* m_pfnGetDescriptorEXT = nullptr;                        // PFN_vkGetDescriptorEXT
+    void* m_pfnCmdBindDescriptorBuffersEXT = nullptr;            // PFN_vkCmdBindDescriptorBuffersEXT
+    void* m_pfnCmdSetDescriptorBufferOffsetsEXT = nullptr;       // PFN_vkCmdSetDescriptorBufferOffsetsEXT
+    void* m_crossQueueReleasePool = nullptr;   // VkCommandPool (graphics family)
+    void* m_crossQueueReleaseCmd = nullptr;    // VkCommandBuffer
+    void* m_crossQueueAcquirePool = nullptr;   // VkCommandPool (compute family)
+    void* m_crossQueueAcquireCmd = nullptr;    // VkCommandBuffer
+    bool m_crossQueueBridgeReady = false;
     /** Descriptor sets to free after 3 frame boundaries (so no CB still references them). */
     std::vector<IDescriptorSet*> m_pendingDescriptorSetsToFree;
     uint32_t m_ticksUntilDescriptorSetFree = 0;
@@ -343,6 +407,8 @@ private:
     /** Texture wrappers are retired after N frames to avoid CPU-side stale-pointer UAF. */
     std::vector<RetiredTextureEntry> m_pendingTextureWrapperRetires;
     void RetirePendingTextureWrappers(bool forceAll);
+    bool CreateCrossQueueBridgeResources();
+    void DestroyCrossQueueBridge();
     void EnsureImGuiDescriptorPool();
     /** HDR/SDR swapchain compose: fullscreen shader (lazy); invalidated when swapchain VkFormat changes. */
     void DestroyPresentResolveResources();

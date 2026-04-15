@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/rendering/rhi/RHI.h"
+#include <cstddef>
 #include <vector>
 
 namespace eyelib {
@@ -8,6 +9,8 @@ namespace rendering {
 namespace rhi {
 
 struct DeviceVK;
+struct TextureVK;
+struct BufferVK;
 
 /** **Bindless** table: one **`VkDescriptorSet`**, binding **0** = **`COMBINED_IMAGE_SAMPLER`** array (**`kMaxTextures`**),
  *  binding **1** = **`STORAGE_BUFFER`** array (**`kMaxBuffers`**). Pool uses **`VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT`**
@@ -28,6 +31,15 @@ struct BindlessHeapVK : IBindlessHeap {
     IDescriptorSet* m_descriptorSetWrapper = nullptr;
     void* m_descriptorPool = nullptr;  // VkDescriptorPool
     void* m_descriptorSet = nullptr;   // VkDescriptorSet
+    IBuffer* m_descriptorBuffer = nullptr;
+    uint64_t m_descriptorBufferAddress = 0;
+    size_t m_descriptorBufferSize = 0;
+    uint32_t m_descriptorBufferBindingIndex = 0;
+    size_t m_binding0Offset = 0;
+    size_t m_binding1Offset = 0;
+    size_t m_combinedImageSamplerDescriptorSize = 0;
+    size_t m_storageBufferDescriptorSize = 0;
+    bool m_usesDescriptorBuffer = false;
 
     static constexpr uint32_t kMaxTextures = 8192;
     static constexpr uint32_t kMaxBuffers = 8192;
@@ -37,6 +49,9 @@ private:
     void freeTextureSlot(uint32_t index);
     uint32_t allocBufferSlot();
     void freeBufferSlot(uint32_t index);
+    bool UpdateDescriptorBufferTexture(uint32_t index, TextureVK* tex);
+    bool UpdateDescriptorBufferStorageBuffer(uint32_t index, BufferVK* buf);
+    bool tryInitDescriptorBufferBacking();
 
     uint32_t m_nextTextureIndex = 0;
     uint32_t m_nextBufferIndex = 0;

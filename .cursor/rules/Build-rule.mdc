@@ -1,6 +1,6 @@
 ---
 description: 
-globs: **/CMakeLists.txt, **/cmake/**/*.cmake
+globs: **Cmake**, **/cmake,**Build**
 alwaysApply: false
 ---
 

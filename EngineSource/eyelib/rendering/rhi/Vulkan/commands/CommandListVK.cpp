@@ -8,10 +8,13 @@
 #include "eyelib/rendering/rhi/Vulkan/descriptors/BindlessHeapVK.h"
 #include "eyelib/rendering/rhi/Vulkan/descriptors/DescriptorSetVK.h"
 #include "eyelib/rendering/rhi/Vulkan/pipelines/PipelineVK.h"
+#include "eyelib/rendering/rhi/Vulkan/barriers/BarrierTrackerVK.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/VulkanEnums.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
+#include "eyelib/rendering/backend/RenderBackendPolicy.h"
 #include <vulkan/vulkan.h>
 #include "eyelib/core/Log.h"
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 #include <cstring>
@@ -22,6 +25,19 @@ namespace rendering {
 namespace rhi {
 
 namespace {
+
+static uint32_t TextureVkArrayLayers(const TextureVK* t) {
+    if (!t) return 1u;
+    switch (t->m_type) {
+    case TextureType::TextureCube:
+        return 6u;
+    case TextureType::Texture2DArray:
+        return (std::max)(1u, t->m_depthOrArray);
+    default:
+        return 1u;
+    }
+}
+
 const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     switch (kind) {
     case PipelineLayoutKind::PushOnly: return "PushOnly";
@@ -50,10 +66,35 @@ static uint32_t BindlessHeapDescriptorSetIndex(PipelineLayoutKind kind) {
     }
 }
 
+/** `PipelineVK` stores `m_nativePipelineLayout == nullptr` for `PushOnly` compute even though `VkComputePipelineCreateInfo::layout` uses `GetComputePipelineLayout()` (set0 + bindless set1). Match `Dispatch` / push path resolution. */
+static VkPipelineLayout ResolvePipelineLayoutForDescriptorBind(DeviceVK* device, PipelineVK* pVK) {
+    if (!device || !pVK) return VK_NULL_HANDLE;
+    if (pVK->m_isCompute && pVK->m_layoutKind == PipelineLayoutKind::PushOnly)
+        return static_cast<VkPipelineLayout>(device->GetComputePipelineLayout());
+    return static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+}
+
+/** Bindless heap set index: Forward 3, GBuffer 2, default compute layout (`GetComputePipelineLayout`) set **1**; other compute layouts have no bindless slot here. */
+static uint32_t BindlessHeapSetIndexForCurrentPipeline(DeviceVK* device, PipelineVK* pVK) {
+    if (!pVK) return UINT32_MAX;
+    const VkPipelineLayout layout = ResolvePipelineLayoutForDescriptorBind(device, pVK);
+    if (layout == VK_NULL_HANDLE) return UINT32_MAX;
+    if (!pVK->m_isCompute)
+        return BindlessHeapDescriptorSetIndex(pVK->m_layoutKind);
+    if (layout == static_cast<VkPipelineLayout>(device->GetComputePipelineLayout()))
+        return 1u;
+    return UINT32_MAX;
+}
+
 static VkBuffer VkBufferFromRhi(IBuffer* buffer) {
     if (!buffer) return VK_NULL_HANDLE;
     BufferVK* bv = static_cast<BufferVK*>(buffer);
     return bv->m_buffer ? static_cast<VkBuffer>(bv->m_buffer) : VK_NULL_HANDLE;
+}
+
+static uint64_t MakeQueryKey(const IQueryPool* pool, uint32_t index) {
+    const uint64_t poolHash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pool));
+    return (poolHash << 32) ^ static_cast<uint64_t>(index);
 }
 } // namespace
 
@@ -103,6 +144,44 @@ void CommandListVK::ResetCpuRecordingStateAfterPoolReset() {
     m_cullFaceEnabled = false;
     m_cullFrontFace = false;
     m_pushModelSet = false;
+    m_hasGraphicsWork = false;
+    m_hasComputeWork = false;
+    m_computeQueueEligible = true;
+    m_requiresQueueOwnershipTransfers = false;
+    m_crossQueueOwnershipUnsafe = false;
+    m_crossQueueBuffers.clear();
+    m_crossQueueBufferSet.clear();
+    m_crossQueueImages.clear();
+    m_activeQueryKeys.clear();
+}
+
+void CommandListVK::NoteCrossQueueBuffer(void* vkBuffer) {
+    if (!vkBuffer)
+        return;
+    const uint64_t key = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vkBuffer));
+    if (m_crossQueueBufferSet.insert(key).second)
+        m_crossQueueBuffers.push_back(vkBuffer);
+}
+
+void CommandListVK::NoteCrossQueueImage(void* vkImage, uint32_t aspectMask, uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer,
+                                        uint32_t arrayLayerCount, ResourceState ownershipLayout) {
+    if (!vkImage || ownershipLayout == ResourceState::Undefined)
+        return;
+    CrossQueueImageMeta meta = {};
+    meta.vkImage = vkImage;
+    meta.aspectMask = aspectMask;
+    meta.baseMipLevel = baseMipLevel;
+    meta.levelCount = levelCount;
+    meta.baseArrayLayer = baseArrayLayer;
+    meta.arrayLayerCount = arrayLayerCount;
+    meta.ownershipLayout = ownershipLayout;
+    for (CrossQueueImageMeta& e : m_crossQueueImages) {
+        if (e.vkImage == vkImage) {
+            e = meta;
+            return;
+        }
+    }
+    m_crossQueueImages.push_back(meta);
 }
 
 void CommandListVK::Begin() {
@@ -248,6 +327,8 @@ void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransi
 }
 
 void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     EndRenderingIfActive();
     if (!rt || !m_isRecording || !m_commandBuffer) return;
     RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
@@ -260,6 +341,8 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentI
 }
 
 void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!rt || !m_isRecording || !m_commandBuffer) return;
     RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
     if (rtVK != m_currentRenderTarget) return;
@@ -301,6 +384,8 @@ void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
 }
 
 void CommandListVK::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!rt || !m_isRecording || !m_commandBuffer) return;
     RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
     if (rtVK != m_currentRenderTarget) return;
@@ -335,7 +420,7 @@ void CommandListVK::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearVal
     vkCmdClearAttachments(buf, static_cast<uint32_t>(clears.size()), clears.data(), 1, &rect);
 }
 
-void CommandListVK::ClearDefaultFramebuffer(const ClearValue& clear) { (void)clear; }
+void CommandListVK::ClearDefaultFramebuffer(const ClearValue& clear) { m_hasGraphicsWork = true; m_computeQueueEligible = false; (void)clear; }
 
 void CommandListVK::PushDebugUtilsLabel(const char* name, const float colorRgba[4]) {
     if (!m_isRecording || !m_commandBuffer || !m_device || !name) return;
@@ -417,6 +502,7 @@ void CommandListVK::SetBlendFunc(BlendFactor src, BlendFactor dst) { (void)src; 
 void CommandListVK::SetPolygonOffsetLine(bool enable, float factor, float units) { (void)enable; (void)factor; (void)units; }
 
 void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) {
+    m_requiresQueueOwnershipTransfers = true;
     if (!buffer || !m_isRecording || !m_commandBuffer) return;
     if (m_isRenderingActive) {
         static int warnCount = 0;
@@ -427,21 +513,27 @@ void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, Reso
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
-    VkBufferMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barrier.srcAccessMask = ToVkAccessFlags(fromState);
-    barrier.dstAccessMask = ToVkAccessFlags(toState);
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.buffer = vkBuf;
-    barrier.offset = 0;
-    barrier.size = VK_WHOLE_SIZE;
-    VkPipelineStageFlags srcStage = ToVkPipelineStage(fromState);
-    VkPipelineStageFlags dstStage = ToVkPipelineStage(toState);
-    vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), srcStage, dstStage, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+    NoteCrossQueueBuffer(bufVK->m_buffer);
+    VkBufferMemoryBarrier2 barrier2 = {};
+    barrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier2.srcStageMask = ToVkPipelineStage2(fromState);
+    barrier2.srcAccessMask = ToVkAccessFlags2(fromState);
+    barrier2.dstStageMask = ToVkPipelineStage2(toState);
+    barrier2.dstAccessMask = ToVkAccessFlags2(toState);
+    barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.buffer = vkBuf;
+    barrier2.offset = 0;
+    barrier2.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier2;
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
 }
 
 void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
+    m_requiresQueueOwnershipTransfers = true;
     if (!texture || !m_isRecording || !m_commandBuffer) return;
     (void)fromState;
     if (m_isRenderingActive) {
@@ -451,11 +543,26 @@ void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, R
     }
     EndRenderingIfActive();
     if (!m_device) return;
+    TextureVK* texVK = static_cast<TextureVK*>(texture);
+    BarrierTrackerVK* tracker = static_cast<BarrierTrackerVK*>(m_device->GetBarrierTracker());
+    const ResourceState layoutBefore = BarrierTrackerVK::GetImageState(tracker, texVK->m_image);
+    if (layoutBefore == ResourceState::Undefined) {
+        m_computeQueueEligible = false;
+        m_crossQueueOwnershipUnsafe = true;
+    } else {
+        const VkImageAspectFlags aspect = static_cast<VkImageAspectFlags>(ToVkImageAspect(texVK->GetFormat()));
+        const uint32_t mipLevels = (std::max)(1u, texVK->m_mipLevels);
+        const uint32_t layers = TextureVkArrayLayers(texVK);
+        NoteCrossQueueImage(texVK->m_image, aspect, 0u, mipLevels, 0u, layers, layoutBefore);
+    }
     m_device->TransitionTextureToState(texture, toState);
     m_device->FlushBarrierTracker(this);
 }
 
 void CommandListVK::MemoryBarrierStorage() {
+    m_computeQueueEligible = false;
+    m_requiresQueueOwnershipTransfers = true;
+    m_crossQueueOwnershipUnsafe = true;
     if (!m_isRecording || !m_commandBuffer) return;
     if (m_isRenderingActive) {
         static int warnCount = 0;
@@ -463,16 +570,23 @@ void CommandListVK::MemoryBarrierStorage() {
             core::Log::Warn("Vulkan MemoryBarrierStorage called during active rendering; ending render scope explicitly. Move barriers outside render passes.");
     }
     EndRenderingIfActive();
-    VkMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-    vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), srcStage, dstStage, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+    VkMemoryBarrier2 barrier2 = {};
+    barrier2.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier2.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    barrier2.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+    barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    barrier2.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &barrier2;
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
 }
 
 void CommandListVK::BarrierBufferTransferReadToHostWrite(IBuffer* buffer) {
+    m_computeQueueEligible = false;
+    m_requiresQueueOwnershipTransfers = true;
+    m_crossQueueOwnershipUnsafe = true;
     if (!buffer || !m_isRecording || !m_commandBuffer) return;
     if (m_isRenderingActive) {
         static int warnCount = 0;
@@ -483,19 +597,28 @@ void CommandListVK::BarrierBufferTransferReadToHostWrite(IBuffer* buffer) {
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
-    VkBufferMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.dstAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.buffer = vkBuf;
-    barrier.offset = 0;
-    barrier.size = VK_WHOLE_SIZE;
-    vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+    VkBufferMemoryBarrier2 barrier2 = {};
+    barrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier2.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    barrier2.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier2.dstAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+    barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.buffer = vkBuf;
+    barrier2.offset = 0;
+    barrier2.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier2;
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
 }
 
 void CommandListVK::BarrierHostVisibleBufferToTransferRead(IBuffer* buffer) {
+    m_computeQueueEligible = false;
+    m_requiresQueueOwnershipTransfers = true;
+    m_crossQueueOwnershipUnsafe = true;
     if (!buffer || !m_isRecording || !m_commandBuffer) return;
     if (m_isRenderingActive) {
         static int warnCount = 0;
@@ -506,16 +629,22 @@ void CommandListVK::BarrierHostVisibleBufferToTransferRead(IBuffer* buffer) {
     BufferVK* bufVK = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = static_cast<VkBuffer>(bufVK->m_buffer);
     if (vkBuf == VK_NULL_HANDLE) return;
-    VkBufferMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.buffer = vkBuf;
-    barrier.offset = 0;
-    barrier.size = VK_WHOLE_SIZE;
-    vkCmdPipelineBarrier(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
+    VkBufferMemoryBarrier2 barrier2 = {};
+    barrier2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier2.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier2.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+    barrier2.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier2.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    barrier2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier2.buffer = vkBuf;
+    barrier2.offset = 0;
+    barrier2.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier2;
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
 }
 void CommandListVK::BindPixelPackBufferAsSSBO(void* pboHandle, uint32_t slot, size_t size) { (void)pboHandle; (void)slot; (void)size; }
 
@@ -534,6 +663,8 @@ void CommandListVK::PushGraphicsConstantsIfPossible() {
 void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (!pipeline || !m_isRecording || !m_commandBuffer || !m_device) return;
     PipelineVK* pVK = static_cast<PipelineVK*>(pipeline);
+    if (pVK->m_isCompute) m_hasComputeWork = true;
+    else { m_hasGraphicsWork = true; m_computeQueueEligible = false; }
     VkPipeline vkPipe = static_cast<VkPipeline>(pVK->m_pipeline);
     if (vkPipe == VK_NULL_HANDLE) {
         // Do not set m_currentPipeline: BindDescriptorSets and draws require a real VkPipeline bind.
@@ -688,26 +819,74 @@ void CommandListVK::BindDescriptorSets(uint32_t firstSet, uint32_t count, IDescr
     vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, firstSet, count, vkSets.data(), dynamicOffsetCount, dynamicOffsets ? dynamicOffsets : nullptr);
 }
 void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
-    // Optional partial update: only Forward and GBuffer pipeline layouts include a dedicated bindless set (see Create*PipelineLayout).
-    // Prefer BindDescriptorSets(0, N, ...) with all resource-space sets; this exists for incremental/tooling use after vkCmdBindPipeline.
+    // Optional partial update: Forward/GBuffer bindless sets, or default compute (`GetComputePipelineLayout`: set1 bindless). Prefer
+    // BindDescriptorSets(0, N, ...) with all resource-space sets when possible; this exists for incremental/tooling use after vkCmdBindPipeline.
     if (!m_isRecording || !m_commandBuffer || !m_device || !m_currentPipeline) return;
     PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
-    if (pVK->m_isCompute) return;
-    const uint32_t setIndex = BindlessHeapDescriptorSetIndex(pVK->m_layoutKind);
+    const uint32_t setIndex = BindlessHeapSetIndexForCurrentPipeline(m_device, pVK);
     if (setIndex == UINT32_MAX) return;
-    if (pVK->m_requiredSetCount == 0 || pVK->m_requiredSetCount <= setIndex) return;
+    if (!pVK->m_isCompute) {
+        if (pVK->m_requiredSetCount == 0 || pVK->m_requiredSetCount <= setIndex) return;
+    }
 
-    VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
+    const VkPipelineLayout layout = ResolvePipelineLayoutForDescriptorBind(m_device, pVK);
     if (layout == VK_NULL_HANDLE) return;
 
-    VkDescriptorSet vkHeapSet = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
-    if (heap) {
-        BindlessHeapVK* heapVK = static_cast<BindlessHeapVK*>(heap);
-        if (heapVK->m_descriptorSet != nullptr)
-            vkHeapSet = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
+    BindlessHeapVK* heapVK = heap ? static_cast<BindlessHeapVK*>(heap) : nullptr;
+    const VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+#if defined(VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT) && defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (m_device->SupportsDescriptorBuffer() && heapVK && heapVK->m_usesDescriptorBuffer && heapVK->m_descriptorBuffer &&
+        m_device->DescriptorBufferFnCmdBindBuffersEXT() && m_device->DescriptorBufferFnCmdSetOffsetsEXT()) {
+        BufferVK* bufVK = static_cast<BufferVK*>(heapVK->m_descriptorBuffer);
+        VkBuffer vkBuf = bufVK->m_buffer ? static_cast<VkBuffer>(bufVK->m_buffer) : VK_NULL_HANDLE;
+        if (vkBuf != VK_NULL_HANDLE) {
+            m_requiresQueueOwnershipTransfers = true;
+            EndRenderingIfActive();
+            VkBufferMemoryBarrier2 barrier = {};
+            barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.buffer = vkBuf;
+            barrier.offset = 0;
+            barrier.size = heapVK->m_descriptorBufferSize > 0 ? static_cast<VkDeviceSize>(heapVK->m_descriptorBufferSize) : VK_WHOLE_SIZE;
+            VkDependencyInfo dep = {};
+            dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep.bufferMemoryBarrierCount = 1;
+            dep.pBufferMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
+
+            VkDescriptorBufferBindingInfoEXT bindInfo = {};
+            bindInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT;
+            bindInfo.buffer = vkBuf;
+            bindInfo.offset = 0;
+            bindInfo.range = heapVK->m_descriptorBufferSize;
+            bindInfo.usage = VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
+
+            auto pfnBind =
+                reinterpret_cast<PFN_vkCmdBindDescriptorBuffersEXT>(m_device->DescriptorBufferFnCmdBindBuffersEXT());
+            pfnBind(static_cast<VkCommandBuffer>(m_commandBuffer), 0, 1, &bindInfo);
+
+            const uint32_t bufIdx = heapVK->m_descriptorBufferBindingIndex;
+            const VkDeviceSize dbOffset = 0;
+            auto pfnSet =
+                reinterpret_cast<PFN_vkCmdSetDescriptorBufferOffsetsEXT>(m_device->DescriptorBufferFnCmdSetOffsetsEXT());
+            pfnSet(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, setIndex, 1, &bufIdx, &dbOffset);
+            return;
+        }
     }
-    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_BIND_POINT_GRAPHICS, layout, setIndex, 1, &vkHeapSet, 0,
-                            nullptr);
+#endif
+
+    // Null heap or no DB: classic partially-bound set (update-after-bind pool); valid with independent sets + DB layouts.
+    VkDescriptorSet vkHeapSet = static_cast<VkDescriptorSet>(m_device->GetEmptyBindlessSet());
+    if (heapVK && heapVK->m_descriptorSet != nullptr)
+        vkHeapSet = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
+    vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, setIndex, 1, &vkHeapSet, 0, nullptr);
 }
 
 void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
@@ -742,6 +921,8 @@ void CommandListVK::SetUniformHandle64(const char* name, uint64_t handle) { (voi
 void CommandListVK::SetSubroutineIndices(ShaderStage stage, uint32_t count, const uint32_t* indices) { (void)stage; (void)count; (void)indices; }
 
 void CommandListVK::Draw(uint32_t vertexCount, uint32_t firstVertex) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive) {
         static int n = 0;
@@ -753,6 +934,8 @@ void CommandListVK::Draw(uint32_t vertexCount, uint32_t firstVertex) {
     vkCmdDraw(static_cast<VkCommandBuffer>(m_commandBuffer), vertexCount, 1, firstVertex, 0);
 }
 void CommandListVK::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive) {
         static int n = 0;
@@ -764,9 +947,13 @@ void CommandListVK::DrawIndexed(uint32_t indexCount, uint32_t firstIndex, int32_
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, 1, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawIndexedSubmesh(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     DrawIndexed(indexCount, firstIndex, vertexOffset);
 }
 void CommandListVK::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t instanceCount) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive) {
         static int n = 0;
@@ -778,6 +965,8 @@ void CommandListVK::DrawIndexedInstanced(uint32_t indexCount, uint32_t firstInde
     vkCmdDrawIndexed(static_cast<VkCommandBuffer>(m_commandBuffer), indexCount, instanceCount, firstIndex, vertexOffset, 0);
 }
 void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive) return;
     VkBuffer buf = VkBufferFromRhi(indirectBuffer);
@@ -787,6 +976,8 @@ void CommandListVK::DrawArraysIndirect(IBuffer* indirectBuffer, size_t offset) {
                       sizeof(VkDrawIndirectCommand));
 }
 void CommandListVK::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive) return;
     VkBuffer buf = VkBufferFromRhi(indirectBuffer);
@@ -796,6 +987,8 @@ void CommandListVK::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) 
                              sizeof(VkDrawIndexedIndirectCommand));
 }
 void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive || drawCount == 0) return;
     VkBuffer buf = VkBufferFromRhi(indirectBuffer);
@@ -805,6 +998,8 @@ void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offs
     vkCmdDrawIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), drawCount, s);
 }
 void CommandListVK::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_isRecording || !m_commandBuffer) return;
     if (!m_isRenderingActive || drawCount == 0) return;
     VkBuffer buf = VkBufferFromRhi(indirectBuffer);
@@ -815,6 +1010,8 @@ void CommandListVK::MultiDrawIndexedIndirect(IBuffer* indirectBuffer, size_t off
 }
 void CommandListVK::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer,
                                                  size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_device || !m_isRecording || !m_commandBuffer) return;
     if (!m_device->GetCapabilities().supportsMultiDrawIndirectCount) {
         static int once = 0;
@@ -833,6 +1030,8 @@ void CommandListVK::MultiDrawArraysIndirectCount(IBuffer* indirectBuffer, size_t
 }
 void CommandListVK::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer,
                                                   size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
     if (!m_device || !m_isRecording || !m_commandBuffer) return;
     if (!m_device->GetCapabilities().supportsMultiDrawIndirectCount) {
         static int once = 0;
@@ -850,6 +1049,7 @@ void CommandListVK::MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_
                                   cnt, static_cast<VkDeviceSize>(countBufferOffset), maxDrawCount, s);
 }
 void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+    m_hasComputeWork = true;
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
     PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
     if (pVK && pVK->m_isCompute && pVK->m_pipeline != VK_NULL_HANDLE) {
@@ -873,6 +1073,7 @@ void CommandListVK::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_
     }
 }
 void CommandListVK::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
+    m_hasComputeWork = true;
     if (!m_isRecording || !m_commandBuffer || !m_device) return;
     VkBuffer buf = VkBufferFromRhi(indirectBuffer);
     if (buf == VK_NULL_HANDLE) return;
@@ -895,7 +1096,15 @@ void CommandListVK::DispatchIndirect(IBuffer* indirectBuffer, size_t offset) {
 }
 
 void CommandListVK::ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
-    if (!m_isRecording || !m_commandBuffer || !pool || queryCount == 0) return;
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!pool) {
+        core::Log::Error("CommandListVK::ResetQueryPool: query pool is null.");
+        return;
+    }
+    if (queryCount == 0) {
+        core::Log::Error("CommandListVK::ResetQueryPool: queryCount must be > 0.");
+        return;
+    }
     QueryPoolVK* qvk = static_cast<QueryPoolVK*>(pool);
     VkQueryPool qp = static_cast<VkQueryPool>(qvk->m_queryPool);
     if (qp == VK_NULL_HANDLE) return;
@@ -905,8 +1114,15 @@ void CommandListVK::ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32
                           queryCount, qvk->m_count);
         return;
     }
+    for (uint32_t i = 0; i < queryCount; ++i) {
+        const uint64_t key = MakeQueryKey(pool, firstQuery + i);
+        if (m_activeQueryKeys.find(key) != m_activeQueryKeys.end()) {
+            core::Log::ErrorF("CommandListVK::ResetQueryPool: query index %u is active; end query before reset.", firstQuery + i);
+            return;
+        }
+    }
     if (m_isRenderingActive) {
-        if (m_device && m_device->GetCapabilities().supportsHostQueryReset) {
+        if (::eyelib::rendering::backend::SupportsHostQueryReset(m_device)) {
             m_device->ResetQueryPoolOnHost(pool, firstQuery, queryCount);
             return;
         }
@@ -927,7 +1143,7 @@ void CommandListVK::BeginQuery(IQueryPool* pool, uint32_t index) {
                               qvk->m_count);
             return;
         }
-        if (m_device && m_device->GetCapabilities().supportsHostQueryReset)
+        if (::eyelib::rendering::backend::SupportsHostQueryReset(m_device))
             m_device->ResetQueryPoolOnHost(pool, index, 2u);
         else if (m_isRenderingActive) {
             core::Log::Error("CommandListVK::BeginQuery(Timestamp): vkCmdResetQueryPool is not valid inside dynamic rendering; "
@@ -937,12 +1153,32 @@ void CommandListVK::BeginQuery(IQueryPool* pool, uint32_t index) {
             vkCmdResetQueryPool(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index, 2u);
         }
         vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, index);
+        m_activeQueryKeys.insert(MakeQueryKey(pool, index));
     } else if (qvk->GetType() == QueryType::Occlusion) {
         if (index >= qvk->m_count) {
             core::Log::ErrorF("CommandListVK::BeginQuery(Occlusion): index out of range (index=%u count=%u).", index, qvk->m_count);
             return;
         }
+        const uint64_t key = MakeQueryKey(pool, index);
+        if (!m_activeQueryKeys.insert(key).second) {
+            core::Log::ErrorF("CommandListVK::BeginQuery(Occlusion): query index %u is already active.", index);
+            return;
+        }
         vkCmdBeginQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index, 0u);
+    } else if (qvk->GetType() == QueryType::PipelineStatistics) {
+        if (index >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::BeginQuery(PipelineStatistics): index out of range (index=%u count=%u).", index,
+                              qvk->m_count);
+            return;
+        }
+        const uint64_t key = MakeQueryKey(pool, index);
+        if (!m_activeQueryKeys.insert(key).second) {
+            core::Log::ErrorF("CommandListVK::BeginQuery(PipelineStatistics): query index %u is already active.", index);
+            return;
+        }
+        vkCmdBeginQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index, 0u);
+    } else {
+        core::Log::Error("CommandListVK::BeginQuery: unsupported query type for Vulkan command list.");
     }
 }
 
@@ -957,13 +1193,37 @@ void CommandListVK::EndQuery(IQueryPool* pool, uint32_t index) {
                               qvk->m_count);
             return;
         }
+        const uint64_t key = MakeQueryKey(pool, index);
+        if (m_activeQueryKeys.erase(key) == 0) {
+            core::Log::ErrorF("CommandListVK::EndQuery(Timestamp): query index %u is not active.", index);
+            return;
+        }
         vkCmdWriteTimestamp(static_cast<VkCommandBuffer>(m_commandBuffer), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, index + 1u);
     } else if (qvk->GetType() == QueryType::Occlusion) {
         if (index >= qvk->m_count) {
             core::Log::ErrorF("CommandListVK::EndQuery(Occlusion): index out of range (index=%u count=%u).", index, qvk->m_count);
             return;
         }
+        const uint64_t key = MakeQueryKey(pool, index);
+        if (m_activeQueryKeys.erase(key) == 0) {
+            core::Log::ErrorF("CommandListVK::EndQuery(Occlusion): query index %u is not active.", index);
+            return;
+        }
         vkCmdEndQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index);
+    } else if (qvk->GetType() == QueryType::PipelineStatistics) {
+        if (index >= qvk->m_count) {
+            core::Log::ErrorF("CommandListVK::EndQuery(PipelineStatistics): index out of range (index=%u count=%u).", index,
+                              qvk->m_count);
+            return;
+        }
+        const uint64_t key = MakeQueryKey(pool, index);
+        if (m_activeQueryKeys.erase(key) == 0) {
+            core::Log::ErrorF("CommandListVK::EndQuery(PipelineStatistics): query index %u is not active.", index);
+            return;
+        }
+        vkCmdEndQuery(static_cast<VkCommandBuffer>(m_commandBuffer), qp, index);
+    } else {
+        core::Log::Error("CommandListVK::EndQuery: unsupported query type for Vulkan command list.");
     }
 }
 
@@ -982,10 +1242,13 @@ IFence* CommandListVK::InsertFence() {
 }
 
 void CommandListVK::CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) {
+    m_requiresQueueOwnershipTransfers = true;
     if (!m_isRecording || !m_commandBuffer || !src || !dst || size == 0) return;
     BufferVK* srcVK = static_cast<BufferVK*>(src);
     BufferVK* dstVK = static_cast<BufferVK*>(dst);
     if (!srcVK->m_buffer || !dstVK->m_buffer) return;
+    NoteCrossQueueBuffer(srcVK->m_buffer);
+    NoteCrossQueueBuffer(dstVK->m_buffer);
     VkBufferCopy region = {};
     region.srcOffset = srcOffset;
     region.dstOffset = dstOffset;

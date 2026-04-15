@@ -17,6 +17,10 @@ inline VkBufferUsageFlags ToVkBufferUsage(BufferUsage usage) {
     if (HasUsage(usage, BufferUsage::TransferSrc)) f |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if (HasUsage(usage, BufferUsage::TransferDst)) f |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     if (HasUsage(usage, BufferUsage::IndirectDraw)) f |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    if (HasUsage(usage, BufferUsage::ShaderDeviceAddress)) f |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+#if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (HasUsage(usage, BufferUsage::DescriptorBuffer)) f |= VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
+#endif
     return f ? f : VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 }
 
@@ -31,6 +35,7 @@ inline VkFormat ToVkFormat(RHITextureFormat format) {
         case RHITextureFormat::RGB8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
         case RHITextureFormat::RGBA8_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
         case RHITextureFormat::BGRA8: return VK_FORMAT_B8G8R8A8_UNORM;
+        case RHITextureFormat::BGR10A2: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
         case RHITextureFormat::RGB16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::RGBA16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
         case RHITextureFormat::R32UI: return VK_FORMAT_R32_UINT;
@@ -100,6 +105,14 @@ inline VkAccessFlags ToVkAccessFlags(ResourceState state) {
         case ResourceState::IndirectDraw:    return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
     }
     return 0;
+}
+
+inline VkPipelineStageFlags2 ToVkPipelineStage2(ResourceState state) {
+    return static_cast<VkPipelineStageFlags2>(ToVkPipelineStage(state));
+}
+
+inline VkAccessFlags2 ToVkAccessFlags2(ResourceState state) {
+    return static_cast<VkAccessFlags2>(ToVkAccessFlags(state));
 }
 
 inline VkImageLayout ToVkImageLayout(ResourceState state) {

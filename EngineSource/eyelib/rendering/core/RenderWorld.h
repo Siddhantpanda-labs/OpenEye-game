@@ -3,7 +3,9 @@
 #include "eyelib/rendering/core/FrameContext.h"
 #include "eyelib/rendering/core/RenderCapabilities.h"
 #include "eyelib/rendering/core/RenderContext.h"
+#include "eyelib/rendering/core/GpuProfiler.h"
 #include "eyelib/rendering/core/RenderResources.h"
+#include "eyelib/rendering/debug/RenderStats.h"
 #include "eyelib/rendering/framegraph/BlackboardWriterRegistry.h"
 #include "eyelib/rendering/framegraph/FrameGraph.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
@@ -67,6 +69,8 @@ public:
     RenderFeatureRegistry& Features() noexcept { return m_features; }
     const RenderCapabilities& Caps() const noexcept { return m_caps; }
     RenderResources& Resources() noexcept { return m_resources; }
+    const GpuProfiler& Profiler() const noexcept { return m_gpuProfiler; }
+    const RenderStats& Stats() const noexcept { return m_stats; }
 
 private:
     void UploadPhase(FrameContext& frame, RenderContext& render, rhi::ICommandList* recordingCommandList);
@@ -81,6 +85,8 @@ private:
     DrawList m_drawList;
     VisibilitySystem m_visibility;
     RenderResources m_resources;
+    GpuProfiler m_gpuProfiler;
+    RenderStats m_stats;
     RenderFeatureRegistry m_features;
     FrameGraph m_graph;
     FrameGraphBlackboard m_blackboard;

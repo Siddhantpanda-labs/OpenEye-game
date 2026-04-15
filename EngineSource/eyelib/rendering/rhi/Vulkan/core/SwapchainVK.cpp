@@ -1,4 +1,6 @@
 #include "eyelib/rendering/rhi/Vulkan/core/SwapchainVK.h"
+#include "eyelib/rendering/rhi/Vulkan/barriers/BarrierTrackerVK.h"
+#include "eyelib/rendering/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
@@ -11,8 +13,93 @@ namespace rhi {
 
 namespace {
 
+VkSurfaceFormatKHR SelectSdrSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) {
+    for (const auto& f : formats) {
+        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            return f;
+    }
+    return formats.empty() ? VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR} : formats[0];
+}
+
+VkSurfaceFormatKHR SelectSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats, DeviceVK* deviceSettings) {
+    SwapchainOutputMode mode = SwapchainOutputMode::SdrSrgb;
+    bool csExt = false;
+    if (deviceSettings) {
+        mode = deviceSettings->GetSwapchainOutputMode();
+        csExt = deviceSettings->SupportsSwapchainColorspace();
+    }
+    if (formats.empty())
+        return {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+
+    if (!csExt || mode == SwapchainOutputMode::SdrSrgb) {
+        const VkSurfaceFormatKHR sdr = SelectSdrSurfaceFormat(formats);
+        core::Log::InfoF("SwapchainVK: SDR surface format 0x%x colorSpace 0x%x.",
+                         static_cast<unsigned>(sdr.format), static_cast<unsigned>(sdr.colorSpace));
+        return sdr;
+    }
+
+    if (mode == SwapchainOutputMode::Hdr10St2084) {
+        for (const auto& f : formats) {
+            if (f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT && f.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32) {
+                core::Log::InfoF("SwapchainVK: HDR10 ST2084 surface format 0x%x colorSpace 0x%x.",
+                                 static_cast<unsigned>(f.format), static_cast<unsigned>(f.colorSpace));
+                return f;
+            }
+        }
+        for (const auto& f : formats) {
+            if (f.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
+                core::Log::InfoF("SwapchainVK: HDR10 ST2084 surface format 0x%x colorSpace 0x%x.",
+                                 static_cast<unsigned>(f.format), static_cast<unsigned>(f.colorSpace));
+                return f;
+            }
+        }
+        core::Log::Warn("SwapchainVK: HDR10 output requested but no HDR10 surface format found; falling back to SDR.");
+        return SelectSdrSurfaceFormat(formats);
+    }
+
+    if (mode == SwapchainOutputMode::HdrExtendedSrgbLinear) {
+        for (const auto& f : formats) {
+            if (f.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT && f.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+                core::Log::InfoF("SwapchainVK: extended sRGB linear (FP16) surface format 0x%x colorSpace 0x%x.",
+                                 static_cast<unsigned>(f.format), static_cast<unsigned>(f.colorSpace));
+                return f;
+            }
+        }
+        for (const auto& f : formats) {
+            if (f.colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
+                core::Log::InfoF("SwapchainVK: extended sRGB linear surface format 0x%x colorSpace 0x%x.",
+                                 static_cast<unsigned>(f.format), static_cast<unsigned>(f.colorSpace));
+                return f;
+            }
+        }
+        core::Log::Warn("SwapchainVK: scRGB / extended linear output requested but no matching surface format; falling back to SDR.");
+        return SelectSdrSurfaceFormat(formats);
+    }
+
+    return SelectSdrSurfaceFormat(formats);
+}
+
 bool PresentModeListed(const std::vector<VkPresentModeKHR>& modes, VkPresentModeKHR m) {
     return std::find(modes.begin(), modes.end(), m) != modes.end();
+}
+
+const char* PresentModeName(VkPresentModeKHR mode) {
+    switch (mode) {
+    case VK_PRESENT_MODE_IMMEDIATE_KHR: return "Immediate";
+    case VK_PRESENT_MODE_MAILBOX_KHR: return "Mailbox";
+    case VK_PRESENT_MODE_FIFO_KHR: return "Fifo";
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return "FifoRelaxed";
+    default: return "Other";
+    }
+}
+
+VkPresentModeKHR PreferredVkPresentMode(SwapchainPresentMode pref) {
+    switch (pref) {
+    case SwapchainPresentMode::Mailbox: return VK_PRESENT_MODE_MAILBOX_KHR;
+    case SwapchainPresentMode::Immediate: return VK_PRESENT_MODE_IMMEDIATE_KHR;
+    case SwapchainPresentMode::Fifo:
+    default: return VK_PRESENT_MODE_FIFO_KHR;
+    }
 }
 
 VkPresentModeKHR SelectVkPresentMode(const std::vector<VkPresentModeKHR>& modes, SwapchainPresentMode pref) {
@@ -159,8 +246,9 @@ static void EnsureRenderPassAndFramebuffers(SwapchainVK* sw) {
 }
 
 bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, void* surface, uint32_t width, uint32_t height,
-                         DeviceVK* debugNameDevice, SwapchainPresentMode presentPreference) {
+                         DeviceVK* debugNameDevice, SwapchainPresentMode presentPreference, bool useSwapchainMaintenance1) {
     if (!out || !device || !physicalDevice || !surface) return false;
+    out->useSwapchainMaintenance1 = useSwapchainMaintenance1;
     width = std::max(1u, width);
     height = std::max(1u, height);
     VkDevice dev = static_cast<VkDevice>(device);
@@ -177,24 +265,25 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &formatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &formatCount, formats.data());
-    VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR } : formats[0];
-    for (const auto& f : formats) {
-        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            chosenFormat = f;
-            break;
-        }
-    }
+    const VkSurfaceFormatKHR chosenFormat = SelectSurfaceFormat(formats, debugNameDevice);
     uint32_t presentModeCount = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, presentModes.data());
     const VkPresentModeKHR presentMode = SelectVkPresentMode(presentModes, presentPreference);
-    core::Log::InfoF("SwapchainVK::Create: present preference=%d, selected VkPresentModeKHR=%d",
-                     static_cast<int>(presentPreference), static_cast<int>(presentMode));
+    const VkPresentModeKHR preferredMode = PreferredVkPresentMode(presentPreference);
+    if (presentMode != preferredMode) {
+        core::Log::WarnF("SwapchainVK::Create: preferred present mode %s unavailable; selected %s fallback.",
+                         PresentModeName(preferredMode), PresentModeName(presentMode));
+    } else {
+        core::Log::InfoF("SwapchainVK::Create: selected present mode %s.", PresentModeName(presentMode));
+    }
     VkExtent2D extent = {};
     extent.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
     extent.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
     uint32_t imageCount = SelectSwapchainImageCount(caps, presentMode);
+    core::Log::InfoF("SwapchainVK::Create: imageCount=%u (caps min=%u max=%u).",
+                     imageCount, caps.minImageCount, caps.maxImageCount);
 
     VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -210,6 +299,17 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     swapInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     swapInfo.presentMode = presentMode;
     swapInfo.clipped = VK_TRUE;
+#if defined(VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT)
+    VkSwapchainPresentModesCreateInfoEXT presentModesExt = {};
+    if (useSwapchainMaintenance1) {
+        presentModesExt.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT;
+        presentModesExt.presentModeCount = 1u;
+        presentModesExt.pPresentModes = &presentMode;
+        swapInfo.pNext = &presentModesExt;
+    }
+#else
+    (void)useSwapchainMaintenance1;
+#endif
 
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     res = vkCreateSwapchainKHR(dev, &swapInfo, nullptr, &swapchain);
@@ -225,6 +325,7 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     out->width = extent.width;
     out->height = extent.height;
     out->format = static_cast<uint32_t>(chosenFormat.format);
+    out->colorSpace = static_cast<uint32_t>(chosenFormat.colorSpace);
 
     uint32_t swapchainImageCount = 0;
     vkGetSwapchainImagesKHR(dev, swapchain, &swapchainImageCount, nullptr);
@@ -251,15 +352,18 @@ bool SwapchainVK::Create(SwapchainVK* out, void* device, void* physicalDevice, v
     EnsureRenderPassAndFramebuffers(out);
     if (!CreateRenderFinishedSemaphores(out)) {
         DestroyRenderFinishedSemaphores(out);
-        Destroy(out, device);
+        Destroy(out, device, debugNameDevice);
         return false;
     }
     if (debugNameDevice && out->swapchain)
         SetDebugNameSwapchain(debugNameDevice, out->swapchain, "OpenEye_Swapchain");
+    out->usePresentId = debugNameDevice && debugNameDevice->SupportsPresentWait();
+    out->nextPresentId = 1;
+    out->lastPresentId = 0;
     return true;
 }
 
-void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
+void SwapchainVK::Destroy(SwapchainVK* sw, void* device, DeviceVK* maintenanceDevice) {
     if (!sw || !device) return;
     DestroyRenderFinishedSemaphores(sw);
     VkDevice dev = static_cast<VkDevice>(device);
@@ -285,8 +389,16 @@ void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
         if (p) vkDestroyImageView(dev, static_cast<VkImageView>(p), nullptr);
     }
     sw->imageViews.clear();
-    sw->images.clear();
+    const uint32_t imageCountForRelease = static_cast<uint32_t>(sw->images.size());
     VkSwapchainKHR sc = static_cast<VkSwapchainKHR>(sw->swapchain);
+    if (sc != VK_NULL_HANDLE && imageCountForRelease > 0 && maintenanceDevice && sw->useSwapchainMaintenance1)
+        maintenanceDevice->ReleaseSwapchainImagesForMaintenance(sw->swapchain, imageCountForRelease);
+    if (maintenanceDevice) {
+        BarrierTrackerVK* tr = maintenanceDevice->GetBarrierTrackerVK();
+        for (void* img : sw->images)
+            if (img) BarrierTrackerVK::RemoveImageState(tr, img);
+    }
+    sw->images.clear();
     if (sc != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(dev, sc, nullptr);
         sw->swapchain = nullptr;
@@ -294,6 +406,7 @@ void SwapchainVK::Destroy(SwapchainVK* sw, void* device) {
     sw->width = 0;
     sw->height = 0;
     sw->format = 0;
+    sw->colorSpace = 0;
 }
 
 void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* debugNameDevice,
@@ -330,8 +443,16 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
         if (view) vkDestroyImageView(dev, static_cast<VkImageView>(view), nullptr);
     }
     imageViews.clear();
-    images.clear();
+    const uint32_t imageCountForRelease = static_cast<uint32_t>(images.size());
     VkSwapchainKHR sc = static_cast<VkSwapchainKHR>(swapchain);
+    if (sc != VK_NULL_HANDLE && imageCountForRelease > 0 && debugNameDevice && useSwapchainMaintenance1)
+        debugNameDevice->ReleaseSwapchainImagesForMaintenance(swapchain, imageCountForRelease);
+    if (debugNameDevice) {
+        BarrierTrackerVK* tr = debugNameDevice->GetBarrierTrackerVK();
+        for (void* img : images)
+            if (img) BarrierTrackerVK::RemoveImageState(tr, img);
+    }
+    images.clear();
     if (sc != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(dev, sc, nullptr);
         swapchain = nullptr;
@@ -347,22 +468,25 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
     vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &formatCount, nullptr);
     std::vector<VkSurfaceFormatKHR> formats(formatCount);
     if (formatCount) vkGetPhysicalDeviceSurfaceFormatsKHR(phys, surf, &formatCount, formats.data());
-    VkSurfaceFormatKHR chosenFormat = formats.empty() ? VkSurfaceFormatKHR{ VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR } : formats[0];
-    for (const auto& f : formats) {
-        if (f.format == VK_FORMAT_B8G8R8A8_UNORM && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            chosenFormat = f;
-            break;
-        }
-    }
+    const VkSurfaceFormatKHR chosenFormat = SelectSurfaceFormat(formats, debugNameDevice);
     uint32_t presentModeCount = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, nullptr);
     std::vector<VkPresentModeKHR> presentModes(presentModeCount);
     if (presentModeCount) vkGetPhysicalDeviceSurfacePresentModesKHR(phys, surf, &presentModeCount, presentModes.data());
     const VkPresentModeKHR presentMode = SelectVkPresentMode(presentModes, presentPreference);
+    const VkPresentModeKHR preferredMode = PreferredVkPresentMode(presentPreference);
+    if (presentMode != preferredMode) {
+        core::Log::WarnF("SwapchainVK::Resize: preferred present mode %s unavailable; selected %s fallback.",
+                         PresentModeName(preferredMode), PresentModeName(presentMode));
+    } else {
+        core::Log::InfoF("SwapchainVK::Resize: selected present mode %s.", PresentModeName(presentMode));
+    }
     VkExtent2D extent = {};
     extent.width = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
     extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     uint32_t imageCount = SelectSwapchainImageCount(caps, presentMode);
+    core::Log::InfoF("SwapchainVK::Resize: imageCount=%u (caps min=%u max=%u).",
+                     imageCount, caps.minImageCount, caps.maxImageCount);
 
     VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -378,6 +502,15 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
     swapInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     swapInfo.presentMode = presentMode;
     swapInfo.clipped = VK_TRUE;
+#if defined(VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT)
+    VkSwapchainPresentModesCreateInfoEXT presentModesExtResize = {};
+    if (useSwapchainMaintenance1) {
+        presentModesExtResize.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_EXT;
+        presentModesExtResize.presentModeCount = 1u;
+        presentModesExtResize.pPresentModes = &presentMode;
+        swapInfo.pNext = &presentModesExtResize;
+    }
+#endif
 
     VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
     res = vkCreateSwapchainKHR(dev, &swapInfo, nullptr, &newSwapchain);
@@ -389,6 +522,7 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
     this->width = extent.width;
     this->height = extent.height;
     format = static_cast<uint32_t>(chosenFormat.format);
+    colorSpace = static_cast<uint32_t>(chosenFormat.colorSpace);
 
     uint32_t swapchainImageCount = 0;
     vkGetSwapchainImagesKHR(dev, newSwapchain, &swapchainImageCount, nullptr);
@@ -416,6 +550,9 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
     CreateRenderFinishedSemaphores(this);
     if (debugNameDevice && swapchain)
         SetDebugNameSwapchain(debugNameDevice, swapchain, "OpenEye_Swapchain");
+    usePresentId = debugNameDevice && debugNameDevice->SupportsPresentWait();
+    nextPresentId = 1;
+    lastPresentId = 0;
 }
 
 int SwapchainVK::Acquire(void* semaphoreToSignal, uint64_t timeoutMs, uint32_t* outImageIndex) {
@@ -443,10 +580,35 @@ int SwapchainVK::Present(void* queue, void* waitSemaphore, uint32_t imageIndex) 
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = &waitSem;
     }
+    uint64_t presentIdValue = 0;
+#if defined(VK_STRUCTURE_TYPE_PRESENT_ID_KHR)
+    VkPresentIdKHR presentIdKHR = {};
+    if (usePresentId) {
+        presentIdValue = nextPresentId++;
+        presentIdKHR.sType = VK_STRUCTURE_TYPE_PRESENT_ID_KHR;
+        presentIdKHR.pNext = nullptr;
+        presentIdKHR.swapchainCount = 1;
+        presentIdKHR.pPresentIds = &presentIdValue;
+        presentInfo.pNext = &presentIdKHR;
+    }
+#else
+    (void)presentIdValue;
+#endif
     VkDevice dev = static_cast<VkDevice>(device);
     PFN_vkQueuePresentKHR pfnPresent = reinterpret_cast<PFN_vkQueuePresentKHR>(vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
     if (!pfnPresent) return static_cast<int>(VK_ERROR_EXTENSION_NOT_PRESENT);
     VkResult res = pfnPresent(q, &presentInfo);
+#if defined(VK_STRUCTURE_TYPE_PRESENT_ID_KHR)
+    if (usePresentId && (res == VK_SUCCESS || res == VK_SUBOPTIMAL_KHR))
+        lastPresentId = presentIdValue;
+#endif
+    if (res != VK_SUCCESS) {
+        if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR) {
+            core::Log::WarnF("SwapchainVK::Present: vkQueuePresentKHR returned recoverable status (0x%x).", static_cast<unsigned>(res));
+        } else {
+            core::Log::ErrorF("SwapchainVK::Present: vkQueuePresentKHR failed (0x%x).", static_cast<unsigned>(res));
+        }
+    }
     return static_cast<int>(res);
 }
 

@@ -16,7 +16,8 @@ struct AllocatorVK {
      * Create VMA allocator. physicalDevice/device/instance are VkPhysicalDevice/VkDevice/VkInstance.
      * vulkanApiVersion e.g. VK_API_VERSION_1_2.
      */
-    static bool Create(AllocatorVK* out, void* physicalDevice, void* device, void* instance, uint32_t vulkanApiVersion);
+    static bool Create(AllocatorVK* out, void* physicalDevice, void* device, void* instance, uint32_t vulkanApiVersion,
+                       bool enableBufferDeviceAddress);
     static void Destroy(AllocatorVK* a);
 
     void* GetHandle() const { return handle; }

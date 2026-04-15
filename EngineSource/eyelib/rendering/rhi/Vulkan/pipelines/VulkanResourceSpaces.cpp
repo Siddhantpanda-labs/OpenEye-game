@@ -260,7 +260,8 @@ VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device) {
 
 static VkPipelineLayout createPipelineLayoutCommon(VkDevice device,
     const VkDescriptorSetLayout* setLayouts, uint32_t setLayoutCount,
-    VkShaderStageFlags pushStages) {
+    VkShaderStageFlags pushStages,
+    VkPipelineLayoutCreateFlags extraFlags) {
     VkPushConstantRange pushRange = {};
     pushRange.stageFlags = pushStages;
     pushRange.offset = 0;
@@ -268,6 +269,7 @@ static VkPipelineLayout createPipelineLayoutCommon(VkDevice device,
 
     VkPipelineLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.flags = extraFlags;
     info.setLayoutCount = setLayoutCount;
     info.pSetLayouts = setLayouts;
     info.pushConstantRangeCount = 1;
@@ -287,16 +289,24 @@ VkPipelineLayout CreateForwardPipelineLayout(VkDevice device,
     VkDescriptorSetLayout forwardPassLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout) {
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, forwardPassLayout, materialLayout, bindlessLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, kGraphicsStages);
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    const VkPipelineLayoutCreateFlags flags =
+        useIndependentSets ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0u;
+#else
+    (void)useIndependentSets;
+    const VkPipelineLayoutCreateFlags flags = 0u;
+#endif
+    return createPipelineLayoutCommon(device, layouts, 5, kGraphicsStages, flags);
 }
 
 VkPipelineLayout CreatePostPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout postPassLayout) {
     VkDescriptorSetLayout layouts[2] = { frameLayout, postPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages, 0u);
 }
 
 VkPipelineLayout CreateShadowPipelineLayout(VkDevice device,
@@ -304,23 +314,31 @@ VkPipelineLayout CreateShadowPipelineLayout(VkDevice device,
     VkDescriptorSetLayout shadowPassLayout,
     VkDescriptorSetLayout sceneLayout) {
     VkDescriptorSetLayout layouts[3] = { frameLayout, shadowPassLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 3, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 3, kGraphicsStages, 0u);
 }
 
 VkPipelineLayout CreateGBufferPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout) {
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets) {
     VkDescriptorSetLayout layouts[4] = { frameLayout, materialLayout, bindlessLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 4, kGraphicsStages);
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    const VkPipelineLayoutCreateFlags flags =
+        useIndependentSets ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0u;
+#else
+    (void)useIndependentSets;
+    const VkPipelineLayoutCreateFlags flags = 0u;
+#endif
+    return createPipelineLayoutCommon(device, layouts, 4, kGraphicsStages, flags);
 }
 
 VkPipelineLayout CreateDeferredLightingPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout deferredLightingPassLayout) {
     VkDescriptorSetLayout layouts[2] = { frameLayout, deferredLightingPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages, 0u);
 }
 
 VkPipelineLayout CreateComputeLightCullPipelineLayout(VkDevice device,
@@ -329,7 +347,7 @@ VkPipelineLayout CreateComputeLightCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout sceneLayout,
     VkDescriptorSetLayout emptyLayout) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, lightCullPassLayout, emptyLayout, emptyLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT);
+    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT, 0u);
 }
 
 VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
@@ -337,12 +355,12 @@ VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout sceneLayout,
     VkDescriptorSetLayout emptyLayout) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, emptyLayout, emptyLayout, emptyLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT);
+    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT, 0u);
 }
 
 VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout) {
     VkDescriptorSetLayout layouts[1] = { iblPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages, 0u);
 }
 
 VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device) {
@@ -370,7 +388,7 @@ VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device) {
 
 VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSetLayout outlinePostLayout) {
     VkDescriptorSetLayout layouts[1] = { outlinePostLayout };
-    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages, 0u);
 }
 
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {

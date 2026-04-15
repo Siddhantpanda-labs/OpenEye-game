@@ -42,13 +42,15 @@ VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device);
 /** Set 0 — IBLPass: 0 environment cube (combined image sampler). */
 VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device);
 
-/** Forward: set0 Frame, set1 ForwardPass, set2 Material, set3 Bindless, set4 SceneBuffers. Push constants 128 bytes vertex|fragment. */
+/** Forward: set0 Frame, set1 ForwardPass, set2 Material, set3 Bindless, set4 SceneBuffers. Push constants 128 bytes vertex|fragment.
+ *  When @p useIndependentSets (descriptor buffer bindless + classic sets), `VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT` is OR'd in. */
 VkPipelineLayout CreateForwardPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout forwardPassLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout);
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets);
 
 /** Post: set0 Frame, set1 PostPass. Push constants 128 bytes vertex|fragment. */
 VkPipelineLayout CreatePostPipelineLayout(VkDevice device,
@@ -66,7 +68,8 @@ VkPipelineLayout CreateGBufferPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout);
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets);
 
 /** DeferredLighting: set0 Frame, set1 DeferredLightingPass. Push constants 128 bytes. */
 VkPipelineLayout CreateDeferredLightingPipelineLayout(VkDevice device,

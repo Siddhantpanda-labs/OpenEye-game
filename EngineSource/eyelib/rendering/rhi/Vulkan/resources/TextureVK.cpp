@@ -1,4 +1,5 @@
 #include "eyelib/rendering/rhi/Vulkan/resources/TextureVK.h"
+#include "eyelib/rendering/rhi/Vulkan/barriers/BarrierTrackerVK.h"
 #include "eyelib/rendering/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/VulkanEnums.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
@@ -191,10 +192,12 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
         return false;
     }
 
-    VkImageMemoryBarrier toTransfer = {};
-    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    VkImageMemoryBarrier2 toTransfer = {};
+    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toTransfer.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
     toTransfer.srcAccessMask = 0;
-    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toTransfer.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    toTransfer.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -205,7 +208,11 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
     toTransfer.subresourceRange.levelCount = 1;
     toTransfer.subresourceRange.baseArrayLayer = 0;
     toTransfer.subresourceRange.layerCount = 1;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+    VkDependencyInfo depToTransfer = {};
+    depToTransfer.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToTransfer.imageMemoryBarrierCount = 1;
+    depToTransfer.pImageMemoryBarriers = &toTransfer;
+    vkCmdPipelineBarrier2(cmd, &depToTransfer);
 
     const uint32_t dstBpp = VkFormatColorTexelBytes(vkFormat);
     const size_t rowPitch = (static_cast<size_t>(width) * dstBpp + 3u) & ~size_t{3};
@@ -221,17 +228,23 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
     region.imageExtent = { width, height, 1 };
     vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    VkImageMemoryBarrier toSample = {};
-    toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toSample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkImageMemoryBarrier2 toSample = {};
+    toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toSample.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    toSample.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    toSample.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    toSample.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     toSample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toSample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     toSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toSample.image = image;
     toSample.subresourceRange = toTransfer.subresourceRange;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toSample);
+    VkDependencyInfo depToSample = {};
+    depToSample.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToSample.imageMemoryBarrierCount = 1;
+    depToSample.pImageMemoryBarriers = &toSample;
+    vkCmdPipelineBarrier2(cmd, &depToSample);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         vkFreeCommandBuffers(device, pool, 1, &cmd);
@@ -301,10 +314,12 @@ bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkForm
         return false;
     }
 
-    VkImageMemoryBarrier toTransfer = {};
-    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    VkImageMemoryBarrier2 toTransfer = {};
+    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toTransfer.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
     toTransfer.srcAccessMask = 0;
-    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toTransfer.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    toTransfer.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -315,7 +330,11 @@ bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkForm
     toTransfer.subresourceRange.levelCount = 1;
     toTransfer.subresourceRange.baseArrayLayer = 0;
     toTransfer.subresourceRange.layerCount = 6;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toTransfer);
+    VkDependencyInfo depToTransfer = {};
+    depToTransfer.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToTransfer.imageMemoryBarrierCount = 1;
+    depToTransfer.pImageMemoryBarriers = &toTransfer;
+    vkCmdPipelineBarrier2(cmd, &depToTransfer);
 
     const uint32_t dstBpp = VkFormatColorTexelBytes(vkFormat);
     const size_t rowPitch = (static_cast<size_t>(width) * dstBpp + 3u) & ~size_t{3};
@@ -336,17 +355,23 @@ bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkForm
     }
     vkCmdCopyBufferToImage(cmd, staging, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 6, regions);
 
-    VkImageMemoryBarrier toSample = {};
-    toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toSample.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkImageMemoryBarrier2 toSample = {};
+    toSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    toSample.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    toSample.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    toSample.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    toSample.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     toSample.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toSample.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     toSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toSample.image = image;
     toSample.subresourceRange = toTransfer.subresourceRange;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toSample);
+    VkDependencyInfo depToSample = {};
+    depToSample.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToSample.imageMemoryBarrierCount = 1;
+    depToSample.pImageMemoryBarriers = &toSample;
+    vkCmdPipelineBarrier2(cmd, &depToSample);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         vkFreeCommandBuffers(device, pool, 1, &cmd);
@@ -421,10 +446,14 @@ bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, ui
         return false;
     }
 
-    VkImageMemoryBarrier barrier = {};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    VkImageMemoryBarrier2 barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
     barrier.srcAccessMask = 0;
-    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                           VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -435,9 +464,11 @@ bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, ui
     barrier.subresourceRange.levelCount = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = arrayLayers;
-    constexpr VkPipelineStageFlags kDstShaderStages = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, kDstShaderStages, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    VkDependencyInfo depToSrv = {};
+    depToSrv.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depToSrv.imageMemoryBarrierCount = 1;
+    depToSrv.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &depToSrv);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         vkFreeCommandBuffers(device, pool, 1, &cmd);
@@ -468,6 +499,20 @@ bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, ui
     vkDestroyFence(device, fence, nullptr);
     vkFreeCommandBuffers(device, pool, 1, &cmd);
     vkDestroyCommandPool(device, pool, nullptr);
+    return true;
+}
+
+bool ValidateImageFormatUsage(VkPhysicalDevice physicalDevice, VkFormat format, VkImageUsageFlags usage) {
+    if (physicalDevice == VK_NULL_HANDLE || format == VK_FORMAT_UNDEFINED) return false;
+    VkFormatProperties props = {};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+    const VkFormatFeatureFlags features = props.optimalTilingFeatures;
+    auto has = [features](VkFormatFeatureFlags f) { return (features & f) == f; };
+    if ((usage & VK_IMAGE_USAGE_SAMPLED_BIT) && !has(VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)) return false;
+    if ((usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) && !has(VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT)) return false;
+    if ((usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) && !has(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) return false;
+    if ((usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && !has(VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) return false;
+    if ((usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) && !has(VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) return false;
     return true;
 }
 
@@ -512,6 +557,12 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
         imgInfo.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (desc.type == TextureType::TextureCube)
         imgInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    const VkPhysicalDevice physicalDevice = static_cast<VkPhysicalDevice>(deviceObj->GetPhysicalDevice());
+    if (!ValidateImageFormatUsage(physicalDevice, imgInfo.format, imgInfo.usage)) {
+        core::Log::ErrorF("CreateTextureVK: format/usage unsupported (format=%u usage=0x%x).",
+                          static_cast<unsigned>(imgInfo.format), static_cast<unsigned>(imgInfo.usage));
+        return nullptr;
+    }
 
     VmaAllocationCreateInfo allocCreateInfo = {};
     allocCreateInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -702,6 +753,11 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     t->m_allocation = allocation;
     if (desc.type == TextureType::Texture2DArray)
         t->m_slice2DViewsByLayer.assign(layerCount, nullptr);
+    // GPU layout matches ShaderResource after upload or UNDEFINED→SRV one-shot init; keep tracker aligned for BarrierTexture / presentation.
+    if (didCpuUpload || wantSrvOnlyLayoutInit) {
+        BarrierTrackerVK::SetImageState(static_cast<BarrierTrackerVK*>(deviceObj->GetBarrierTracker()), image,
+                                        ResourceState::ShaderResource);
+    }
     return t;
 }
 

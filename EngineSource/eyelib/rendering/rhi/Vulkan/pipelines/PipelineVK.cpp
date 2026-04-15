@@ -244,6 +244,19 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     renderingInfo.stencilAttachmentFormat = selectedFormats.stencilFormat;
     assert(colorBlend.attachmentCount == renderingInfo.colorAttachmentCount);
 
+#if defined(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT)
+    VkGraphicsPipelineLibraryCreateInfoEXT graphicsPipelineLibraryInfo = {};
+    if (device->SupportsGraphicsPipelineLibrary()) {
+        graphicsPipelineLibraryInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+        graphicsPipelineLibraryInfo.pNext = &renderingInfo;
+        graphicsPipelineLibraryInfo.flags =
+            VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
+            VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+            VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+            VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT;
+    }
+#endif
+
     std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     if (device->SupportsExtendedDynamicState()) {
         dynamicStates.push_back(VK_DYNAMIC_STATE_CULL_MODE);
@@ -258,7 +271,11 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
 
     VkGraphicsPipelineCreateInfo gpInfo = {};
     gpInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#if defined(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) && defined(VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT)
+    gpInfo.pNext = device->SupportsGraphicsPipelineLibrary() ? static_cast<void*>(&graphicsPipelineLibraryInfo) : static_cast<void*>(&renderingInfo);
+#else
     gpInfo.pNext = &renderingInfo;
+#endif
     gpInfo.stageCount = 2;
     gpInfo.pStages = stages;
     gpInfo.pVertexInputState = &vertexInput;
@@ -274,6 +291,10 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     gpInfo.subpass = 0;
     gpInfo.basePipelineHandle = VK_NULL_HANDLE;
     gpInfo.basePipelineIndex = -1;
+#if defined(VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (device->SupportsDescriptorBuffer())
+        gpInfo.flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+#endif
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(vkDevice, cache, 1, &gpInfo, nullptr, &pipeline);
@@ -307,6 +328,10 @@ void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipe
     createInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     createInfo.stage = stageInfo;
     createInfo.layout = layout;
+#if defined(VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
+    if (device->SupportsDescriptorBuffer())
+        createInfo.flags |= VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+#endif
 
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateComputePipelines(vkDevice, cache, 1, &createInfo, nullptr, &pipeline);

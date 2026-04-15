@@ -1,0 +1,8 @@
+---
+description: 
+globs: **EngineSource/eyelib/rendering/, **eyelib/rendering/
+alwaysApply: false
+---
+
+see one thing that this works are to solidify to rhi layer and vulkan backend that rhi and vulkan backend completes and has all stuff, then i will move to eyelib/rendering/ module above rhi to implement hight level stuff
+creating a nextgen rendering module in eyelib/rendering - but isolated without affecting any other library files and client side files

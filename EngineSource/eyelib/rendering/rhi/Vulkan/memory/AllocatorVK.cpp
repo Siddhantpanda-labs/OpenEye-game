@@ -8,13 +8,16 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
-bool AllocatorVK::Create(AllocatorVK* out, void* physicalDevice, void* device, void* instance, uint32_t vulkanApiVersion) {
+bool AllocatorVK::Create(AllocatorVK* out, void* physicalDevice, void* device, void* instance, uint32_t vulkanApiVersion,
+                         bool enableBufferDeviceAddress) {
     if (!out || !physicalDevice || !device || !instance) return false;
     VmaAllocatorCreateInfo info = {};
     info.physicalDevice = static_cast<VkPhysicalDevice>(physicalDevice);
     info.device = static_cast<VkDevice>(device);
     info.instance = static_cast<VkInstance>(instance);
     info.vulkanApiVersion = vulkanApiVersion;
+    if (enableBufferDeviceAddress)
+        info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkResult res = vmaCreateAllocator(&info, &allocator);
     if (res != VK_SUCCESS) {

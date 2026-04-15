@@ -26,6 +26,7 @@ EngineSource/thirdparty/libjpeg-turbo/
 EngineSource/thirdparty/Aespinosa_vulkan/
 EngineSource/thirdparty/Wicked_engine/
 EngineSource/thirdparty/Vulkan_Samples/
+EngineSource/thirdparty/Sascha_Vulkan/
 *.user
 *.suo
 *.sdf

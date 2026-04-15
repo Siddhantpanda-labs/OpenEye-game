@@ -34,19 +34,28 @@ struct SwapchainVK {
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t format = 0;                // VkFormat (opaque)
+    uint32_t colorSpace = 0;            // VkColorSpaceKHR (opaque)
     /** Per-image semaphores signaled by submit, waited by present. Avoids reusing a semaphore still in use by present (validation 00067). */
     std::vector<void*> renderFinishedSemaphores;
 
     void* device = nullptr;              // VkDevice (for Resize/Destroy)
     void* physicalDevice = nullptr;       // VkPhysicalDevice (for Resize)
     void* surface = nullptr;             // VkSurfaceKHR (for Resize)
+    /** When true, swapchain create/resize chains `VkSwapchainPresentModesCreateInfoEXT` (requires `VK_EXT_swapchain_maintenance1`). */
+    bool useSwapchainMaintenance1 = false;
+    /** When true, `Present` chains `VkPresentIdKHR` (requires `VK_KHR_present_id` + device features). */
+    bool usePresentId = false;
+    uint64_t nextPresentId = 1;
+    uint64_t lastPresentId = 0;
 
     /** Create swapchain, images, views, render pass, framebuffers. Returns true on success.
      *  If **`debugNameDevice`** is set, applies **`VK_EXT_debug_utils`** name **`OpenEye_Swapchain`** to **`VkSwapchainKHR`**. */
     static bool Create(SwapchainVK* out, void* device, void* physicalDevice, void* surface, uint32_t width, uint32_t height,
-                       DeviceVK* debugNameDevice = nullptr, SwapchainPresentMode presentPreference = SwapchainPresentMode::Fifo);
-    /** Destroy framebuffers, render pass, views, swapchain. Does not destroy surface. */
-    static void Destroy(SwapchainVK* sw, void* device);
+                       DeviceVK* debugNameDevice = nullptr, SwapchainPresentMode presentPreference = SwapchainPresentMode::Fifo,
+                       bool useSwapchainMaintenance1 = false);
+    /** Destroy framebuffers, render pass, views, swapchain. Does not destroy surface.
+     *  **`maintenanceDevice`:** when non-null and maintenance1 is active, calls `ReleaseSwapchainImagesForMaintenance` before destroying `VkSwapchainKHR`. */
+    static void Destroy(SwapchainVK* sw, void* device, DeviceVK* maintenanceDevice = nullptr);
     /** Recreate swapchain and derived state. When forceRecreate is true, recreates even if width/height unchanged (e.g. OUT_OF_DATE).
      *  **`debugNameDevice`:** optional **`VK_EXT_debug_utils`** naming for the new swapchain (same as **`Create`**). */
     void Resize(uint32_t width, uint32_t height, bool forceRecreate = false, DeviceVK* debugNameDevice = nullptr,
@@ -70,6 +79,8 @@ struct SwapchainVK {
     /** Extent (width, height) for renderer. */
     void GetExtent(uint32_t* outWidth, uint32_t* outHeight) const { if (outWidth) *outWidth = width; if (outHeight) *outHeight = height; }
     uint32_t GetFormat() const { return format; }
+    uint32_t GetColorSpace() const { return colorSpace; }
+    uint64_t GetLastPresentId() const { return lastPresentId; }
     /** Semaphore for this image index (signal on submit, wait on present). Valid after Create/Resize. */
     void* GetRenderFinishedSemaphore(uint32_t imageIndex) const;
 };

@@ -61,7 +61,7 @@ bool CreateComputeSet0(VkDevice device, VkDescriptorPool descriptorPool,
 }
 
 bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeSet0Layout, VkDescriptorSetLayout bindlessSetLayout,
-                                 VkPipelineLayout* outPipelineLayout) {
+                                 bool useIndependentSets, VkPipelineLayout* outPipelineLayout) {
     if (!device || !computeSet0Layout || !bindlessSetLayout || !outPipelineLayout) return false;
     *outPipelineLayout = VK_NULL_HANDLE;
     VkDescriptorSetLayout setLayouts[2] = { computeSet0Layout, bindlessSetLayout };
@@ -71,6 +71,12 @@ bool CreateComputePipelineLayout(VkDevice device, VkDescriptorSetLayout computeS
     pushRange.size = 16;
     VkPipelineLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    if (useIndependentSets)
+        info.flags |= VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
+#else
+    (void)useIndependentSets;
+#endif
     info.setLayoutCount = 2;
     info.pSetLayouts = setLayouts;
     info.pushConstantRangeCount = 1;

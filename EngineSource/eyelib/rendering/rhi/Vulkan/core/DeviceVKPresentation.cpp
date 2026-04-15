@@ -19,6 +19,58 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
+namespace {
+
+static void CmdImageBarrier2(VkCommandBuffer cmd, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                             const VkImageMemoryBarrier& b) {
+    VkImageMemoryBarrier2 b2 = {};
+    b2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    b2.srcStageMask = static_cast<VkPipelineStageFlags2>(srcStage);
+    b2.srcAccessMask = static_cast<VkAccessFlags2>(b.srcAccessMask);
+    b2.dstStageMask = static_cast<VkPipelineStageFlags2>(dstStage);
+    b2.dstAccessMask = static_cast<VkAccessFlags2>(b.dstAccessMask);
+    b2.oldLayout = b.oldLayout;
+    b2.newLayout = b.newLayout;
+    b2.srcQueueFamilyIndex = b.srcQueueFamilyIndex;
+    b2.dstQueueFamilyIndex = b.dstQueueFamilyIndex;
+    b2.image = b.image;
+    b2.subresourceRange = b.subresourceRange;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &b2;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+static void CmdImageBarriers2(VkCommandBuffer cmd, VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                              const VkImageMemoryBarrier* barriers, uint32_t count) {
+    if (!barriers || count == 0) return;
+    std::vector<VkImageMemoryBarrier2> b2;
+    b2.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        VkImageMemoryBarrier2 x = {};
+        x.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        x.srcStageMask = static_cast<VkPipelineStageFlags2>(srcStage);
+        x.srcAccessMask = static_cast<VkAccessFlags2>(barriers[i].srcAccessMask);
+        x.dstStageMask = static_cast<VkPipelineStageFlags2>(dstStage);
+        x.dstAccessMask = static_cast<VkAccessFlags2>(barriers[i].dstAccessMask);
+        x.oldLayout = barriers[i].oldLayout;
+        x.newLayout = barriers[i].newLayout;
+        x.srcQueueFamilyIndex = barriers[i].srcQueueFamilyIndex;
+        x.dstQueueFamilyIndex = barriers[i].dstQueueFamilyIndex;
+        x.image = barriers[i].image;
+        x.subresourceRange = barriers[i].subresourceRange;
+        b2.push_back(x);
+    }
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.imageMemoryBarrierCount = count;
+    dep.pImageMemoryBarriers = b2.data();
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+} // namespace
+
 void DeviceVK::Present() {
     if (!m_queues.GetGraphicsQueue()) return;
     VkQueue queue = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
@@ -34,6 +86,7 @@ void DeviceVK::Present() {
     const uint32_t imageIndex = frame.swapchainImageIndex;
     void* renderFinishedPerImage = m_swapchain.GetRenderFinishedSemaphore(imageIndex);
     int presentRes = m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished, imageIndex);
+    NoteVulkanDeviceLost("Present vkQueuePresentKHR", presentRes);
     m_pendingPresent = false;
     if (presentRes == VK_ERROR_OUT_OF_DATE_KHR) {
         m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
@@ -54,8 +107,10 @@ void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
 }
 
 void DeviceVK::Finish() {
-    if (m_queues.GetGraphicsQueue())
-        vkQueueWaitIdle(static_cast<VkQueue>(m_queues.GetGraphicsQueue()));
+    if (m_queues.GetGraphicsQueue()) {
+        const VkResult idle = vkQueueWaitIdle(static_cast<VkQueue>(m_queues.GetGraphicsQueue()));
+        NoteVulkanDeviceLost("Finish vkQueueWaitIdle", static_cast<int>(idle));
+    }
 }
 
 void DeviceVK::EnsureImGuiDescriptorPool() {
@@ -153,7 +208,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         toDst.image = dstImage;
         toDst.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
+        CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, toDst);
         VkClearColorValue clearColor = {};
 #if defined(OPENEYE_VULKAN_DEBUG_CLEAR_RED) && OPENEYE_VULKAN_DEBUG_CLEAR_RED
         // Debug: bright red to verify swapchain output is visible (see documentation/vulkan/vulkan_check.md).
@@ -177,7 +232,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         toColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         toColor.image = dstImage;
         toColor.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &toColor);
+        CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, toColor);
         VkRenderPassBeginInfo rpBegin = {};
         rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpBegin.renderPass = static_cast<VkRenderPass>(rpHandle);
@@ -189,6 +244,8 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         if (m_postBlitCallback)
             m_postBlitCallback(cmd);
         vkCmdEndRenderPass(cmd);
+        // Swapchain overlay RP uses finalLayout PRESENT_SRC_KHR; keep tracker aligned for acquire/blit next frame.
+        BarrierTrackerVK::SetImageState(&m_barrierTracker, static_cast<void*>(dstImage), ResourceState::Present);
         return;
     }
     RenderTargetVK* rt = static_cast<RenderTargetVK*>(src);
@@ -242,7 +299,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, barrierDst);
         VkClearColorValue clearColor = {};
         clearColor.float32[0] = 0.12f;
         clearColor.float32[1] = 0.12f;
@@ -269,11 +326,11 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         barrierSrc.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         barrierSrc.image = srcImage;
         barrierSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierSrc);
+        CmdImageBarrier2(cmd, srcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, barrierSrc);
         barrierDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, barrierDst);
         VkImageCopy copy = {};
         copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
@@ -288,7 +345,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         restoreSrc.image = srcImage;
         restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
+        CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, restoreSrc);
         BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
     } else {
         static bool loggedResolvePath = false;
@@ -317,9 +374,9 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
             barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
             barrierDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            vkCmdPipelineBarrier(cmd, srcStage | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                  0, 0, nullptr, 0, nullptr, 1, &toSample);
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+            CmdImageBarrier2(cmd, srcStage | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, toSample);
+            CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, barrierDst);
 
             void* swapView = m_swapchain.GetImageView(imageIndex);
             bool renderedResolve = false;
@@ -367,7 +424,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
             restoreSrc.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             restoreSrc.image = srcImage;
             restoreSrc.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restoreSrc);
+            CmdImageBarrier2(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, restoreSrc);
             BarrierTrackerVK::SetImageState(&m_barrierTracker, tex->m_image, ResourceState::RenderTarget);
         }
     }
@@ -377,7 +434,7 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         barrierDst.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         barrierDst.oldLayout = dstPostComposeLayout;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        vkCmdPipelineBarrier(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        CmdImageBarrier2(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, barrierDst);
         VkRenderPass rp = static_cast<VkRenderPass>(m_swapchain.GetRenderPass());
         VkFramebuffer fb = static_cast<VkFramebuffer>(m_swapchain.GetFramebuffer(imageIndex));
         VkClearValue clearVal = {};
@@ -391,12 +448,14 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
         m_postBlitCallback(cmd);
         vkCmdEndRenderPass(cmd);
+        BarrierTrackerVK::SetImageState(&m_barrierTracker, static_cast<void*>(dstImage), ResourceState::Present);
     } else {
         barrierDst.srcAccessMask = dstPostComposeAccess;
         barrierDst.dstAccessMask = 0;
         barrierDst.oldLayout = dstPostComposeLayout;
         barrierDst.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        vkCmdPipelineBarrier(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrierDst);
+        CmdImageBarrier2(cmd, dstPostComposeSrcStage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, barrierDst);
+        BarrierTrackerVK::SetImageState(&m_barrierTracker, static_cast<void*>(dstImage), ResourceState::Present);
     }
 }
 
@@ -472,6 +531,12 @@ bool DeviceVK::EnsurePresentResolveResources() {
         break;
     case VK_FORMAT_R8G8B8A8_UNORM:
         swapColorRhi = RHITextureFormat::RGBA8;
+        break;
+    case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+        swapColorRhi = RHITextureFormat::BGR10A2;
+        break;
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+        swapColorRhi = RHITextureFormat::RGBA16F;
         break;
     default: {
         static bool once = false;
@@ -600,7 +665,7 @@ void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
     toCopy[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toCopy[1].image = dstImage;
     toCopy[1].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, srcStage | dstStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, toCopy);
+    CmdImageBarriers2(cmd, srcStage | dstStage, VK_PIPELINE_STAGE_TRANSFER_BIT, toCopy, 2);
 
     VkImageCopy copy = {};
     copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
@@ -633,7 +698,7 @@ void DeviceVK::Blit(IRenderTarget* src, IRenderTarget* dst, bool colorOnly) {
     restore[1].newLayout = dstRestoreLayout;
     restore[1].image = dstImage;
     restore[1].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcRestoreStage | dstRestoreStage, 0, 0, nullptr, 0, nullptr, 2, restore);
+    CmdImageBarriers2(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcRestoreStage | dstRestoreStage, restore, 2);
 
     BarrierTrackerVK::SetImageState(&m_barrierTracker, srcTex->m_image, srcRestoreState);
     BarrierTrackerVK::SetImageState(&m_barrierTracker, dstTex->m_image, dstRestoreState);
@@ -740,7 +805,7 @@ void DeviceVK::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
     toCopy[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toCopy[1].image = dstImage;
     toCopy[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, srcStage | dstStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, toCopy);
+    CmdImageBarriers2(cmd, srcStage | dstStage, VK_PIPELINE_STAGE_TRANSFER_BIT, toCopy, 2);
 
     VkImageCopy copy = {};
     copy.srcSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
@@ -771,7 +836,7 @@ void DeviceVK::BlitDepthOnly(IRenderTarget* src, IRenderTarget* dst) {
     restore[1].newLayout = dstRestoreLayout;
     restore[1].image = dstImage;
     restore[1].subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcRestoreStage | dstRestoreStage, 0, 0, nullptr, 0, nullptr, 2, restore);
+    CmdImageBarriers2(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, srcRestoreStage | dstRestoreStage, restore, 2);
 
     BarrierTrackerVK::SetImageState(&m_barrierTracker, srcTex->m_image, srcRestoreState);
     BarrierTrackerVK::SetImageState(&m_barrierTracker, dstTex->m_image, dstRestoreState);

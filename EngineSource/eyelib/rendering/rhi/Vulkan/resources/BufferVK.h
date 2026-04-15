@@ -20,12 +20,15 @@ struct BufferVK : IBuffer {
     void* Map(size_t offset, size_t size) override;
     void Unmap() override;
     void Update(const void* data, size_t offset, size_t size) override;
+    /** Flush CPU-written bytes for non-coherent host-visible allocations (descriptor-buffer host writes). */
+    void FlushHostVisibleWrites(size_t offset, size_t size);
 
     DeviceVK* m_device = nullptr;
     size_t m_size = 0;
     BufferMemoryHint m_hint = BufferMemoryHint::DeviceOnly;
     void* m_buffer = nullptr;       // VkBuffer
     void* m_allocation = nullptr;   // VmaAllocation
+    bool m_deviceAddressCapable = false;
 };
 
 IBuffer* CreateBufferVK(DeviceVK* device, const BufferDesc& desc, const void* initialData);

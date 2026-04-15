@@ -32,6 +32,15 @@ bool SupportsCompute(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsCompute;
 }
 
+bool SupportsAsyncCompute(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsAsyncCompute;
+}
+
+bool AllowsAsyncComputeQueueRouting(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsAsyncCompute &&
+           device->GetAsyncComputeSubmitPolicy() != rhi::AsyncComputeSubmitPolicy::ForceGraphicsQueue;
+}
+
 bool SupportsMultiDrawIndirect(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsMultiDrawIndirect;
 }
@@ -82,6 +91,42 @@ bool SupportsOcclusionQueries(const rhi::IDevice* device) {
 
 bool SupportsHostQueryReset(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsHostQueryReset;
+}
+
+bool SupportsPipelineStatisticsQueries(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsPipelineStatisticsQueries;
+}
+
+bool SupportsSynchronization2(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsSynchronization2;
+}
+
+bool SupportsBufferDeviceAddress(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsBufferDeviceAddress;
+}
+
+bool SupportsDescriptorBuffer(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsDescriptorBuffer;
+}
+
+bool SupportsGraphicsPipelineLibrary(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsGraphicsPipelineLibrary;
+}
+
+bool SupportsSwapchainColorspace(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsSwapchainColorspace;
+}
+
+bool SupportsPresentWait(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsPresentWait;
+}
+
+bool SupportsPipelineExecutableProperties(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsPipelineExecutableProperties;
+}
+
+bool SupportsDeviceFault(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsDeviceFault;
 }
 
 }  // namespace backend

@@ -2,6 +2,11 @@
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
+#include "eyelib/core/Log.h"
+
+#ifndef OPENEYE_RENDERING_GPU_STATS_LOG
+#define OPENEYE_RENDERING_GPU_STATS_LOG 0
+#endif
 
 namespace eyelib {
 namespace rendering {
@@ -63,6 +68,7 @@ void RenderWorld::Shutdown() {
     m_features.Clear();
     m_blackboard.SetWriterRegistry(nullptr);
     m_blackboardWriters.Clear();
+    m_gpuProfiler.Shutdown(m_device);
     m_resources.Shutdown(m_device);
     m_initialized = false;
 }
@@ -100,7 +106,15 @@ void RenderWorld::RunFrame(float deltaSeconds, rhi::ICommandList* recordingComma
 
     m_scheduler.Schedule(m_frame, m_render, m_caps, m_graph, m_blackboard);
     m_graph.Compile(m_device);
+    m_gpuProfiler.BeginFrame(m_device, recordingCommandList);
     m_graph.Execute(m_device, recordingCommandList, &m_blackboard);
+    m_gpuProfiler.EndFrame(recordingCommandList);
+    m_stats.CaptureFromProfiler(m_frame.frameIndex, m_gpuProfiler);
+#if OPENEYE_RENDERING_GPU_STATS_LOG
+    if ((m_frame.frameIndex % 120u) == 0u) {
+        core::Log::Info(m_stats.FormatPipelineSummary().c_str());
+    }
+#endif
 
     m_render.recordingCommandList = nullptr;
     m_render.resources = nullptr;
