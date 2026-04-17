@@ -27,6 +27,9 @@ struct BindlessHeapVK : IBindlessHeap {
     void FreeBufferHandle(BindlessHandle handle) override;
     IDescriptorSet* GetDescriptorSet() override;
 
+    /** True when the update-after-bind pool and descriptor set were created; otherwise allocation APIs no-op. */
+    bool IsReady() const { return m_descriptorSet != nullptr && m_device != nullptr; }
+
     DeviceVK* m_device = nullptr;
     IDescriptorSet* m_descriptorSetWrapper = nullptr;
     void* m_descriptorPool = nullptr;  // VkDescriptorPool
@@ -40,6 +43,12 @@ struct BindlessHeapVK : IBindlessHeap {
     size_t m_combinedImageSamplerDescriptorSize = 0;
     size_t m_storageBufferDescriptorSize = 0;
     bool m_usesDescriptorBuffer = false;
+    bool m_warnedDescriptorBufferTextureEncodeFailure = false;
+    bool m_warnedDescriptorBufferBufferEncodeFailure = false;
+    bool m_warnedTextureHeapExhausted = false;
+    bool m_warnedBufferHeapExhausted = false;
+    bool m_warnedZeroSizeStorageBuffer = false;
+    bool m_warnedAllocateOnUninitializedHeap = false;
 
     static constexpr uint32_t kMaxTextures = 8192;
     static constexpr uint32_t kMaxBuffers = 8192;

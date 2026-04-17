@@ -89,6 +89,17 @@ void SetDebugNameSwapchain(DeviceVK* device, void* vkSwapchainKHR, const char* n
     SetDebugName(dev, VK_OBJECT_TYPE_SWAPCHAIN_KHR, reinterpret_cast<uint64_t>(vkSwapchainKHR), name);
 }
 
+void SetDebugNameAccelerationStructure(DeviceVK* device, void* vkAccelerationStructureKHR, const char* name) {
+    if (!device || !vkAccelerationStructureKHR) return;
+    VkDevice dev = static_cast<VkDevice>(device->GetDevice());
+#if defined(VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR)
+    SetDebugName(dev, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, reinterpret_cast<uint64_t>(vkAccelerationStructureKHR), name);
+#else
+    (void)dev;
+    (void)name;
+#endif
+}
+
 void CmdDebugUtilsBeginLabel(DeviceVK* device, void* vkCommandBuffer, const char* name, const float colorRgba[4]) {
     if (!device || !vkCommandBuffer || !name || !colorRgba) return;
     VkDevice dev = static_cast<VkDevice>(device->GetDevice());

@@ -88,15 +88,11 @@ void DeviceVK::Present() {
     int presentRes = m_swapchain.Present(queue, renderFinishedPerImage ? renderFinishedPerImage : frame.renderFinished, imageIndex);
     NoteVulkanDeviceLost("Present vkQueuePresentKHR", presentRes);
     m_pendingPresent = false;
-    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR) {
-        m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
-    } else if (presentRes == static_cast<int>(VK_SUBOPTIMAL_KHR)) {
-        static bool s_suboptimalOnce = false;
-        if (!s_suboptimalOnce) {
-            core::Log::Warn("Vulkan Present: VK_SUBOPTIMAL_KHR — swapchain still presented; recreate if window surface changed.");
-            s_suboptimalOnce = true;
-        }
-    } else if (presentRes != static_cast<int>(VK_SUCCESS)) {
+    if (presentRes == static_cast<int>(VK_SUCCESS)) {
+    } else if (presentRes == static_cast<int>(VK_ERROR_OUT_OF_DATE_KHR) ||
+               presentRes == static_cast<int>(VK_SUBOPTIMAL_KHR)) {
+        NoteSwapchainKhrResult("Present vkQueuePresentKHR", presentRes, SwapchainKhrPath::Present);
+    } else {
         core::Log::ErrorF("Vulkan Present: vkQueuePresentKHR failed (0x%x)", static_cast<unsigned>(presentRes));
     }
 }

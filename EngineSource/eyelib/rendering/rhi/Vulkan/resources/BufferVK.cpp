@@ -16,6 +16,8 @@ namespace {
 static ResourceState ResourceStateFromBufferDescForTracker(const BufferDesc& desc) {
     if (HasUsage(desc.usage, BufferUsage::IndirectDraw)) return ResourceState::IndirectDraw;
     if (HasUsage(desc.usage, BufferUsage::DescriptorBuffer)) return ResourceState::ShaderResource;
+    if (HasUsage(desc.usage, BufferUsage::AccelerationStructureStorage)) return ResourceState::AsBuildStorage;
+    if (HasUsage(desc.usage, BufferUsage::AccelerationStructureBuildInput)) return ResourceState::AsBuildGeometryInput;
     if (HasUsage(desc.usage, BufferUsage::Storage)) return ResourceState::ShaderResource;
     if (HasUsage(desc.usage, BufferUsage::Uniform)) return ResourceState::UniformBuffer;
     if (HasUsage(desc.usage, BufferUsage::Index)) return ResourceState::IndexBuffer;
@@ -27,6 +29,12 @@ static ResourceState ResourceStateFromVkBufferUsageForTracker(VkBufferUsageFlags
     u &= static_cast<VkBufferUsageFlags>(~VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 #if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
     if (u & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) return ResourceState::ShaderResource;
+#endif
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)
+    if (u & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR) return ResourceState::AsBuildStorage;
+#endif
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR)
+    if (u & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR) return ResourceState::AsBuildGeometryInput;
 #endif
     if (u & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT) return ResourceState::IndirectDraw;
     if (u & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) return ResourceState::ShaderResource;
@@ -58,6 +66,26 @@ static void FinalBufferAccessFromUsage(VkBufferUsageFlags u, VkAccessFlags* outA
         acc |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
         st |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
     }
+#if defined(VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR) && defined(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)
+    if (u & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR) {
+        acc |= VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        st |= VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
+#endif
+#if defined(VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR)
+    if (u & VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR) {
+        acc |= VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        st |= VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
+#endif
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR)
+    if (u & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR) {
+        acc |= VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        st |= VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
+#endif
+#endif
 #if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
     if (u & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) {
         acc |= VK_ACCESS_SHADER_READ_BIT;
@@ -72,10 +100,36 @@ static void FinalBufferAccessFromUsage(VkBufferUsageFlags u, VkAccessFlags* outA
     *outStage = st ? st : VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
 }
 
+static VkQueue SelectUploadQueue(DeviceVK* deviceObj, uint32_t* outQueueFamily) {
+    if (!deviceObj) return VK_NULL_HANDLE;
+    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t family = deviceObj->GetGraphicsQueueFamily();
+
+    VkQueue transferQueue = static_cast<VkQueue>(deviceObj->GetTransferQueue());
+    const uint32_t transferFamily = deviceObj->GetTransferQueueFamily();
+    if (transferQueue != VK_NULL_HANDLE) {
+        if (transferFamily == family) {
+            queue = transferQueue;
+        } else {
+            static bool warnedDedicatedTransfer = false;
+            if (!warnedDedicatedTransfer) {
+                core::Log::Info(
+                    "BufferVK upload policy: dedicated transfer queue detected but upload path remains on graphics queue "
+                    "until explicit queue-family ownership transfer for buffers is implemented.");
+                warnedDedicatedTransfer = true;
+            }
+        }
+    }
+
+    if (outQueueFamily) *outQueueFamily = family;
+    return queue;
+}
+
 static bool SubmitDeviceLocalBufferUpload(DeviceVK* deviceObj, VkBuffer dst, VkDeviceSize size, const void* data,
                                           VkBufferUsageFlags usageAfterTransfer) {
     VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t queueFamily = 0;
+    VkQueue queue = SelectUploadQueue(deviceObj, &queueFamily);
     VmaAllocator allocator = static_cast<VmaAllocator>(deviceObj->GetAllocator());
     if (!device || !queue || !allocator || !data || size == 0 || dst == VK_NULL_HANDLE)
         return false;
@@ -110,7 +164,7 @@ static bool SubmitDeviceLocalBufferUpload(DeviceVK* deviceObj, VkBuffer dst, VkD
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    poolInfo.queueFamilyIndex = queueFamily;
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator, staging, stAllocH);
         return false;
@@ -212,6 +266,7 @@ static bool SubmitDeviceLocalBufferUpload(DeviceVK* deviceObj, VkBuffer dst, VkD
     sub.pCommandBuffers = &cmd;
     VkResult sr = vkQueueSubmit(queue, 1, &sub, fence);
     if (sr != VK_SUCCESS) {
+        deviceObj->NoteVulkanDeviceLost("SubmitDeviceLocalBufferUpload vkQueueSubmit", static_cast<int>(sr));
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, pool, 1, &cmd);
         vkDestroyCommandPool(device, pool, nullptr);
@@ -273,76 +328,112 @@ void BufferVK::FlushHostVisibleWrites(size_t offset, size_t size) {
     vmaFlushAllocation(allocator, static_cast<VmaAllocation>(m_allocation), static_cast<VkDeviceSize>(offset), flushSize);
 }
 
-IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void* initialData) {
-    if (!deviceObj || desc.sizeInBytes == 0) return nullptr;
+bool BufferVK::InitFromVkUsage(DeviceVK* deviceObj, size_t sizeInBytes, VkBufferUsageFlags vkUsage, BufferMemoryHint hint, const void* initialData,
+                              const BufferDesc* trackerSeedDesc, ResourceState trackerInitialState) {
+    if (!deviceObj || sizeInBytes == 0) return false;
     VmaAllocator allocator = static_cast<VmaAllocator>(deviceObj->GetAllocator());
-    if (!allocator) return nullptr;
+    if (!allocator) return false;
+
+#if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
+    const bool requestsDescriptorBuffer = (vkUsage & VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT) != 0;
+#else
+    const bool requestsDescriptorBuffer = false;
+#endif
+    const bool requestsDeviceAddress = (vkUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
+    if (requestsDescriptorBuffer && !requestsDeviceAddress) {
+        core::Log::Error("BufferVK::InitFromVkUsage: DescriptorBuffer usage requires SHADER_DEVICE_ADDRESS in VkBufferUsageFlags.");
+        return false;
+    }
+    if (requestsDeviceAddress && !deviceObj->SupportsBufferDeviceAddress()) {
+        core::Log::Error("BufferVK::InitFromVkUsage: SHADER_DEVICE_ADDRESS requested but buffer device address is not supported.");
+        return false;
+    }
+    const bool deviceAddressCapable = (vkUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
+    const bool deviceLocalUpload = initialData && sizeInBytes > 0 && hint == BufferMemoryHint::DeviceOnly;
+    if (deviceLocalUpload)
+        vkUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     VkBufferCreateInfo bufInfo = {};
     bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufInfo.size = desc.sizeInBytes;
-    VkBufferUsageFlags vkUsage = ToVkBufferUsage(desc.usage);
-    const bool supportsBufferDeviceAddress = deviceObj->SupportsBufferDeviceAddress();
-    const bool requestsDeviceAddress = HasUsage(desc.usage, BufferUsage::ShaderDeviceAddress);
-    const bool requestsDescriptorBuffer = HasUsage(desc.usage, BufferUsage::DescriptorBuffer);
-    if (requestsDescriptorBuffer && !requestsDeviceAddress) {
-        core::Log::Error("CreateBufferVK: DescriptorBuffer usage requires BufferUsage::ShaderDeviceAddress for Vulkan binding.");
-        return nullptr;
-    }
-    if (requestsDeviceAddress && !supportsBufferDeviceAddress) {
-        core::Log::Error("CreateBufferVK: BufferUsage::ShaderDeviceAddress requested but device does not support buffer device address.");
-        return nullptr;
-    }
-    const bool deviceAddressCapable = (vkUsage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) != 0;
-    const bool deviceLocalUpload =
-        initialData && desc.sizeInBytes > 0 && desc.memoryHint == BufferMemoryHint::DeviceOnly;
-    if (deviceLocalUpload)
-        vkUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufInfo.size = static_cast<VkDeviceSize>(sizeInBytes);
     bufInfo.usage = vkUsage;
 
     VmaAllocationCreateInfo allocCreateInfo = {};
-    allocCreateInfo.usage = (desc.memoryHint == BufferMemoryHint::HostVisible || desc.memoryHint == BufferMemoryHint::HostVisiblePersistent)
-        ? VMA_MEMORY_USAGE_CPU_TO_GPU : VMA_MEMORY_USAGE_GPU_ONLY;
-    if (desc.memoryHint == BufferMemoryHint::HostVisiblePersistent)
+    allocCreateInfo.usage = (hint == BufferMemoryHint::HostVisible || hint == BufferMemoryHint::HostVisiblePersistent) ? VMA_MEMORY_USAGE_CPU_TO_GPU
+                                                                                                                      : VMA_MEMORY_USAGE_GPU_ONLY;
+    if (hint == BufferMemoryHint::HostVisiblePersistent)
         allocCreateInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
     VkBuffer vkBuffer = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
     VkResult res = vmaCreateBuffer(allocator, &bufInfo, &allocCreateInfo, &vkBuffer, &allocation, nullptr);
     if (res != VK_SUCCESS) {
-        core::Log::ErrorF("CreateBufferVK: vmaCreateBuffer failed (0x%x)", res);
-        return nullptr;
+        core::Log::ErrorF("BufferVK::InitFromVkUsage: vmaCreateBuffer failed (0x%x)", res);
+        return false;
     }
 
-    auto* b = new BufferVK(deviceObj);
-    b->m_size = desc.sizeInBytes;
-    b->m_hint = desc.memoryHint;
-    b->m_buffer = vkBuffer;
-    b->m_allocation = allocation;
-    b->m_deviceAddressCapable = deviceAddressCapable;
+    m_device = deviceObj;
+    m_size = sizeInBytes;
+    m_hint = hint;
+    m_vkUsage = vkUsage;
+    m_buffer = vkBuffer;
+    m_allocation = allocation;
+    m_deviceAddressCapable = deviceAddressCapable;
 
-    if (initialData && desc.sizeInBytes > 0) {
-        if (desc.memoryHint == BufferMemoryHint::HostVisible || desc.memoryHint == BufferMemoryHint::HostVisiblePersistent) {
+    if (initialData && sizeInBytes > 0) {
+        if (hint == BufferMemoryHint::HostVisible || hint == BufferMemoryHint::HostVisiblePersistent) {
             void* mapped = nullptr;
             if (vmaMapMemory(allocator, allocation, &mapped) == VK_SUCCESS) {
-                memcpy(mapped, initialData, desc.sizeInBytes);
+                memcpy(mapped, initialData, sizeInBytes);
                 vmaUnmapMemory(allocator, allocation);
             }
-        } else if (desc.memoryHint == BufferMemoryHint::DeviceOnly) {
-            if (!SubmitDeviceLocalBufferUpload(deviceObj, vkBuffer, static_cast<VkDeviceSize>(desc.sizeInBytes), initialData,
-                                               ToVkBufferUsage(desc.usage))) {
+        } else if (hint == BufferMemoryHint::DeviceOnly) {
+            if (!SubmitDeviceLocalBufferUpload(deviceObj, vkBuffer, static_cast<VkDeviceSize>(sizeInBytes), initialData, vkUsage)) {
                 vmaDestroyBuffer(allocator, vkBuffer, allocation);
-                delete b;
-                core::Log::Error("CreateBufferVK: device-local buffer upload failed");
-                return nullptr;
+                m_buffer = nullptr;
+                m_allocation = nullptr;
+                core::Log::Error("BufferVK::InitFromVkUsage: device-local buffer upload failed");
+                return false;
             }
         }
-        if (BarrierTrackerVK* tr = static_cast<BarrierTrackerVK*>(deviceObj->GetBarrierTracker())) {
-            if (desc.memoryHint == BufferMemoryHint::DeviceOnly)
-                BarrierTrackerVK::SetBufferState(tr, vkBuffer, ResourceStateFromVkBufferUsageForTracker(vkUsage));
-            else
-                BarrierTrackerVK::SetBufferState(tr, vkBuffer, ResourceStateFromBufferDescForTracker(desc));
+    }
+    if (BarrierTrackerVK* tr = static_cast<BarrierTrackerVK*>(deviceObj->GetBarrierTracker())) {
+        ResourceState rs = ResourceState::Undefined;
+        if (trackerInitialState != ResourceState::Undefined) {
+            rs = trackerInitialState;
+        } else if (initialData && sizeInBytes > 0) {
+            rs = ResourceStateFromVkBufferUsageForTracker(vkUsage);
+            if (hint != BufferMemoryHint::DeviceOnly && trackerSeedDesc)
+                rs = ResourceStateFromBufferDescForTracker(*trackerSeedDesc);
         }
+        if (rs != ResourceState::Undefined)
+            BarrierTrackerVK::SetBufferState(tr, vkBuffer, rs);
+    }
+    return true;
+}
+
+IBuffer* CreateBufferVK(DeviceVK* deviceObj, const BufferDesc& desc, const void* initialData) {
+    if (!deviceObj || desc.sizeInBytes == 0) return nullptr;
+    VkBufferUsageFlags vkUsage = ToVkBufferUsage(desc.usage);
+    const bool requestsDeviceAddress = HasUsage(desc.usage, BufferUsage::ShaderDeviceAddress);
+    const bool requestsDescriptorBuffer = HasUsage(desc.usage, BufferUsage::DescriptorBuffer);
+    if (requestsDescriptorBuffer && !requestsDeviceAddress) {
+        core::Log::Error("CreateBufferVK: DescriptorBuffer usage requires BufferUsage::ShaderDeviceAddress for Vulkan binding.");
+        return nullptr;
+    }
+    if (requestsDeviceAddress && !deviceObj->SupportsBufferDeviceAddress()) {
+        core::Log::Error("CreateBufferVK: BufferUsage::ShaderDeviceAddress requested but device does not support buffer device address.");
+        return nullptr;
+    }
+    const bool deviceLocalUpload =
+        initialData && desc.sizeInBytes > 0 && desc.memoryHint == BufferMemoryHint::DeviceOnly;
+    if (deviceLocalUpload)
+        vkUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    auto* b = new BufferVK(deviceObj);
+    if (!b->InitFromVkUsage(deviceObj, desc.sizeInBytes, vkUsage, desc.memoryHint, initialData, &desc)) {
+        delete b;
+        return nullptr;
     }
     return b;
 }

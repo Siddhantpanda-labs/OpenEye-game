@@ -38,6 +38,9 @@ struct RenderTargetVK;
  * **Rendering:** HDR/offscreen/swapchain-resolve paths use **`vkCmdBeginRendering`** / `vkCmdEndRendering` (dynamic
  * rendering). Active pass extent is tracked in `m_activeDynamicRenderWidth/Height` for draws (including fullscreen).
  * Swapchain **classic** `VkRenderPass` usage lives in presentation code, not here.
+ *
+ * **Queries:** `ResetQueryPool` / `BeginQuery` / `EndQuery` interact with dynamic rendering and optional host query reset;
+ * see `query_pool_dynamic_rendering.md` (same `Vulkan/` tree).
  */
 struct CommandListVK : ICommandList {
     /** For immediate list: device creates and sets buffer via SetCommandBuffer(buf, true). */
@@ -115,6 +118,11 @@ struct CommandListVK : ICommandList {
     void MultiDrawIndexedIndirectCount(IBuffer* indirectBuffer, size_t indirectOffset, IBuffer* countBuffer, size_t countBufferOffset, uint32_t maxDrawCount, uint32_t stride) override;
     void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
     void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) override;
+    void DrawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+    void DrawMeshTasksIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) override;
+    void SetFragmentShadingRate(FragmentShadingRate rate,
+                                FragmentShadingRateCombinerOp pipelinePrimitiveOp,
+                                FragmentShadingRateCombinerOp primitiveAttachmentOp) override;
 
     void ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) override;
     void BeginQuery(IQueryPool* pool, uint32_t index) override;
@@ -130,6 +138,8 @@ struct CommandListVK : ICommandList {
     IFence* InsertFence() override;
 
     void CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) override;
+    void BuildAccelerationStructures(uint32_t infoCount, const void* pBuildGeometryInfos, const void* const* ppBuildRangeInfos) override;
+    void MemoryBarrierAccelerationStructureAccess() override;
 
     /** Backend: VkCommandBuffer (opaque to avoid including vulkan.h in header). */
     void* GetCommandBuffer() const { return m_commandBuffer; }

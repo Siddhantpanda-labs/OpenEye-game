@@ -8,6 +8,8 @@ option(OPENEYE_USE_VULKAN "Build with Vulkan support (RHI + ImGui backend; requi
 option(OPENEYE_VULKAN_DEBUG_CLEAR_RED "Vulkan debug: red clear to verify present path" ON)
 # Validation: ON = enable VK_LAYER_KHRONOS_validation (requires Vulkan SDK; outputs to stderr).
 option(OPENEYE_VULKAN_VALIDATION "Enable Vulkan validation layer" ON)
+# RHI: wall-clock profiling around CommandListVK::BindBindlessHeap (descriptor-buffer vs classic path); default OFF.
+option(OPENEYE_RHI_BINDLESS_PROFILE "Vulkan RHI: profile BindBindlessHeap (CPU-side timing, logs)" OFF)
 
 # --------------------------------------
 # LZ4 & Zstd (FetchContent)

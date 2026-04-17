@@ -40,6 +40,21 @@ struct IBindlessHeap;
 struct IRenderTarget;
 struct IQueryPool;
 struct IFence;
+struct IAccelerationStructure;
+/** Scratch region for acceleration-structure GPU builds (see `AccelerationStructureScratchBufferDesc`). */
+struct IAccelerationStructureScratchBuffer {
+    virtual ~IAccelerationStructureScratchBuffer() = default;
+    virtual IBuffer* Buffer() = 0;
+    virtual const IBuffer* Buffer() const = 0;
+};
+/** TLAS instance record array (see `AccelerationStructureInstanceBufferDesc`). */
+struct IAccelerationStructureInstanceBuffer {
+    virtual ~IAccelerationStructureInstanceBuffer() = default;
+    virtual IBuffer* Buffer() = 0;
+    virtual const IBuffer* Buffer() const = 0;
+    virtual uint32_t GetMaxInstanceCount() const = 0;
+    virtual size_t GetInstanceStrideBytes() const = 0;
+};
 
 /** GPU frame lifecycle for backends that submit per-frame command buffers (Vulkan). Used for debug checks and tooling. */
 enum class GpuFramePhase : uint8_t {
@@ -101,6 +116,40 @@ struct IDevice {
     virtual void DestroyBuffer(IBuffer* buffer) = 0;
     /** Vulkan: returns `vkGetBufferDeviceAddress` for buffers created with shader-device-address usage; 0 when unsupported/unavailable. */
     virtual uint64_t GetBufferDeviceAddress(IBuffer* buffer) { (void)buffer; return 0; }
+
+    /** Vulkan `VK_KHR_acceleration_structure`: query build sizes for a device-side build. Fills zeros when unsupported. */
+    virtual bool GetAccelerationStructureBuildSizes(const AccelerationStructureBuildSizesInput& input, AccelerationStructureBuildSizes& outSizes) {
+        (void)input;
+        outSizes = {};
+        return false;
+    }
+    /** Vulkan `VK_KHR_acceleration_structure`: create a `VkAccelerationStructureKHR` in a buffer subrange. Returns nullptr when unsupported or on failure. */
+    virtual IAccelerationStructure* CreateAccelerationStructure(const AccelerationStructureDesc& desc) { (void)desc; return nullptr; }
+    /** Vulkan: deferred `vkDestroyAccelerationStructureKHR` (GPU fence); destroy **before** freeing `AccelerationStructureDesc::storageBuffer`. */
+    virtual void DestroyAccelerationStructure(IAccelerationStructure* as) { (void)as; }
+
+    /** Vulkan: scratch buffer for `vkCmdBuildAccelerationStructuresKHR` (storage + shader device address, scratch-aligned). */
+    virtual IAccelerationStructureScratchBuffer* CreateAccelerationStructureScratchBuffer(const AccelerationStructureScratchBufferDesc& desc,
+                                                                                          const void* initialData = nullptr) {
+        (void)desc;
+        (void)initialData;
+        return nullptr;
+    }
+    virtual void DestroyAccelerationStructureScratchBuffer(IAccelerationStructureScratchBuffer* buffer) {
+        if (!buffer) return;
+        DestroyBuffer(buffer->Buffer());
+    }
+    /** Vulkan: TLAS instance buffer (`VkAccelerationStructureInstanceKHR` stride). */
+    virtual IAccelerationStructureInstanceBuffer* CreateAccelerationStructureInstanceBuffer(const AccelerationStructureInstanceBufferDesc& desc,
+                                                                                              const void* initialData = nullptr) {
+        (void)desc;
+        (void)initialData;
+        return nullptr;
+    }
+    virtual void DestroyAccelerationStructureInstanceBuffer(IAccelerationStructureInstanceBuffer* buffer) {
+        if (!buffer) return;
+        DestroyBuffer(buffer->Buffer());
+    }
 
     virtual ITexture* CreateTexture(const TextureDesc& desc, const void* initialData = nullptr) = 0;
     virtual void DestroyTexture(ITexture* texture) = 0;
@@ -379,6 +428,20 @@ struct ICommandList {
     /** Dispatch compute with group counts read from indirectBuffer at offset (DispatchIndirectCommand). Same pipeline requirements as Dispatch. Gated by supportsCompute. */
     virtual void DispatchIndirect(IBuffer* indirectBuffer, size_t offset) = 0;
 
+    /** Vulkan `VK_EXT_mesh_shader`: dispatch mesh task groups (`vkCmdDrawMeshTasksEXT`). Requires active dynamic rendering, mesh pipeline bound, `RHICapabilities::supportsMeshShader`. */
+    virtual void DrawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
+    /** Vulkan: `vkCmdDrawMeshTasksIndirectEXT` — buffer holds `VkDrawMeshTasksIndirectCommandEXT` records. */
+    virtual void DrawMeshTasksIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) = 0;
+    /** Vulkan `VK_KHR_fragment_shading_rate`: sets per-draw fragment shading rate and combiner ops for subsequent draws in this command buffer. */
+    virtual void SetFragmentShadingRate(
+        FragmentShadingRate rate,
+        FragmentShadingRateCombinerOp pipelinePrimitiveOp = FragmentShadingRateCombinerOp::Keep,
+        FragmentShadingRateCombinerOp primitiveAttachmentOp = FragmentShadingRateCombinerOp::Keep) {
+        (void)rate;
+        (void)pipelinePrimitiveOp;
+        (void)primitiveAttachmentOp;
+    }
+
     /** Vulkan: `vkCmdResetQueryPool` for [firstQuery, firstQuery+queryCount), or host `vkResetQueryPool` when `supportsHostQueryReset` while inside dynamic rendering. Cmd reset must be outside active dynamic rendering. No-op default. */
     virtual void ResetQueryPool(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
         (void)pool;
@@ -402,6 +465,23 @@ struct ICommandList {
     virtual IFence* InsertFence() = 0;
 
     virtual void CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, size_t dstOffset, size_t size) = 0;
+
+    /**
+     * Vulkan `VK_KHR_acceleration_structure`: record `vkCmdBuildAccelerationStructuresKHR`.
+     * `pBuildGeometryInfos` points to `infoCount` `VkAccelerationStructureBuildGeometryInfoKHR` in device build mode.
+     * `ppBuildRangeInfos` matches Vulkan’s `const VkAccelerationStructureBuildRangeInfoKHR* const*` (one pointer per info).
+     * No-op when `!GetCapabilities().supportsAccelerationStructureBuild` or not recording.
+     */
+    virtual void BuildAccelerationStructures(uint32_t infoCount, const void* pBuildGeometryInfos, const void* const* ppBuildRangeInfos) {
+        (void)infoCount;
+        (void)pBuildGeometryInfos;
+        (void)ppBuildRangeInfos;
+    }
+    /**
+     * Conservative dependency between AS build writes and subsequent AS reads (e.g. ray query in compute).
+     * Vulkan: `VkMemoryBarrier2` with acceleration-structure access/stages. No-op when unsupported.
+     */
+    virtual void MemoryBarrierAccelerationStructureAccess() {}
 };
 
 // ---- Fence (CPU wait for GPU) ----
@@ -418,6 +498,16 @@ struct IBuffer {
     virtual void* Map(size_t offset = 0, size_t size = 0) = 0;  // 0 size = whole buffer
     virtual void Unmap() = 0;
     virtual void Update(const void* data, size_t offset, size_t size) = 0;
+};
+
+struct IAccelerationStructure {
+    virtual ~IAccelerationStructure() = default;
+    virtual AccelerationStructureType GetAccelerationStructureType() const = 0;
+    /** Vulkan `vkGetAccelerationStructureDeviceAddressKHR` when ray-query slice is enabled; else 0. */
+    virtual uint64_t GetDeviceAddress() const = 0;
+    virtual uint64_t GetSizeInBytes() const = 0;
+    /** Vulkan: `VkAccelerationStructureKHR` as `void*`; nullptr when not applicable. */
+    virtual void* GetNativeAccelerationStructure() { return nullptr; }
 };
 
 // ---- Texture ----
@@ -497,6 +587,8 @@ struct IPipeline {
         out.hasIndirectOut = false;
         out.hasDrawListIn = false;
     }
+    /** True when pipeline uses Vulkan mesh shading (`DrawMeshTasks` / `DrawMeshTasksIndirect` instead of `Draw`). */
+    virtual bool UsesMeshShaders() const { return false; }
 };
 
 // ---- Render target ----
@@ -520,7 +612,9 @@ struct IQueryPool {
     virtual ~IQueryPool() = default;
     virtual QueryType GetType() const = 0;
     virtual uint32_t GetCount() const = 0;
-    /** Timestamp: nanoseconds (`BeginQuery(i)`/`EndQuery(i)` use slots `i` and `i+1`). Occlusion: samples passed (uint64). Pipeline statistics: use `GetPipelineStatistics` (this returns 0). */
+    /** Timestamp: nanoseconds after **`VkPhysicalDeviceLimits::timestampPeriod`** scaling in **`QueryPoolVK::GetResult`**
+     *  (`BeginQuery(i)` / `EndQuery(i)` use **`vkCmdWriteTimestamp`** at **`i`** and **`i+1`**). Occlusion: samples passed (**uint64**).
+     *  Pipeline statistics: use **`GetPipelineStatistics`** (**`GetResult`** returns 0). See **`eyelib/rendering/rhi/Vulkan/query_pool_dynamic_rendering.md`**. */
     virtual uint64_t GetResult(uint32_t index) = 0;
     /** For `QueryType::PipelineStatistics`: number of `uint64_t` counters per query (popcount of pool mask). Else 0. */
     virtual uint32_t GetPipelineStatisticsSlotCount() const { return 0; }

@@ -19,6 +19,7 @@ void SetDebugNameImageView(DeviceVK* device, void* vkImageView, const char* name
 void SetDebugNamePipeline(DeviceVK* device, void* vkPipeline, const char* name);
 void SetDebugNameDescriptorSet(DeviceVK* device, void* vkDescriptorSet, const char* name);
 void SetDebugNameSwapchain(DeviceVK* device, void* vkSwapchainKHR, const char* name);
+void SetDebugNameAccelerationStructure(DeviceVK* device, void* vkAccelerationStructureKHR, const char* name);
 
 /** Nested **region** in a **`VkCommandBuffer`** (visible in captures / some GPU profilers). Begin and End calls must be paired. */
 void CmdDebugUtilsBeginLabel(DeviceVK* device, void* vkCommandBuffer, const char* name, const float colorRgba[4]);

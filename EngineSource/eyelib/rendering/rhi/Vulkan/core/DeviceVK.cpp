@@ -1,5 +1,7 @@
 #include "eyelib/rendering/rhi/Vulkan/core/DeviceVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/BufferVK.h"
+#include "eyelib/rendering/rhi/Vulkan/resources/AccelerationStructureBuffersVK.h"
+#include "eyelib/rendering/rhi/Vulkan/resources/AccelerationStructureVK.h"
 #include "eyelib/rendering/rhi/Vulkan/resources/TextureVK.h"
 #include "eyelib/rendering/rhi/Vulkan/pipelines/ShaderVK.h"
 #include "eyelib/rendering/rhi/Vulkan/pipelines/PipelineVK.h"
@@ -17,6 +19,7 @@
 #include "eyelib/rendering/rhi/Vulkan/pipelines/VulkanResourceSpaces.h"
 #include "eyelib/rendering/rhi/ResourceSetLayoutDesc.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
+#include "eyelib/rendering/backend/RenderBackendPolicy.h"
 #include "eyelib/rendering/shaders/ShaderPathResolve.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
@@ -61,8 +64,12 @@ std::string GetPipelineCachePathForPhysicalDevice(VkPhysicalDevice phys) {
     std::string exePath = eyelib::platform::filesystem::GetExecutablePath();
     std::string cacheDir = eyelib::platform::filesystem::GetDirectory(exePath);
     if (cacheDir.empty()) return {};
-    char name[96];
-    snprintf(name, sizeof(name), "vulkan_pipeline_cache_%u_%u.bin", props.vendorID, props.deviceID);
+    // `pipelineCacheUUID` is the Vulkan-specified discriminator for pipeline cache compatibility across drivers/builds.
+    char uuidHex[VK_UUID_SIZE * 2 + 1];
+    for (int i = 0; i < VK_UUID_SIZE; ++i)
+        snprintf(uuidHex + i * 2, 3, "%02x", static_cast<unsigned>(props.pipelineCacheUUID[i]));
+    char name[160];
+    snprintf(name, sizeof(name), "vulkan_pipeline_cache_%04x_%04x_%s.bin", props.vendorID, props.deviceID, uuidHex);
     return cacheDir + "/" + name;
 }
 }
@@ -86,6 +93,7 @@ DeviceVK::~DeviceVK() {
         for (uint32_t i = 0; i < kMaxFrames; ++i)
             m_deletionQueue.Tick(m_device, GetAllocator(), i, &alreadyDestroyedPipelines);
         RetirePendingTextureWrappers(true);
+        RetirePendingAccelerationStructureWrappers(true);
         for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
             DestroyDescriptorSetVK(this, set);
         m_pendingDescriptorSetsToFree.clear();
@@ -219,6 +227,11 @@ DeviceVK::~DeviceVK() {
     rscLayout = static_cast<VkDescriptorSetLayout>(m_emptyResourceSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_emptyResourceSetLayout = nullptr; }
 
+    VkPipelineLayout meshPushPl = static_cast<VkPipelineLayout>(m_meshPushPipelineLayout);
+    if (meshPushPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, meshPushPl, nullptr);
+        m_meshPushPipelineLayout = nullptr;
+    }
     VkPipelineLayout defaultPl = static_cast<VkPipelineLayout>(m_defaultPipelineLayout);
     if (defaultPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, defaultPl, nullptr);
@@ -282,6 +295,7 @@ DeviceVK::~DeviceVK() {
             m_deletionQueue.Tick(m_device, GetAllocator(), i);
     }
     RetirePendingTextureWrappers(true);
+    RetirePendingAccelerationStructureWrappers(true);
     UploadHeapVK::Destroy(&m_uploadHeap, GetAllocator());
     AllocatorVK::Destroy(&m_allocatorVK);
     if (device != VK_NULL_HANDLE)
@@ -413,6 +427,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_descriptor_buffer") == 0; });
     const bool hasGraphicsPipelineLibraryExt = std::any_of(availableExts.begin(), availableExts.end(),
         [](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, "VK_EXT_graphics_pipeline_library") == 0; });
+    const bool hasFragmentShadingRateExt = hasDeviceExtension("VK_KHR_fragment_shading_rate");
+    const bool hasAccelerationStructureExt = hasDeviceExtension("VK_KHR_acceleration_structure");
+    const bool hasDeferredHostOperationsExt = hasDeviceExtension("VK_KHR_deferred_host_operations");
+    const bool hasRayQueryExt = hasDeviceExtension("VK_KHR_ray_query");
     const bool hasPipelineExecutablePropertiesExt = hasDeviceExtension("VK_KHR_pipeline_executable_properties");
     const bool hasDeviceFaultExt = hasDeviceExtension("VK_EXT_device_fault");
 
@@ -540,6 +558,16 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     hostQueryResetFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
     VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
     bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR)
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragmentShadingRateFeatures = {};
+    fragmentShadingRateFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+#endif
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures = {};
+    accelerationStructureFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures = {};
+    rayQueryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+#endif
 
     if (chainVulkan12) {
         vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -846,6 +874,91 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     m_supportsGraphicsPipelineLibrary = false;
 #endif
 
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR)
+    bool variableRateShadingSupported = false;
+    if (hasFragmentShadingRateExt) {
+        VkPhysicalDeviceFeatures2 vrsProbe = {};
+        vrsProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        vrsProbe.pNext = &fragmentShadingRateFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &vrsProbe);
+        variableRateShadingSupported = (fragmentShadingRateFeatures.pipelineFragmentShadingRate == VK_TRUE);
+    }
+    if (variableRateShadingSupported) {
+        deviceExtensions.push_back("VK_KHR_fragment_shading_rate");
+        fragmentShadingRateFeatures.pipelineFragmentShadingRate = VK_TRUE;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&fragmentShadingRateFeatures);
+        }
+        m_supportsVariableRateShading = true;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR)
+        VkPhysicalDeviceFragmentShadingRatePropertiesKHR vrsProps = {};
+        vrsProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_PROPERTIES_KHR;
+        VkPhysicalDeviceProperties2 props2 = {};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &vrsProps;
+        vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+        m_vrsMinTexelWidth = vrsProps.minFragmentShadingRateAttachmentTexelSize.width;
+        m_vrsMinTexelHeight = vrsProps.minFragmentShadingRateAttachmentTexelSize.height;
+        m_vrsMaxTexelWidth = vrsProps.maxFragmentShadingRateAttachmentTexelSize.width;
+        m_vrsMaxTexelHeight = vrsProps.maxFragmentShadingRateAttachmentTexelSize.height;
+#endif
+    } else {
+        m_supportsVariableRateShading = false;
+    }
+#else
+    (void)hasFragmentShadingRateExt;
+    m_supportsVariableRateShading = false;
+#endif
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR)
+    m_supportsRayQuery = false;
+    m_rayTracingMaxPrimitiveCount = 0;
+    m_rayTracingScratchAlignment = 0;
+    bool rayQuerySliceSupported = false;
+    if (hasAccelerationStructureExt && hasDeferredHostOperationsExt && hasRayQueryExt) {
+        VkPhysicalDeviceFeatures2 rtProbe = {};
+        rtProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        rtProbe.pNext = &accelerationStructureFeatures;
+        accelerationStructureFeatures.pNext = &rayQueryFeatures;
+        rayQueryFeatures.pNext = nullptr;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &rtProbe);
+        rayQuerySliceSupported =
+            (accelerationStructureFeatures.accelerationStructure == VK_TRUE) && (rayQueryFeatures.rayQuery == VK_TRUE);
+    }
+    if (rayQuerySliceSupported) {
+        deviceExtensions.push_back("VK_KHR_deferred_host_operations");
+        deviceExtensions.push_back("VK_KHR_acceleration_structure");
+        deviceExtensions.push_back("VK_KHR_ray_query");
+        accelerationStructureFeatures.accelerationStructure = VK_TRUE;
+        rayQueryFeatures.rayQuery = VK_TRUE;
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&accelerationStructureFeatures);
+        }
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR)
+        VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps = {};
+        asProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR;
+        VkPhysicalDeviceProperties2 rtProps = {};
+        rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        rtProps.pNext = &asProps;
+        vkGetPhysicalDeviceProperties2(physicalDevice, &rtProps);
+        m_rayTracingMaxPrimitiveCount = asProps.maxPrimitiveCount;
+        m_rayTracingScratchAlignment = asProps.minAccelerationStructureScratchOffsetAlignment;
+#endif
+        m_supportsRayQuery = true;
+    }
+#else
+    (void)hasAccelerationStructureExt;
+    (void)hasDeferredHostOperationsExt;
+    (void)hasRayQueryExt;
+    m_supportsRayQuery = false;
+    m_rayTracingMaxPrimitiveCount = 0;
+    m_rayTracingScratchAlignment = 0;
+#endif
+
 #if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR) && defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR)
     VkPhysicalDevicePresentIdFeaturesKHR presentIdFeaturesKHR = {};
     VkPhysicalDevicePresentWaitFeaturesKHR presentWaitFeaturesKHR = {};
@@ -935,17 +1048,72 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     m_supportsDeviceFault = false;
 #endif
 
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT)
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshShaderFeatures = {};
+    meshShaderFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    meshShaderFeatures.pNext = nullptr;
+    {
+        VkPhysicalDeviceFeatures2 meshFeatProbe = {};
+        meshFeatProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        meshFeatProbe.pNext = &meshShaderFeatures;
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &meshFeatProbe);
+    }
+    m_supportsMeshShader = false;
+    m_supportsMeshTaskShader = false;
+    m_meshShaderMaxOutputVertices = 0;
+    m_meshShaderMaxOutputPrimitives = 0;
+    m_meshShaderMaxPayloadAndSharedMemoryBytes = 0;
+    if (hasDeviceExtension("VK_EXT_mesh_shader") && meshShaderFeatures.meshShader == VK_TRUE) {
+        deviceExtensions.push_back("VK_EXT_mesh_shader");
+        meshShaderFeatures.meshShader = VK_TRUE;
+        if (meshShaderFeatures.taskShader == VK_TRUE) {
+            meshShaderFeatures.taskShader = VK_TRUE;
+            m_supportsMeshTaskShader = true;
+        } else {
+            meshShaderFeatures.taskShader = VK_FALSE;
+        }
+        {
+            VkBaseOutStructure* tail = reinterpret_cast<VkBaseOutStructure*>(&features2);
+            while (tail->pNext) tail = reinterpret_cast<VkBaseOutStructure*>(tail->pNext);
+            tail->pNext = reinterpret_cast<VkBaseOutStructure*>(&meshShaderFeatures);
+        }
+        m_supportsMeshShader = true;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT)
+        VkPhysicalDeviceMeshShaderPropertiesEXT meshShaderProps = {};
+        meshShaderProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT;
+        VkPhysicalDeviceProperties2 props2 = {};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &meshShaderProps;
+        vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+        m_meshShaderMaxOutputVertices = meshShaderProps.maxMeshOutputVertices;
+        m_meshShaderMaxOutputPrimitives = meshShaderProps.maxMeshOutputPrimitives;
+        m_meshShaderMaxPayloadAndSharedMemoryBytes = meshShaderProps.maxMeshPayloadAndSharedMemorySize;
+#endif
+        core::Log::InfoF(
+            "Vulkan: VK_EXT_mesh_shader enabled (task=%d maxMeshOutVerts=%u maxMeshOutPrims=%u payloadShared=%u).",
+            m_supportsMeshTaskShader ? 1 : 0, m_meshShaderMaxOutputVertices, m_meshShaderMaxOutputPrimitives,
+            m_meshShaderMaxPayloadAndSharedMemoryBytes);
+    }
+#else
+    m_supportsMeshShader = false;
+    m_supportsMeshTaskShader = false;
+    m_meshShaderMaxOutputVertices = 0;
+    m_meshShaderMaxOutputPrimitives = 0;
+    m_meshShaderMaxPayloadAndSharedMemoryBytes = 0;
+#endif
+
     core::Log::InfoF(
         "Vulkan required feature status: fragmentStoresAndAtomics=%d descriptorPartiallyBound=%d descriptorSampledImageUpdateAfterBind=%d descriptorStorageBufferUpdateAfterBind=%d timelineSemaphore=%d dynamicRendering=%d synchronization2=%d shaderDrawParameters=%d",
         1, 1, 1, 1, 1, 1, 1, 1);
     core::Log::InfoF(
-        "Vulkan optional feature status: drawIndirectCount=%d extendedDynamicState=%d hostQueryReset=%d pipelineStatisticsQuery=%d bufferDeviceAddress=%d descriptorBuffer=%d graphicsPipelineLibrary=%d tessellationShader=%d geometryShader=%d occlusionQueries=%d swapchainMaintenance1=%d swapchainColorspace=%d presentWait=%d pipelineExecutableProperties=%d deviceFault=%d",
+        "Vulkan optional feature status: drawIndirectCount=%d extendedDynamicState=%d hostQueryReset=%d pipelineStatisticsQuery=%d bufferDeviceAddress=%d descriptorBuffer=%d graphicsPipelineLibrary=%d tessellationShader=%d geometryShader=%d occlusionQueries=%d swapchainMaintenance1=%d swapchainColorspace=%d presentWait=%d pipelineExecutableProperties=%d deviceFault=%d meshShader=%d variableRateShading=%d rayQuery=%d",
         m_supportsDrawIndirectCount ? 1 : 0, m_supportsExtendedDynamicState ? 1 : 0,
         m_supportsHostQueryReset ? 1 : 0, m_supportsPipelineStatisticsQuery ? 1 : 0,
         m_supportsBufferDeviceAddress ? 1 : 0, m_supportsDescriptorBuffer ? 1 : 0, m_supportsGraphicsPipelineLibrary ? 1 : 0,
         m_supportsTessellationShader ? 1 : 0,
         m_supportsGeometryShader ? 1 : 0, m_supportsOcclusionQuery ? 1 : 0, m_supportsSwapchainMaintenance1 ? 1 : 0,
-        m_supportsSwapchainColorspace ? 1 : 0, m_supportsPresentWait ? 1 : 0, m_supportsPipelineExecutableProperties ? 1 : 0, m_supportsDeviceFault ? 1 : 0);
+        m_supportsSwapchainColorspace ? 1 : 0, m_supportsPresentWait ? 1 : 0, m_supportsPipelineExecutableProperties ? 1 : 0, m_supportsDeviceFault ? 1 : 0,
+        m_supportsMeshShader ? 1 : 0, m_supportsVariableRateShading ? 1 : 0, m_supportsRayQuery ? 1 : 0);
 
     VkDeviceCreateInfo deviceCreateInfo = {};
     deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1004,6 +1172,66 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             m_pfnGetDescriptorEXT = nullptr;
             m_pfnCmdBindDescriptorBuffersEXT = nullptr;
             m_pfnCmdSetDescriptorBufferOffsetsEXT = nullptr;
+        }
+    }
+    if (m_supportsPipelineExecutableProperties) {
+        m_pfnGetPipelineExecutablePropertiesKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetPipelineExecutablePropertiesKHR"));
+        if (!m_pfnGetPipelineExecutablePropertiesKHR)
+            core::Log::Warn(
+                "Vulkan: VK_KHR_pipeline_executable_properties enabled but vkGetPipelineExecutablePropertiesKHR was not loaded.");
+    }
+    if (m_supportsDeviceFault) {
+        m_pfnGetDeviceFaultInfoEXT = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetDeviceFaultInfoEXT"));
+        if (!m_pfnGetDeviceFaultInfoEXT)
+            core::Log::Warn("Vulkan: VK_EXT_device_fault enabled but vkGetDeviceFaultInfoEXT was not loaded.");
+    }
+    if (m_supportsMeshShader) {
+        m_pfnCmdDrawMeshTasksEXT = reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
+        m_pfnCmdDrawMeshTasksIndirectEXT =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksIndirectEXT"));
+        if (!m_pfnCmdDrawMeshTasksEXT) {
+            core::Log::Warn("Vulkan: VK_EXT_mesh_shader enabled but vkCmdDrawMeshTasksEXT was not loaded; mesh draws disabled.");
+            m_supportsMeshShader = false;
+            m_supportsMeshTaskShader = false;
+            m_pfnCmdDrawMeshTasksIndirectEXT = nullptr;
+        }
+    }
+    if (m_supportsVariableRateShading) {
+        m_pfnCmdSetFragmentShadingRateKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdSetFragmentShadingRateKHR"));
+        if (!m_pfnCmdSetFragmentShadingRateKHR) {
+            core::Log::Warn(
+                "Vulkan: VK_KHR_fragment_shading_rate enabled but vkCmdSetFragmentShadingRateKHR was not loaded; VRS disabled.");
+            m_supportsVariableRateShading = false;
+        }
+    }
+    if (m_supportsRayQuery) {
+        m_pfnCreateAccelerationStructureKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR"));
+        m_pfnDestroyAccelerationStructureKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR"));
+        m_pfnCmdBuildAccelerationStructuresKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR"));
+        m_pfnGetAccelerationStructureBuildSizesKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR"));
+        m_pfnGetAccelerationStructureDeviceAddressKHR =
+            reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR"));
+        const bool missingAsEntrypoints =
+            !m_pfnCreateAccelerationStructureKHR || !m_pfnDestroyAccelerationStructureKHR ||
+            !m_pfnCmdBuildAccelerationStructuresKHR || !m_pfnGetAccelerationStructureBuildSizesKHR ||
+            !m_pfnGetAccelerationStructureDeviceAddressKHR;
+        if (missingAsEntrypoints) {
+            core::Log::Warn(
+                "Vulkan: ray query slice extensions enabled but acceleration-structure entry points failed to load; disabling ray query support.");
+            m_supportsRayQuery = false;
+            m_pfnCreateAccelerationStructureKHR = nullptr;
+            m_pfnDestroyAccelerationStructureKHR = nullptr;
+            m_pfnCmdBuildAccelerationStructuresKHR = nullptr;
+            m_pfnGetAccelerationStructureBuildSizesKHR = nullptr;
+            m_pfnGetAccelerationStructureDeviceAddressKHR = nullptr;
+            m_rayTracingMaxPrimitiveCount = 0;
+            m_rayTracingScratchAlignment = 0;
         }
     }
 
@@ -1116,8 +1344,12 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     std::vector<uint8_t> pipelineCacheInitialData;
     VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(m_physicalDeviceVK.GetHandle());
     std::string pipelineCachePath = GetPipelineCachePathForPhysicalDevice(phys);
-    if (!pipelineCachePath.empty() && eyelib::platform::filesystem::FileExists(pipelineCachePath))
+    if (!pipelineCachePath.empty() && eyelib::platform::filesystem::FileExists(pipelineCachePath)) {
         pipelineCacheInitialData = eyelib::platform::filesystem::ReadFile(pipelineCachePath);
+        if (!pipelineCacheInitialData.empty())
+            core::Log::InfoF("Vulkan: loading on-disk pipeline cache (%zu bytes) from %s", pipelineCacheInitialData.size(),
+                              pipelineCachePath.c_str());
+    }
     VkPipelineCacheCreateInfo pipelineCacheInfo = {};
     pipelineCacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     pipelineCacheInfo.initialDataSize = pipelineCacheInitialData.size();
@@ -1186,6 +1418,13 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     bindlessBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindlessBindings[1].descriptorCount = kMaxBindlessBuffers;
     bindlessBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT) && defined(VK_SHADER_STAGE_TASK_BIT_EXT)
+    if (m_supportsMeshShader) {
+        const VkShaderStageFlags meshAmp = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+        bindlessBindings[0].stageFlags |= meshAmp;
+        bindlessBindings[1].stageFlags |= meshAmp;
+    }
+#endif
     bindlessBindings[1].pImmutableSamplers = nullptr;
     VkDescriptorSetLayoutCreateInfo bindlessLayoutInfo = {};
     bindlessLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1340,16 +1579,17 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
 
     // Resource-space descriptor set layouts and pipeline layouts (Frame/Pass/Material/SceneBuffers). See descriptor_binding_table.md.
     {
-        VkDescriptorSetLayout frameLayout = vkres::CreateFrameSetLayout(device);
-        VkDescriptorSetLayout forwardPassLayout = vkres::CreateForwardPassSetLayout(device);
-        VkDescriptorSetLayout postPassLayout = vkres::CreatePostPassSetLayout(device);
-        VkDescriptorSetLayout shadowPassLayout = vkres::CreateShadowPassSetLayout(device);
+        const bool meshStages = m_supportsMeshShader;
+        VkDescriptorSetLayout frameLayout = vkres::CreateFrameSetLayout(device, meshStages);
+        VkDescriptorSetLayout forwardPassLayout = vkres::CreateForwardPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout postPassLayout = vkres::CreatePostPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout shadowPassLayout = vkres::CreateShadowPassSetLayout(device, meshStages);
         VkDescriptorSetLayout lightCullPassLayout = vkres::CreateLightCullPassSetLayout(device);
-        VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device);
-        VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device);
-        VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device);
-        VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device);
-        VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device);
+        VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device, meshStages);
+        VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device, meshStages);
+        VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device, meshStages);
         VkDescriptorSetLayout emptyLayout = vkres::CreateEmptySetLayout(device);
         if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !emptyLayout) {
             if (emptyLayout) vkDestroyDescriptorSetLayout(device, emptyLayout, nullptr);
@@ -1397,16 +1637,17 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_emptyResourceSetLayout = emptyLayout;
 
         VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout,
-                                                                        sceneLayout, m_supportsDescriptorBuffer);
-        VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout);
-        VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout);
+                                                                        sceneLayout, m_supportsDescriptorBuffer, meshStages);
+        VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout, meshStages);
+        VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout, meshStages);
         VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout,
-                                                                      m_supportsDescriptorBuffer);
-        VkPipelineLayout deferredLightingPl = vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout);
+                                                                      m_supportsDescriptorBuffer, meshStages);
+        VkPipelineLayout deferredLightingPl =
+            vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout, meshStages);
         VkPipelineLayout computeLightCullPl = vkres::CreateComputeLightCullPipelineLayout(device, frameLayout, lightCullPassLayout, sceneLayout, emptyLayout);
         VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout, emptyLayout);
-        VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout);
-        VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout);
+        VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout, meshStages);
+        VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
         if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl) {
             if (outlinePostPl) vkDestroyPipelineLayout(device, outlinePostPl, nullptr);
             if (iblPl) vkDestroyPipelineLayout(device, iblPl, nullptr);
@@ -1584,6 +1825,14 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
     else
         core::Log::Warn("DeviceVK::Initialize: failed to create nearest sampler, falling back to default linear sampler for all textures.");
 
+    m_meshPushPipelineLayout = nullptr;
+    if (m_supportsMeshShader) {
+        m_meshPushPipelineLayout = vkres::CreatePushOnlyPipelineLayoutWithMeshPushStages(device);
+        if (!m_meshPushPipelineLayout)
+            core::Log::Warn(
+                "DeviceVK::Initialize: mesh push pipeline layout failed; mesh `PipelineLayoutKind::PushOnly` pipelines cannot be created.");
+    }
+
     QueryCapabilities();
     core::Log::Info("Vulkan device initialized");
     return true;
@@ -1644,7 +1893,7 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsGpuDrivenPerDrawTransformIndirect = true;
     m_caps.supportsAsyncCompute = (m_queues.GetComputeQueue() != nullptr) && (m_queues.GetComputeQueueFamily() != m_queues.GetGraphicsQueueFamily());
     m_caps.supportsBindless = true;  // descriptor indexing
-    m_caps.supportsRayTracing = false;
+    m_caps.supportsRayTracing = m_supportsRayQuery;
     m_caps.supportsTessellation = true;
     m_caps.supportsGeometryShader = true;
     m_caps.supportsConditionalRender = false;
@@ -1662,6 +1911,18 @@ void DeviceVK::QueryCapabilities() {
         VkPhysicalDeviceProperties props = {};
         vkGetPhysicalDeviceProperties(phys, &props);
         m_caps.supportsGpuTimestampQueries = props.limits.timestampPeriod > 0.f;
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES)
+        VkPhysicalDeviceSubgroupProperties subgroupProps{};
+        subgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+        VkPhysicalDeviceProperties2 props2{};
+        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        props2.pNext = &subgroupProps;
+        vkGetPhysicalDeviceProperties2(phys, &props2);
+        m_caps.subgroupSize = subgroupProps.subgroupSize;
+        m_caps.subgroupSupportedShaderStagesMask = static_cast<uint32_t>(subgroupProps.supportedStages);
+        m_caps.subgroupSupportedOperationsMask = static_cast<uint32_t>(subgroupProps.supportedOperations);
+        m_caps.subgroupQuadOperationsInAllStages = (subgroupProps.quadOperationsInAllStages == VK_TRUE);
+#endif
     }
     VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(m_surface);
     if (surface != VK_NULL_HANDLE && phys != VK_NULL_HANDLE) {
@@ -1688,8 +1949,22 @@ void DeviceVK::QueryCapabilities() {
     m_caps.supportsSwapchainMaintenance1 = m_supportsSwapchainMaintenance1;
     m_caps.supportsSwapchainColorspace = m_supportsSwapchainColorspace;
     m_caps.supportsPresentWait = m_supportsPresentWait;
+    m_caps.supportsMeshShader = m_supportsMeshShader;
+    m_caps.supportsMeshTaskShader = m_supportsMeshTaskShader;
+    m_caps.meshShaderMaxOutputVertices = m_meshShaderMaxOutputVertices;
+    m_caps.meshShaderMaxOutputPrimitives = m_meshShaderMaxOutputPrimitives;
+    m_caps.meshShaderMaxPayloadAndSharedMemoryBytes = m_meshShaderMaxPayloadAndSharedMemoryBytes;
+    m_caps.supportsVariableRateShading = m_supportsVariableRateShading;
+    m_caps.vrsMinTexelWidth = m_vrsMinTexelWidth;
+    m_caps.vrsMinTexelHeight = m_vrsMinTexelHeight;
+    m_caps.vrsMaxTexelWidth = m_vrsMaxTexelWidth;
+    m_caps.vrsMaxTexelHeight = m_vrsMaxTexelHeight;
+    m_caps.supportsRayQuery = m_supportsRayQuery;
+    m_caps.supportsAccelerationStructureBuild = (GetCmdBuildAccelerationStructuresKHR() != nullptr);
+    m_caps.rayTracingMaxPrimitiveCount = m_rayTracingMaxPrimitiveCount;
+    m_caps.rayTracingScratchAlignment = m_rayTracingScratchAlignment;
     core::Log::InfoF(
-        "Vulkan caps: present mailbox=%d immediate=%d gpuTimestamps=%d tess=%d geom=%d occlusion=%d hostQueryReset=%d pipelineStats=%d sync2=%d bda=%d descriptorBuffer=%d graphicsPipelineLibrary=%d pipelineExecutableProperties=%d deviceFault=%d asyncCompute=%d swapchainMaint1=%d swapchainColorspace=%d presentWait=%d",
+        "Vulkan caps: present mailbox=%d immediate=%d gpuTimestamps=%d tess=%d geom=%d occlusion=%d hostQueryReset=%d pipelineStats=%d sync2=%d bda=%d descriptorBuffer=%d graphicsPipelineLibrary=%d pipelineExecutableProperties=%d deviceFault=%d asyncCompute=%d swapchainMaint1=%d swapchainColorspace=%d presentWait=%d meshShader=%d meshTask=%d vrs=%d vrsTexelRange=%ux%u..%ux%u rayQuery=%d asScratchAlign=%u",
         m_caps.supportsPresentMailbox ? 1 : 0, m_caps.supportsPresentImmediate ? 1 : 0,
         m_caps.supportsGpuTimestampQueries ? 1 : 0, m_caps.supportsTessellation ? 1 : 0,
         m_caps.supportsGeometryShader ? 1 : 0, m_caps.supportsOcclusionQueries ? 1 : 0,
@@ -1698,7 +1973,17 @@ void DeviceVK::QueryCapabilities() {
         m_caps.supportsGraphicsPipelineLibrary ? 1 : 0,
         m_caps.supportsPipelineExecutableProperties ? 1 : 0, m_caps.supportsDeviceFault ? 1 : 0,
         m_caps.supportsAsyncCompute ? 1 : 0, m_caps.supportsSwapchainMaintenance1 ? 1 : 0,
-        m_caps.supportsSwapchainColorspace ? 1 : 0, m_caps.supportsPresentWait ? 1 : 0);
+        m_caps.supportsSwapchainColorspace ? 1 : 0, m_caps.supportsPresentWait ? 1 : 0,
+        m_caps.supportsMeshShader ? 1 : 0, m_caps.supportsMeshTaskShader ? 1 : 0,
+        m_caps.supportsVariableRateShading ? 1 : 0,
+        m_caps.vrsMinTexelWidth, m_caps.vrsMinTexelHeight, m_caps.vrsMaxTexelWidth, m_caps.vrsMaxTexelHeight,
+        m_caps.supportsRayQuery ? 1 : 0, m_caps.rayTracingScratchAlignment);
+    if (m_caps.subgroupSize > 0u) {
+        core::Log::InfoF(
+            "Vulkan caps (subgroup): size=%u stagesMask=0x%x opsMask=0x%x quadAllStages=%d",
+            m_caps.subgroupSize, m_caps.subgroupSupportedShaderStagesMask, m_caps.subgroupSupportedOperationsMask,
+            m_caps.subgroupQuadOperationsInAllStages ? 1 : 0);
+    }
 }
 
 void DeviceVK::EnsureFullscreenQuad() {
@@ -1749,7 +2034,15 @@ const char* DeviceVK::GetShaderFragmentExtension() const { return ".frag"; }
 
 bool DeviceVK::ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) {
     if (!logicalName || logicalName[0] == '\0') return false;
-    const char* ext = (stage == ShaderStage::Compute) ? ".comp" : (stage == ShaderStage::Vertex) ? ".vert" : ".frag";
+    const char* ext = ".frag";
+    switch (stage) {
+    case ShaderStage::Compute: ext = ".comp"; break;
+    case ShaderStage::Vertex: ext = ".vert"; break;
+    case ShaderStage::Task: ext = ".task"; break;
+    case ShaderStage::Mesh: ext = ".mesh"; break;
+    case ShaderStage::Fragment:
+    default: ext = ".frag"; break;
+    }
     outPath = std::string("assets/shaders/vulkan/") + logicalName + ext;
     return true;
 }
@@ -1847,6 +2140,134 @@ void DeviceVK::EnqueueFrameSliceCommandList(ICommandList* cmd) {
     m_frameSliceCommandListsByFrame[m_currentFrameIndex].push_back(std::unique_ptr<ICommandList>(cmd));
 }
 
+void DeviceVK::DeveloperLogPipelineExecutablePropertiesOnce(void* vkPipeline, const char* debugName) {
+    if (m_loggedPipelineExecutableSample)
+        return;
+    if (!m_supportsPipelineExecutableProperties) {
+        m_loggedPipelineExecutableSample = true;
+        return;
+    }
+    m_loggedPipelineExecutableSample = true;
+    auto pfn = reinterpret_cast<PFN_vkGetPipelineExecutablePropertiesKHR>(m_pfnGetPipelineExecutablePropertiesKHR);
+    VkDevice dev = static_cast<VkDevice>(m_device);
+    VkPipeline pl = static_cast<VkPipeline>(vkPipeline);
+    if (!pfn || dev == VK_NULL_HANDLE || pl == VK_NULL_HANDLE)
+        return;
+
+#if defined(VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR) && defined(VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR)
+    VkPipelineInfoKHR pipelineInfo = {};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR;
+    pipelineInfo.pipeline = pl;
+
+    uint32_t execCount = 0;
+    VkResult r = pfn(dev, &pipelineInfo, &execCount, nullptr);
+    if (r != VK_SUCCESS || execCount == 0) {
+        if (r != VK_SUCCESS)
+            core::Log::WarnF("Vulkan: vkGetPipelineExecutablePropertiesKHR count query failed (0x%x)",
+                             static_cast<unsigned>(static_cast<uint32_t>(r)));
+        return;
+    }
+
+    std::vector<VkPipelineExecutablePropertiesKHR> props(execCount);
+    for (uint32_t i = 0; i < execCount; ++i) {
+        props[i].sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR;
+        props[i].pNext = nullptr;
+    }
+    r = pfn(dev, &pipelineInfo, &execCount, props.data());
+    if (r != VK_SUCCESS)
+        return;
+
+    const char* dbg = (debugName && debugName[0]) ? debugName : "(no debugName)";
+    const char* firstName = props[0].name;
+    if (!firstName || !firstName[0])
+        firstName = "(unnamed)";
+    core::Log::InfoF(
+        "Vulkan: pipeline executable properties (sample): pipeline='%s' executable_count=%u first_executable.name='%s'",
+        dbg, execCount, firstName);
+#else
+    (void)debugName;
+    (void)pl;
+#endif
+}
+
+void DeviceVK::TryLogDeviceFaultInfoEXT(const char* lossContext) {
+#if !defined(VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT) || !defined(VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT)
+    (void)lossContext;
+#else
+    if (!m_supportsDeviceFault || !m_device || !m_pfnGetDeviceFaultInfoEXT || m_deviceFaultInfoLogged)
+        return;
+    auto pfn = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(m_pfnGetDeviceFaultInfoEXT);
+    if (!pfn)
+        return;
+
+    VkDevice dev = static_cast<VkDevice>(m_device);
+    VkDeviceFaultCountsEXT counts{};
+    counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+    const VkResult r0 = pfn(dev, &counts, nullptr);
+    if (r0 != VK_SUCCESS) {
+        static int s_faultCountFail = 0;
+        if (s_faultCountFail < 4) {
+            ++s_faultCountFail;
+            core::Log::WarnF("Vulkan: vkGetDeviceFaultInfoEXT(counts, context=%s) returned %d", lossContext ? lossContext : "?",
+                              static_cast<int>(r0));
+        }
+        m_deviceFaultInfoLogged = true;
+        return;
+    }
+
+    const uint32_t origAddr = counts.addressInfoCount;
+    const uint32_t origVend = counts.vendorInfoCount;
+    const VkDeviceSize origBin = counts.vendorBinarySize;
+
+    constexpr uint32_t kMaxFaultInfos = 256u;
+    constexpr VkDeviceSize kMaxVendorBin = 16ull * 1024ull * 1024ull;
+    const uint32_t addrCap = (std::min)(origAddr, kMaxFaultInfos);
+    const uint32_t vendCap = (std::min)(origVend, kMaxFaultInfos);
+    VkDeviceSize binCap = origBin;
+    if (binCap > kMaxVendorBin)
+        binCap = kMaxVendorBin;
+
+    std::vector<VkDeviceFaultAddressInfoEXT> addressInfos(addrCap);
+    std::vector<VkDeviceFaultVendorInfoEXT> vendorInfos(vendCap);
+    std::vector<uint8_t> vendorBinary;
+    if (binCap > 0)
+        vendorBinary.resize(static_cast<size_t>(binCap));
+
+    VkDeviceFaultInfoEXT info{};
+    info.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+    info.pAddressInfos = addressInfos.empty() ? nullptr : addressInfos.data();
+    info.pVendorInfos = vendorInfos.empty() ? nullptr : vendorInfos.data();
+    info.pVendorBinaryData = vendorBinary.empty() ? nullptr : vendorBinary.data();
+
+    counts = VkDeviceFaultCountsEXT{};
+    counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+    counts.addressInfoCount = addrCap;
+    counts.vendorInfoCount = vendCap;
+    counts.vendorBinarySize = binCap;
+
+    const VkResult r1 = pfn(dev, &counts, &info);
+    m_deviceFaultInfoLogged = true;
+
+    const char* desc = info.description;
+    if (!desc)
+        desc = "";
+    uint64_t firstAddr = 0;
+    uint32_t firstAddrType = 0;
+    if (counts.addressInfoCount > 0u && !addressInfos.empty()) {
+        firstAddr = static_cast<uint64_t>(addressInfos[0].reportedAddress);
+        firstAddrType = static_cast<uint32_t>(addressInfos[0].addressType);
+    }
+    core::Log::ErrorF(
+        "Vulkan VK_EXT_device_fault (context=%s): vkGetDeviceFaultInfoEXT result=%d description=\"%s\" "
+        "addressInfosReturned=%u (query=%u) vendorInfosReturned=%u (query=%u) vendorBinaryBytes=%llu (query=%llu) "
+        "firstReportedAddress=0x%llx firstAddressType=%u",
+        lossContext ? lossContext : "?", static_cast<int>(r1), desc, counts.addressInfoCount, origAddr,
+        counts.vendorInfoCount, origVend,
+        static_cast<unsigned long long>(counts.vendorBinarySize), static_cast<unsigned long long>(origBin),
+        static_cast<unsigned long long>(firstAddr), firstAddrType);
+#endif
+}
+
 void DeviceVK::NoteVulkanDeviceLost(const char* context, int vkResult) {
 #if defined(VK_ERROR_DEVICE_LOST)
     if (static_cast<VkResult>(vkResult) != VK_ERROR_DEVICE_LOST)
@@ -1862,6 +2283,46 @@ void DeviceVK::NoteVulkanDeviceLost(const char* context, int vkResult) {
         "Vulkan: VK_ERROR_DEVICE_LOST (%s) — `VkDevice` and dependent RHI objects are invalid; destroy this device and "
         "rebuild swapchain, pipelines, and GPU resources from a fresh init (see `documentation/vulkan/steps_todo.md` Phase E).",
         context ? context : "?");
+    TryLogDeviceFaultInfoEXT(context);
+}
+
+void DeviceVK::NoteSwapchainKhrResult(const char* context, int vkResult, SwapchainKhrPath path) {
+    const VkResult r = static_cast<VkResult>(vkResult);
+#if defined(VK_ERROR_OUT_OF_DATE_KHR)
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+        static int s_outOfDateLogs = 0;
+        if (s_outOfDateLogs < 16) {
+            ++s_outOfDateLogs;
+            core::Log::InfoF(
+                "Vulkan %s: VK_ERROR_OUT_OF_DATE_KHR — recreating swapchain (see `swapchain_present_policy.md`).",
+                context ? context : "?");
+        }
+        if (m_device && m_surface && m_swapchain.swapchain)
+            m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
+        return;
+    }
+#endif
+#if defined(VK_SUBOPTIMAL_KHR)
+    if (r == VK_SUBOPTIMAL_KHR) {
+        if (path == SwapchainKhrPath::Present) {
+            static bool s_presentSuboptimalOnce = false;
+            if (!s_presentSuboptimalOnce) {
+                s_presentSuboptimalOnce = true;
+                core::Log::Warn(
+                    "Vulkan Present: VK_SUBOPTIMAL_KHR — present succeeded; optional resize if surface mode mismatched "
+                    "(see `swapchain_present_policy.md`).");
+            }
+        } else {
+            static int s_acquireSuboptimalLogs = 0;
+            if (s_acquireSuboptimalLogs < 6) {
+                ++s_acquireSuboptimalLogs;
+                core::Log::InfoF(
+                    "Vulkan %s: VK_SUBOPTIMAL_KHR — image index valid; optional resize (see `swapchain_present_policy.md`).",
+                    context ? context : "?");
+            }
+        }
+    }
+#endif
 }
 
 CommandListVK* DeviceVK::GetRecordingCommandListVK() {
@@ -1889,6 +2350,7 @@ void DeviceVK::BeginFrame() {
     m_transientRecordingStack.clear();
     m_deletionQueue.Tick(m_device, GetAllocator(), m_currentFrameIndex);
     RetirePendingTextureWrappers(false);
+    RetirePendingAccelerationStructureWrappers(false);
     ++m_ticksUntilDescriptorSetFree;
     if (m_ticksUntilDescriptorSetFree >= kMaxFrames && !m_pendingDescriptorSetsToFree.empty()) {
         for (IDescriptorSet* set : m_pendingDescriptorSetsToFree)
@@ -1915,11 +2377,13 @@ void DeviceVK::BeginFrame() {
         uint32_t acquiredIndex = 0xFFFFFFFFu;
         int acquireRes = m_swapchain.Acquire(frame.imageAvailable, UINT64_MAX, &acquiredIndex);
         NoteVulkanDeviceLost("BeginFrame vkAcquireNextImageKHR", acquireRes);
-        if (acquireRes == VK_ERROR_OUT_OF_DATE_KHR) {
-            m_swapchain.Resize(m_swapchain.GetWidth(), m_swapchain.GetHeight(), true, this, m_swapchainPresentMode);
+        if (acquireRes == static_cast<int>(VK_ERROR_OUT_OF_DATE_KHR)) {
+            NoteSwapchainKhrResult("BeginFrame vkAcquireNextImageKHR", acquireRes, SwapchainKhrPath::Acquire);
             m_pendingPresent = false;
             frame.swapchainImageIndex = 0xFFFFFFFFu;
-        } else if (acquireRes == VK_SUCCESS || acquireRes == VK_SUBOPTIMAL_KHR) {
+        } else if (acquireRes == static_cast<int>(VK_SUCCESS) || acquireRes == static_cast<int>(VK_SUBOPTIMAL_KHR)) {
+            if (acquireRes == static_cast<int>(VK_SUBOPTIMAL_KHR))
+                NoteSwapchainKhrResult("BeginFrame vkAcquireNextImageKHR", acquireRes, SwapchainKhrPath::Acquire);
             m_pendingPresent = true;
             frame.swapchainImageIndex = acquiredIndex;
             if (void* acqImg = m_swapchain.GetImage(acquiredIndex))
@@ -2453,6 +2917,17 @@ void DeviceVK::DestroyBuffer(IBuffer* buffer) {
     if (!buffer) return;
     BufferVK* b = static_cast<BufferVK*>(buffer);
     if (b->m_buffer) {
+        const uint64_t bufKey = reinterpret_cast<uint64_t>(b->m_buffer);
+        const auto refIt = m_accelerationStructureBackingRefCount.find(bufKey);
+        if (refIt != m_accelerationStructureBackingRefCount.end() && refIt->second > 0) {
+            static int s_asBufferDestroyWarn = 0;
+            if (s_asBufferDestroyWarn < 12) {
+                ++s_asBufferDestroyWarn;
+                core::Log::Error(
+                    "DeviceVK::DestroyBuffer: buffer still referenced by live acceleration structure(s); destroy those with "
+                    "DestroyAccelerationStructure first (GPU completion follows the same deferred fence as other resources).");
+            }
+        }
         BarrierTrackerVK::RemoveBufferState(&m_barrierTracker, b->m_buffer);
         m_deletionQueue.EnqueueBuffer(GetCurrentFrameIndex(), GetAllocator(), b->m_buffer, b->m_allocation);
         b->m_buffer = nullptr;
@@ -2488,6 +2963,166 @@ uint64_t DeviceVK::GetBufferDeviceAddress(IBuffer* buffer) {
     info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     info.buffer = vkBuffer;
     return static_cast<uint64_t>(vkGetBufferDeviceAddress(static_cast<VkDevice>(m_device), &info));
+}
+
+namespace {
+
+#if defined(VK_KHR_acceleration_structure)
+inline VkBuildAccelerationStructureFlagsKHR ToVkBuildAccelerationStructureFlagsKHR(AccelerationStructureBuildFlags flags) {
+    VkBuildAccelerationStructureFlagsKHR out = 0;
+    if (HasAccelerationStructureBuildFlag(flags, AccelerationStructureBuildFlags::AllowUpdate))
+        out |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+    if (HasAccelerationStructureBuildFlag(flags, AccelerationStructureBuildFlags::AllowCompaction))
+        out |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    if (HasAccelerationStructureBuildFlag(flags, AccelerationStructureBuildFlags::PreferFastTrace))
+        out |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if (HasAccelerationStructureBuildFlag(flags, AccelerationStructureBuildFlags::PreferFastBuild))
+        out |= VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+    if (HasAccelerationStructureBuildFlag(flags, AccelerationStructureBuildFlags::LowMemory))
+        out |= VK_BUILD_ACCELERATION_STRUCTURE_LOW_MEMORY_BIT_KHR;
+    return out;
+}
+#endif
+
+} // namespace
+
+bool DeviceVK::GetAccelerationStructureBuildSizes(const AccelerationStructureBuildSizesInput& input, AccelerationStructureBuildSizes& outSizes) {
+    outSizes = {};
+#if !defined(VK_KHR_acceleration_structure) || !defined(VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR)
+    (void)input;
+    return false;
+#else
+    if (!m_supportsRayQuery || !m_device) {
+        return false;
+    }
+    auto* pfnSizes = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(m_pfnGetAccelerationStructureBuildSizesKHR);
+    if (!pfnSizes) {
+        return false;
+    }
+
+    VkAccelerationStructureBuildGeometryInfoKHR geomInfo = {};
+    geomInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    geomInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    geomInfo.flags = ToVkBuildAccelerationStructureFlagsKHR(input.flags);
+    geomInfo.srcAccelerationStructure = VK_NULL_HANDLE;
+    geomInfo.dstAccelerationStructure = VK_NULL_HANDLE;
+    geomInfo.geometryCount = 0;
+    geomInfo.ppGeometries = nullptr;
+    geomInfo.pMaxPrimitiveCounts = nullptr;
+
+    std::vector<VkAccelerationStructureGeometryKHR> geometries;
+    std::vector<const VkAccelerationStructureGeometryKHR*> geometryPtrs;
+    std::vector<uint32_t> maxPrimitiveCounts;
+
+    switch (input.type) {
+        case AccelerationStructureType::BottomLevel: {
+            geomInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+            if (input.geometries.empty()) {
+                core::Log::Error("DeviceVK::GetAccelerationStructureBuildSizes: bottom-level input requires at least one geometry.");
+                return false;
+            }
+            geometries.resize(input.geometries.size());
+            geometryPtrs.reserve(input.geometries.size());
+            maxPrimitiveCounts.resize(input.geometries.size());
+            for (size_t i = 0; i < input.geometries.size(); ++i) {
+                const AccelerationStructureGeometryBuildInput& gIn = input.geometries[i];
+                VkAccelerationStructureGeometryKHR& g = geometries[i];
+                g = {};
+                g.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+                maxPrimitiveCounts[i] = gIn.primitiveCount;
+                if (gIn.geometryType == AccelerationStructureGeometryType::Triangles) {
+                    g.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+                    g.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+                    g.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+                    g.geometry.triangles.vertexData.deviceAddress = 0;
+                    g.geometry.triangles.vertexStride = sizeof(float) * 3;
+                    uint32_t maxVertexIndex = 0;
+                    if (gIn.maxVertexCount > 0)
+                        maxVertexIndex = gIn.maxVertexCount - 1u;
+                    else if (gIn.primitiveCount > 0)
+                        maxVertexIndex = gIn.primitiveCount * 3u - 1u;
+                    g.geometry.triangles.maxVertex = maxVertexIndex;
+                    g.geometry.triangles.maxPrimitive = gIn.primitiveCount;
+                    g.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
+                    g.geometry.triangles.indexData.deviceAddress = 0;
+                    g.geometry.triangles.transformData.deviceAddress = 0;
+                } else {
+                    g.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+                    g.geometry.aabbs.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+                    g.geometry.aabbs.data.deviceAddress = 0;
+                    g.geometry.aabbs.stride = sizeof(VkAabbPositionsKHR);
+                }
+                geometryPtrs.push_back(&g);
+            }
+            geomInfo.geometryCount = static_cast<uint32_t>(geometryPtrs.size());
+            geomInfo.ppGeometries = geometryPtrs.data();
+            geomInfo.pMaxPrimitiveCounts = maxPrimitiveCounts.data();
+        } break;
+        case AccelerationStructureType::TopLevel: {
+            geomInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+            if (input.maxInstanceCount == 0) {
+                core::Log::Error("DeviceVK::GetAccelerationStructureBuildSizes: top-level input requires maxInstanceCount > 0.");
+                return false;
+            }
+            geometries.resize(1);
+            maxPrimitiveCounts.resize(1);
+            maxPrimitiveCounts[0] = input.maxInstanceCount;
+            VkAccelerationStructureGeometryKHR& g = geometries[0];
+            g = {};
+            g.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+            g.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+            g.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+            g.geometry.instances.arrayOfPointers = VK_FALSE;
+            g.geometry.instances.data.deviceAddress = 0;
+            geometryPtrs.push_back(&g);
+            geomInfo.geometryCount = 1;
+            geomInfo.ppGeometries = geometryPtrs.data();
+            geomInfo.pMaxPrimitiveCounts = maxPrimitiveCounts.data();
+        } break;
+        default:
+            return false;
+    }
+
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo = {};
+    sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    pfnSizes(static_cast<VkDevice>(m_device), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &geomInfo, geomInfo.pMaxPrimitiveCounts, &sizeInfo);
+
+    outSizes.accelerationStructureSize = static_cast<uint64_t>(sizeInfo.accelerationStructureSize);
+    outSizes.buildScratchSize = static_cast<uint64_t>(sizeInfo.buildScratchSize);
+    outSizes.updateScratchSize = static_cast<uint64_t>(sizeInfo.updateScratchSize);
+    return true;
+#endif
+}
+
+IAccelerationStructure* DeviceVK::CreateAccelerationStructure(const AccelerationStructureDesc& desc) {
+    return CreateAccelerationStructureVK(this, desc);
+}
+
+void DeviceVK::DestroyAccelerationStructure(IAccelerationStructure* as) {
+    if (!as) return;
+    auto* av = static_cast<AccelerationStructureVK*>(as);
+    if (av->m_retired)
+        return;
+    if (av->m_storageVkBuffer) {
+        NoteAccelerationStructureDestroyedForBuffer(av->m_storageVkBuffer);
+        av->m_storageVkBuffer = nullptr;
+    }
+    if (av->m_as) {
+        m_deletionQueue.EnqueueAccelerationStructure(GetCurrentFrameIndex(), m_device, av->m_as);
+        av->m_as = nullptr;
+    }
+    av->m_retired = true;
+    m_pendingAccelerationStructureWrapperRetires.push_back({ av, m_frameNumber + kMaxFrames });
+}
+
+IAccelerationStructureScratchBuffer* DeviceVK::CreateAccelerationStructureScratchBuffer(const AccelerationStructureScratchBufferDesc& desc,
+                                                                                       const void* initialData) {
+    return CreateAccelerationStructureScratchBufferVK(this, desc, initialData);
+}
+
+IAccelerationStructureInstanceBuffer* DeviceVK::CreateAccelerationStructureInstanceBuffer(const AccelerationStructureInstanceBufferDesc& desc,
+                                                                                          const void* initialData) {
+    return CreateAccelerationStructureInstanceBufferVK(this, desc, initialData);
 }
 
 ITexture* DeviceVK::CreateTexture(const TextureDesc& desc, const void* initialData) {
@@ -2573,6 +3208,41 @@ void DeviceVK::RetirePendingTextureWrappers(bool forceAll) {
         }
     }
     m_pendingTextureWrapperRetires.resize(write);
+}
+
+void DeviceVK::NoteAccelerationStructureCreatedOnBuffer(void* vkBuffer) {
+    if (!vkBuffer) return;
+    ++m_accelerationStructureBackingRefCount[reinterpret_cast<uint64_t>(vkBuffer)];
+}
+
+void DeviceVK::NoteAccelerationStructureDestroyedForBuffer(void* vkBuffer) {
+    if (!vkBuffer) return;
+    const uint64_t k = reinterpret_cast<uint64_t>(vkBuffer);
+    auto it = m_accelerationStructureBackingRefCount.find(k);
+    if (it == m_accelerationStructureBackingRefCount.end())
+        return;
+    if (it->second <= 1u)
+        m_accelerationStructureBackingRefCount.erase(it);
+    else
+        --it->second;
+}
+
+void DeviceVK::RetirePendingAccelerationStructureWrappers(bool forceAll) {
+    if (m_pendingAccelerationStructureWrapperRetires.empty()) return;
+    const uint32_t currentFrame = m_frameNumber;
+    size_t write = 0;
+    for (size_t read = 0; read < m_pendingAccelerationStructureWrapperRetires.size(); ++read) {
+        RetiredAccelerationStructureEntry& e = m_pendingAccelerationStructureWrapperRetires[read];
+        const bool canRetire = forceAll || (currentFrame >= e.retireFrameNumber);
+        if (canRetire) {
+            delete e.accelerationStructure;
+            e.accelerationStructure = nullptr;
+        } else {
+            if (write != read) m_pendingAccelerationStructureWrapperRetires[write] = e;
+            ++write;
+        }
+    }
+    m_pendingAccelerationStructureWrapperRetires.resize(write);
 }
 
 void DeviceVK::CommitSparseTexturePages(ITexture* texture, uint32_t level, int32_t x, int32_t y, int32_t z, uint32_t width, uint32_t height, uint32_t depth, bool commit) {
@@ -2733,16 +3403,16 @@ IQueryPool* DeviceVK::CreateQueryPool(QueryType type, uint32_t count, PipelineSt
         core::Log::Error("DeviceVK::CreateQueryPool: unsupported query type.");
         return nullptr;
     }
-    if (type == QueryType::Timestamp && !m_caps.supportsGpuTimestampQueries) {
+    if (type == QueryType::Timestamp && !::eyelib::rendering::backend::SupportsGpuTimestampQueries(this)) {
         core::Log::Error("DeviceVK::CreateQueryPool: timestamp queries are unsupported on this device.");
         return nullptr;
     }
-    if (type == QueryType::Occlusion && !m_caps.supportsOcclusionQueries) {
+    if (type == QueryType::Occlusion && !::eyelib::rendering::backend::SupportsOcclusionQueries(this)) {
         core::Log::Error("DeviceVK::CreateQueryPool: occlusion queries are unsupported on this device.");
         return nullptr;
     }
     if (type == QueryType::PipelineStatistics) {
-        if (!m_caps.supportsPipelineStatisticsQueries) {
+        if (!::eyelib::rendering::backend::SupportsPipelineStatisticsQueries(this)) {
             core::Log::Error("DeviceVK::CreateQueryPool: pipeline statistics queries are unsupported on this device.");
             return nullptr;
         }
@@ -2760,7 +3430,7 @@ IQueryPool* DeviceVK::CreateQueryPool(QueryType type, uint32_t count, PipelineSt
 void DeviceVK::DestroyQueryPool(IQueryPool* pool) { DestroyQueryPoolVK(pool); }
 
 void DeviceVK::ResetQueryPoolOnHost(IQueryPool* pool, uint32_t firstQuery, uint32_t queryCount) {
-    if (!m_supportsHostQueryReset) {
+    if (!::eyelib::rendering::backend::SupportsHostQueryReset(this)) {
         core::Log::Error("DeviceVK::ResetQueryPoolOnHost: host query reset is not supported.");
         return;
     }
@@ -2845,22 +3515,44 @@ IBindlessHeap* DeviceVK::CreateBindlessHeap() { return new BindlessHeapVK(this);
 
 void DeviceVK::DestroyBindlessHeap(IBindlessHeap* heap) { if (heap) delete static_cast<BindlessHeapVK*>(heap); }
 
+IBindlessHeap* DeviceVK::EnsureSharedBindlessHeapLocked() {
+    if (m_sharedBindlessHeap) {
+        BindlessHeapVK* existing = static_cast<BindlessHeapVK*>(m_sharedBindlessHeap);
+        if (!existing->IsReady()) {
+            delete existing;
+            m_sharedBindlessHeap = nullptr;
+        } else
+            return m_sharedBindlessHeap;
+    }
+    IBindlessHeap* h = CreateBindlessHeap();
+    BindlessHeapVK* hv = static_cast<BindlessHeapVK*>(h);
+    if (!hv->IsReady()) {
+        static bool s_loggedSharedHeapFailure = false;
+        if (!s_loggedSharedHeapFailure) {
+            core::Log::Error(
+                "DeviceVK: shared bindless heap creation failed (descriptor pool or set allocation). "
+                "GetOrCreateSharedBindlessHeap / shared texture handles will return nullptr or invalid until device re-initialization.");
+            s_loggedSharedHeapFailure = true;
+        }
+        delete hv;
+        return nullptr;
+    }
+    m_sharedBindlessHeap = h;
+    return m_sharedBindlessHeap;
+}
+
 IBindlessHeap* DeviceVK::GetOrCreateSharedBindlessHeap() {
     if (!m_caps.supportsBindless)
         return nullptr;
     std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
-    if (!m_sharedBindlessHeap)
-        m_sharedBindlessHeap = CreateBindlessHeap();
-    return m_sharedBindlessHeap;
+    return EnsureSharedBindlessHeapLocked();
 }
 
 BindlessHandle DeviceVK::GetOrAllocateSharedBindlessTextureHandle(ITexture* texture) {
     if (!texture || !m_caps.supportsBindless)
         return kInvalidBindlessHandle;
     std::lock_guard<std::mutex> lock(m_sharedBindlessMutex);
-    if (!m_sharedBindlessHeap)
-        m_sharedBindlessHeap = CreateBindlessHeap();
-    IBindlessHeap* heap = m_sharedBindlessHeap;
+    IBindlessHeap* heap = EnsureSharedBindlessHeapLocked();
     if (!heap)
         return kInvalidBindlessHandle;
     auto it = m_sharedBindlessTextureHandles.find(texture);

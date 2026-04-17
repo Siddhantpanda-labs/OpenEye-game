@@ -184,11 +184,17 @@ ResourceState BarrierTrackerVK::GetImageState(const BarrierTrackerVK* tracker, v
 void BarrierTrackerVK::SetImageState(BarrierTrackerVK* tracker, void* image, ResourceState state) {
     if (!tracker || !image) return;
     tracker->m_imageState[image] = state;
+    tracker->m_pendingImages.erase(std::remove_if(tracker->m_pendingImages.begin(), tracker->m_pendingImages.end(),
+                                                  [image](const PendingImage& p) { return p.image == image; }),
+                                     tracker->m_pendingImages.end());
 }
 
 void BarrierTrackerVK::RemoveImageState(BarrierTrackerVK* tracker, void* image) {
     if (!tracker || !image) return;
     tracker->m_imageState.erase(image);
+    tracker->m_pendingImages.erase(std::remove_if(tracker->m_pendingImages.begin(), tracker->m_pendingImages.end(),
+                                                  [image](const PendingImage& p) { return p.image == image; }),
+                                     tracker->m_pendingImages.end());
 }
 
 } // namespace rhi

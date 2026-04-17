@@ -20,7 +20,7 @@ Shaders, C++ descriptor updates, and pipeline layout creation must match this fi
 4. Shader reflection, C++ descriptor writes, and layout factories must agree 1:1.
 5. New code must not introduce `Legacy` descriptor paths.
 
-**Pipeline-specific set numbering:** The table below is the **Forward** five-set layout (`CreateForwardPipelineLayout`). **GBuffer** uses four sets: 0 Frame, 1 Material, **2 bindless**, 3 SceneBuffers (`CreateGBufferPipelineLayout`). `ICommandList::BindBindlessHeap` (Vulkan) binds the heap at set **3** for Forward and set **2** for GBuffer after the matching pipeline is bound; prefer `BindDescriptorSets(0, N, …)` with all sets.
+**Pipeline-specific set numbering:** The table below is the **Forward** five-set layout (`CreateForwardPipelineLayout`). Other kinds use compact layouts where possible; `ICommandList::BindBindlessHeap` binds bindless at set **3** for Forward and set **2** for GBuffer after the matching pipeline is bound. Prefer `BindDescriptorSets(0, N, …)` with all sets.
 
 | Set | Role         | Lifetime   |
 | --- | ------------ | ---------- |
@@ -166,13 +166,40 @@ Push constants:
 | OutlinePost       | 0         |
 | Forward           | 0,1,2,3,4 |
 | Post              | 0,1       |
-| Shadow            | 0,1,4     |
-| GBuffer           | 0,2,3,4   |
+| Shadow            | 0,1,2     |
+| GBuffer           | 0,1,2,3   |
 | DeferredLighting  | 0,1       |
-| ComputeLightCull  | 0,1,4     |
-| ComputeGpuCull    | 0,4       |
+| ComputeLightCull  | 0,1,4 (2,3 are empty placeholders) |
+| ComputeGpuCull    | 0,4 (1,2,3 are empty placeholders) |
 
 `Legacy` is treated as deprecated alias of `PushOnly` and is migration-only.
+
+---
+
+## Bindless path matrix (Phase 2.1 audit baseline)
+
+This matrix captures how each `PipelineLayoutKind` binds bindless resources today:
+
+| Kind | Bindless slot | Descriptor buffer path | Classic descriptor-set path |
+| ---- | ------------- | ---------------------- | --------------------------- |
+| Forward | set 3 | Yes (`BindBindlessHeap` via `vkCmdBindDescriptorBuffersEXT`) | Yes (`vkCmdBindDescriptorSets` set 3) |
+| GBuffer | set 2 | Yes (`BindBindlessHeap` via `vkCmdBindDescriptorBuffersEXT`) | Yes (`vkCmdBindDescriptorSets` set 2) |
+| PushOnly / Legacy | none | N/A | N/A |
+| Post / Shadow / DeferredLighting / IBL / OutlinePost | none | N/A | N/A |
+| ComputeLightCull / ComputeGpuCull | none in resource-space layout | N/A | N/A |
+| Compute PushOnly default (`GetComputePipelineLayout`) | set 1 | Yes (`BindBindlessHeap` set 1) | Yes (`vkCmdBindDescriptorSets` set 1) |
+
+If descriptor-buffer backing cannot be created at heap init, the heap still serves the classic bindless path (`vkUpdateDescriptorSets` + `vkCmdBindDescriptorSets`).
+
+**Phase 2.2 failure behavior (RHI, deterministic logs):**
+
+- Shared heap creation failure (`DeviceVK::EnsureSharedBindlessHeapLocked`): one-shot error; `GetOrCreateSharedBindlessHeap` returns nullptr; shared texture handle allocation returns `kInvalidBindlessHandle`.
+- Per-heap pool/set creation failure: `AllocateTextureHandle` / `AllocateBufferHandle` return invalid; one-shot error on first allocation attempt.
+- Table full (`kMaxTextures` / `kMaxBuffers`): invalid handle; one-shot warn per table.
+- Zero-byte buffer for bindless storage binding: rejected; one-shot warn (invalid `VkDescriptorBufferInfo::range`).
+- Descriptor-buffer **encode** failure after a successful classic descriptor write: one-shot warn; `m_usesDescriptorBuffer` cleared for that heap so `BindBindlessHeap` stops using `vkCmdBindDescriptorBuffersEXT` while classic bindless stays authoritative.
+
+**Phase 2.3 profiling (optional):** CMake option **`OPENEYE_RHI_BINDLESS_PROFILE`** (default **OFF**) defines **`OPENEYE_RHI_BINDLESS_PROFILE=1`** for `EyelibRendering` and enables **CPU-side** timing in **`CommandListVK::BindBindlessHeap`**: first-use **Info** per path (descriptor-buffer vs classic `vkCmdBindDescriptorSets`), and a one-shot **Warn** if a bind exceeds **500 µs** wall time.
 
 ---
 

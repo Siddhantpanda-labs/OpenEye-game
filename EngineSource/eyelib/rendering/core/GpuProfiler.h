@@ -12,6 +12,9 @@ struct ICommandList;
 struct IQueryPool;
 }
 
+/** Optional frame GPU counters: uses **`QueryType::PipelineStatistics`** only (not timestamps). Gated by
+ *  **`RenderBackendPolicy::SupportsPipelineStatisticsQueries`**. Timestamp **`timestampPeriod`** / **`GetResult`** usage is
+ *  documented in **`eyelib/rendering/rhi/Vulkan/query_pool_dynamic_rendering.md`**. */
 class GpuProfiler {
 public:
     struct NamedPipelineStat {

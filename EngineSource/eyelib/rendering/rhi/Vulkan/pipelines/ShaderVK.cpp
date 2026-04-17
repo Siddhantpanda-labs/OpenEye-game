@@ -25,7 +25,8 @@ bool ShaderVK::IsValid() const { return m_module != nullptr; }
 
 IShader* CreateShaderVK(DeviceVK* device, ShaderStage stage, const char* source, size_t sourceLen) {
     if (!device || !source || sourceLen == 0) return nullptr;
-    if (stage != ShaderStage::Vertex && stage != ShaderStage::Fragment && stage != ShaderStage::Compute) {
+    if (stage != ShaderStage::Vertex && stage != ShaderStage::Fragment && stage != ShaderStage::Compute &&
+        stage != ShaderStage::Task && stage != ShaderStage::Mesh) {
         core::Log::ErrorF("CreateShaderVK: unsupported stage %u", static_cast<unsigned>(static_cast<uint32_t>(stage)));
         return nullptr;
     }
@@ -34,6 +35,10 @@ IShader* CreateShaderVK(DeviceVK* device, ShaderStage stage, const char* source,
         fname = "shader.vert";
     else if (stage == ShaderStage::Fragment)
         fname = "shader.frag";
+    else if (stage == ShaderStage::Task)
+        fname = "shader.task";
+    else if (stage == ShaderStage::Mesh)
+        fname = "shader.mesh";
     std::vector<uint32_t> spirv;
     if (!VulkanCompileGlslToSpirv(source, sourceLen, stage, fname, spirv) || spirv.empty())
         return nullptr;

@@ -20,6 +20,13 @@
 #include <cstring>
 #include <cassert>
 
+#ifndef OPENEYE_RHI_BINDLESS_PROFILE
+#define OPENEYE_RHI_BINDLESS_PROFILE 0
+#endif
+#if OPENEYE_RHI_BINDLESS_PROFILE
+#include <chrono>
+#endif
+
 namespace eyelib {
 namespace rendering {
 namespace rhi {
@@ -96,6 +103,66 @@ static uint64_t MakeQueryKey(const IQueryPool* pool, uint32_t index) {
     const uint64_t poolHash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pool));
     return (poolHash << 32) ^ static_cast<uint64_t>(index);
 }
+
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR)
+static VkExtent2D ToVkFragmentShadingRateExtent(FragmentShadingRate rate) {
+    switch (rate) {
+    case FragmentShadingRate::Rate1x1: return { 1u, 1u };
+    case FragmentShadingRate::Rate1x2: return { 1u, 2u };
+    case FragmentShadingRate::Rate2x1: return { 2u, 1u };
+    case FragmentShadingRate::Rate2x2: return { 2u, 2u };
+    case FragmentShadingRate::Rate2x4: return { 2u, 4u };
+    case FragmentShadingRate::Rate4x2: return { 4u, 2u };
+    case FragmentShadingRate::Rate4x4: return { 4u, 4u };
+    default: return { 1u, 1u };
+    }
+}
+
+static VkFragmentShadingRateCombinerOpKHR ToVkFragmentShadingRateCombinerOp(FragmentShadingRateCombinerOp op) {
+    switch (op) {
+    case FragmentShadingRateCombinerOp::Keep: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+    case FragmentShadingRateCombinerOp::Replace: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+    case FragmentShadingRateCombinerOp::Min: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MIN_KHR;
+    case FragmentShadingRateCombinerOp::Max: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MAX_KHR;
+    case FragmentShadingRateCombinerOp::Mul: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_MUL_KHR;
+    default: return VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+    }
+}
+#endif
+
+#if OPENEYE_RHI_BINDLESS_PROFILE
+enum class BindlessBindProfilePath : uint8_t { DescriptorBuffer, ClassicSet };
+
+static void LogBindlessHeapBindProfile(BindlessBindProfilePath path, int64_t micros) {
+    static bool s_firstDb = true;
+    static bool s_firstClassic = true;
+    static bool s_slowDbWarned = false;
+    static bool s_slowClassicWarned = false;
+    if (path == BindlessBindProfilePath::DescriptorBuffer && s_firstDb) {
+        core::Log::InfoF("CommandListVK::BindBindlessHeap profile: first descriptor-buffer bind path (%lld us).", static_cast<long long>(micros));
+        s_firstDb = false;
+    }
+    if (path == BindlessBindProfilePath::ClassicSet && s_firstClassic) {
+        core::Log::InfoF("CommandListVK::BindBindlessHeap profile: first classic vkCmdBindDescriptorSets path (%lld us).", static_cast<long long>(micros));
+        s_firstClassic = false;
+    }
+    constexpr int64_t kSlowUs = 500;
+    if (micros >= kSlowUs) {
+        if (path == BindlessBindProfilePath::DescriptorBuffer && !s_slowDbWarned) {
+            core::Log::WarnF(
+                "CommandListVK::BindBindlessHeap profile: slow descriptor-buffer bind (%lld us); further slow-path logs suppressed.",
+                static_cast<long long>(micros));
+            s_slowDbWarned = true;
+        }
+        if (path == BindlessBindProfilePath::ClassicSet && !s_slowClassicWarned) {
+            core::Log::WarnF(
+                "CommandListVK::BindBindlessHeap profile: slow classic bind (%lld us); further slow-path logs suppressed.",
+                static_cast<long long>(micros));
+            s_slowClassicWarned = true;
+        }
+    }
+}
+#endif
 } // namespace
 
 CommandListVK::CommandListVK(DeviceVK* device) : m_device(device) {}
@@ -535,7 +602,6 @@ void CommandListVK::BarrierBuffer(IBuffer* buffer, ResourceState fromState, Reso
 void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) {
     m_requiresQueueOwnershipTransfers = true;
     if (!texture || !m_isRecording || !m_commandBuffer) return;
-    (void)fromState;
     if (m_isRenderingActive) {
         static int warnCount = 0;
         if (warnCount++ < 8)
@@ -546,6 +612,15 @@ void CommandListVK::BarrierTexture(ITexture* texture, ResourceState fromState, R
     TextureVK* texVK = static_cast<TextureVK*>(texture);
     BarrierTrackerVK* tracker = static_cast<BarrierTrackerVK*>(m_device->GetBarrierTracker());
     const ResourceState layoutBefore = BarrierTrackerVK::GetImageState(tracker, texVK->m_image);
+    if (fromState != ResourceState::Undefined && layoutBefore != ResourceState::Undefined && fromState != layoutBefore) {
+        static int mismatchWarn = 0;
+        if (mismatchWarn < 8) {
+            ++mismatchWarn;
+            core::Log::WarnF(
+                "CommandListVK::BarrierTexture: caller `fromState` (%u) != BarrierTracker layout (%u); emitted barrier uses tracker state.",
+                static_cast<unsigned>(fromState), static_cast<unsigned>(layoutBefore));
+        }
+    }
     if (layoutBefore == ResourceState::Undefined) {
         m_computeQueueEligible = false;
         m_crossQueueOwnershipUnsafe = true;
@@ -653,11 +728,20 @@ void CommandListVK::PushGraphicsConstantsIfPossible() {
     PipelineVK* pVK = static_cast<PipelineVK*>(m_currentPipeline);
     if (pVK->m_isCompute) return;
     VkPipelineLayout layout = static_cast<VkPipelineLayout>(pVK->m_nativePipelineLayout);
-    if (layout == VK_NULL_HANDLE)
-        layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    if (layout == VK_NULL_HANDLE) {
+        // PushOnly mesh pipelines store no native layout (zero sets); push must use the mesh push layout, not the default V|F-only layout.
+        if (pVK->UsesMeshShaders() && m_device->GetMeshPushPipelineLayout())
+            layout = static_cast<VkPipelineLayout>(m_device->GetMeshPushPipelineLayout());
+        else
+            layout = static_cast<VkPipelineLayout>(m_device->GetDefaultPipelineLayout());
+    }
     if (layout == VK_NULL_HANDLE) return;
-    vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 256, m_pushConstants);
+    VkShaderStageFlags pushStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT)
+    if (pVK->UsesMeshShaders())
+        pushStages = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
+#endif
+    vkCmdPushConstants(static_cast<VkCommandBuffer>(m_commandBuffer), layout, pushStages, 0, 256, m_pushConstants);
 }
 
 void CommandListVK::BindPipeline(IPipeline* pipeline) {
@@ -832,6 +916,10 @@ void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
     const VkPipelineLayout layout = ResolvePipelineLayoutForDescriptorBind(m_device, pVK);
     if (layout == VK_NULL_HANDLE) return;
 
+#if OPENEYE_RHI_BINDLESS_PROFILE
+    const std::chrono::steady_clock::time_point profileT0 = std::chrono::steady_clock::now();
+#endif
+
     BindlessHeapVK* heapVK = heap ? static_cast<BindlessHeapVK*>(heap) : nullptr;
     const VkPipelineBindPoint bindPoint = pVK->m_isCompute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;
 
@@ -877,6 +965,11 @@ void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
             auto pfnSet =
                 reinterpret_cast<PFN_vkCmdSetDescriptorBufferOffsetsEXT>(m_device->DescriptorBufferFnCmdSetOffsetsEXT());
             pfnSet(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, setIndex, 1, &bufIdx, &dbOffset);
+#if OPENEYE_RHI_BINDLESS_PROFILE
+            const std::chrono::steady_clock::time_point profileT1 = std::chrono::steady_clock::now();
+            LogBindlessHeapBindProfile(BindlessBindProfilePath::DescriptorBuffer,
+                std::chrono::duration_cast<std::chrono::microseconds>(profileT1 - profileT0).count());
+#endif
             return;
         }
     }
@@ -887,6 +980,13 @@ void CommandListVK::BindBindlessHeap(IBindlessHeap* heap) {
     if (heapVK && heapVK->m_descriptorSet != nullptr)
         vkHeapSet = static_cast<VkDescriptorSet>(heapVK->m_descriptorSet);
     vkCmdBindDescriptorSets(static_cast<VkCommandBuffer>(m_commandBuffer), bindPoint, layout, setIndex, 1, &vkHeapSet, 0, nullptr);
+#if OPENEYE_RHI_BINDLESS_PROFILE
+    {
+        const std::chrono::steady_clock::time_point profileT1 = std::chrono::steady_clock::now();
+        LogBindlessHeapBindProfile(BindlessBindProfilePath::ClassicSet,
+            std::chrono::duration_cast<std::chrono::microseconds>(profileT1 - profileT0).count());
+    }
+#endif
 }
 
 void CommandListVK::SetPushConstants(uint32_t offset, uint32_t size, const void* data) {
@@ -985,6 +1085,77 @@ void CommandListVK::DrawIndexedIndirect(IBuffer* indirectBuffer, size_t offset) 
     PushGraphicsConstantsIfPossible();
     vkCmdDrawIndexedIndirect(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), 1u,
                              sizeof(VkDrawIndexedIndirectCommand));
+}
+
+void CommandListVK::DrawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT)
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
+    if (!m_device || !m_device->SupportsMeshShader() || !m_device->GetCmdDrawMeshTasksEXT()) return;
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive) return;
+    PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
+    if (!pVK || !pVK->UsesMeshShaders()) {
+        static int s_once = 0;
+        if (s_once < 4) {
+            ++s_once;
+            core::Log::Warn("DrawMeshTasks: no mesh graphics pipeline bound; draw skipped.");
+        }
+        return;
+    }
+    PushGraphicsConstantsIfPossible();
+    auto* pfn = reinterpret_cast<PFN_vkCmdDrawMeshTasksEXT>(m_device->GetCmdDrawMeshTasksEXT());
+    pfn(static_cast<VkCommandBuffer>(m_commandBuffer), groupCountX, groupCountY, groupCountZ);
+#else
+    (void)groupCountX;
+    (void)groupCountY;
+    (void)groupCountZ;
+#endif
+}
+
+void CommandListVK::DrawMeshTasksIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT)
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
+    if (!m_device || !m_device->SupportsMeshShader() || !m_device->GetCmdDrawMeshTasksIndirectEXT()) return;
+    if (!m_isRecording || !m_commandBuffer) return;
+    if (!m_isRenderingActive || drawCount == 0) return;
+    PipelineVK* pVK = m_currentPipeline ? static_cast<PipelineVK*>(m_currentPipeline) : nullptr;
+    if (!pVK || !pVK->UsesMeshShaders()) return;
+    VkBuffer buf = VkBufferFromRhi(indirectBuffer);
+    if (buf == VK_NULL_HANDLE) return;
+    const uint32_t s = stride ? stride : 12u; // VkDrawMeshTasksIndirectCommandEXT: 3 x uint32_t group counts
+    PushGraphicsConstantsIfPossible();
+    auto* pfn = reinterpret_cast<PFN_vkCmdDrawMeshTasksIndirectEXT>(m_device->GetCmdDrawMeshTasksIndirectEXT());
+    pfn(static_cast<VkCommandBuffer>(m_commandBuffer), buf, static_cast<VkDeviceSize>(offset), drawCount, s);
+#else
+    (void)indirectBuffer;
+    (void)offset;
+    (void)drawCount;
+    (void)stride;
+#endif
+}
+
+void CommandListVK::SetFragmentShadingRate(FragmentShadingRate rate,
+                                           FragmentShadingRateCombinerOp pipelinePrimitiveOp,
+                                           FragmentShadingRateCombinerOp primitiveAttachmentOp) {
+#if defined(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR)
+    if (!m_isRecording || !m_commandBuffer || !m_device || !m_device->SupportsVariableRateShading() ||
+        !m_device->GetCmdSetFragmentShadingRateKHR()) {
+        return;
+    }
+    const VkExtent2D fragmentSize = ToVkFragmentShadingRateExtent(rate);
+    VkFragmentShadingRateCombinerOpKHR combiners[2] = {
+        ToVkFragmentShadingRateCombinerOp(pipelinePrimitiveOp),
+        ToVkFragmentShadingRateCombinerOp(primitiveAttachmentOp),
+    };
+    auto* pfn = reinterpret_cast<PFN_vkCmdSetFragmentShadingRateKHR>(m_device->GetCmdSetFragmentShadingRateKHR());
+    pfn(static_cast<VkCommandBuffer>(m_commandBuffer), &fragmentSize, combiners);
+#else
+    (void)rate;
+    (void)pipelinePrimitiveOp;
+    (void)primitiveAttachmentOp;
+#endif
 }
 void CommandListVK::MultiDrawArraysIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) {
     m_hasGraphicsWork = true;
@@ -1257,6 +1428,59 @@ void CommandListVK::CopyBuffer(IBuffer* src, size_t srcOffset, IBuffer* dst, siz
                     static_cast<VkBuffer>(srcVK->m_buffer),
                     static_cast<VkBuffer>(dstVK->m_buffer),
                     1, &region);
+}
+
+// Phase 11.4 — `VK_KHR_acceleration_structure` device build + barriers (ray-query slice; not RTPSO / traceRays).
+void CommandListVK::BuildAccelerationStructures(uint32_t infoCount, const void* pBuildGeometryInfos, const void* const* ppBuildRangeInfos) {
+    m_computeQueueEligible = false;
+    m_requiresQueueOwnershipTransfers = true;
+    m_crossQueueOwnershipUnsafe = true;
+    if (!m_device || !m_isRecording || !m_commandBuffer || infoCount == 0 || !pBuildGeometryInfos || !ppBuildRangeInfos) return;
+    if (!m_device->GetCapabilities().supportsAccelerationStructureBuild) return;
+    if (m_isRenderingActive) {
+        static int warnCount = 0;
+        if (warnCount++ < 8)
+            core::Log::Warn(
+                "Vulkan BuildAccelerationStructures called during active rendering; ending render scope explicitly. Move AS build outside render passes.");
+    }
+    EndRenderingIfActive();
+#if defined(VK_KHR_acceleration_structure)
+    auto* pfnBuild = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(m_device->GetCmdBuildAccelerationStructuresKHR());
+    if (pfnBuild) {
+        pfnBuild(static_cast<VkCommandBuffer>(m_commandBuffer), infoCount,
+                 reinterpret_cast<const VkAccelerationStructureBuildGeometryInfoKHR*>(pBuildGeometryInfos),
+                 reinterpret_cast<const VkAccelerationStructureBuildRangeInfoKHR* const*>(ppBuildRangeInfos));
+    }
+#endif
+}
+
+void CommandListVK::MemoryBarrierAccelerationStructureAccess() {
+    m_computeQueueEligible = false;
+    m_requiresQueueOwnershipTransfers = true;
+    m_crossQueueOwnershipUnsafe = true;
+    if (!m_device || !m_isRecording || !m_commandBuffer) return;
+    if (!m_device->GetCapabilities().supportsAccelerationStructureBuild) return;
+    if (m_isRenderingActive) {
+        static int warnCount = 0;
+        if (warnCount++ < 8)
+            core::Log::Warn(
+                "Vulkan MemoryBarrierAccelerationStructureAccess called during active rendering; ending render scope explicitly. Move barriers outside "
+                "render passes.");
+    }
+    EndRenderingIfActive();
+#if defined(VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR) && defined(VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
+    VkMemoryBarrier2 barrier2 = {};
+    barrier2.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    barrier2.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    barrier2.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    barrier2.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    VkDependencyInfo dep = {};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &barrier2;
+    vkCmdPipelineBarrier2(static_cast<VkCommandBuffer>(m_commandBuffer), &dep);
+#endif
 }
 
 } // namespace rhi

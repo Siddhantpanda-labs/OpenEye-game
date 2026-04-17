@@ -18,6 +18,12 @@ inline VkBufferUsageFlags ToVkBufferUsage(BufferUsage usage) {
     if (HasUsage(usage, BufferUsage::TransferDst)) f |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     if (HasUsage(usage, BufferUsage::IndirectDraw)) f |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     if (HasUsage(usage, BufferUsage::ShaderDeviceAddress)) f |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR)
+    if (HasUsage(usage, BufferUsage::AccelerationStructureStorage)) f |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+#endif
+#if defined(VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR)
+    if (HasUsage(usage, BufferUsage::AccelerationStructureBuildInput)) f |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+#endif
 #if defined(VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT)
     if (HasUsage(usage, BufferUsage::DescriptorBuffer)) f |= VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT;
 #endif
@@ -85,6 +91,17 @@ inline VkPipelineStageFlags ToVkPipelineStage(ResourceState state) {
         case ResourceState::TransferSrc:     return VK_PIPELINE_STAGE_TRANSFER_BIT;
         case ResourceState::Present:         return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         case ResourceState::IndirectDraw:    return VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+#if defined(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR)
+        case ResourceState::AsBuildScratch:
+        case ResourceState::AsBuildGeometryInput:
+        case ResourceState::AsBuildStorage:
+            return VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+#else
+        case ResourceState::AsBuildScratch:
+        case ResourceState::AsBuildGeometryInput:
+        case ResourceState::AsBuildStorage:
+            return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+#endif
     }
     return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 }
@@ -103,6 +120,19 @@ inline VkAccessFlags ToVkAccessFlags(ResourceState state) {
         case ResourceState::TransferSrc:     return VK_ACCESS_TRANSFER_READ_BIT;
         case ResourceState::Present:        return 0;
         case ResourceState::IndirectDraw:    return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+#if defined(VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR)
+        case ResourceState::AsBuildScratch:
+            return VK_ACCESS_SHADER_STORAGE_READ_BIT | VK_ACCESS_SHADER_STORAGE_WRITE_BIT;
+        case ResourceState::AsBuildGeometryInput:
+            return VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        case ResourceState::AsBuildStorage:
+            return VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+#else
+        case ResourceState::AsBuildScratch:
+        case ResourceState::AsBuildGeometryInput:
+        case ResourceState::AsBuildStorage:
+            return 0;
+#endif
     }
     return 0;
 }

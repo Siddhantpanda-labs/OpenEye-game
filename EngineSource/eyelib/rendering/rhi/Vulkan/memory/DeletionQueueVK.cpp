@@ -54,11 +54,28 @@ void DeletionQueueVK::EnqueueSampler(uint32_t frameIndex, void* device, void* sa
     m_perFrame[frameIndex].samplers.push_back(sampler);
 }
 
+void DeletionQueueVK::EnqueueAccelerationStructure(uint32_t frameIndex, void* device, void* accelerationStructure) {
+    (void)device;
+    if (frameIndex >= kMaxFrames || !accelerationStructure) return;
+    m_perFrame[frameIndex].accelerationStructures.push_back(accelerationStructure);
+}
+
 void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, std::set<void*>* alreadyDestroyedPipelines) {
     if (frameIndex >= kMaxFrames) return;
     VkDevice dev = device ? static_cast<VkDevice>(device) : VK_NULL_HANDLE;
     VmaAllocator vma = allocator ? static_cast<VmaAllocator>(allocator) : nullptr;
     FrameDeletions& d = m_perFrame[frameIndex];
+
+    // Acceleration structures must be destroyed before freeing their backing buffers (same deferred frame).
+    for (void* p : d.accelerationStructures) {
+#if defined(VK_KHR_acceleration_structure)
+        if (dev && p)
+            vkDestroyAccelerationStructureKHR(dev, static_cast<VkAccelerationStructureKHR>(p), nullptr);
+#else
+        (void)p;
+#endif
+    }
+    d.accelerationStructures.clear();
 
     for (auto& p : d.buffers) {
         VkBuffer buf = static_cast<VkBuffer>(p.first);

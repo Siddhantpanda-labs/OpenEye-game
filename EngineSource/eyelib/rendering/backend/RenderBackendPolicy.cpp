@@ -129,6 +129,26 @@ bool SupportsDeviceFault(const rhi::IDevice* device) {
     return device && device->GetCapabilities().supportsDeviceFault;
 }
 
+uint32_t SubgroupWaveSize(const rhi::IDevice* device) {
+    return device ? device->GetCapabilities().subgroupSize : 0u;
+}
+
+bool SupportsMeshShader(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsMeshShader;
+}
+
+bool SupportsVariableRateShading(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsVariableRateShading;
+}
+
+bool SupportsRayQuery(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsRayQuery;
+}
+
+bool SupportsAccelerationStructureBuild(const rhi::IDevice* device) {
+    return device && device->GetCapabilities().supportsAccelerationStructureBuild;
+}
+
 }  // namespace backend
 }  // namespace rendering
 }  // namespace eyelib

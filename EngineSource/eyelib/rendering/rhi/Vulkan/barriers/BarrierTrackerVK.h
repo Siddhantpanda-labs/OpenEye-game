@@ -34,6 +34,10 @@ struct CommandListVK;
  * presentation paths that emit `vkCmdPipelineBarrier2` outside this tracker must call **`SetImageState`** /
  * **`RemoveImageState`** (see `DeviceVKPresentation`, `CreateTextureVK`) so cached layout matches GPU.
  *
+ * **Redundant transitions (Phase 3.2):** `TransitionBuffer` / `TransitionImage` (when `updateGlobalLayoutCache` is true) log a
+ * capped number of **Warn**s when `from==to`. Coalescing merges duplicate pending keys before flush. **`SetImageState(Present)`**
+ * (or any state) after presentation is normal and does not go through `TransitionImage`—no redundant-transition noise there.
+ *
  * **Buffers:** `Reset` clears **`m_bufferState`** each frame. Device-local upload (`BufferVK` one-shot copy) and
  * host-visible initial fills happen **outside** `TransitionBuffer`; use **`SetBufferState`** after those barriers
  * complete, and **`RemoveBufferState`** when the `VkBuffer` is destroyed. Swapchain **`VkImage`** handles use
@@ -66,9 +70,9 @@ struct BarrierTrackerVK {
     /** Whole-image layout cache (VkImage as void*). `Undefined` if never set / removed. Not authoritative after partial-only transitions. */
     static ResourceState GetImageState(const BarrierTrackerVK* tracker, void* image);
 
-    /** Set tracked layout after an explicit barrier (no pending barrier recorded). */
+    /** Set tracked layout after an explicit barrier (no pending barrier recorded). Clears any **pending** image barriers for this `VkImage`, mirroring **`SetBufferState`**. */
     static void SetImageState(BarrierTrackerVK* tracker, void* image, ResourceState state);
-    /** Remove all tracking for an image that is being retired/destroyed. */
+    /** Remove layout cache and **pending** barriers for an image that is being retired/destroyed (e.g. swapchain recreate). */
     static void RemoveImageState(BarrierTrackerVK* tracker, void* image);
 
 private:

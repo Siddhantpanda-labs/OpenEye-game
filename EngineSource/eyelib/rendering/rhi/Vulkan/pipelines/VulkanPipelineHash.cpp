@@ -21,6 +21,8 @@ uint64_t HashPipelineDesc(const PipelineDesc& desc) {
     h = HashCombine(h, reinterpret_cast<uintptr_t>(desc.tessControlShader));
     h = HashCombine(h, reinterpret_cast<uintptr_t>(desc.tessEvalShader));
     h = HashCombine(h, reinterpret_cast<uintptr_t>(desc.geometryShader));
+    h = HashCombine(h, reinterpret_cast<uintptr_t>(desc.taskShader));
+    h = HashCombine(h, reinterpret_cast<uintptr_t>(desc.meshShader));
     h = HashCombine(h, static_cast<uint64_t>(desc.vertexLayout.strideInBytes));
     for (const auto& a : desc.vertexLayout.attributes) {
         h = HashCombine(h, static_cast<uint64_t>(a.location));

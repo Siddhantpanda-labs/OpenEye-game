@@ -23,6 +23,10 @@ enum class BufferUsage : uint32_t {
     ShaderDeviceAddress = 1u << 7,  ///< Buffer may be queried via `IDevice::GetBufferDeviceAddress`. Vulkan: VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
     /** Vulkan `VK_EXT_descriptor_buffer`: holds encoded descriptors for bindless / descriptor-buffer bind path. */
     DescriptorBuffer = 1u << 8,
+    /** Vulkan `VK_KHR_acceleration_structure`: backing storage for a `VkAccelerationStructureKHR` (`VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR`). */
+    AccelerationStructureStorage = 1u << 9,
+    /** Vulkan `VK_KHR_acceleration_structure`: scratch memory for `vkCmdBuildAccelerationStructuresKHR` (`VK_BUFFER_USAGE_STORAGE_BUFFER_BIT` is also required; this bit maps to `VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR` when supported). */
+    AccelerationStructureBuildInput = 1u << 10,
 };
 inline BufferUsage operator|(BufferUsage a, BufferUsage b) {
     return static_cast<BufferUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
@@ -48,6 +52,7 @@ enum class AsyncComputeSubmitPolicy : uint8_t {
 };
 
 struct VertexLayout;  // forward
+struct IBuffer;       // forward (acceleration-structure backing buffer in RHI)
 struct BufferDesc {
     size_t sizeInBytes = 0;
     BufferUsage usage = BufferUsage::Vertex;
@@ -118,6 +123,96 @@ struct TextureDesc {
     const char* debugName = nullptr;
 };
 
+// ---- Ray tracing / acceleration structures (Vulkan `VK_KHR_acceleration_structure` slice) ----
+
+enum class AccelerationStructureType : uint8_t {
+    BottomLevel,
+    TopLevel,
+};
+
+enum class AccelerationStructureGeometryType : uint8_t {
+    Triangles,
+    Aabbs,
+};
+
+/** Flags for `vkGetAccelerationStructureBuildSizesKHR` / `vkCmdBuildAccelerationStructuresKHR` (subset). */
+enum class AccelerationStructureBuildFlags : uint32_t {
+    None = 0,
+    AllowUpdate = 1u << 0,
+    AllowCompaction = 1u << 1,
+    PreferFastTrace = 1u << 2,
+    PreferFastBuild = 1u << 3,
+    LowMemory = 1u << 4,
+};
+inline AccelerationStructureBuildFlags operator|(AccelerationStructureBuildFlags a, AccelerationStructureBuildFlags b) {
+    return static_cast<AccelerationStructureBuildFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+inline AccelerationStructureBuildFlags& operator|=(AccelerationStructureBuildFlags& a, AccelerationStructureBuildFlags b) {
+    a = a | b;
+    return a;
+}
+inline bool HasAccelerationStructureBuildFlag(AccelerationStructureBuildFlags flags, AccelerationStructureBuildFlags bit) {
+    return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) != 0;
+}
+
+/** One geometry contribution for a bottom-level acceleration structure build-size query. */
+struct AccelerationStructureGeometryBuildInput {
+    AccelerationStructureGeometryType geometryType = AccelerationStructureGeometryType::Triangles;
+    /** Triangles: triangle count; AABBs: AABB primitive count. */
+    uint32_t primitiveCount = 0;
+    /** Triangles only: max vertex index + 1 (used for sizing). */
+    uint32_t maxVertexCount = 0;
+};
+
+/** Input for `IDevice::GetAccelerationStructureBuildSizes` (device build, sizing-only). */
+struct AccelerationStructureBuildSizesInput {
+    AccelerationStructureType type = AccelerationStructureType::BottomLevel;
+    AccelerationStructureBuildFlags flags = AccelerationStructureBuildFlags::None;
+    /** Bottom-level: one or more geometries. Top-level: leave empty and set `maxInstanceCount`. */
+    std::vector<AccelerationStructureGeometryBuildInput> geometries;
+    /** Top-level: instance count upper bound for sizing. */
+    uint32_t maxInstanceCount = 0;
+};
+
+struct AccelerationStructureBuildSizes {
+    uint64_t accelerationStructureSize = 0;
+    uint64_t buildScratchSize = 0;
+    uint64_t updateScratchSize = 0;
+};
+
+/**
+ * Create a `VkAccelerationStructureKHR` placed in `storageBuffer` at `storageOffset` with `sizeInBytes` from sizing.
+ * **Lifetime (Vulkan):** call `IDevice::DestroyAccelerationStructure` **before** `DestroyBuffer` on `storageBuffer` (or any reuse of that memory).
+ * The device defers `vkDestroyAccelerationStructureKHR` and buffer frees on the same ring-buffered fence schedule as other resources.
+ */
+struct AccelerationStructureDesc {
+    AccelerationStructureType type = AccelerationStructureType::BottomLevel;
+    IBuffer* storageBuffer = nullptr;
+    size_t storageOffset = 0;
+    uint64_t sizeInBytes = 0;
+    const char* debugName = nullptr;
+};
+
+/** Byte stride of one Vulkan `VkAccelerationStructureInstanceKHR` (see `AccelerationStructureBuffersVK.cpp` static_assert). */
+constexpr size_t kAccelerationStructureInstanceRecordStrideBytes = 64;
+
+/** Scratch memory for `vkCmdBuildAccelerationStructuresKHR` (`IDevice::CreateAccelerationStructureScratchBuffer`). */
+struct AccelerationStructureScratchBufferDesc {
+    /** Minimum `GetAccelerationStructureBuildSizes::buildScratchSize` from the matching build; device aligns to AS scratch rules. */
+    size_t sizeInBytes = 0;
+    BufferMemoryHint memoryHint = BufferMemoryHint::DeviceOnly;
+    const char* debugName = nullptr;
+};
+
+/** TLAS instance array (`VkAccelerationStructureInstanceKHR` records). */
+struct AccelerationStructureInstanceBufferDesc {
+    uint32_t maxInstanceCount = 0;
+    /** Bytes between consecutive records; **0** = `kAccelerationStructureInstanceRecordStrideBytes`. */
+    size_t strideInBytes = 0;
+    BufferMemoryHint memoryHint = BufferMemoryHint::DeviceOnly;
+    const char* debugName = nullptr;
+};
+
 // ---- Resource states (for barriers) ----
 
 enum class ResourceState : uint32_t {
@@ -134,6 +229,12 @@ enum class ResourceState : uint32_t {
     Present,
     /** Buffer read by GPU as indirect draw/dispatch parameters. Vulkan: VK_ACCESS_INDIRECT_COMMAND_READ_BIT. */
     IndirectDraw,
+    /** Scratch buffer for `vkCmdBuildAccelerationStructuresKHR` (Vulkan: `VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR` + shader storage access on buffer). */
+    AsBuildScratch,
+    /** Read-only geometry/instance inputs to an AS build (Vulkan: AS BUILD stage + `VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR` on buffer). */
+    AsBuildGeometryInput,
+    /** BLAS/TLAS backing storage being written by an AS build (Vulkan: AS BUILD + `VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR`). */
+    AsBuildStorage,
 };
 
 // ---- Shader ----
@@ -145,6 +246,30 @@ enum class ShaderStage {
     TessControl,
     TessEvaluation,
     Geometry,
+    /** Vulkan `VK_EXT_mesh_shader` task payload stage (optional). */
+    Task,
+    /** Vulkan `VK_EXT_mesh_shader` mesh output stage (replaces vertex shader for that pipeline). */
+    Mesh,
+};
+
+/** Vulkan `VK_KHR_fragment_shading_rate`: per-draw fragment shading rate (pixel footprint). */
+enum class FragmentShadingRate : uint8_t {
+    Rate1x1 = 0,
+    Rate1x2,
+    Rate2x1,
+    Rate2x2,
+    Rate2x4,
+    Rate4x2,
+    Rate4x4,
+};
+
+/** Vulkan `VkFragmentShadingRateCombinerOpKHR` mapped to backend-agnostic command intent. */
+enum class FragmentShadingRateCombinerOp : uint8_t {
+    Keep = 0,
+    Replace,
+    Min,
+    Max,
+    Mul,
 };
 
 // ---- Pipeline ----
@@ -234,8 +359,8 @@ enum class PipelineLayoutKind : uint32_t {
     Shadow,               ///< set0 Frame, set1 ShadowPass, set2 SceneBuffers
     GBuffer,              ///< set0 Frame, set1 Material, set2 Bindless, set3 SceneBuffers
     DeferredLighting,     ///< set0 Frame, set1 DeferredLightingPass
-    ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set2 SceneBuffers
-    ComputeGpuCull,       ///< set0 Frame, set1 SceneBuffers
+    ComputeLightCull,     ///< set0 Frame, set1 LightCullPass, set2-3 Empty placeholders, set4 SceneBuffers
+    ComputeGpuCull,       ///< set0 Frame, set1-3 Empty placeholders, set4 SceneBuffers
     IBL,                  ///< set0 IBLPass (binding 0 = environment cube); push: view, projection [, roughness]
     OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
 };
@@ -279,6 +404,10 @@ struct PipelineDesc {
     void* tessControlShader = nullptr;   // optional; requires TessEvaluation if set
     void* tessEvalShader = nullptr;     // optional
     void* geometryShader = nullptr;     // optional
+    /** Vulkan `VK_EXT_mesh_shader`: optional task shader (`ShaderStage::Task`). Requires `meshShader` and no `vertexShader`. */
+    void* taskShader = nullptr;
+    /** When set with `fragmentShader` and **without** `vertexShader`, creates a mesh graphics pipeline (`ShaderStage::Mesh`). */
+    void* meshShader = nullptr;
     VertexLayout vertexLayout;
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;
     /** Patch size when using tessellation (PatchList or tess shaders present). Default 3 = triangle patches. */
@@ -292,7 +421,7 @@ struct PipelineDesc {
     const char* debugName = nullptr;
     /** Which descriptor set layout to use. Legacy = current path; other kinds use resource-space layouts (set0 Frame, set1 Pass, etc.). Default Legacy. */
     PipelineLayoutKind layoutKind = PipelineLayoutKind::PushOnly;
-    /** Vulkan dynamic rendering: when set, must match the attachments used with this pipeline. When unset, inferred from layoutKind (Post should usually be set explicitly). */
+    /** Vulkan dynamic rendering: when set, must match **`vkCmdBeginRendering`** color/depth views for passes that use this pipeline (see **`dynamic_rendering_pass_contract.md`** in `Vulkan/`). When unset, inferred from **`layoutKind`** (Post should usually be set explicitly). */
     std::optional<PipelineAttachmentFormats> attachmentFormats;
 };
 
@@ -396,7 +525,7 @@ enum class SwapchainOutputMode : uint8_t {
     HdrExtendedSrgbLinear,
 };
 
-/** Maps a nominal frame cap (Hz) to nanoseconds for `IDevice::WaitForPresent` / `WaitForPreviousPresent` timeouts. `0` → `UINT64_MAX` (no timeout budget). */
+/** Maps a nominal frame cap (Hz) to nanoseconds for `IDevice::WaitForPresent` / `WaitForPreviousPresent` timeouts. `0` → `UINT64_MAX` (no timeout budget). Frame-loop recipe: `EngineSource/eyelib/rendering/rhi/Vulkan/swapchain_present_policy.md` §4. */
 inline uint64_t PresentWaitTimeoutNsFromTargetHz(uint32_t targetHz) {
     if (targetHz == 0) return UINT64_MAX;
     return 1000000000ull / static_cast<uint64_t>(targetHz);
@@ -457,10 +586,44 @@ struct RHICapabilities {
     bool supportsDescriptorBuffer = false;
     /** Vulkan: `VK_EXT_graphics_pipeline_library` feature enabled (monolithic create may chain `VkGraphicsPipelineLibraryCreateInfoEXT`). */
     bool supportsGraphicsPipelineLibrary = false;
-    /** Vulkan: `VK_KHR_pipeline_executable_properties` enabled (`vkGetPipelineExecutablePropertiesKHR` path available; first slice is cap + optional device create only). */
+    /** Vulkan: `VK_KHR_pipeline_executable_properties` enabled; entry point loaded when advertised. After the first successful `vkCreate*Pipelines`, **`DeviceVK`** may emit one **Info** sample line (executable count + first ISA name). */
     bool supportsPipelineExecutableProperties = false;
     /** Vulkan: `VK_EXT_device_fault` enabled (driver may report fault info; first slice is cap + optional device create + log-only). */
     bool supportsDeviceFault = false;
+    /** Vulkan: `VK_EXT_mesh_shader` enabled (`vkCmdDrawMeshTasksEXT` path). */
+    bool supportsMeshShader = false;
+    /** Vulkan: mesh shader task stage enabled (`taskShader` pipelines). */
+    bool supportsMeshTaskShader = false;
+    /** From `VkPhysicalDeviceMeshShaderPropertiesEXT::maxMeshOutputVertices` when supported; else 0. */
+    uint32_t meshShaderMaxOutputVertices = 0;
+    /** From `maxMeshOutputPrimitives`. */
+    uint32_t meshShaderMaxOutputPrimitives = 0;
+    /** From `maxMeshPayloadAndSharedMemorySize` (bytes). */
+    uint32_t meshShaderMaxPayloadAndSharedMemoryBytes = 0;
+    /** Vulkan: `VK_KHR_fragment_shading_rate` dynamic state path (`vkCmdSetFragmentShadingRateKHR`). */
+    bool supportsVariableRateShading = false;
+    /** Vulkan: min texel size for shading-rate attachment / pipeline rate (`VkPhysicalDeviceFragmentShadingRatePropertiesKHR`). */
+    uint32_t vrsMinTexelWidth = 1;
+    uint32_t vrsMinTexelHeight = 1;
+    /** Vulkan: max texel size for shading-rate attachment / pipeline rate (`VkPhysicalDeviceFragmentShadingRatePropertiesKHR`). */
+    uint32_t vrsMaxTexelWidth = 1;
+    uint32_t vrsMaxTexelHeight = 1;
+    /** Vulkan ray tracing slice support (Phase 11): true when acceleration structures + ray query are enabled. */
+    bool supportsRayQuery = false;
+    /** True when `vkCmdBuildAccelerationStructuresKHR` is loaded (same enable chain as `supportsRayQuery` today). Distinct name for policy/gating AS **build** commands vs future RTPSO-only caps when Phase 11 completes. */
+    bool supportsAccelerationStructureBuild = false;
+    /** Vulkan AS property: `maxPrimitiveCount` (upper bound for one geometry build call). */
+    uint64_t rayTracingMaxPrimitiveCount = 0;
+    /** Vulkan AS property: `minAccelerationStructureScratchOffsetAlignment`. */
+    uint32_t rayTracingScratchAlignment = 0;
+    /** From `VkPhysicalDeviceSubgroupProperties::subgroupSize` (`vkGetPhysicalDeviceProperties2`); 0 if not queried. */
+    uint32_t subgroupSize = 0;
+    /** `VkPhysicalDeviceSubgroupProperties::supportedStages` as `uint32_t` (`VkShaderStageFlags`). */
+    uint32_t subgroupSupportedShaderStagesMask = 0;
+    /** `VkPhysicalDeviceSubgroupProperties::supportedOperations` as `uint32_t` (`VkSubgroupFeatureFlags`). */
+    uint32_t subgroupSupportedOperationsMask = 0;
+    /** `VkPhysicalDeviceSubgroupProperties::quadOperationsInAllStages`. */
+    bool subgroupQuadOperationsInAllStages = false;
 };
 
 } // namespace rhi

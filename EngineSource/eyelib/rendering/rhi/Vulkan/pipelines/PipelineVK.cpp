@@ -11,6 +11,7 @@
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
+#include <atomic>
 #include <cassert>
 #include <vector>
 #include <string>
@@ -46,6 +47,25 @@ static std::string ApplyKeywordDefinesString(const std::string& source, const st
         prefix += " 1\n";
     }
     return prefix + source;
+}
+
+/** Mesh graphics with real descriptor sets uses the same `VkPipelineLayout` kinds as vertex passes (not compute layouts). */
+static bool PipelineLayoutKindSupportsMeshWithResourceSpace(PipelineLayoutKind kind) {
+    switch (kind) {
+    case PipelineLayoutKind::Forward:
+    case PipelineLayoutKind::Post:
+    case PipelineLayoutKind::Shadow:
+    case PipelineLayoutKind::GBuffer:
+    case PipelineLayoutKind::DeferredLighting:
+    case PipelineLayoutKind::IBL:
+    case PipelineLayoutKind::OutlinePost:
+        return true;
+    case PipelineLayoutKind::PushOnly:
+    case PipelineLayoutKind::ComputeLightCull:
+    case PipelineLayoutKind::ComputeGpuCull:
+    default:
+        return false;
+    }
 }
 
 struct RenderingFormatSelection {
@@ -131,14 +151,119 @@ static RenderingFormatSelection SelectRenderingFormats(const PipelineDesc& desc)
     return out;
 }
 
+/** Phase 6.1: reject **`VkPipelineRenderingCreateInfo`** / blend mismatches before **`vkCreateGraphicsPipelines`**. */
+static bool ValidatePipelineRenderingCreateInfoAgainstDesc(DeviceVK* device, const PipelineDesc& desc,
+                                                            const RenderingFormatSelection& sel) {
+    const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
+    VkPhysicalDevice phys = static_cast<VkPhysicalDevice>(device->GetPhysicalDevice());
+    if (phys == VK_NULL_HANDLE) {
+        core::Log::ErrorF("CreateVkGraphicsPipeline: no physical device (name=%s)", dbg);
+        return false;
+    }
+    VkPhysicalDeviceProperties props = {};
+    vkGetPhysicalDeviceProperties(phys, &props);
+    const uint32_t maxCA = props.limits.maxColorAttachments;
+    const uint32_t maxFO = props.limits.maxFragmentOutputAttachments;
+    const size_t colorCount = sel.colorFormats.size();
+
+    if (colorCount > maxCA) {
+        core::Log::ErrorF(
+            "CreateVkGraphicsPipeline: color attachment count %zu exceeds maxColorAttachments (%u) (VkPipelineRenderingCreateInfo); name=%s",
+            colorCount, maxCA, dbg);
+        return false;
+    }
+    if (colorCount > maxFO) {
+        core::Log::ErrorF(
+            "CreateVkGraphicsPipeline: color attachment count %zu exceeds maxFragmentOutputAttachments (%u); name=%s",
+            colorCount, maxFO, dbg);
+        return false;
+    }
+    for (size_t i = 0; i < colorCount; ++i) {
+        if (sel.colorFormats[i] == VK_FORMAT_UNDEFINED) {
+            core::Log::ErrorF(
+                "CreateVkGraphicsPipeline: color attachment[%zu] is VK_FORMAT_UNDEFINED (check PipelineDesc::attachmentFormats); name=%s",
+                i, dbg);
+            return false;
+        }
+    }
+
+    if (desc.attachmentFormats.has_value()) {
+        const PipelineAttachmentFormats& af = *desc.attachmentFormats;
+        if (af.color.size() != colorCount) {
+            core::Log::ErrorF(
+                "CreateVkGraphicsPipeline: internal error: attachmentFormats.color size %zu != resolved color count %zu; name=%s",
+                af.color.size(), colorCount, dbg);
+            return false;
+        }
+        for (size_t i = 0; i < af.color.size(); ++i) {
+            const RHITextureFormat cf = af.color[i];
+            if (cf == RHITextureFormat::None) {
+                core::Log::ErrorF(
+                    "CreateVkGraphicsPipeline: PipelineDesc::attachmentFormats.color[%zu] is None (illegal); name=%s", i, dbg);
+                return false;
+            }
+            if (cf == RHITextureFormat::Depth24 || cf == RHITextureFormat::Depth24Stencil8) {
+                core::Log::ErrorF(
+                    "CreateVkGraphicsPipeline: attachmentFormats.color[%zu] must not be a depth/stencil RHITextureFormat; name=%s",
+                    i, dbg);
+                return false;
+            }
+        }
+    }
+
+    if (sel.depthFormat == VK_FORMAT_UNDEFINED && sel.stencilFormat != VK_FORMAT_UNDEFINED) {
+        core::Log::ErrorF(
+            "CreateVkGraphicsPipeline: stencilAttachmentFormat set without depthAttachmentFormat (unsupported); name=%s",
+            dbg);
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void* pipelineLayout, void* pipelineCache) {
+    if (desc.meshShader)
+        return CreateVkMeshGraphicsPipeline(device, desc, pipelineLayout, pipelineCache);
     if (!device || !desc.vertexShader || !desc.fragmentShader || !pipelineLayout)
         return nullptr;
     ShaderVK* vs = static_cast<ShaderVK*>(desc.vertexShader);
     ShaderVK* fs = static_cast<ShaderVK*>(desc.fragmentShader);
     if (!vs->m_module || !fs->m_module) return nullptr;
+
+    const RenderingFormatSelection selectedFormats = SelectRenderingFormats(desc);
+    if (!ValidatePipelineRenderingCreateInfoAgainstDesc(device, desc, selectedFormats))
+        return nullptr;
+
+    const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
+    DepthStencilState depthState = desc.depthStencil;
+    if (selectedFormats.depthFormat == VK_FORMAT_UNDEFINED) {
+        if (depthState.depthTest || depthState.depthWrite) {
+            static std::atomic<int> s_depthClampWarns{0};
+            const int n = s_depthClampWarns.fetch_add(1);
+            if (n < 32) {
+                core::Log::WarnF(
+                    "CreateVkGraphicsPipeline: depth test/write in PipelineDesc but VkPipelineRenderingCreateInfo has no depth "
+                    "attachment (layoutKind=%u); clamping depth test/write off. Prefer explicit attachmentFormats + matching depth "
+                    "state. name=%s",
+                    static_cast<unsigned>(static_cast<uint32_t>(desc.layoutKind)), dbg);
+            }
+            depthState.depthTest = false;
+            depthState.depthWrite = false;
+        }
+    }
+    if (selectedFormats.stencilFormat == VK_FORMAT_UNDEFINED && depthState.stencilTest) {
+        static std::atomic<int> s_stencilClampWarns{0};
+        const int n = s_stencilClampWarns.fetch_add(1);
+        if (n < 16) {
+            core::Log::WarnF(
+                "CreateVkGraphicsPipeline: stencil test in PipelineDesc but no stencilAttachmentFormat in VkPipelineRenderingCreateInfo; "
+                "clamping stencil off. name=%s",
+                dbg);
+        }
+        depthState.stencilTest = false;
+    }
 
     VkDevice vkDevice = static_cast<VkDevice>(device->GetDevice());
     VkPipelineLayout layout = static_cast<VkPipelineLayout>(pipelineLayout);
@@ -206,7 +331,6 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     // Single source of truth for dynamic rendering: blend attachment count MUST equal colorAttachmentCount (Vulkan spec).
-    const RenderingFormatSelection selectedFormats = SelectRenderingFormats(desc);
     const uint32_t colorAttachmentCount = static_cast<uint32_t>(selectedFormats.colorFormats.size());
     std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorAttachmentCount);
     for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
@@ -229,11 +353,11 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
 
     VkPipelineDepthStencilStateCreateInfo depthStencil = {};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = desc.depthStencil.depthTest ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = desc.depthStencil.depthWrite ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = ToVkCompareOp(desc.depthStencil.depthCompare);
+    depthStencil.depthTestEnable = depthState.depthTest ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = depthState.depthWrite ? VK_TRUE : VK_FALSE;
+    depthStencil.depthCompareOp = ToVkCompareOp(depthState.depthCompare);
     depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = desc.depthStencil.stencilTest ? VK_TRUE : VK_FALSE;
+    depthStencil.stencilTestEnable = depthState.stencilTest ? VK_TRUE : VK_FALSE;
     depthStencil.front = depthStencil.back = { VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS, 0, 0, 0 };
 
     VkPipelineRenderingCreateInfo renderingInfo = {};
@@ -299,13 +423,13 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkResult res = vkCreateGraphicsPipelines(vkDevice, cache, 1, &gpInfo, nullptr, &pipeline);
     if (res != VK_SUCCESS || pipeline == VK_NULL_HANDLE) {
-        const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
         core::Log::ErrorF(
             "vkCreateGraphicsPipelines failed: VkResult=%d (0x%08X) layoutKind=%u colorAttachments=%u name=%s",
             static_cast<int>(res), static_cast<unsigned int>(static_cast<uint32_t>(res)),
             static_cast<unsigned>(static_cast<uint32_t>(desc.layoutKind)), colorAttachmentCount, dbg);
         return nullptr;
     }
+    device->DeveloperLogPipelineExecutablePropertiesOnce(pipeline, desc.debugName);
     return pipeline;
 }
 
@@ -341,24 +465,64 @@ void* CreateVkComputePipeline(DeviceVK* device, void* pipelineLayout, void* pipe
             static_cast<int>(res), static_cast<unsigned int>(static_cast<uint32_t>(res)));
         return nullptr;
     }
+    device->DeveloperLogPipelineExecutablePropertiesOnce(pipeline, "compute");
     return pipeline;
 }
 
 IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) {
     if (!device) return nullptr;
+    const bool meshPath = desc.meshShader != nullptr;
+    if (meshPath && desc.vertexShader) {
+        core::Log::ErrorF("CreateGraphicsPipelineVK: cannot set both meshShader and vertexShader (name=%s)",
+                          desc.debugName ? desc.debugName : "?");
+        return nullptr;
+    }
+    if (meshPath && desc.layoutKind != PipelineLayoutKind::PushOnly) {
+        if (!device->SupportsMeshShader()) {
+            core::Log::ErrorF(
+                "CreateGraphicsPipelineVK: mesh pipeline with resource-space layout requires VK_EXT_mesh_shader (name=%s)",
+                desc.debugName ? desc.debugName : "?");
+            return nullptr;
+        }
+        if (!PipelineLayoutKindSupportsMeshWithResourceSpace(desc.layoutKind)) {
+            core::Log::ErrorF(
+                "CreateGraphicsPipelineVK: mesh pipelines use PushOnly or a graphics pass layout (Forward, GBuffer, Post, Shadow, "
+                "DeferredLighting, IBL, OutlinePost); layoutKind=%u name=%s",
+                static_cast<unsigned>(static_cast<uint32_t>(desc.layoutKind)), desc.debugName ? desc.debugName : "?");
+            return nullptr;
+        }
+    }
     const uint64_t hash = HashPipelineDesc(desc);
     void* pipeline = device->GetCachedGraphicsPipeline(hash);
     void* layoutToUse = nullptr;
-    if (desc.layoutKind != PipelineLayoutKind::PushOnly) {
+    if (meshPath) {
+        if (desc.layoutKind == PipelineLayoutKind::PushOnly) {
+            layoutToUse = device->GetMeshPushPipelineLayout();
+            if (!layoutToUse) {
+                core::Log::ErrorF(
+                    "CreateGraphicsPipelineVK: PushOnly mesh pipeline requires GetMeshPushPipelineLayout() (device init / extension). name=%s",
+                    desc.debugName ? desc.debugName : "?");
+                return nullptr;
+            }
+        } else {
+            layoutToUse = device->GetPipelineLayoutForKind(desc.layoutKind);
+            if (!layoutToUse) {
+                core::Log::ErrorF("CreateGraphicsPipelineVK: mesh pipeline missing VkPipelineLayout for layoutKind=%u name=%s",
+                                  static_cast<unsigned>(static_cast<uint32_t>(desc.layoutKind)), desc.debugName ? desc.debugName : "?");
+                return nullptr;
+            }
+        }
+    } else if (desc.layoutKind != PipelineLayoutKind::PushOnly) {
         layoutToUse = device->GetPipelineLayoutForKind(desc.layoutKind);
     }
-    if (!layoutToUse) {
+    if (!layoutToUse && !meshPath) {
         layoutToUse = device->GetDefaultPipelineLayout();
     }
+    const bool canCreateClassic = !meshPath && desc.vertexShader && desc.fragmentShader;
+    const bool canCreateMesh = meshPath && desc.meshShader && desc.fragmentShader;
     // Pipeline cache is optional: VK_NULL_HANDLE is valid for vkCreateGraphicsPipelines (no serialized cache).
-    if (!pipeline && desc.vertexShader && desc.fragmentShader && layoutToUse) {
-        void* created =
-            CreateVkGraphicsPipeline(device, desc, layoutToUse, device->GetPipelineCache());
+    if (!pipeline && (canCreateClassic || canCreateMesh) && layoutToUse) {
+        void* created = CreateVkGraphicsPipeline(device, desc, layoutToUse, device->GetPipelineCache());
         if (created) {
             if (desc.debugName)
                 SetDebugNamePipeline(device, created, desc.debugName);
@@ -372,9 +536,9 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
             ++s_logCount;
             const char* dbg = desc.debugName ? desc.debugName : "(no debugName)";
             core::Log::WarnF(
-                "CreateGraphicsPipelineVK: graphics pipeline creation failed or skipped (layoutKind=%u layout=%p vs=%p fs=%p name=%s).",
+                "CreateGraphicsPipelineVK: graphics pipeline creation failed or skipped (layoutKind=%u layout=%p vs=%p mesh=%p fs=%p name=%s).",
                 static_cast<unsigned>(static_cast<int>(desc.layoutKind)), layoutToUse, (void*)desc.vertexShader,
-                (void*)desc.fragmentShader, dbg);
+                (void*)desc.meshShader, (void*)desc.fragmentShader, dbg);
         }
         return nullptr;
     }
@@ -387,8 +551,13 @@ IPipeline* CreateGraphicsPipelineVK(DeviceVK* device, const PipelineDesc& desc) 
     p->m_raster = desc.raster;
     p->m_pipeline = pipeline;
     p->m_layoutKind = desc.layoutKind;
-    p->m_nativePipelineLayout = (desc.layoutKind != PipelineLayoutKind::PushOnly && layoutToUse) ? layoutToUse : nullptr;
-    p->m_requiredSetCount = static_cast<uint8_t>(vkres::GetRequiredDescriptorSetCount(desc.layoutKind));
+    p->m_nativePipelineLayout =
+        (desc.layoutKind != PipelineLayoutKind::PushOnly && layoutToUse) ? layoutToUse : nullptr;
+    p->m_requiredSetCount = static_cast<uint8_t>(
+        (meshPath && desc.layoutKind == PipelineLayoutKind::PushOnly)
+            ? 0u
+            : vkres::GetRequiredDescriptorSetCount(desc.layoutKind));
+    p->m_usesMeshShaders = meshPath;
     p->m_graphicsCacheHash = hash;
     device->RetainGraphicsPipeline(hash);
     return p;
@@ -440,9 +609,11 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
         const std::string vertLabel = baseDir + logicalName + ".vert";
         const std::string fragLabel = baseDir + logicalName + ".frag";
         std::vector<uint32_t> vspirv, fspirv;
-        if (!VulkanCompileGlslToSpirv(vsrc.c_str(), vsrc.size(), ShaderStage::Vertex, vertLabel.c_str(), vspirv))
+        if (!VulkanCompileGlslToSpirv(vsrc.c_str(), vsrc.size(), ShaderStage::Vertex, vertLabel.c_str(), vspirv,
+                                      logicalName.c_str()))
             return false;
-        if (!VulkanCompileGlslToSpirv(fsrc.c_str(), fsrc.size(), ShaderStage::Fragment, fragLabel.c_str(), fspirv))
+        if (!VulkanCompileGlslToSpirv(fsrc.c_str(), fsrc.size(), ShaderStage::Fragment, fragLabel.c_str(), fspirv,
+                                      logicalName.c_str()))
             return false;
         vs = CreateShaderFromBinaryVK(device, ShaderStage::Vertex, vspirv.data(), vspirv.size() * sizeof(uint32_t));
         fs = CreateShaderFromBinaryVK(device, ShaderStage::Fragment, fspirv.data(), fspirv.size() * sizeof(uint32_t));

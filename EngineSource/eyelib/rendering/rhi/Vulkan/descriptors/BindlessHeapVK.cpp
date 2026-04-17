@@ -247,7 +247,15 @@ bool BindlessHeapVK::UpdateDescriptorBufferStorageBuffer(uint32_t index, BufferV
 }
 
 BindlessHandle BindlessHeapVK::AllocateTextureHandle(ITexture* texture) {
-    if (!texture || !m_descriptorSet || !m_device) return kInvalidBindlessHandle;
+    if (!texture || !m_device) return kInvalidBindlessHandle;
+    if (!m_descriptorSet) {
+        if (!m_warnedAllocateOnUninitializedHeap) {
+            core::Log::Error(
+                "BindlessHeapVK: AllocateTextureHandle called on uninitialized heap (pool or set creation failed); returning invalid handle.");
+            m_warnedAllocateOnUninitializedHeap = true;
+        }
+        return kInvalidBindlessHandle;
+    }
     TextureVK* tex = static_cast<TextureVK*>(texture);
     VkImageView imageView = tex->m_imageView ? static_cast<VkImageView>(tex->m_imageView) : VK_NULL_HANDLE;
     if (imageView == VK_NULL_HANDLE) return kInvalidBindlessHandle;
@@ -255,7 +263,13 @@ BindlessHandle BindlessHeapVK::AllocateTextureHandle(ITexture* texture) {
     if (sampler == VK_NULL_HANDLE) return kInvalidBindlessHandle;
 
     uint32_t index = allocTextureSlot();
-    if (index >= kMaxTextures) return kInvalidBindlessHandle;
+    if (index >= kMaxTextures) {
+        if (!m_warnedTextureHeapExhausted) {
+            core::Log::WarnF("BindlessHeapVK::AllocateTextureHandle: sampled-image table full (%u slots); returning invalid handle.", kMaxTextures);
+            m_warnedTextureHeapExhausted = true;
+        }
+        return kInvalidBindlessHandle;
+    }
 
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = sampler;
@@ -271,22 +285,52 @@ BindlessHandle BindlessHeapVK::AllocateTextureHandle(ITexture* texture) {
     write.pImageInfo = &imageInfo;
     vkUpdateDescriptorSets(static_cast<VkDevice>(m_device->GetDevice()), 1, &write, 0, nullptr);
 
-    if (m_usesDescriptorBuffer)
-        UpdateDescriptorBufferTexture(index, tex);
+    if (m_usesDescriptorBuffer && !UpdateDescriptorBufferTexture(index, tex)) {
+        if (!m_warnedDescriptorBufferTextureEncodeFailure) {
+            core::Log::Warn(
+                "BindlessHeapVK: descriptor buffer texture encoding failed; disabling vkCmdBindDescriptorBuffersEXT path for this heap; "
+                "classic descriptor-set bindless remains valid.");
+            m_warnedDescriptorBufferTextureEncodeFailure = true;
+        }
+        m_usesDescriptorBuffer = false;
+    }
 
     return static_cast<BindlessHandle>(index + 1u);
 }
 
 BindlessHandle BindlessHeapVK::AllocateBufferHandle(IBuffer* buffer) {
-    if (!buffer || !m_descriptorSet || !m_device) return kInvalidBindlessHandle;
+    if (!buffer || !m_device) return kInvalidBindlessHandle;
+    if (!m_descriptorSet) {
+        if (!m_warnedAllocateOnUninitializedHeap) {
+            core::Log::Error(
+                "BindlessHeapVK: AllocateBufferHandle called on uninitialized heap (pool or set creation failed); returning invalid handle.");
+            m_warnedAllocateOnUninitializedHeap = true;
+        }
+        return kInvalidBindlessHandle;
+    }
     BufferVK* buf = static_cast<BufferVK*>(buffer);
     VkBuffer vkBuf = buf->m_buffer ? static_cast<VkBuffer>(buf->m_buffer) : VK_NULL_HANDLE;
     if (vkBuf == VK_NULL_HANDLE) return kInvalidBindlessHandle;
 
-    uint32_t index = allocBufferSlot();
-    if (index >= kMaxBuffers) return kInvalidBindlessHandle;
+    const size_t bufSize = buf->GetSize();
+    if (bufSize == 0) {
+        if (!m_warnedZeroSizeStorageBuffer) {
+            core::Log::Warn("BindlessHeapVK::AllocateBufferHandle: rejecting zero-size buffer for storage-buffer bindless slot.");
+            m_warnedZeroSizeStorageBuffer = true;
+        }
+        return kInvalidBindlessHandle;
+    }
 
-    size_t range = buf->GetSize();
+    uint32_t index = allocBufferSlot();
+    if (index >= kMaxBuffers) {
+        if (!m_warnedBufferHeapExhausted) {
+            core::Log::WarnF("BindlessHeapVK::AllocateBufferHandle: storage buffer table full (%u slots); returning invalid handle.", kMaxBuffers);
+            m_warnedBufferHeapExhausted = true;
+        }
+        return kInvalidBindlessHandle;
+    }
+
+    size_t range = bufSize;
     VkDescriptorBufferInfo bufferInfo = {};
     bufferInfo.buffer = vkBuf;
     bufferInfo.offset = 0;
@@ -301,8 +345,15 @@ BindlessHandle BindlessHeapVK::AllocateBufferHandle(IBuffer* buffer) {
     write.pBufferInfo = &bufferInfo;
     vkUpdateDescriptorSets(static_cast<VkDevice>(m_device->GetDevice()), 1, &write, 0, nullptr);
 
-    if (m_usesDescriptorBuffer)
-        UpdateDescriptorBufferStorageBuffer(index, buf);
+    if (m_usesDescriptorBuffer && !UpdateDescriptorBufferStorageBuffer(index, buf)) {
+        if (!m_warnedDescriptorBufferBufferEncodeFailure) {
+            core::Log::Warn(
+                "BindlessHeapVK: descriptor buffer storage-buffer encoding failed; disabling vkCmdBindDescriptorBuffersEXT path for this heap; "
+                "classic descriptor-set bindless remains valid.");
+            m_warnedDescriptorBufferBufferEncodeFailure = true;
+        }
+        m_usesDescriptorBuffer = false;
+    }
 
     return static_cast<BindlessHandle>(index + 1u);
 }

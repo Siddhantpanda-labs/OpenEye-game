@@ -83,6 +83,16 @@ bool SupportsPresentWait(const rhi::IDevice* device);
 bool SupportsPipelineExecutableProperties(const rhi::IDevice* device);
 /** @return true when `VK_EXT_device_fault` was enabled at device create (`RHICapabilities::supportsDeviceFault`). */
 bool SupportsDeviceFault(const rhi::IDevice* device);
+/** @return `RHICapabilities::subgroupSize` from `vkGetPhysicalDeviceProperties2` (0 if unknown / no device). */
+uint32_t SubgroupWaveSize(const rhi::IDevice* device);
+/** @return true when Vulkan mesh shading (`VK_EXT_mesh_shader`) is enabled (`RHICapabilities::supportsMeshShader`). */
+bool SupportsMeshShader(const rhi::IDevice* device);
+/** @return true when Vulkan variable rate shading (`VK_KHR_fragment_shading_rate`) is enabled. */
+bool SupportsVariableRateShading(const rhi::IDevice* device);
+/** @return true when Vulkan ray query + acceleration-structure slice is enabled. */
+bool SupportsRayQuery(const rhi::IDevice* device);
+/** @return true when `vkCmdBuildAccelerationStructuresKHR` is available (`RHICapabilities::supportsAccelerationStructureBuild`). */
+bool SupportsAccelerationStructureBuild(const rhi::IDevice* device);
 
 }  // namespace backend
 }  // namespace rendering

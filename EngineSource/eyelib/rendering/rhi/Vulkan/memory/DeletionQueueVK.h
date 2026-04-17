@@ -11,7 +11,8 @@ namespace rhi {
 
 /** Per-frame deferred destruction. Resources enqueued for frame F are destroyed when Tick(device, allocator, F) is called
  *  **after** that frame's fence has been waited (see DeviceVK::BeginFrame). VMA-backed buffers/images are freed with vmaDestroy*;
- *  Tick destroys **framebuffer → image view → image** so dependents are torn down before images. */
+ *  Tick destroys **VkAccelerationStructureKHR** entries **before** **VkBuffer** frees in the same bucket so AS handles are released
+ *  while backing memory is still valid; **framebuffer → image view → image** ordering applies for render-target teardown. */
 struct DeletionQueueVK {
     static constexpr uint32_t kMaxFrames = 3;
 
@@ -24,6 +25,7 @@ struct DeletionQueueVK {
         std::vector<void*> descriptorSetLayouts;        // VkDescriptorSetLayout
         std::vector<void*> framebuffers;                 // VkFramebuffer
         std::vector<void*> samplers;                    // VkSampler
+        std::vector<void*> accelerationStructures;     // VkAccelerationStructureKHR
     };
     std::array<FrameDeletions, kMaxFrames> m_perFrame = {};
 
@@ -36,6 +38,7 @@ struct DeletionQueueVK {
     void EnqueueDescriptorSetLayout(uint32_t frameIndex, void* device, void* descriptorSetLayout);
     void EnqueueFramebuffer(uint32_t frameIndex, void* device, void* framebuffer);
     void EnqueueSampler(uint32_t frameIndex, void* device, void* sampler);
+    void EnqueueAccelerationStructure(uint32_t frameIndex, void* device, void* accelerationStructure);
 
     /** Process and clear the queue for this frame index. Call after waiting that frame's fence (e.g. in BeginFrame).
      *  If alreadyDestroyedPipelines is non-null, each pipeline handle is only destroyed once across multiple Tick calls (used on shutdown when same cached pipeline can be enqueued by multiple owners). */

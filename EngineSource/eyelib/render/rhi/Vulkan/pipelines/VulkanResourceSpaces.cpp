@@ -11,7 +11,31 @@ static constexpr VkShaderStageFlags kAllStages = VK_SHADER_STAGE_VERTEX_BIT | VK
 static constexpr VkShaderStageFlags kGraphicsStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 static constexpr uint32_t kPushConstantSize = 256;
 
-/** Empty descriptor set layout (0 bindings). Used as placeholder for set indices 1–3 in compute layouts so set 4 = SceneBuffers. */
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT) && defined(VK_SHADER_STAGE_TASK_BIT_EXT)
+static constexpr VkShaderStageFlags kMeshAmpStages =
+    VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT;
+#else
+static constexpr VkShaderStageFlags kMeshAmpStages = 0u;
+#endif
+
+static VkShaderStageFlags GraphicsBindingStages(bool includeMesh) {
+    VkShaderStageFlags f = kGraphicsStages;
+    if (includeMesh && kMeshAmpStages != 0u)
+        f |= kMeshAmpStages;
+    return f;
+}
+
+static VkShaderStageFlags AllBindingStages(bool includeMesh) {
+    VkShaderStageFlags f = kAllStages;
+    if (includeMesh && kMeshAmpStages != 0u)
+        f |= kMeshAmpStages;
+    return f;
+}
+
+static VkShaderStageFlags GraphicsPushStagesForPipelineLayout(bool includeMesh) {
+    return GraphicsBindingStages(includeMesh);
+}
+
 VkDescriptorSetLayout CreateEmptySetLayout(VkDevice device) {
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -26,16 +50,17 @@ VkDescriptorSetLayout CreateEmptySetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateFrameSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateFrameSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = AllBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[2] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = kAllStages;
+    bindings[0].stageFlags = st;
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = kAllStages;
+    bindings[1].stageFlags = st;
 
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -50,25 +75,26 @@ VkDescriptorSetLayout CreateFrameSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateForwardPassSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateForwardPassSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[6] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = kGraphicsStages;
+    bindings[0].stageFlags = st;
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = kGraphicsStages;
+    bindings[1].stageFlags = st;
     bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = kGraphicsStages;
+    bindings[2].stageFlags = st;
     for (uint32_t i = 3; i < 6; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kGraphicsStages;
+        bindings[i].stageFlags = st;
     }
 
     VkDescriptorSetLayoutCreateInfo info = {};
@@ -84,14 +110,14 @@ VkDescriptorSetLayout CreateForwardPassSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreatePostPassSetLayout(VkDevice device) {
-    // PostPass: 0=scene color, 1=depth, 2=velocity; 3-6 for SSR (albedo, PBR, scene tex, skybox)
+VkDescriptorSetLayout CreatePostPassSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[7] = {};
     for (uint32_t i = 0; i < 7; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kGraphicsStages;
+        bindings[i].stageFlags = st;
     }
 
     VkDescriptorSetLayoutCreateInfo info = {};
@@ -107,12 +133,13 @@ VkDescriptorSetLayout CreatePostPassSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateShadowPassSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateShadowPassSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[1] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = kGraphicsStages;
+    bindings[0].stageFlags = st;
 
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -151,31 +178,32 @@ VkDescriptorSetLayout CreateLightCullPassSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateDeferredLightingPassSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateDeferredLightingPassSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[10] = {};
     for (uint32_t i = 0; i < 4; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kGraphicsStages;
+        bindings[i].stageFlags = st;
     }
     bindings[4].binding = 4;
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[4].descriptorCount = 1;
-    bindings[4].stageFlags = kGraphicsStages;
+    bindings[4].stageFlags = st;
     bindings[5].binding = 5;
     bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[5].descriptorCount = 1;
-    bindings[5].stageFlags = kGraphicsStages;
+    bindings[5].stageFlags = st;
     bindings[6].binding = 6;
     bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[6].descriptorCount = 1;
-    bindings[6].stageFlags = kGraphicsStages;
+    bindings[6].stageFlags = st;
     for (uint32_t i = 7; i < 10; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kGraphicsStages;
+        bindings[i].stageFlags = st;
     }
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -190,17 +218,18 @@ VkDescriptorSetLayout CreateDeferredLightingPassSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateMaterialSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateMaterialSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[4] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = kGraphicsStages;
+    bindings[0].stageFlags = st;
     for (uint32_t i = 1; i < 4; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kGraphicsStages;
+        bindings[i].stageFlags = st;
     }
 
     VkDescriptorSetLayoutCreateInfo info = {};
@@ -216,13 +245,14 @@ VkDescriptorSetLayout CreateMaterialSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = AllBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[4] = {};
     for (uint32_t i = 0; i < 4; i++) {
         bindings[i].binding = i;
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = kAllStages;
+        bindings[i].stageFlags = st;
     }
 
     VkDescriptorSetLayoutCreateInfo info = {};
@@ -238,12 +268,12 @@ VkDescriptorSetLayout CreateSceneBuffersSetLayout(VkDevice device) {
     return layout;
 }
 
-VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device, bool includeMeshShaderStages) {
     VkDescriptorSetLayoutBinding binding = {};
     binding.binding = 0;
     binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     binding.descriptorCount = 1;
-    binding.stageFlags = kGraphicsStages;
+    binding.stageFlags = GraphicsBindingStages(includeMeshShaderStages);
 
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -260,7 +290,8 @@ VkDescriptorSetLayout CreateIBLPassSetLayout(VkDevice device) {
 
 static VkPipelineLayout createPipelineLayoutCommon(VkDevice device,
     const VkDescriptorSetLayout* setLayouts, uint32_t setLayoutCount,
-    VkShaderStageFlags pushStages) {
+    VkShaderStageFlags pushStages,
+    VkPipelineLayoutCreateFlags extraFlags) {
     VkPushConstantRange pushRange = {};
     pushRange.stageFlags = pushStages;
     pushRange.offset = 0;
@@ -268,6 +299,7 @@ static VkPipelineLayout createPipelineLayoutCommon(VkDevice device,
 
     VkPipelineLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.flags = extraFlags;
     info.setLayoutCount = setLayoutCount;
     info.pSetLayouts = setLayouts;
     info.pushConstantRangeCount = 1;
@@ -287,40 +319,61 @@ VkPipelineLayout CreateForwardPipelineLayout(VkDevice device,
     VkDescriptorSetLayout forwardPassLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout) {
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets,
+    bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, forwardPassLayout, materialLayout, bindlessLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, kGraphicsStages);
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    const VkPipelineLayoutCreateFlags flags =
+        useIndependentSets ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0u;
+#else
+    (void)useIndependentSets;
+    const VkPipelineLayoutCreateFlags flags = 0u;
+#endif
+    return createPipelineLayoutCommon(device, layouts, 5, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), flags);
 }
 
 VkPipelineLayout CreatePostPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
-    VkDescriptorSetLayout postPassLayout) {
+    VkDescriptorSetLayout postPassLayout,
+    bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[2] = { frameLayout, postPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
 VkPipelineLayout CreateShadowPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout shadowPassLayout,
-    VkDescriptorSetLayout sceneLayout) {
+    VkDescriptorSetLayout sceneLayout,
+    bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[3] = { frameLayout, shadowPassLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 3, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 3, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
 VkPipelineLayout CreateGBufferPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout materialLayout,
     VkDescriptorSetLayout bindlessLayout,
-    VkDescriptorSetLayout sceneLayout) {
+    VkDescriptorSetLayout sceneLayout,
+    bool useIndependentSets,
+    bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[4] = { frameLayout, materialLayout, bindlessLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 4, kGraphicsStages);
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    const VkPipelineLayoutCreateFlags flags =
+        useIndependentSets ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0u;
+#else
+    (void)useIndependentSets;
+    const VkPipelineLayoutCreateFlags flags = 0u;
+#endif
+    return createPipelineLayoutCommon(device, layouts, 4, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), flags);
 }
 
 VkPipelineLayout CreateDeferredLightingPipelineLayout(VkDevice device,
     VkDescriptorSetLayout frameLayout,
-    VkDescriptorSetLayout deferredLightingPassLayout) {
+    VkDescriptorSetLayout deferredLightingPassLayout,
+    bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[2] = { frameLayout, deferredLightingPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 2, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
 VkPipelineLayout CreateComputeLightCullPipelineLayout(VkDevice device,
@@ -329,7 +382,7 @@ VkPipelineLayout CreateComputeLightCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout sceneLayout,
     VkDescriptorSetLayout emptyLayout) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, lightCullPassLayout, emptyLayout, emptyLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT);
+    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT, 0u);
 }
 
 VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
@@ -337,24 +390,25 @@ VkPipelineLayout CreateComputeGpuCullPipelineLayout(VkDevice device,
     VkDescriptorSetLayout sceneLayout,
     VkDescriptorSetLayout emptyLayout) {
     VkDescriptorSetLayout layouts[5] = { frameLayout, emptyLayout, emptyLayout, emptyLayout, sceneLayout };
-    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT);
+    return createPipelineLayoutCommon(device, layouts, 5, VK_SHADER_STAGE_COMPUTE_BIT, 0u);
 }
 
-VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout) {
+VkPipelineLayout CreateIBLPipelineLayout(VkDevice device, VkDescriptorSetLayout iblPassLayout, bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[1] = { iblPassLayout };
-    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 1, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
-VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device) {
+VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[2] = {};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = kGraphicsStages;
+    bindings[0].stageFlags = st;
     bindings[1].binding = 1;
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = kGraphicsStages;
+    bindings[1].stageFlags = st;
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = 2;
@@ -368,9 +422,9 @@ VkDescriptorSetLayout CreateOutlinePostSetLayout(VkDevice device) {
     return layout;
 }
 
-VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSetLayout outlinePostLayout) {
+VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSetLayout outlinePostLayout, bool includeMeshPushStages) {
     VkDescriptorSetLayout layouts[1] = { outlinePostLayout };
-    return createPipelineLayoutCommon(device, layouts, 1, kGraphicsStages);
+    return createPipelineLayoutCommon(device, layouts, 1, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
@@ -393,6 +447,32 @@ VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
     return layout;
 }
 
+VkPipelineLayout CreatePushOnlyPipelineLayoutWithMeshPushStages(VkDevice device) {
+#if defined(VK_SHADER_STAGE_MESH_BIT_EXT) && defined(VK_SHADER_STAGE_TASK_BIT_EXT)
+    VkPushConstantRange pushRange = {};
+    pushRange.stageFlags =
+        VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushRange.offset = 0;
+    pushRange.size = kPushConstantSize;
+    VkPipelineLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 0;
+    info.pSetLayouts = nullptr;
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &pushRange;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkResult res = vkCreatePipelineLayout(device, &info, nullptr, &layout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("VulkanResourceSpaces: CreatePushOnlyPipelineLayoutWithMeshPushStages failed (0x%x)", res);
+        return VK_NULL_HANDLE;
+    }
+    return layout;
+#else
+    (void)device;
+    return VK_NULL_HANDLE;
+#endif
+}
+
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
@@ -407,7 +487,7 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::ComputeGpuCull: return computeGpuCull;
         case PipelineLayoutKind::IBL: return ibl;
         case PipelineLayoutKind::OutlinePost: return outlinePost;
-        case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
+        case PipelineLayoutKind::PushOnly: return pushOnly;
     }
     return VK_NULL_HANDLE;
 }
@@ -423,7 +503,7 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::ComputeGpuCull: return 5;
         case PipelineLayoutKind::IBL: return 1;
         case PipelineLayoutKind::OutlinePost: return 1;
-        case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
+        case PipelineLayoutKind::PushOnly: return 0;
     }
     return 0;
 }

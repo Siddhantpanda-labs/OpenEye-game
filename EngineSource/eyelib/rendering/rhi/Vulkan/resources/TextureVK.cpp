@@ -159,16 +159,42 @@ static uint32_t VkFormatColorTexelBytes(VkFormat f) {
     }
 }
 
+static VkQueue SelectUploadQueue(DeviceVK* deviceObj, uint32_t* outQueueFamily) {
+    if (!deviceObj) return VK_NULL_HANDLE;
+    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t family = deviceObj->GetGraphicsQueueFamily();
+
+    VkQueue transferQueue = static_cast<VkQueue>(deviceObj->GetTransferQueue());
+    const uint32_t transferFamily = deviceObj->GetTransferQueueFamily();
+    if (transferQueue != VK_NULL_HANDLE) {
+        if (transferFamily == family) {
+            queue = transferQueue;
+        } else {
+            static bool warnedDedicatedTransfer = false;
+            if (!warnedDedicatedTransfer) {
+                core::Log::Info(
+                    "TextureVK upload policy: dedicated transfer queue detected but upload path remains on graphics queue "
+                    "until explicit queue-family ownership transfer for images is implemented.");
+                warnedDedicatedTransfer = true;
+            }
+        }
+    }
+
+    if (outQueueFamily) *outQueueFamily = family;
+    return queue;
+}
+
 bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, uint32_t width, uint32_t height, VkBuffer staging) {
     VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t queueFamily = 0;
+    VkQueue queue = SelectUploadQueue(deviceObj, &queueFamily);
     if (!queue) return false;
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    poolInfo.queueFamilyIndex = queueFamily;
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
         return false;
 
@@ -267,6 +293,7 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
     submit.pCommandBuffers = &cmd;
     VkResult sr = vkQueueSubmit(queue, 1, &submit, fence);
     if (sr != VK_SUCCESS) {
+        deviceObj->NoteVulkanDeviceLost("SubmitTextureUpload vkQueueSubmit", static_cast<int>(sr));
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, pool, 1, &cmd);
         vkDestroyCommandPool(device, pool, nullptr);
@@ -283,14 +310,15 @@ bool SubmitTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, 
 bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkFormat, uint32_t width, uint32_t height,
                              VkBuffer staging) {
     VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t queueFamily = 0;
+    VkQueue queue = SelectUploadQueue(deviceObj, &queueFamily);
     if (!queue) return false;
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    poolInfo.queueFamilyIndex = queueFamily;
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
         return false;
 
@@ -392,7 +420,9 @@ bool SubmitCubeTextureUpload(DeviceVK* deviceObj, VkImage image, VkFormat vkForm
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-    if (vkQueueSubmit(queue, 1, &submit, fence) != VK_SUCCESS) {
+    VkResult cubeSr = vkQueueSubmit(queue, 1, &submit, fence);
+    if (cubeSr != VK_SUCCESS) {
+        deviceObj->NoteVulkanDeviceLost("SubmitCubeTextureUpload vkQueueSubmit", static_cast<int>(cubeSr));
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, pool, 1, &cmd);
         vkDestroyCommandPool(device, pool, nullptr);
@@ -415,14 +445,15 @@ bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, ui
                                           VkImageAspectFlags aspectMask) {
     if (!image || mipLevels == 0 || arrayLayers == 0) return false;
     VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
-    VkQueue queue = static_cast<VkQueue>(deviceObj->GetGraphicsQueue());
+    uint32_t queueFamily = 0;
+    VkQueue queue = SelectUploadQueue(deviceObj, &queueFamily);
     if (!queue) return false;
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    poolInfo.queueFamilyIndex = deviceObj->GetGraphicsQueueFamily();
+    poolInfo.queueFamilyIndex = queueFamily;
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
         return false;
 
@@ -489,7 +520,9 @@ bool SubmitImageUndefinedToShaderReadOnly(DeviceVK* deviceObj, VkImage image, ui
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-    if (vkQueueSubmit(queue, 1, &submit, fence) != VK_SUCCESS) {
+    VkResult initSrvSr = vkQueueSubmit(queue, 1, &submit, fence);
+    if (initSrvSr != VK_SUCCESS) {
+        deviceObj->NoteVulkanDeviceLost("SubmitImageUndefinedToShaderReadOnly vkQueueSubmit", static_cast<int>(initSrvSr));
         vkDestroyFence(device, fence, nullptr);
         vkFreeCommandBuffers(device, pool, 1, &cmd);
         vkDestroyCommandPool(device, pool, nullptr);

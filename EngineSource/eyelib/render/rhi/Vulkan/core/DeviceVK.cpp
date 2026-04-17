@@ -780,16 +780,17 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
 
     // Resource-space descriptor set layouts and pipeline layouts (Frame/Pass/Material/SceneBuffers). See descriptor_binding_table.md.
     {
-        VkDescriptorSetLayout frameLayout = vkres::CreateFrameSetLayout(device);
-        VkDescriptorSetLayout forwardPassLayout = vkres::CreateForwardPassSetLayout(device);
-        VkDescriptorSetLayout postPassLayout = vkres::CreatePostPassSetLayout(device);
-        VkDescriptorSetLayout shadowPassLayout = vkres::CreateShadowPassSetLayout(device);
+        const bool meshStages = false; // Legacy `render` Vulkan path: mesh layouts aligned with `rendering` API; enable when this backend supports mesh.
+        VkDescriptorSetLayout frameLayout = vkres::CreateFrameSetLayout(device, meshStages);
+        VkDescriptorSetLayout forwardPassLayout = vkres::CreateForwardPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout postPassLayout = vkres::CreatePostPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout shadowPassLayout = vkres::CreateShadowPassSetLayout(device, meshStages);
         VkDescriptorSetLayout lightCullPassLayout = vkres::CreateLightCullPassSetLayout(device);
-        VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device);
-        VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device);
-        VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device);
-        VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device);
-        VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device);
+        VkDescriptorSetLayout deferredLightingPassLayout = vkres::CreateDeferredLightingPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout materialLayout = vkres::CreateMaterialSetLayout(device, meshStages);
+        VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device, meshStages);
+        VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device, meshStages);
+        VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device, meshStages);
         VkDescriptorSetLayout emptyLayout = vkres::CreateEmptySetLayout(device);
         if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !emptyLayout) {
             if (emptyLayout) vkDestroyDescriptorSetLayout(device, emptyLayout, nullptr);
@@ -836,15 +837,18 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_iblPassSetLayout = iblPassLayout;
         m_emptyResourceSetLayout = emptyLayout;
 
-        VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout, sceneLayout);
-        VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout);
-        VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout);
-        VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout);
-        VkPipelineLayout deferredLightingPl = vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout);
+        VkPipelineLayout forwardPl = vkres::CreateForwardPipelineLayout(device, frameLayout, forwardPassLayout, materialLayout, bindlessSetLayout,
+                                                                        sceneLayout, false, meshStages);
+        VkPipelineLayout postPl = vkres::CreatePostPipelineLayout(device, frameLayout, postPassLayout, meshStages);
+        VkPipelineLayout shadowPl = vkres::CreateShadowPipelineLayout(device, frameLayout, shadowPassLayout, sceneLayout, meshStages);
+        VkPipelineLayout gbufferPl = vkres::CreateGBufferPipelineLayout(device, frameLayout, materialLayout, bindlessSetLayout, sceneLayout, false,
+                                                                        meshStages);
+        VkPipelineLayout deferredLightingPl =
+            vkres::CreateDeferredLightingPipelineLayout(device, frameLayout, deferredLightingPassLayout, meshStages);
         VkPipelineLayout computeLightCullPl = vkres::CreateComputeLightCullPipelineLayout(device, frameLayout, lightCullPassLayout, sceneLayout, emptyLayout);
         VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout, emptyLayout);
-        VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout);
-        VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout);
+        VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout, meshStages);
+        VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
         if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl) {
             if (outlinePostPl) vkDestroyPipelineLayout(device, outlinePostPl, nullptr);
             if (iblPl) vkDestroyPipelineLayout(device, iblPl, nullptr);

@@ -35,6 +35,7 @@ struct RenderTargetVK;
 struct QueryPoolVK;
 struct FenceVK;
 struct BindlessHeapVK;
+struct AccelerationStructureVK;
 
 /** Vulkan RHI device. Handles are opaque (void*) to avoid requiring vulkan.h in this header.
  *  Queue policy: swapchain **present** and main frame work use the **graphics** queue; see `QueuesVK`.
@@ -76,6 +77,14 @@ struct DeviceVK : IDevice {
     IBuffer* CreateBuffer(const BufferDesc& desc, const void* initialData) override;
     void DestroyBuffer(IBuffer* buffer) override;
     uint64_t GetBufferDeviceAddress(IBuffer* buffer) override;
+
+    bool GetAccelerationStructureBuildSizes(const AccelerationStructureBuildSizesInput& input, AccelerationStructureBuildSizes& outSizes) override;
+    IAccelerationStructure* CreateAccelerationStructure(const AccelerationStructureDesc& desc) override;
+    void DestroyAccelerationStructure(IAccelerationStructure* as) override;
+    IAccelerationStructureScratchBuffer* CreateAccelerationStructureScratchBuffer(const AccelerationStructureScratchBufferDesc& desc,
+                                                                                   const void* initialData) override;
+    IAccelerationStructureInstanceBuffer* CreateAccelerationStructureInstanceBuffer(const AccelerationStructureInstanceBufferDesc& desc,
+                                                                                    const void* initialData) override;
 
     ITexture* CreateTexture(const TextureDesc& desc, const void* initialData) override;
     void DestroyTexture(ITexture* texture) override;
@@ -138,7 +147,13 @@ struct DeviceVK : IDevice {
 
     int GetMaxSamples(int requestedSamples) override;
 
-    /** Frame ring (`kMaxFrames`): BeginFrame waits this slot’s fence, ticks deferred deletion, resets pool/fence, acquires swapchain image; EndFrame submits command buffers with that fence and (if presenting) waits `imageAvailable` and signals `renderFinished`. Present runs on the graphics queue. */
+    /** Frame ring (`kMaxFrames`): BeginFrame waits this slot’s fence, ticks deferred deletion, resets pool/fence, acquires swapchain image; EndFrame submits command buffers with that fence and (if presenting) waits `imageAvailable` and signals `renderFinished`. Present runs on the graphics queue.
+     *
+     * Frame/submit invariants (Phase 4.1):
+     * - Timeline semaphore (`m_timelineSemaphore`) orders deferred submits and cross-queue bridge work; it is distinct from per-frame binary semaphores (`imageAvailable`/`renderFinished`) used for acquire/present.
+     * - Deferred compute submits may route to compute queue only when eligibility checks pass; otherwise they submit on graphics queue with the same timeline ordering contract.
+     * - `WaitForPresent`/`WaitForPreviousPresent` are opt-in pacing helpers (`VK_KHR_present_wait`) and do not change queue ownership or implicit submission ordering; see `swapchain_present_policy.md` §4.
+     * - Upload helper submits (`TextureVK`/`BufferVK`) currently use graphics-family-safe command pools and queue selection policy; dedicated transfer-family ownership handoff is intentionally not implicit. */
     void BeginFrame() override;
     void EndFrame() override;
     GpuFramePhase GetGpuFramePhase() const override { return m_gpuFramePhase; }
@@ -160,6 +175,8 @@ struct DeviceVK : IDevice {
     bool SupportsDescriptorBuffer() const { return m_supportsDescriptorBuffer; }
     /** True when `VK_EXT_graphics_pipeline_library` is enabled (`VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT::graphicsPipelineLibrary`). */
     bool SupportsGraphicsPipelineLibrary() const { return m_supportsGraphicsPipelineLibrary; }
+    /** When `VK_KHR_pipeline_executable_properties` is enabled: one **Info** line with executable count + first ISA name (no-op otherwise). Safe to call after every pipeline create; runs at most once per device. */
+    void DeveloperLogPipelineExecutablePropertiesOnce(void* vkPipeline, const char* debugName);
     void Finish() override;
     void BlitToDefaultFramebuffer(IRenderTarget* src) override;
     void BlitToDefaultFramebuffer(void* nativeFbo, uint32_t width, uint32_t height) override;
@@ -180,7 +197,7 @@ struct DeviceVK : IDevice {
 
     /** Initialize Vulkan instance and device. Called by CreateVulkanDevice. Returns false on failure. */
     bool Initialize(void* windowHandle, uint32_t width, uint32_t height);
-    /** Sets `m_deviceLost` and logs once per `VK_ERROR_DEVICE_LOST` from queue/surface operations. */
+    /** Sets `m_deviceLost` and logs once per `VK_ERROR_DEVICE_LOST`; when `VK_EXT_device_fault` is enabled, best-effort `vkGetDeviceFaultInfoEXT` detail (Phase 12). */
     void NoteVulkanDeviceLost(const char* context, int vkResult);
     /** Opaque Vulkan instance (VkInstance). */
     void* GetInstance() const { return m_instanceVK.GetHandle(); }
@@ -196,6 +213,10 @@ struct DeviceVK : IDevice {
     void FreeCommandBuffer(void* cmdBuf, void* commandPool);
     /** Opaque graphics queue (VkQueue). */
     void* GetGraphicsQueue() const { return m_queues.GetGraphicsQueue(); }
+    /** Opaque transfer queue (VkQueue). May alias graphics queue on single-family devices. */
+    void* GetTransferQueue() const { return m_queues.GetTransferQueue(); }
+    /** Transfer queue family index. May equal graphics family. */
+    uint32_t GetTransferQueueFamily() const { return m_queues.GetTransferQueueFamily(); }
     /** Opaque descriptor pool (VkDescriptorPool). */
     void* GetDescriptorPool() const { return m_descriptorPool; }
     /** Opaque default linear sampler (VkSampler) for color textures. */
@@ -221,6 +242,27 @@ struct DeviceVK : IDevice {
     void* DescriptorBufferFnCmdSetOffsetsEXT() const { return m_pfnCmdSetDescriptorBufferOffsetsEXT; }
     /** Default pipeline layout: PushOnly (0 sets, push constants only). Used for graphics pipelines without a resource-space layout (e.g. BRDF LUT, fullscreen quads). */
     void* GetDefaultPipelineLayout() const { return m_defaultPipelineLayout; }
+    /** PushOnly layout with task|mesh|fragment push-constant stages; for `PipelineDesc::meshShader` + `PipelineLayoutKind::PushOnly`. */
+    void* GetMeshPushPipelineLayout() const { return m_meshPushPipelineLayout; }
+    /** True when `VK_EXT_mesh_shader` was enabled and `vkCmdDrawMeshTasksEXT` loaded. */
+    bool SupportsMeshShader() const { return m_supportsMeshShader; }
+    /** True when `VK_KHR_fragment_shading_rate` is enabled and `vkCmdSetFragmentShadingRateKHR` loaded. */
+    bool SupportsVariableRateShading() const { return m_supportsVariableRateShading; }
+    /** True when Vulkan acceleration-structure + ray-query slice is enabled (`VK_KHR_acceleration_structure` + `VK_KHR_ray_query`). */
+    bool SupportsRayQuery() const { return m_supportsRayQuery; }
+    /** From `VkPhysicalDeviceAccelerationStructurePropertiesKHR::minAccelerationStructureScratchOffsetAlignment` (1 when unknown). */
+    uint32_t GetRayTracingScratchAlignment() const { return m_rayTracingScratchAlignment ? m_rayTracingScratchAlignment : 1u; }
+    void* GetCmdDrawMeshTasksEXT() const { return m_pfnCmdDrawMeshTasksEXT; }
+    void* GetCmdDrawMeshTasksIndirectEXT() const { return m_pfnCmdDrawMeshTasksIndirectEXT; }
+    void* GetCmdSetFragmentShadingRateKHR() const { return m_pfnCmdSetFragmentShadingRateKHR; }
+    void* GetCmdBuildAccelerationStructuresKHR() const { return m_pfnCmdBuildAccelerationStructuresKHR; }
+    void* GetCreateAccelerationStructureKHR() const { return m_pfnCreateAccelerationStructureKHR; }
+    void* GetDestroyAccelerationStructureKHR() const { return m_pfnDestroyAccelerationStructureKHR; }
+    void* GetGetAccelerationStructureBuildSizesKHR() const { return m_pfnGetAccelerationStructureBuildSizesKHR; }
+    void* GetGetAccelerationStructureDeviceAddressKHR() const { return m_pfnGetAccelerationStructureDeviceAddressKHR; }
+    /** Refcount `VkBuffer` handles that currently host at least one `VkAccelerationStructureKHR` (Phase 11.5). */
+    void NoteAccelerationStructureCreatedOnBuffer(void* vkBuffer);
+    void NoteAccelerationStructureDestroyedForBuffer(void* vkBuffer);
     /** Bindless descriptor set layout (set 1: textures binding 0, buffers binding 1). */
     void* GetBindlessSetLayout() const { return m_bindlessSetLayout; }
     /** IPipelineLayout wrapper for bindless set layout (for use with CreateDescriptorSetWrapperVK). */
@@ -279,7 +321,14 @@ struct DeviceVK : IDevice {
     void ReleaseSwapchainImagesForMaintenance(void* vkSwapchain, uint32_t imageCount);
 
 private:
+    /** `VK_ERROR_OUT_OF_DATE_KHR` / `VK_SUBOPTIMAL_KHR` handling for acquire + present (see `swapchain_present_policy.md`). */
+    enum class SwapchainKhrPath : uint8_t { Acquire, Present };
+    void NoteSwapchainKhrResult(const char* context, int vkResult, SwapchainKhrPath path);
+
     void QueryCapabilities();
+    void TryLogDeviceFaultInfoEXT(const char* lossContext);
+    /** Precondition: `m_sharedBindlessMutex` is held. Returns nullptr if heap allocation failed. */
+    IBindlessHeap* EnsureSharedBindlessHeapLocked();
 
     RHICapabilities m_caps;
     InstanceVK m_instanceVK;
@@ -295,6 +344,7 @@ private:
     void* m_nearestSampler = nullptr;  // VkSampler (nearest)
     void* m_pipelineCache = nullptr;  // VkPipelineCache
     void* m_defaultPipelineLayout = nullptr;  // VkPipelineLayout (PushOnly: 0 sets, push constants only)
+    void* m_meshPushPipelineLayout = nullptr; // VkPipelineLayout (PushOnly, push visible to task|mesh|fragment)
     void* m_bindlessSetLayout = nullptr;      // VkDescriptorSetLayout for bindless heap (set 1)
     mutable IPipelineLayout* m_bindlessPipelineLayoutWrapper = nullptr;  // wrapper for GetBindlessPipelineLayout
     void* m_emptyBindlessSet = nullptr;       // VkDescriptorSet (partially bound, for set 1 when no heap bound)
@@ -392,6 +442,32 @@ private:
     void* m_pfnGetDescriptorEXT = nullptr;                        // PFN_vkGetDescriptorEXT
     void* m_pfnCmdBindDescriptorBuffersEXT = nullptr;            // PFN_vkCmdBindDescriptorBuffersEXT
     void* m_pfnCmdSetDescriptorBufferOffsetsEXT = nullptr;       // PFN_vkCmdSetDescriptorBufferOffsetsEXT
+    void* m_pfnGetPipelineExecutablePropertiesKHR = nullptr;     // PFN_vkGetPipelineExecutablePropertiesKHR
+    void* m_pfnGetDeviceFaultInfoEXT = nullptr;                  // PFN_vkGetDeviceFaultInfoEXT
+    void* m_pfnCmdDrawMeshTasksEXT = nullptr;                    // PFN_vkCmdDrawMeshTasksEXT
+    void* m_pfnCmdDrawMeshTasksIndirectEXT = nullptr;            // PFN_vkCmdDrawMeshTasksIndirectEXT
+    void* m_pfnCmdSetFragmentShadingRateKHR = nullptr;           // PFN_vkCmdSetFragmentShadingRateKHR
+    void* m_pfnCreateAccelerationStructureKHR = nullptr;         // PFN_vkCreateAccelerationStructureKHR
+    void* m_pfnDestroyAccelerationStructureKHR = nullptr;        // PFN_vkDestroyAccelerationStructureKHR
+    void* m_pfnCmdBuildAccelerationStructuresKHR = nullptr;      // PFN_vkCmdBuildAccelerationStructuresKHR
+    void* m_pfnGetAccelerationStructureBuildSizesKHR = nullptr;  // PFN_vkGetAccelerationStructureBuildSizesKHR
+    void* m_pfnGetAccelerationStructureDeviceAddressKHR = nullptr; // PFN_vkGetAccelerationStructureDeviceAddressKHR
+    bool m_supportsMeshShader = false;
+    bool m_supportsMeshTaskShader = false;
+    bool m_supportsVariableRateShading = false;
+    bool m_supportsRayQuery = false;
+    uint64_t m_rayTracingMaxPrimitiveCount = 0;
+    uint32_t m_rayTracingScratchAlignment = 0;
+    uint32_t m_vrsMinTexelWidth = 1;
+    uint32_t m_vrsMinTexelHeight = 1;
+    uint32_t m_vrsMaxTexelWidth = 1;
+    uint32_t m_vrsMaxTexelHeight = 1;
+    uint32_t m_meshShaderMaxOutputVertices = 0;
+    uint32_t m_meshShaderMaxOutputPrimitives = 0;
+    uint32_t m_meshShaderMaxPayloadAndSharedMemoryBytes = 0;
+    bool m_loggedPipelineExecutableSample = false;
+    /** One-shot: `vkGetDeviceFaultInfoEXT` after `VK_ERROR_DEVICE_LOST` (best-effort; spec requires lost device). */
+    bool m_deviceFaultInfoLogged = false;
     void* m_crossQueueReleasePool = nullptr;   // VkCommandPool (graphics family)
     void* m_crossQueueReleaseCmd = nullptr;    // VkCommandBuffer
     void* m_crossQueueAcquirePool = nullptr;   // VkCommandPool (compute family)
@@ -407,6 +483,13 @@ private:
     /** Texture wrappers are retired after N frames to avoid CPU-side stale-pointer UAF. */
     std::vector<RetiredTextureEntry> m_pendingTextureWrapperRetires;
     void RetirePendingTextureWrappers(bool forceAll);
+    std::unordered_map<uint64_t, uint32_t> m_accelerationStructureBackingRefCount;
+    struct RetiredAccelerationStructureEntry {
+        AccelerationStructureVK* accelerationStructure = nullptr;
+        uint32_t retireFrameNumber = 0;
+    };
+    std::vector<RetiredAccelerationStructureEntry> m_pendingAccelerationStructureWrapperRetires;
+    void RetirePendingAccelerationStructureWrappers(bool forceAll);
     bool CreateCrossQueueBridgeResources();
     void DestroyCrossQueueBridge();
     void EnsureImGuiDescriptorPool();
