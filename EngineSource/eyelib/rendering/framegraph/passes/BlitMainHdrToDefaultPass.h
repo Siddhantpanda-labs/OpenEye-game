@@ -4,6 +4,7 @@
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/framegraph/FrameGraphPass.h"
+#include "eyelib/rendering/framegraph/FrameGraphPassNames.h"
 
 namespace eyelib {
 namespace rendering {
@@ -19,7 +20,7 @@ public:
         , m_blackboard(blackboard)
         , m_slot(slot) {}
 
-    const char* DebugName() const noexcept override { return "BlitMainHdrToDefault"; }
+    const char* DebugName() const noexcept override { return pass_names::kBlitMainHdrToDefault; }
 
     void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) override;
     void Execute(rhi::ICommandList* cmd) override;

@@ -57,6 +57,7 @@ const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::ComputeGpuCull: return "ComputeGpuCull";
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
+    case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
     default: return "Unknown";
     }
 }
@@ -346,10 +347,12 @@ void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransi
     if (doTransitions) {
         for (uint32_t i = 0; i < colorCount; ++i) {
             ITexture* tex = rtVK->GetColorTexture(i);
-            if (tex) m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
+            if (tex && m_device->GetTextureTrackedState(tex) != ResourceState::RenderTarget)
+                m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
         }
         ITexture* depthTex = rtVK->GetDepthTexture();
-        if (depthTex) m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
+        if (depthTex && m_device->GetTextureTrackedState(depthTex) != ResourceState::DepthWrite)
+            m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
         m_device->FlushBarrierTracker(this);
     }
 

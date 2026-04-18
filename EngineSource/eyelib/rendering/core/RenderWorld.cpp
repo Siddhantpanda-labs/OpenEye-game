@@ -1,5 +1,6 @@
 #include "eyelib/rendering/core/RenderWorld.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
+#include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
 #include "eyelib/core/Log.h"
@@ -10,6 +11,18 @@
 
 namespace eyelib {
 namespace rendering {
+
+namespace {
+
+struct UploadRecordingPhaseScope {
+    RenderResources& res;
+    explicit UploadRecordingPhaseScope(RenderResources& r) : res(r) { res.BeginUploadRecordingPhase(); }
+    ~UploadRecordingPhaseScope() { res.EndUploadRecordingPhase(); }
+    UploadRecordingPhaseScope(const UploadRecordingPhaseScope&) = delete;
+    UploadRecordingPhaseScope& operator=(const UploadRecordingPhaseScope&) = delete;
+};
+
+}  // namespace
 
 RenderWorld::RenderWorld(rhi::IDevice* device) noexcept : m_device(device), m_scheduler(m_features) {}
 
@@ -43,7 +56,10 @@ void RenderWorld::Initialize() {
         return;
 
     m_blackboardWriters.Clear();
-    (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainHdrRenderTarget, "RenderResources");
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainHdrRenderTarget, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainDepth, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources);
     m_blackboard.SetWriterRegistry(&m_blackboardWriters);
 
     m_caps.gpu = m_device->GetCapabilities();
@@ -73,24 +89,39 @@ void RenderWorld::Shutdown() {
     m_initialized = false;
 }
 
-void RenderWorld::UploadPhase(FrameContext& frame, RenderContext& render, rhi::ICommandList* recordingCommandList) {
-    render.drawList = &m_drawList;
-    render.recordingCommandList = recordingCommandList;
-    m_visibility.BuildCpuDrawList(render.sceneView, m_drawList);
-
+void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
     m_resources.EnsureAllocated(render.device, render.outputWidth, render.outputHeight);
+    m_resources.EnsureUniformBuffers(render.device);
     m_resources.EnsureStagingUploadBuffer(render.device);
     m_resources.EnsureGpuUploadScratchBuffer(render.device);
     render.resources = &m_resources;
 
     m_blackboard.ClearFrame();
     if (rhi::IRenderTarget* hdr = m_resources.MainHdrRenderTarget())
-        m_blackboard.PublishRenderTarget(BlackboardSlot::MainHdrRenderTarget, "RenderResources", hdr);
+        m_blackboard.PublishRenderTarget(BlackboardSlot::MainHdrRenderTarget, writer_names::kRenderResources, hdr);
+    if (rhi::ITexture* depth = m_resources.MainDepthTexture())
+        m_blackboard.PublishTexture(BlackboardSlot::MainDepth, writer_names::kRenderResources, depth);
+    if (rhi::IBuffer* perFrame = m_resources.PerFrameUniformBuffer())
+        m_blackboard.PublishBuffer(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources, perFrame);
+    if (rhi::IBuffer* perView = m_resources.PerViewUniformBuffer())
+        m_blackboard.PublishBuffer(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources, perView);
+}
 
+void RenderWorld::RecordFeatureUploads(FrameContext& frame, RenderContext& render) {
+    UploadRecordingPhaseScope uploadScope(m_resources);
     for (IRenderFeature* f : m_features.OrderedFeatures()) {
         if (f)
             f->OnUpload(frame, render);
     }
+}
+
+void RenderWorld::UploadPhase(FrameContext& frame, RenderContext& render, rhi::ICommandList* recordingCommandList) {
+    render.drawList = &m_drawList;
+    render.recordingCommandList = recordingCommandList;
+    m_visibility.BuildCpuDrawList(render.sceneView, m_drawList);
+
+    PrepareUploadPhaseResources(render);
+    RecordFeatureUploads(frame, render);
 }
 
 void RenderWorld::RunFrame(float deltaSeconds, rhi::ICommandList* recordingCommandList) {
@@ -105,7 +136,7 @@ void RenderWorld::RunFrame(float deltaSeconds, rhi::ICommandList* recordingComma
     UploadPhase(m_frame, m_render, recordingCommandList);
 
     m_scheduler.Schedule(m_frame, m_render, m_caps, m_graph, m_blackboard);
-    m_graph.Compile(m_device);
+    m_graph.Compile(m_device, &m_blackboard);
     m_gpuProfiler.BeginFrame(m_device, recordingCommandList);
     m_graph.Execute(m_device, recordingCommandList, &m_blackboard);
     m_gpuProfiler.EndFrame(recordingCommandList);

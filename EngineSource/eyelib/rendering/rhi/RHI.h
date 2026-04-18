@@ -287,6 +287,8 @@ struct IDevice {
     virtual void* GetBarrierTracker() { return nullptr; }
     /** Optional: transition texture to state via barrier tracker. No-op if GetBarrierTracker() is null. Used by FrameGraph for batched barriers. */
     virtual void TransitionTextureToState(ITexture* texture, ResourceState newState) { (void)texture; (void)newState; }
+    /** Optional: whole-image layout cached in the barrier tracker (`Undefined` if unknown / unsupported). Used at graph compile for cross-pass merge. */
+    virtual ResourceState GetTextureTrackedState(const ITexture* texture) const { (void)texture; return ResourceState::Undefined; }
     /** Optional: flush pending barrier tracker transitions into the command list. No-op if GetBarrierTracker() is null. */
     virtual void FlushBarrierTracker(ICommandList* cmd) { (void)cmd; }
     /** Blit color from given render target to the default framebuffer (e.g. for present). */

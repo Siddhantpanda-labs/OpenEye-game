@@ -67,10 +67,16 @@ void DeletionQueueVK::Tick(void* device, void* allocator, uint32_t frameIndex, s
     FrameDeletions& d = m_perFrame[frameIndex];
 
     // Acceleration structures must be destroyed before freeing their backing buffers (same deferred frame).
+#if defined(VK_KHR_acceleration_structure)
+    PFN_vkDestroyAccelerationStructureKHR pfnDestroyAccelerationStructureKHR = nullptr;
+    if (dev)
+        pfnDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+            vkGetDeviceProcAddr(dev, "vkDestroyAccelerationStructureKHR"));
+#endif
     for (void* p : d.accelerationStructures) {
 #if defined(VK_KHR_acceleration_structure)
-        if (dev && p)
-            vkDestroyAccelerationStructureKHR(dev, static_cast<VkAccelerationStructureKHR>(p), nullptr);
+        if (dev && p && pfnDestroyAccelerationStructureKHR)
+            pfnDestroyAccelerationStructureKHR(dev, static_cast<VkAccelerationStructureKHR>(p), nullptr);
 #else
         (void)p;
 #endif

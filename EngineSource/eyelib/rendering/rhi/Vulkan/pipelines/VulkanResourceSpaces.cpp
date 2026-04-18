@@ -432,6 +432,11 @@ VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSe
     return createPipelineLayoutCommon(device, layouts, 1, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
+VkPipelineLayout CreateComposeBootstrapPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout, bool includeMeshPushStages) {
+    VkDescriptorSetLayout layouts[1] = { frameLayout };
+    return createPipelineLayoutCommon(device, layouts, 1, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
+}
+
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
     VkPushConstantRange pushRange = {};
     pushRange.stageFlags = kGraphicsStages;
@@ -481,7 +486,8 @@ VkPipelineLayout CreatePushOnlyPipelineLayoutWithMeshPushStages(VkDevice device)
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
-    VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout pushOnly, PipelineLayoutKind kind) {
+    VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap, VkPipelineLayout pushOnly,
+    PipelineLayoutKind kind) {
     switch (kind) {
         case PipelineLayoutKind::Forward: return forward;
         case PipelineLayoutKind::Post: return post;
@@ -492,6 +498,7 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::ComputeGpuCull: return computeGpuCull;
         case PipelineLayoutKind::IBL: return ibl;
         case PipelineLayoutKind::OutlinePost: return outlinePost;
+        case PipelineLayoutKind::ComposeBootstrap: return composeBootstrap;
         case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
     }
     return VK_NULL_HANDLE;
@@ -508,6 +515,7 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::ComputeGpuCull: return 5;
         case PipelineLayoutKind::IBL: return 1;
         case PipelineLayoutKind::OutlinePost: return 1;
+        case PipelineLayoutKind::ComposeBootstrap: return 1;
         case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
     }
     return 0;

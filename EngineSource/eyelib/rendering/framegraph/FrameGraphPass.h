@@ -22,8 +22,8 @@ public:
     virtual void OnCompiled(uint32_t passIndexInGraph) noexcept { (void)passIndexInGraph; }
 
     /**
-     * Declares texture layout transitions applied before `Execute` for this pass when a barrier tracker exists.
-     * Default: none. Order: collect → `IDevice::TransitionTextureToState` → `FlushBarrierTracker` → `Execute`.
+     * Declares texture layout transitions for this pass. Collected during `FrameGraph::Compile` (with blackboard),
+     * deduplicated, then replayed before `Execute`. Default: none.
      */
     virtual void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) {
         (void)blackboard;

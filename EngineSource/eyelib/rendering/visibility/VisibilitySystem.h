@@ -11,7 +11,7 @@ class VisibilitySystem {
 public:
     VisibilitySystem() = default;
 
-    /** Fills `out` from the scene view (camera-only stub until culling lands). */
+    /** Frustum-culls `scene` draw instances into `out`, assigns `DrawItem::sortKey`, stable sort ascending. */
     void BuildCpuDrawList(const IRenderSceneView* scene, DrawList& out) const;
 };
 

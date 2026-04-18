@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
 
 namespace eyelib {
@@ -21,7 +22,7 @@ public:
     RasterFeature() = default;
     ~RasterFeature() override;
 
-    const char* FeatureDebugName() const noexcept override { return "Raster"; }
+    const char* FeatureDebugName() const noexcept override { return writer_names::kRasterFeature; }
 
     void OnUpload(FrameContext& frame, const RenderContext& render) override;
     void OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& blackboard, const RenderContext& render) override;

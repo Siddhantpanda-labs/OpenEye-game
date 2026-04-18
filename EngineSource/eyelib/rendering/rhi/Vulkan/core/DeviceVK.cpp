@@ -201,6 +201,8 @@ DeviceVK::~DeviceVK() {
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_iblPipelineLayout = nullptr; }
     rscPl = static_cast<VkPipelineLayout>(m_outlinePostPipelineLayout);
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_outlinePostPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_composeBootstrapPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_composeBootstrapPipelineLayout = nullptr; }
     // Resource-space set layouts
     VkDescriptorSetLayout rscLayout = static_cast<VkDescriptorSetLayout>(m_frameSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_frameSetLayout = nullptr; }
@@ -1648,7 +1650,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkPipelineLayout computeGpuCullPl = vkres::CreateComputeGpuCullPipelineLayout(device, frameLayout, sceneLayout, emptyLayout);
         VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout, meshStages);
         VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
-        if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl) {
+        VkPipelineLayout composeBootstrapPl = vkres::CreateComposeBootstrapPipelineLayout(device, frameLayout, meshStages);
+        if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl ||
+            !composeBootstrapPl) {
+            if (composeBootstrapPl) vkDestroyPipelineLayout(device, composeBootstrapPl, nullptr);
             if (outlinePostPl) vkDestroyPipelineLayout(device, outlinePostPl, nullptr);
             if (iblPl) vkDestroyPipelineLayout(device, iblPl, nullptr);
             if (computeGpuCullPl) vkDestroyPipelineLayout(device, computeGpuCullPl, nullptr);
@@ -1710,6 +1715,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_iblPipelineLayout = iblPl;
         m_outlinePostSetLayout = outlinePostLayout;
         m_outlinePostPipelineLayout = outlinePostPl;
+        m_composeBootstrapPipelineLayout = composeBootstrapPl;
 
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] =
             CreatePipelineLayoutWrapperVK(this, frameLayout, MakeResourceSetDesc(IDevice::ResourceSetType::Frame));
@@ -2020,6 +2026,7 @@ void* DeviceVK::GetPipelineLayoutForKind(PipelineLayoutKind kind) const {
         static_cast<VkPipelineLayout>(m_computeGpuCullPipelineLayout),
         static_cast<VkPipelineLayout>(m_iblPipelineLayout),
         static_cast<VkPipelineLayout>(m_outlinePostPipelineLayout),
+        static_cast<VkPipelineLayout>(m_composeBootstrapPipelineLayout),
         static_cast<VkPipelineLayout>(m_defaultPipelineLayout),
         kind);
 }
@@ -2873,6 +2880,15 @@ void DeviceVK::SubmitCommandList(ICommandList* list) {
 
 void* DeviceVK::GetBarrierTracker() {
     return &m_barrierTracker;
+}
+
+ResourceState DeviceVK::GetTextureTrackedState(const ITexture* texture) const {
+    if (!texture)
+        return ResourceState::Undefined;
+    const TextureVK* texVK = static_cast<const TextureVK*>(texture);
+    if (texVK->m_retired || !texVK->m_image)
+        return ResourceState::Undefined;
+    return BarrierTrackerVK::GetImageState(&m_barrierTracker, texVK->m_image);
 }
 
 void DeviceVK::TransitionTextureToState(ITexture* texture, ResourceState newState) {

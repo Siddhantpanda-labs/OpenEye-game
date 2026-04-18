@@ -1,6 +1,7 @@
 #include "eyelib/rendering/features/raster/RasterFeature.h"
 
 #include "eyelib/rendering/core/FrameContext.h"
+#include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/RenderContext.h"
 #include "eyelib/rendering/core/RenderResources.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
@@ -11,6 +12,8 @@
 #include "eyelib/rendering/framegraph/passes/FullscreenHdrComposePass.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
+#include "eyelib/rendering/scene/CameraView.h"
+#include "eyelib/rendering/scene/IRenderSceneView.h"
 
 #include <cstdint>
 #include <cstring>
@@ -33,9 +36,25 @@ void main() {
 constexpr const char* kComposeFragGlsl = R"(#version 450
 layout(location = 0) in vec2 vUv;
 layout(location = 0) out vec4 outColor;
+layout(set = 0, binding = 0) uniform PerFrameUbo {
+    uint uFrameIndex;
+    float uDeltaTime;
+    uint uPad0;
+    uint uPad1;
+} uPerFrame;
+layout(set = 0, binding = 1) uniform PerViewUbo {
+    mat4 uView;
+    mat4 uProjection;
+    mat4 uViewProjection;
+    vec4 uViewPos;
+    vec4 uViewport;
+} uPerView;
 layout(push_constant) uniform Push { vec4 tint; } pc;
 void main() {
-    outColor = vec4(mix(pc.tint.rgb * 0.2, pc.tint.rgb, vUv.x), 1.0);
+    vec3 base = mix(pc.tint.rgb * 0.2, pc.tint.rgb, vUv.x);
+    float flicker = fract(uPerView.uViewPos.x * 0.07 + float(uPerFrame.uFrameIndex) * 0.013 + uPerFrame.uDeltaTime);
+    vec3 shaded = mix(base, base * (0.75 + 0.25 * flicker), 0.4);
+    outColor = vec4(shaded, 1.0);
 }
 )";
 
@@ -73,7 +92,7 @@ void RasterFeature::ensureComposePipeline(rhi::IDevice* device) {
     gp.assetPath = "internal/raster_compose_bootstrap";
     gp.vertexLayout = fullscreenVertexLayout();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
-    gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
+    gp.layoutKind = rhi::PipelineLayoutKind::ComposeBootstrap;
     gp.sourcePolicy = rhi::ShaderSourcePolicy::CompileFromSource;
     gp.vertexSourceOverride = kComposeVertGlsl;
     gp.fragmentSourceOverride = kComposeFragGlsl;
@@ -95,16 +114,27 @@ void RasterFeature::OnShutdown() {
 
 void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     RenderResources* res = render.resources;
-    if (!res || !render.recordingCommandList)
+    if (!res || !render.recordingCommandList || !render.device)
         return;
 
-    constexpr size_t kBytes = 16;
-    alignas(8) uint8_t blob[kBytes] = {};
-    std::memcpy(blob, &frame.frameIndex, sizeof(frame.frameIndex));
-    constexpr uint32_t kMagic = 0x4f504545u;
-    std::memcpy(blob + 8, &kMagic, sizeof(kMagic));
+    res->EnsureUniformBuffers(render.device);
 
-    (void)res->RecordGpuUploadScratchFromStaging(render.recordingCommandList, blob, kBytes);
+    PerFrameUniformStd140 perFrame{};
+    perFrame.frameIndex = static_cast<uint32_t>(frame.frameIndex & 0xFFFFFFFFull);
+    perFrame.deltaTime = frame.deltaSeconds;
+    (void)res->UploadPerFrameUniform(render.recordingCommandList, perFrame);
+
+    PerViewUniformStd140 perView{};
+    if (const CameraView* cam = render.sceneView ? render.sceneView->TryGetCamera() : nullptr) {
+        perView.view = cam->view;
+        perView.projection = cam->projection;
+        perView.viewProjection = cam->projection * cam->view;
+        perView.viewPosition = {cam->viewPos.x, cam->viewPos.y, cam->viewPos.z, 1.0f};
+    }
+    const float w = static_cast<float>((render.outputWidth > 0u) ? render.outputWidth : 1u);
+    const float h = static_cast<float>((render.outputHeight > 0u) ? render.outputHeight : 1u);
+    perView.viewport = {w, h, 1.0f / w, 1.0f / h};
+    (void)res->UploadPerViewUniform(render.recordingCommandList, perView);
 }
 
 void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& blackboard, const RenderContext& render) {
@@ -119,7 +149,8 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     graph.AddPass(std::make_unique<ClearBlackboardRenderTargetPass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, clear));
 
     if (m_composePipeline)
-        graph.AddPass(std::make_unique<FullscreenHdrComposePass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, m_composePipeline));
+        graph.AddPass(
+            std::make_unique<FullscreenHdrComposePass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, render.device, m_composePipeline));
 
     graph.AddPass(std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard));
 }

@@ -3,6 +3,7 @@
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/framegraph/FrameGraphPass.h"
+#include "eyelib/rendering/framegraph/FrameGraphPassNames.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
 
 namespace eyelib {
@@ -18,7 +19,7 @@ public:
         , m_slot(slot)
         , m_clear(clear) {}
 
-    const char* DebugName() const noexcept override { return "ClearBlackboardRenderTarget"; }
+    const char* DebugName() const noexcept override { return pass_names::kClearBlackboardRenderTarget; }
 
     void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) override;
 

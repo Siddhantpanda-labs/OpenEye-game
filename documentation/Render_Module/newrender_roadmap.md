@@ -40,6 +40,37 @@ Deliver a **second-generation** renderer under `eyelib/rendering/` that:
 
 ---
 
+## 1.3 Hardening dimensions (architectural discipline)
+
+These are the **axes the architecture is most likely to rot on over time**. They are not phases and not features — they are **stress tests** we re-run after each basic piece lands, so that the guarantees in §1.1 and the rules in §2 and the companion doc actually hold in code, not only on paper.
+
+**Cadence.** After every milestone in `Render_check.md` that adds real behavior (e.g. a new feature, a new pass kind, upload path changes, a new blackboard resource), walk through the list below in order. For each dimension, produce a short **pass / partial / fail** note in `Render_check.md` with the specific files or passes inspected. Do **not** start a new milestone with any dimension in **fail** state.
+
+| # | Dimension | What we check (short) | Primary failure mode |
+|---|-----------|----------------------|----------------------|
+| D1 | **Frame graph integrity** | Every GPU write is a declared pass; no direct recording outside `FrameGraph::Execute`; post / editor / debug are passes. | “Tail recording” after the graph; bypasses that skip barriers and aliasing. |
+| D2 | **Blackboard hygiene** | Named resources only; **single writer** per resource; names come from a central constants header; reads are typed, not string-soup. | Blackboard turns into a global grab bag with hidden dependencies. |
+| D3 | **Feature isolation** | Features talk **only** via blackboard; no cross-feature includes, no direct calls; disabled features register **zero** passes. | Features grow pointers to each other; can’t be removed or reordered. |
+| D4 | **Dependency direction** | Layer DAG (`scene → core → framegraph → scheduler → features → … → rhi`) holds in **includes and CMake**; no reverse edges. | Cycles that force whole-module rebuilds and make swaps (RHI, lighting) impossible. |
+| D5 | **Upload phase reality** | All data required for the first draw is uploaded in the **upload phase**, never lazily inside pass execute; barriers around upload → read are explicit. | Silent data races / stale frames; worsens under streaming (Nanite-style, VSM, neural weights). |
+| D6 | **Barriers & scheduling** | Barriers are computed at graph **compile** (global view), not only ad-hoc per-pass; aliasing / async-compute ordering is visible to the graph. | Over-barriering (perf) or under-barriering (correctness) that only shows up on specific GPUs. |
+| D7 | **Capabilities & permutations** | `RenderCapabilities` is read at **`OnRegister`**; no hot-path `if (supports X)`; shader permutations declared at register, **no `GetOrCompile` in execute**. | Runtime stalls, GPU-specific crashes, unbounded permutation churn. |
+| D8 | **Command-list & queue lifetime** | `ICommandList*` never stored across frames; queue choice is declared at schedule time, never by hand-submits inside features. | Async-compute correctness bugs; use-after-free on queue/frame boundaries. |
+| D9 | **Temporal ownership** | History / ping-pong / jitter / camera-cut invalidation owned by **one** temporal system; features request handles, never allocate their own “previous frame” textures. | Every denoiser/upscaler invents its own history; impossible to reason about correctness globally. |
+| D10 | **Observability** | GPU scopes on every pass; RenderDoc hook wired; per-pass timings exported. Debt gets filed against captures, not hunches. | Optimizing the wrong thing; regressions land silently. |
+
+**How a check looks (template):**
+
+- **Dimension:** D2 (Blackboard hygiene)
+- **Scope:** milestone M4 (upload / visibility / barrier work)
+- **Inspected:** `framegraph/FrameGraphBlackboard.h`, `BlackboardWriterRegistry.h`, all `features/**` writers.
+- **Result:** pass / partial / fail
+- **Notes / follow-ups:** 1–3 bullets, file-level.
+
+Keep it lightweight. The point is to catch rot **early and cheaply**, not to produce paperwork.
+
+---
+
 ## 2. Non-negotiable rules
 
 ### 2.1 Dependency firewall

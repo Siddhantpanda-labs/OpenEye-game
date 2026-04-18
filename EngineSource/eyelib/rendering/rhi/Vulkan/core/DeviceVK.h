@@ -72,6 +72,7 @@ struct DeviceVK : IDevice {
 
     void* GetBarrierTracker() override;
     void TransitionTextureToState(ITexture* texture, ResourceState newState) override;
+    ResourceState GetTextureTrackedState(const ITexture* texture) const override;
     void FlushBarrierTracker(ICommandList* cmd) override;
 
     IBuffer* CreateBuffer(const BufferDesc& desc, const void* initialData) override;
@@ -372,6 +373,7 @@ private:
     void* m_computeGpuCullPipelineLayout = nullptr;
     void* m_outlinePostSetLayout = nullptr;
     void* m_outlinePostPipelineLayout = nullptr;
+    void* m_composeBootstrapPipelineLayout = nullptr;
     /** Wrappers for GetResourceSetLayout (single-set IPipelineLayout per type); do not own set layouts. */
     IPipelineLayout* m_resourceSetLayouts[10] = {};  // Frame, PostPass, ..., IBLPass, OutlinePost
     void* m_emptyResourceSetLayout = nullptr;       // VkDescriptorSetLayout (0 bindings, placeholder for compute sets 1–3)

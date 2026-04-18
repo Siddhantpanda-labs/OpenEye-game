@@ -75,6 +75,11 @@ public:
 private:
     void UploadPhase(FrameContext& frame, RenderContext& render, rhi::ICommandList* recordingCommandList);
 
+    /** Resize/create `RenderResources`, publish blackboard slots — before `BeginUploadRecordingPhase` (A.8). */
+    void PrepareUploadPhaseResources(RenderContext& render);
+    /** `BeginUploadRecordingPhase` + all `IRenderFeature::OnUpload` (GPU upload recording only here). */
+    void RecordFeatureUploads(FrameContext& frame, RenderContext& render);
+
     rhi::IDevice* m_device = nullptr;
     const IRenderSceneView* m_sceneView = nullptr;
     bool m_initialized = false;

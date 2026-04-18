@@ -41,7 +41,7 @@
 | `IRenderSceneView::TryGetCamera` / `RenderSceneView`                           | Done   |
 | `BlackboardWriterRegistry` + `OnRegisterBlackboardWriters`                     | Done   |
 | Debug: publish must match reserved writer when registry is bound               | Done   |
-| `IFrameGraphPass::OnCompiled` + `FrameGraph::Compile(device)` pass-index pass  | Done   |
+| `IFrameGraphPass::OnCompiled` + `FrameGraph::Compile(device, blackboard)` pass-index + barrier plan  | Done   |
 | `RenderWorld::Initialize` reserves `MainHdrRenderTarget` for `RenderResources` | Done   |
 
 
@@ -62,18 +62,58 @@
 | `RasterFeature` lazy pipeline from embedded GLSL (`CreateGraphicsPipelineFromShaderAsset` overrides) | Done |
 | `OnShutdown` destroys compose pipeline | Done |
 
-### M4 — Uploads, barriers, visibility → draw list — In progress (partial)
+### M4 — Uploads, barriers, visibility → draw list — Section **A** closeout done (A.10 hardening logged); full M4 / M5 forward path still tracked below
 
 
 | Item                                                                                      | Status                                                                 |
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | Staging upload buffer capacity + `EnsureStagingUploadBuffer` / `Shutdown` ordering       | Done                                                                   |
-| Real staging uploads in `OnUpload` (buffers, material tables)                             | Partial — `RenderResources::RecordGpuUploadScratchFromStaging` (owned barrier state); sandbox demo; material tables TBD |
-| `FrameGraph::Compile` drives global `BarrierTracker` / layout scheduling                  | Not started — execute-time per-pass barriers only                      |
-| `FrameGraph::Execute` applies pass `CollectTextureBarriers` → transition → flush        | Done                                                                   |
-| `VisibilitySystem::BuildCpuDrawList` + `RenderContext::drawList` + `UploadPhase` wiring   | Partial — stub list + `DrawList::visibleCount` when camera exists   |
+| Real staging uploads in `OnUpload` (buffers, material tables)                             | Partial — PerFrame/PerView UBO path live; `RecordGpuUploadScratchFromStaging` retained for misc; material tables TBD |
+| `FrameGraph::Compile` per-pass barriers + dedupe + cross-pass noop merge vs `BarrierTrackerVK` | Done — `MergeBarrierPlansAgainstTracker`, `IDevice::GetTextureTrackedState` |
+| `FrameGraph::Execute` applies compiled barrier plan → transition → flush → pass body     | Done                                                                   |
+| `VisibilitySystem::BuildCpuDrawList` + `RenderContext::drawList` + `UploadPhase` wiring   | Done — `SceneDrawInstance` stream, frustum cull, `sortKey` + sort (GPU cull still future) |
 | Pass texture barrier hooks (`IFrameGraphPass::CollectTextureBarriers`)                  | Done — clear (RT/depth) + blit (HDR color → `ShaderResource` before `BlitToDefaultFramebuffer`) |
+| **A.1** Central names header (`pass_names::k*`, `writer_names::k*`, `resource_names::k*`) | Done — no literal pass/writer strings remain |
+| **A.2** Blackboard slot growth (`MainDepth`, `PerFrame/PerView` UBOs) + shared-depth split | Done — blackboard publishes textures/buffers, HDR uses `CreateRenderTargetWithSharedDepth`, UBO slots reserved (null until A.5) |
+| **A.3** Typed `DrawList` (`DrawLayer`, `DrawItem`, `items`, `VisibleCount`)                | Done |
+| **A.4** CPU frustum visibility + `sortKey` in `VisibilitySystem`                           | Done — scene instances + `math::Frustum`; sandbox exercises cull |
+| **A.5** PerFrame / PerView UBOs + upload path + compose bind                               | Done — `FrameViewUniforms`, `ComposeBootstrap` layout, descriptor bind in compose pass |
+| **A.6** Compile-time barrier plans + global merge vs tracker                          | Done — `m_barrierPlans`, per-pass dedupe, `MergeBarrierPlansAgainstTracker`, `GetTextureTrackedState` |
+| **A.7** Debug barrier validation (intra + inter-pass warns, merged asserts)          | Done — late Undefined / sim-gap `WarnF`; false-positive “raw merged away” removed |
+| **A.8** Upload phase guard (`RenderResources` GPU uploads only in `OnUpload`)        | Done — prepare (`Ensure*` + blackboard) vs record (`OnUpload` + scope); Debug asserts |
+| **A.9** Sandbox smoke (`OpenEyeRenderingSandbox` Debug, validation on)               | Done — 2026-04-19: clear + compose + blit; no spurious `FrameGraph` / redundant-tracker noise after fixes below |
 
+
+**A.9 smoke (2026-04-19):** `FullscreenHdrComposePass` no longer duplicates `CollectTextureBarriers` (clear pass owns RT/depth layouts). `CommandListVK::BeginRenderingWithTarget` only calls `TransitionTextureToState` when `GetTextureTrackedState` differs (avoids duplicate transitions after graph flush). `WarnInterPassRawBarriersFullyMergedAway` removed from `FrameGraph::Compile`.
+
+### A.10 — Section A hardening (§1.3 template, 2026-04-19)
+
+Scope: milestone **M4 closeout** after A.1–A.9. **No fail** — safe to start Section B planning.
+
+- **Dimension:** D1 (Frame graph integrity)  
+  **Inspected:** `core/RenderWorld.cpp` (`RunFrame`: `UploadPhase` → `Schedule` → `Compile` → `Execute` only; no GPU tail after `m_graph.Execute`), `framegraph/FrameGraph.cpp` (`Execute` → pass `Execute` only), passes under `framegraph/passes/*` (no `ICommandList` stored on pass objects).  
+  **Result:** **pass**  
+  **Notes:** HDR path GPU work for bootstrap is clear/compose/blit passes; upload uses same cmd list before graph (by design).
+
+- **Dimension:** D2 (Blackboard hygiene)  
+  **Inspected:** `FrameGraphBlackboard.h` (typed slots + writer validation), `RenderWorld::Initialize` / `UploadPhase` publishes with `writer_names::kRenderResources`, `RasterFeature` uses `pass_names::k*` / `BlackboardSlot` (no literal slot strings in hot paths).  
+  **Result:** **pass**  
+  **Notes:** Single-writer registry for four slots; features do not publish core-owned HDR in current bootstrap.
+
+- **Dimension:** D4 (Dependency direction)  
+  **Inspected:** `rg` include sweep — `framegraph/**` does not include `scheduler/` or `features/`; `scene/**` does not include `framegraph`/`scheduler`/`features`. `core/RenderWorld.*` includes scheduler (orchestration owns scheduler — expected).  
+  **Result:** **partial**  
+  **Notes:** `rhi/RHI.h` includes `core/RenderBackend.h` (thin policy header); document or trim later if strict “rhi above nothing” is required.
+
+- **Dimension:** D5 (Upload phase reality)  
+  **Inspected:** `rg` for `UploadPerFrame|UploadPerView|RecordGpuUploadScratch` under `eyelib/rendering` — only `RasterFeature::OnUpload` + `RenderResources` impl. `RenderResources` Debug asserts + `PrepareUploadPhaseResources` / `RecordFeatureUploads` / RAII scope in `RenderWorld.cpp`.  
+  **Result:** **pass**  
+  **Notes:** No pass `Execute` calls `RenderResources` upload APIs; `RasterFeature::OnUpload` redundant `EnsureUniformBuffers` is harmless (idempotent).
+
+- **Dimension:** D6 (Barriers & scheduling)  
+  **Inspected:** `FrameGraph::Compile` (`CollectTextureBarriers`, dedupe, `MergeBarrierPlansAgainstTracker`, A.7 validators), `FrameGraph::Execute` (replays `m_barrierPlans`); aliasing / async-compute ordering not in scope yet.  
+  **Result:** **partial**  
+  **Notes:** Compile-time plan + tracker merge is in place; resource aliasing and async queue scheduling remain future graph work.
 
 ---
 
@@ -90,6 +130,26 @@
 - `core/RenderResources.h`, `core/RenderResources.cpp`
 - `rhi/RHI.h`, `rhi/Vulkan/commands/CommandListVK.h`, `CommandListVK.cpp`
 - `app/rendering_sandbox/main.cpp`
+
+**A.1 adds:** `framegraph/FrameGraphPassNames.h` (rewritten), `framegraph/FrameGraphResourceNames.h` (new); passes + `RenderWorld` + `RasterFeature` routed through constants.
+
+**A.2 adds:** `framegraph/BlackboardSlot.h` (new slots), `framegraph/FrameGraphBlackboard.h` (texture/buffer publish), `framegraph/FrameGraphResourceNames.h` (`kMainDepth`, `kPerFrameUniformBuffer`, `kPerViewUniformBuffer`), `core/RenderResources.h`/`.cpp` (standalone depth + shared-depth HDR RT + UBO placeholders), `core/RenderWorld.cpp` (four slot reservations + frame publish).
+
+**A.3 adds:** `scene/DrawList.h` (`DrawLayer`, `DrawItem`, `draw_item_flags`).
+
+**A.4 adds:** `scene/SceneDrawInstance.h`; `scene/IRenderSceneView.h`, `scene/RenderSceneView.h` (instance stream); `visibility/VisibilitySystem.cpp` (frustum + sortKey); `rhi/Vulkan/memory/DeletionQueueVK.cpp` (proc addr for AS destroy); `app/rendering_sandbox/main.cpp` (camera + test instances).
+
+**A.5 adds:** `core/FrameViewUniforms.h`; `core/RenderResources.h`/`.cpp`, `core/RenderWorld.cpp`; `rhi/RHITypes.h` (`ComposeBootstrap`); `rhi/Vulkan/pipelines/VulkanResourceSpaces.*`, `rhi/Vulkan/core/DeviceVK.*`, `PipelineVK.cpp`, `PipelineVKMesh.cpp`, `CommandListVK.cpp`, `DescriptorSetVK.cpp`; `features/raster/RasterFeature.cpp`; `framegraph/passes/FullscreenHdrComposePass.*`.
+
+**A.6 adds:** `framegraph/FrameGraphBarrierList.h` (`DedupeConsecutiveSameTargetState`), `framegraph/FrameGraph.h`/`.cpp` (`m_barrierPlans`, `MergeBarrierPlansAgainstTracker`, `Compile(..., blackboard)`), `framegraph/FrameGraphPass.h` (doc), `core/RenderWorld.cpp` (`Compile` passes `&m_blackboard`); `rhi/RHI.h` (`GetTextureTrackedState`); `rhi/Vulkan/core/DeviceVK.h`/`.cpp`.
+
+**A.7 adds:** `framegraph/FrameGraph.cpp` / `FrameGraph.h` (intra-pass conflict warn; `WarnFirstMergedBarrierTextureUnknownLayout`, `WarnInterPassSimulatedLayoutGap`; merged asserts); `rhi/RHI.h` + `DeviceVK.*` (`GetTextureTrackedState(const ITexture*)`). *Follow-up (A.9):* dropped `WarnInterPassRawBarriersFullyMergedAway` (legitimate idempotent collects).
+
+**A.8 adds:** `core/RenderResources.h`/`.cpp` (`Begin/EndUploadRecordingPhase`, debug depth, asserts, upload contract comment); `core/RenderWorld.h`/`.cpp` (`PrepareUploadPhaseResources`, `RecordFeatureUploads`, `UploadRecordingPhaseScope`).
+
+**A.9 adds:** `framegraph/passes/FullscreenHdrComposePass.*` (no `CollectTextureBarriers` duplicate); `rhi/Vulkan/commands/CommandListVK.cpp` (conditional `BeginRenderingWithTarget` transitions); `framegraph/FrameGraph.cpp` / `FrameGraph.h`, `Render_steps_todo.md`, this file (smoke note).
+
+**A.10 adds:** this file §A.10 (D1–D6 pass/partial notes); `Render_steps_todo.md` (tracking matrix **A** → Done).
 
 
 ---

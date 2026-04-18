@@ -46,6 +46,7 @@ static const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::ComputeGpuCull: return "ComputeGpuCull";
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
+    case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
     default: return "Unknown";
     }
 }
