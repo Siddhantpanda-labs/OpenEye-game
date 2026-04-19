@@ -76,11 +76,11 @@ struct IDevice {
     /** Typed backend identity (avoid string matching). */
     virtual ::eyelib::rendering::RenderBackend GetRenderBackend() const = 0;
 
-    /** Shader path resolution: base path is assets/shaders/{backendName}/{shaderLogicalPath}. Extensions are backend-specific (e.g. OpenGL: .vert/.frag; Diligent: .vsh/.psh). */
+    /** Shader path resolution: Vulkan uses assets/shaders/rendering/vulkan/{logicalPath}; other backends use assets/shaders/{backendName}/{logicalPath}. Extensions are backend-specific (e.g. OpenGL: .vert/.frag; Diligent: .vsh/.psh). */
     virtual const char* GetShaderBackendName() const = 0;
     virtual const char* GetShaderVertexExtension() const = 0;
     virtual const char* GetShaderFragmentExtension() const = 0;
-    /** Resolve logical shader path (e.g. passes/gpu_cull/cull_indirect_with_drawlist) to backend-specific asset path. Returns true and sets outPath on success. Used for compute and other single-file shaders. */
+    /** Resolve logical shader path (e.g. raster/forward/forward_opaque) to backend-specific asset path. Returns true and sets outPath on success. Used for compute and other single-file shaders. */
     virtual bool ResolveShaderPath(const char* logicalName, ShaderStage stage, std::string& outPath) { (void)logicalName; (void)stage; (void)outPath; return false; }
 
     /** Allocate a command list for recording. Begin/End/record on it, then SubmitCommandList(list).
@@ -229,7 +229,19 @@ struct IDevice {
     virtual IDescriptorSet* CreateDescriptorSet(IPipelineLayout* layout) = 0;
     virtual void DestroyDescriptorSet(IDescriptorSet* set) = 0;
     /** Resource-space set type for binding table (set 0 Frame, set 1 Pass, etc.). Get layout then CreateDescriptorSet(layout). Returns nullptr if unsupported. */
-    enum class ResourceSetType : uint32_t { Frame, PostPass, ForwardPass, ShadowPass, LightCullPass, Material, SceneBuffers, DeferredLightingPass, IBLPass, OutlinePost };
+    enum class ResourceSetType : uint32_t {
+        Frame,
+        PostPass,
+        ForwardPass,
+        ShadowPass,
+        LightCullPass,
+        Material,
+        SceneBuffers,
+        DeferredLightingPass,
+        IBLPass,
+        OutlinePost,
+        RasterForwardM5Data,
+    };
     virtual IPipelineLayout* GetResourceSetLayout(ResourceSetType type) { (void)type; return nullptr; }
     /** Vulkan resource-space: empty descriptor set (0 bindings) for placeholder slots 1–3 in compute layouts. Returns nullptr if unsupported. */
     virtual IDescriptorSet* GetEmptyResourceSet() { return nullptr; }
@@ -434,6 +446,10 @@ struct ICommandList {
     virtual void DrawMeshTasks(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
     /** Vulkan: `vkCmdDrawMeshTasksIndirectEXT` — buffer holds `VkDrawMeshTasksIndirectCommandEXT` records. */
     virtual void DrawMeshTasksIndirect(IBuffer* indirectBuffer, size_t offset, uint32_t drawCount, uint32_t stride) = 0;
+
+    /** GPU capture regions (Vulkan: VK_EXT_debug_utils). Default no-op on backends without labels. */
+    virtual void PushDebugUtilsLabel(const char* name, const float* colorRgba = nullptr) { (void)name; (void)colorRgba; }
+    virtual void PopDebugUtilsLabel() {}
     /** Vulkan `VK_KHR_fragment_shading_rate`: sets per-draw fragment shading rate and combiner ops for subsequent draws in this command buffer. */
     virtual void SetFragmentShadingRate(
         FragmentShadingRate rate,

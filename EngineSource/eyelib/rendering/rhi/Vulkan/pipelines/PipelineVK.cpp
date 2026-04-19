@@ -7,6 +7,7 @@
 #include "eyelib/rendering/rhi/Vulkan/pipelines/VulkanPipelineHash.h"
 #include "eyelib/rendering/rhi/Vulkan/utils/DebugUtilsVK.h"
 #include "eyelib/rendering/shaders/ShaderPathResolve.h"
+#include "eyelib/rendering/shaders/RenderingShaderRoots.h"
 #include "eyelib/rendering/shaders/ShaderSourceLoader.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
@@ -60,6 +61,7 @@ static bool PipelineLayoutKindSupportsMeshWithResourceSpace(PipelineLayoutKind k
     case PipelineLayoutKind::IBL:
     case PipelineLayoutKind::OutlinePost:
     case PipelineLayoutKind::ComposeBootstrap:
+    case PipelineLayoutKind::RasterForwardM5Minimal:
         return true;
     case PipelineLayoutKind::PushOnly:
     case PipelineLayoutKind::ComputeLightCull:
@@ -123,6 +125,7 @@ static void InferAttachmentFormatsFromLayoutKind(PipelineLayoutKind kind, Render
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         break;
     case PipelineLayoutKind::ComposeBootstrap:
+    case PipelineLayoutKind::RasterForwardM5Minimal:
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         out.depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
         out.stencilFormat = VK_FORMAT_D24_UNORM_S8_UINT;
@@ -574,10 +577,7 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
     const bool fromOverrides = !info.vertexSourceOverride.empty() && !info.fragmentSourceOverride.empty();
     if (!fromOverrides && info.assetPath.empty()) return nullptr;
 
-    std::string root = platform::filesystem::GetEngineAssetsRoot();
-    const std::string baseDir = root.empty()
-        ? std::string("assets/shaders/vulkan/")
-        : platform::filesystem::NormalizePath(root + "/assets/shaders/vulkan/");
+    const std::string baseDir = eyelib::rendering::shaders::VulkanRenderingShaderBaseDir();
 
     std::string logicalName;
     const char* debugNameCstr = nullptr;

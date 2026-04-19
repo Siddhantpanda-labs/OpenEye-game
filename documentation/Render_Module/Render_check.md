@@ -6,6 +6,14 @@
 
 ---
 
+## Discipline (layout, ownership, naming)
+
+1. **Folders:** Keep every file in the **right folder** under `EngineSource/eyelib/rendering/` (and this doc tree under `documentation/Render_Module/`) per the module charter and roadmap—no ad-hoc locations, no mixing unrelated concerns across top-level areas.
+2. **Files & separation of concerns:** Each file should own **one coherent role** (e.g. one pass, one resource family, one subsystem boundary). Do not scatter one concern across many loosely related files, and do not merge unrelated logic into a single oversized file; split when responsibilities diverge.
+3. **Naming:** Use **precise, professional identifiers** (types, files, passes, blackboard slots)—specific enough that intent and ownership are obvious from the name alone; avoid vague or “placeholder” shorthand.
+
+---
+
 ## Principles (ongoing)
 
 
@@ -59,8 +67,10 @@
 | Item | Status |
 |------|--------|
 | `FullscreenHdrComposePass` (barriers + `DrawFullscreenQuad`, push tint) | Done |
-| `RasterFeature` lazy pipeline from embedded GLSL (`CreateGraphicsPipelineFromShaderAsset` overrides) | Done |
-| `OnShutdown` destroys compose pipeline | Done |
+| `RasterFeature` pipelines via `shaders/ShaderLibrary` — `OnRegister` declares permutations, `OnSchedulePasses` warms all (compose + forward baseline); compose still uses embedded GLSL overrides | Done |
+| `OnShutdown` destroys cached pipelines (`ShaderLibrary::DestroyPipelines`) | Done |
+| **Batch 2 (B.3–B.4, B.9):** `geometry/IGeometryProvider` + `StaticMeshGeometryProvider`; PerObject SSBO + blackboard slot; sandbox unit cube + `IMeshHandleResolver` | Done |
+| **Batch 3 (B.6–B.8):** Default graph **clear → forward opaque → blit** (`ForwardOpaquePass`, `PipelineLayoutKind::RasterForwardM5Minimal`, directional-light UBO, embedded M5 shaders); `GpuProfiler::Scope` + `FrameGraph::Execute` pass labels; sandbox calls `RasterFeature::SetMeshResolver` | Done (2026-04-18) |
 
 ### M4 — Uploads, barriers, visibility → draw list — Section **A** closeout done (A.10 hardening logged); full M4 / M5 forward path still tracked below
 

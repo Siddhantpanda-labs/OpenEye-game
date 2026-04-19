@@ -374,8 +374,11 @@ private:
     void* m_outlinePostSetLayout = nullptr;
     void* m_outlinePostPipelineLayout = nullptr;
     void* m_composeBootstrapPipelineLayout = nullptr;
+    void* m_rasterForwardM5MinimalPipelineLayout = nullptr;
+    /** Set1 layout for `PipelineLayoutKind::RasterForwardM5Minimal` (PerObject SSBO + directional light UBO). */
+    void* m_rasterM5DataSetLayout = nullptr;
     /** Wrappers for GetResourceSetLayout (single-set IPipelineLayout per type); do not own set layouts. */
-    IPipelineLayout* m_resourceSetLayouts[10] = {};  // Frame, PostPass, ..., IBLPass, OutlinePost
+    IPipelineLayout* m_resourceSetLayouts[11] = {};  // Frame … OutlinePost, RasterForwardM5Data
     void* m_emptyResourceSetLayout = nullptr;       // VkDescriptorSetLayout (0 bindings, placeholder for compute sets 1–3)
     IPipelineLayout* m_emptyResourceSetLayoutWrapper = nullptr;
     IDescriptorSet* m_emptyResourceSet = nullptr;   // one set from m_emptyResourceSetLayout, for BindDescriptorSets placeholder

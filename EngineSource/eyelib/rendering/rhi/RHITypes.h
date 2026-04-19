@@ -220,6 +220,8 @@ enum class ResourceState : uint32_t {
     VertexBuffer,
     IndexBuffer,
     UniformBuffer,
+    /** SSBO / storage buffer read in shaders (optionally written). Vulkan: `VK_ACCESS_SHADER_STORAGE_READ_BIT` (+ write when used with RW). */
+    StorageBuffer,
     ShaderResource,
     RenderTarget,
     DepthWrite,
@@ -365,6 +367,8 @@ enum class PipelineLayoutKind : uint32_t {
     OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
     /** set0 Frame only (per-frame + per-view UBOs); push constants unchanged. EyelibRendering bootstrap / simple passes. */
     ComposeBootstrap,
+    /** set0 Frame, set1 PerObject SSBO + directional light UBO (M5 sandbox forward minimal). */
+    RasterForwardM5Minimal,
 };
 
 /** Vulkan: how to obtain SPIR-V for a shader asset. OpenGL/Diligent ignore where not applicable. */
@@ -382,7 +386,7 @@ struct PipelineAttachmentFormats {
 
 /** Create a graphics pipeline from one logical shader asset (path without extension, e.g. passes/sky/skybox). */
 struct ShaderGraphicsPipelineCreateInfo {
-    /** Logical path under assets/shaders/{backend}/; may be empty only when both source overrides are set. */
+    /** Logical path under assets/shaders/rendering/{backend}/ for Vulkan (EyelibRendering); may be empty only when both source overrides are set. */
     std::string assetPath;
     VertexLayout vertexLayout;
     PrimitiveTopology topology = PrimitiveTopology::TriangleList;

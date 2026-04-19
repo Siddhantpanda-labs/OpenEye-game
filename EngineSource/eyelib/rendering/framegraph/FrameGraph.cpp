@@ -1,5 +1,6 @@
 #include "eyelib/rendering/framegraph/FrameGraph.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
+#include "eyelib/rendering/core/GpuProfiler.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/rendering/rhi/RHI.h"
 
@@ -243,6 +244,8 @@ void FrameGraph::Execute(rhi::IDevice* device, rhi::ICommandList* cmd, const Fra
             device->FlushBarrierTracker(cmd);
         }
 
+        const char* passName = p->DebugName();
+        GpuProfiler::Scope passScope(cmd, passName && passName[0] ? passName : "FrameGraphPass");
         p->Execute(cmd);
     }
 }

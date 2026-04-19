@@ -17,6 +17,15 @@ struct IQueryPool;
  *  documented in **`eyelib/rendering/rhi/Vulkan/query_pool_dynamic_rendering.md`**. */
 class GpuProfiler {
 public:
+    /** Nested GPU debug region (Vulkan debug utils when available). Matches pass `DebugName()` / `pass_names::k*`. */
+    struct Scope {
+        rhi::ICommandList* m_cmd = nullptr;
+        Scope(rhi::ICommandList* cmd, const char* name);
+        ~Scope();
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+    };
+
     struct NamedPipelineStat {
         const char* name = "";
         uint64_t value = 0;

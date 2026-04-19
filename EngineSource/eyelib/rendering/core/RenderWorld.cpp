@@ -60,6 +60,8 @@ void RenderWorld::Initialize() {
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainDepth, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerObjectStorageBuffer, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::DirectionalLightUniformBuffer, writer_names::kRenderResources);
     m_blackboard.SetWriterRegistry(&m_blackboardWriters);
 
     m_caps.gpu = m_device->GetCapabilities();
@@ -94,6 +96,7 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
     m_resources.EnsureUniformBuffers(render.device);
     m_resources.EnsureStagingUploadBuffer(render.device);
     m_resources.EnsureGpuUploadScratchBuffer(render.device);
+    m_resources.EnsurePerObjectBuffer(render.device, m_drawList.VisibleCount());
     render.resources = &m_resources;
 
     m_blackboard.ClearFrame();
@@ -105,6 +108,10 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
         m_blackboard.PublishBuffer(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources, perFrame);
     if (rhi::IBuffer* perView = m_resources.PerViewUniformBuffer())
         m_blackboard.PublishBuffer(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources, perView);
+    if (rhi::IBuffer* perObj = m_resources.PerObjectStorageBuffer())
+        m_blackboard.PublishBuffer(BlackboardSlot::PerObjectStorageBuffer, writer_names::kRenderResources, perObj);
+    if (rhi::IBuffer* dir = m_resources.DirectionalLightUniformBuffer())
+        m_blackboard.PublishBuffer(BlackboardSlot::DirectionalLightUniformBuffer, writer_names::kRenderResources, dir);
 }
 
 void RenderWorld::RecordFeatureUploads(FrameContext& frame, RenderContext& render) {

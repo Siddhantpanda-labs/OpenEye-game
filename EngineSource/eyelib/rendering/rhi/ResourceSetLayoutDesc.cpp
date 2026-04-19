@@ -85,6 +85,12 @@ PipelineLayoutDesc MakeResourceSetDesc(ResourceSetType type) {
             {1, BindingType::Texture},
         };
         break;
+    case ResourceSetType::RasterForwardM5Data:
+        desc.bindings = {
+            {0, BindingType::StorageBuffer},
+            {1, BindingType::UniformBuffer},
+        };
+        break;
     }
     return desc;
 }

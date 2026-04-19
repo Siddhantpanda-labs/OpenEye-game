@@ -1,4 +1,5 @@
 #include "eyelib/rendering/shaders/ShaderCache.h"
+#include "eyelib/rendering/shaders/RenderingShaderRoots.h"
 #include "eyelib/rendering/materials/MaterialCompiler.h"
 #include "eyelib/rendering/resources/Shader.h"
 #include "eyelib/rendering/materials/Material.h"
@@ -8,6 +9,7 @@
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include <algorithm>
+#include <cstring>
 
 namespace eyelib {
 namespace rendering {
@@ -71,9 +73,14 @@ static std::vector<std::string> getDefaultShaderDependencies(const ShaderKey& ke
     const char* fragExt = device->GetShaderFragmentExtension();
     if (!backend || !vertExt || !fragExt) return deps;
     std::string root = platform::filesystem::GetEngineAssetsRoot();
-    const std::string basePath = root.empty()
-        ? (std::string("assets/shaders/") + backend + "/" + logical)
-        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + logical);
+    std::string basePath;
+    if (backend && std::strcmp(backend, "vulkan") == 0) {
+        basePath = shaders::VulkanRenderingShaderBaseDir() + logical;
+    } else {
+        basePath = root.empty()
+            ? (std::string("assets/shaders/") + backend + "/" + logical)
+            : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + logical);
+    }
     deps.push_back(basePath + std::string(vertExt));
     deps.push_back(basePath + std::string(fragExt));
     deps.push_back(basePath + ".vert.spv");

@@ -18,7 +18,7 @@ static ResourceState ResourceStateFromBufferDescForTracker(const BufferDesc& des
     if (HasUsage(desc.usage, BufferUsage::DescriptorBuffer)) return ResourceState::ShaderResource;
     if (HasUsage(desc.usage, BufferUsage::AccelerationStructureStorage)) return ResourceState::AsBuildStorage;
     if (HasUsage(desc.usage, BufferUsage::AccelerationStructureBuildInput)) return ResourceState::AsBuildGeometryInput;
-    if (HasUsage(desc.usage, BufferUsage::Storage)) return ResourceState::ShaderResource;
+    if (HasUsage(desc.usage, BufferUsage::Storage)) return ResourceState::StorageBuffer;
     if (HasUsage(desc.usage, BufferUsage::Uniform)) return ResourceState::UniformBuffer;
     if (HasUsage(desc.usage, BufferUsage::Index)) return ResourceState::IndexBuffer;
     return ResourceState::VertexBuffer;
@@ -37,7 +37,7 @@ static ResourceState ResourceStateFromVkBufferUsageForTracker(VkBufferUsageFlags
     if (u & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR) return ResourceState::AsBuildGeometryInput;
 #endif
     if (u & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT) return ResourceState::IndirectDraw;
-    if (u & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) return ResourceState::ShaderResource;
+    if (u & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) return ResourceState::StorageBuffer;
     if (u & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) return ResourceState::UniformBuffer;
     if (u & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) return ResourceState::IndexBuffer;
     return ResourceState::VertexBuffer;

@@ -47,6 +47,7 @@ static const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
     case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
+    case PipelineLayoutKind::RasterForwardM5Minimal: return "RasterForwardM5Minimal";
     default: return "Unknown";
     }
 }

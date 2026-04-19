@@ -1,5 +1,7 @@
 #pragma once
 
+#include "eyelib/math/Types.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -28,6 +30,8 @@ struct DrawItem {
     uint32_t meshHandle = 0;
     uint32_t materialId = 0;
     uint32_t transformIndex = 0;
+    /** World transform copied from `SceneDrawInstance` when the item is emitted (PerObject SSBO, B.4). */
+    math::Mat4 worldMatrix{1.0f};
     uint64_t sortKey = 0;
     uint32_t flags = draw_item_flags::kNone;
     DrawLayer layer = DrawLayer::Opaque;

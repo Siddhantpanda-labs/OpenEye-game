@@ -145,8 +145,8 @@ struct CommandListVK : ICommandList {
     void* GetCommandBuffer() const { return m_commandBuffer; }
 
     /** Vulkan-only: nested **debug regions** for RenderDoc / GPU captures (**`VK_EXT_debug_utils`**). No-op if unsupported. */
-    void PushDebugUtilsLabel(const char* name, const float colorRgba[4] = nullptr);
-    void PopDebugUtilsLabel();
+    void PushDebugUtilsLabel(const char* name, const float* colorRgba = nullptr) override;
+    void PopDebugUtilsLabel() override;
     /** For compute UpdateComputeSet0: current bound texture at binding (null if unbound). */
     rhi::ITexture* GetBoundTexture(uint32_t binding) const;
     /** For compute UpdateComputeSet0: current bound storage buffer at binding. */

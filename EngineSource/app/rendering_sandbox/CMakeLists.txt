@@ -16,6 +16,8 @@ target_link_libraries(OpenEyeRenderingSandbox
         glfw
 )
 
+add_dependencies(OpenEyeRenderingSandbox CopyEngineAssets)
+
 if(MSVC)
     target_compile_options(OpenEyeRenderingSandbox PRIVATE /W4 /wd4100)
 endif()

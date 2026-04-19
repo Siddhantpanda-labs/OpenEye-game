@@ -58,6 +58,7 @@ const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
     case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
+    case PipelineLayoutKind::RasterForwardM5Minimal: return "RasterForwardM5Minimal";
     default: return "Unknown";
     }
 }
@@ -492,7 +493,7 @@ void CommandListVK::ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearVal
 
 void CommandListVK::ClearDefaultFramebuffer(const ClearValue& clear) { m_hasGraphicsWork = true; m_computeQueueEligible = false; (void)clear; }
 
-void CommandListVK::PushDebugUtilsLabel(const char* name, const float colorRgba[4]) {
+void CommandListVK::PushDebugUtilsLabel(const char* name, const float* colorRgba) {
     if (!m_isRecording || !m_commandBuffer || !m_device || !name) return;
     static const float kDefaultRgba[4] = { 0.78f, 0.78f, 0.82f, 1.f };
     const float* c = colorRgba ? colorRgba : kDefaultRgba;

@@ -106,6 +106,12 @@ VkPipelineLayout CreateOutlinePostPipelineLayout(VkDevice device, VkDescriptorSe
 /** ComposeBootstrap: set0 Frame (two UBOs). Push constants 256 bytes (optionally includes mesh push stages). */
 VkPipelineLayout CreateComposeBootstrapPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout, bool includeMeshPushStages);
 
+/** Set 1 — RasterForwardM5Data: 0 PerObject SSBO, 1 directional light UBO. */
+VkDescriptorSetLayout CreateRasterForwardM5DataSetLayout(VkDevice device, bool includeMeshShaderStages);
+/** RasterForwardM5Minimal: set0 Frame, set1 RasterForwardM5Data. Push constants 256 bytes (optionally includes mesh push stages). */
+VkPipelineLayout CreateRasterForwardM5MinimalPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout rasterM5DataLayout, bool includeMeshPushStages);
+
 /** PushOnly: 0 descriptor sets; push constants 128 bytes. Used for BRDF LUT, etc. */
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device);
 /** PushOnly with task|mesh|fragment push-constant stages for `VK_EXT_mesh_shader` pipelines. See `mesh_shader_rhi.md`. */
@@ -115,7 +121,8 @@ VkPipelineLayout CreatePushOnlyPipelineLayoutWithMeshPushStages(VkDevice device)
 VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLayout post, VkPipelineLayout shadow,
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
-    VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap, VkPipelineLayout pushOnly,
+    VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap,
+    VkPipelineLayout rasterForwardM5Minimal, VkPipelineLayout pushOnly,
     PipelineLayoutKind kind);
 
 /** Number of descriptor sets the pipeline layout expects. PushOnly/Legacy = 0. */

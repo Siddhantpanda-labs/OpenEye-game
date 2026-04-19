@@ -76,6 +76,7 @@ void VisibilitySystem::BuildCpuDrawList(const IRenderSceneView* scene, DrawList&
         item.meshHandle = src.meshHandle;
         item.materialId = src.materialId;
         item.transformIndex = src.transformIndex;
+        item.worldMatrix = src.worldTransform;
         item.flags = src.flags;
         item.layer = src.layer;
         item.sortKey = ComputeSortKey(src.layer, src.materialId, dist);

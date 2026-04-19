@@ -1,5 +1,6 @@
 #pragma once
 
+#include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 
 #include <cstddef>
@@ -7,6 +8,9 @@
 
 namespace eyelib {
 namespace rendering {
+
+struct DrawList;
+
 namespace rhi {
 struct IDevice;
 struct ICommandList;
@@ -21,8 +25,8 @@ struct IBuffer;
  *
  * **Upload contract (A.8):** `EnsureAllocated` / `EnsureUniformBuffers` / `Ensure*Buffer` are allocation/setup only
  * (no upload commands); `RenderWorld` runs them in a **prepare** step before `BeginUploadRecordingPhase`.
- * `UploadPer*` / `RecordGpuUploadScratchFromStaging` record GPU copies on the upload command list and assert
- * (Debug) that they run only while the upload recording scope is active (`OnUpload`).
+ * `UploadPer*` / `UploadPerObjectBufferFromDrawList` / `RecordGpuUploadScratchFromStaging` record GPU copies on the
+ * upload command list and assert (Debug) that they run only while the upload recording scope is active (`OnUpload`).
  *
  * Depth split: `m_mainDepth` is a standalone depth texture; `m_mainHdr` is an HDR color RT that
  * binds this depth via `CreateRenderTargetWithSharedDepth`, so both slots reference the same
@@ -50,6 +54,12 @@ public:
     /** Creates PerFrame / PerView uniform buffers if missing (device-local, transfer + uniform). */
     void EnsureUniformBuffers(rhi::IDevice* device);
 
+    /**
+     * Resizes the PerObject SSBO when `minInstanceCount` exceeds the current capacity (allocation only — A.8).
+     * Call from `PrepareUploadPhaseResources` before upload recording.
+     */
+    void EnsurePerObjectBuffer(rhi::IDevice* device, uint32_t minInstanceCount);
+
     /** Host-visible upload ring (lazy). Safe for `OnUpload` writers. */
     void EnsureStagingUploadBuffer(rhi::IDevice* device);
     rhi::IBuffer* StagingUploadBuffer() noexcept { return m_staging; }
@@ -71,6 +81,12 @@ public:
     /** Upload std140 PerView block into `PerViewUniformBuffer` (OnUpload only). */
     bool UploadPerViewUniform(rhi::ICommandList* cmd, const PerViewUniformStd140& data);
 
+    /** Upload directional light UBO (OnUpload only). */
+    bool UploadDirectionalLightUniform(rhi::ICommandList* cmd, const DirectionalLightStd140& data);
+
+    /** Pack visible `DrawList` rows into the PerObject SSBO (OnUpload only). No-op when `list.VisibleCount()==0`. */
+    bool UploadPerObjectBufferFromDrawList(rhi::ICommandList* cmd, const DrawList& list);
+
     uint32_t Width() const noexcept { return m_width; }
     uint32_t Height() const noexcept { return m_height; }
 
@@ -90,9 +106,19 @@ public:
     rhi::IBuffer* PerViewUniformBuffer() noexcept { return m_perViewUbo; }
     const rhi::IBuffer* PerViewUniformBuffer() const noexcept { return m_perViewUbo; }
 
+    /** Per-object instance SSBO (std430 rows). Created by `EnsurePerObjectBuffer`. */
+    rhi::IBuffer* PerObjectStorageBuffer() noexcept { return m_perObjectSsbo; }
+    const rhi::IBuffer* PerObjectStorageBuffer() const noexcept { return m_perObjectSsbo; }
+
+    /** Directional light UBO (std140, 256 bytes). Created by `EnsureUniformBuffers`. */
+    rhi::IBuffer* DirectionalLightUniformBuffer() noexcept { return m_dirLightUbo; }
+    const rhi::IBuffer* DirectionalLightUniformBuffer() const noexcept { return m_dirLightUbo; }
+
 private:
     bool RecordUniformBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& uniformPrimed, const void* data,
                                             size_t sizeInBytes);
+    bool RecordStorageBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& storagePrimed, const void* data,
+                                              size_t sizeInBytes);
 
     rhi::IDevice* m_device = nullptr;
     uint32_t m_width = 0;
@@ -103,8 +129,13 @@ private:
     rhi::IBuffer* m_gpuScratch = nullptr;
     rhi::IBuffer* m_perFrameUbo = nullptr;
     rhi::IBuffer* m_perViewUbo = nullptr;
+    rhi::IBuffer* m_perObjectSsbo = nullptr;
+    rhi::IBuffer* m_dirLightUbo = nullptr;
+    uint32_t m_perObjectCapacity = 0;
     bool m_perFrameUboUniformPrimed = false;
     bool m_perViewUboUniformPrimed = false;
+    bool m_dirLightUboUniformPrimed = false;
+    bool m_perObjectSsboStoragePrimed = false;
     /** Staging was used as a transfer source on the GPU (needs transfer→host before next CPU write). */
     bool m_stagingGpuReadPending = false;
     /** Scratch buffer was transitioned to uniform read after last successful upload. */

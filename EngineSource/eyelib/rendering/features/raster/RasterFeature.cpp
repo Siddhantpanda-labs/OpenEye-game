@@ -1,5 +1,6 @@
 #include "eyelib/rendering/features/raster/RasterFeature.h"
 
+#include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/core/FrameContext.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/RenderContext.h"
@@ -9,107 +10,66 @@
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/framegraph/passes/BlitMainHdrToDefaultPass.h"
 #include "eyelib/rendering/framegraph/passes/ClearBlackboardRenderTargetPass.h"
-#include "eyelib/rendering/framegraph/passes/FullscreenHdrComposePass.h"
+#include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
+#include "eyelib/rendering/geometry/IMeshHandleResolver.h"
+#include "eyelib/rendering/resources/Mesh.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
 #include "eyelib/rendering/scene/CameraView.h"
 #include "eyelib/rendering/scene/IRenderSceneView.h"
+#include "eyelib/rendering/shaders/ShaderPermutationKey.h"
 
-#include <cstdint>
-#include <cstring>
+#include <glm/geometric.hpp>
+#include <glm/glm.hpp>
 
 namespace eyelib {
 namespace rendering {
 
 namespace {
 
-constexpr const char* kComposeVertGlsl = R"(#version 450
-layout(location = 0) in vec2 position;
-layout(location = 1) in vec2 texCoord;
-layout(location = 0) out vec2 vUv;
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-    vUv = texCoord;
-}
-)";
-
-constexpr const char* kComposeFragGlsl = R"(#version 450
-layout(location = 0) in vec2 vUv;
-layout(location = 0) out vec4 outColor;
-layout(set = 0, binding = 0) uniform PerFrameUbo {
-    uint uFrameIndex;
-    float uDeltaTime;
-    uint uPad0;
-    uint uPad1;
-} uPerFrame;
-layout(set = 0, binding = 1) uniform PerViewUbo {
-    mat4 uView;
-    mat4 uProjection;
-    mat4 uViewProjection;
-    vec4 uViewPos;
-    vec4 uViewport;
-} uPerView;
-layout(push_constant) uniform Push { vec4 tint; } pc;
-void main() {
-    vec3 base = mix(pc.tint.rgb * 0.2, pc.tint.rgb, vUv.x);
-    float flicker = fract(uPerView.uViewPos.x * 0.07 + float(uPerFrame.uFrameIndex) * 0.013 + uPerFrame.uDeltaTime);
-    vec3 shaded = mix(base, base * (0.75 + 0.25 * flicker), 0.4);
-    outColor = vec4(shaded, 1.0);
-}
-)";
+const shaders::ShaderPermutationKey kPermForwardOpaqueM5Baseline{
+    shaders::ShaderPermutationKey::ProgramId::RasterForwardOpaque, 1, 1};
 
 }  // namespace
 
 RasterFeature::~RasterFeature() {
-    releaseComposePipeline();
+    m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
+    m_shaderLibrary.ClearRegistrations();
+    m_pipelineDevice = nullptr;
 }
 
-void RasterFeature::releaseComposePipeline() noexcept {
-    if (m_composePipeline && m_deviceForPipeline) {
-        m_deviceForPipeline->DestroyPipeline(m_composePipeline);
-        m_composePipeline = nullptr;
-        m_deviceForPipeline = nullptr;
-    }
+void RasterFeature::SetMeshResolver(const IMeshHandleResolver* resolver) noexcept {
+    m_meshResolver = resolver;
 }
 
-rhi::VertexLayout RasterFeature::fullscreenVertexLayout() {
-    using namespace rhi;
-    constexpr uint32_t stride = 4u * sizeof(float);
-    VertexLayout layout{};
-    layout.strideInBytes = stride;
-    layout.attributes = {
-        {0, VertexAttributeType::Float2, 0u},
-        {1, VertexAttributeType::Float2, 2u * sizeof(float)},
-    };
-    return layout;
-}
-
-void RasterFeature::ensureComposePipeline(rhi::IDevice* device) {
-    if (!device || m_composePipeline)
-        return;
-
+rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeForwardOpaqueBaselineSpec() {
     rhi::ShaderGraphicsPipelineCreateInfo gp{};
-    gp.assetPath = "internal/raster_compose_bootstrap";
-    gp.vertexLayout = fullscreenVertexLayout();
+    gp.assetPath = "raster/forward/forward_opaque";
+    gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
-    gp.layoutKind = rhi::PipelineLayoutKind::ComposeBootstrap;
-    gp.sourcePolicy = rhi::ShaderSourcePolicy::CompileFromSource;
-    gp.vertexSourceOverride = kComposeVertGlsl;
-    gp.fragmentSourceOverride = kComposeFragGlsl;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterForwardM5Minimal;
+    gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
     gp.useDepthStencilOverride = true;
-    gp.depthStencilOverride.depthTest = false;
-    gp.depthStencilOverride.depthWrite = false;
+    gp.depthStencilOverride.depthTest = true;
+    gp.depthStencilOverride.depthWrite = true;
+    gp.depthStencilOverride.depthCompare = rhi::DepthCompare::Less;
     rhi::PipelineAttachmentFormats att{};
     att.color.push_back(rhi::RHITextureFormat::RGBA16F);
     att.depthStencil = rhi::RHITextureFormat::Depth24Stencil8;
     gp.attachmentFormats = att;
+    return gp;
+}
 
-    m_composePipeline = device->CreateGraphicsPipelineFromShaderAsset(gp);
-    m_deviceForPipeline = m_composePipeline ? device : nullptr;
+void RasterFeature::OnRegister(const RenderCapabilities& caps) {
+    (void)caps;
+    m_shaderLibrary.ClearRegistrations();
+    m_shaderLibrary.AddEntry(kPermForwardOpaqueM5Baseline, makeForwardOpaqueBaselineSpec());
 }
 
 void RasterFeature::OnShutdown() {
-    releaseComposePipeline();
+    m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
+    m_shaderLibrary.ClearRegistrations();
+    m_pipelineDevice = nullptr;
 }
 
 void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
@@ -135,10 +95,26 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     const float h = static_cast<float>((render.outputHeight > 0u) ? render.outputHeight : 1u);
     perView.viewport = {w, h, 1.0f / w, 1.0f / h};
     (void)res->UploadPerViewUniform(render.recordingCommandList, perView);
+
+    DirectionalLightStd140 dir{};
+    {
+        glm::vec3 d(dir.direction.x, dir.direction.y, dir.direction.z);
+        d = glm::normalize(d);
+        dir.direction = {d.x, d.y, d.z, 0.f};
+    }
+    (void)res->UploadDirectionalLightUniform(render.recordingCommandList, dir);
+
+    if (render.drawList)
+        (void)res->UploadPerObjectBufferFromDrawList(render.recordingCommandList, *render.drawList);
 }
 
 void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& blackboard, const RenderContext& render) {
-    ensureComposePipeline(render.device);
+    if (render.device) {
+        m_shaderLibrary.WarmUpPipelines(render.device);
+        m_pipelineDevice = render.device;
+    }
+
+    rhi::IPipeline* forwardPipeline = m_shaderLibrary.TryGetPipeline(kPermForwardOpaqueM5Baseline);
 
     rhi::ClearValue clear{};
     clear.color[0] = 0.12f;
@@ -148,9 +124,9 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     clear.depth = 1.0f;
     graph.AddPass(std::make_unique<ClearBlackboardRenderTargetPass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, clear));
 
-    if (m_composePipeline)
-        graph.AddPass(
-            std::make_unique<FullscreenHdrComposePass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, render.device, m_composePipeline));
+    if (forwardPipeline && m_meshResolver && render.drawList)
+        graph.AddPass(std::make_unique<ForwardOpaquePass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, render.device, forwardPipeline,
+                                                          m_meshResolver, render.drawList));
 
     graph.AddPass(std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard));
 }

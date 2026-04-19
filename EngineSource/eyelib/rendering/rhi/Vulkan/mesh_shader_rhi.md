@@ -48,7 +48,7 @@ Mesh pipelines use push constants on **task | mesh | fragment** (layout includes
 
 - **`ShaderStage::Task`** / **`ShaderStage::Mesh`** for **`CreateShader`** / **`CreateShaderFromBinary`**.
 - GLSL → SPIR-V: **`VulkanCompileGlslToSpirv`** uses **shaderc** `shaderc_glsl_task_shader` / `shaderc_glsl_mesh_shader` (requires a recent Vulkan SDK / shaderc).
-- Asset naming (under `assets/shaders/vulkan/`): **`.task`**, **`.mesh`**, plus existing **`.vert` / `.frag`**. **`DeviceVK::ResolveShaderPath`** maps stages to these extensions.
+- Asset naming (under `assets/shaders/rendering/vulkan/` for EyelibRendering): **`.task`**, **`.mesh`**, plus **`.vert` / `.frag`**. **`DeviceVK::ResolveShaderPath`** maps stages to these extensions.
 
 ---
 

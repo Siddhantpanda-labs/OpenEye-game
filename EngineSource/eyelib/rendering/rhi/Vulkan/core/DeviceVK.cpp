@@ -21,6 +21,7 @@
 #include "eyelib/rendering/rhi/RHITypes.h"
 #include "eyelib/rendering/backend/RenderBackendPolicy.h"
 #include "eyelib/rendering/shaders/ShaderPathResolve.h"
+#include "eyelib/rendering/shaders/RenderingShaderRoots.h"
 #include "eyelib/platform/filesystem/FileSystem.h"
 #include "eyelib/core/Log.h"
 #if defined(_WIN32)
@@ -176,7 +177,7 @@ DeviceVK::~DeviceVK() {
         m_pipelineCache = nullptr;
     }
     // Resource set layout wrappers (single-set IPipelineLayout per type; destroy before set layouts)
-    for (size_t i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 11; ++i) {
         if (m_resourceSetLayouts[i]) {
             DestroyPipelineLayout(m_resourceSetLayouts[i]);
             m_resourceSetLayouts[i] = nullptr;
@@ -203,6 +204,8 @@ DeviceVK::~DeviceVK() {
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_outlinePostPipelineLayout = nullptr; }
     rscPl = static_cast<VkPipelineLayout>(m_composeBootstrapPipelineLayout);
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_composeBootstrapPipelineLayout = nullptr; }
+    rscPl = static_cast<VkPipelineLayout>(m_rasterForwardM5MinimalPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_rasterForwardM5MinimalPipelineLayout = nullptr; }
     // Resource-space set layouts
     VkDescriptorSetLayout rscLayout = static_cast<VkDescriptorSetLayout>(m_frameSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_frameSetLayout = nullptr; }
@@ -224,6 +227,8 @@ DeviceVK::~DeviceVK() {
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_iblPassSetLayout = nullptr; }
     rscLayout = static_cast<VkDescriptorSetLayout>(m_outlinePostSetLayout);
     if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_outlinePostSetLayout = nullptr; }
+    rscLayout = static_cast<VkDescriptorSetLayout>(m_rasterM5DataSetLayout);
+    if (rscLayout != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyDescriptorSetLayout(device, rscLayout, nullptr); m_rasterM5DataSetLayout = nullptr; }
     if (m_emptyResourceSet) { DestroyDescriptorSet(m_emptyResourceSet); m_emptyResourceSet = nullptr; }
     if (m_emptyResourceSetLayoutWrapper) { DestroyPipelineLayout(m_emptyResourceSetLayoutWrapper); m_emptyResourceSetLayoutWrapper = nullptr; }
     rscLayout = static_cast<VkDescriptorSetLayout>(m_emptyResourceSetLayout);
@@ -1592,9 +1597,11 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkDescriptorSetLayout sceneLayout = vkres::CreateSceneBuffersSetLayout(device, meshStages);
         VkDescriptorSetLayout iblPassLayout = vkres::CreateIBLPassSetLayout(device, meshStages);
         VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device, meshStages);
+        VkDescriptorSetLayout rasterM5DataLayout = vkres::CreateRasterForwardM5DataSetLayout(device, meshStages);
         VkDescriptorSetLayout emptyLayout = vkres::CreateEmptySetLayout(device);
-        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !emptyLayout) {
+        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !rasterM5DataLayout || !emptyLayout) {
             if (emptyLayout) vkDestroyDescriptorSetLayout(device, emptyLayout, nullptr);
+            if (rasterM5DataLayout) vkDestroyDescriptorSetLayout(device, rasterM5DataLayout, nullptr);
             if (outlinePostLayout) vkDestroyDescriptorSetLayout(device, outlinePostLayout, nullptr);
             if (iblPassLayout) vkDestroyDescriptorSetLayout(device, iblPassLayout, nullptr);
             if (sceneLayout) vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
@@ -1651,8 +1658,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkPipelineLayout iblPl = vkres::CreateIBLPipelineLayout(device, iblPassLayout, meshStages);
         VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
         VkPipelineLayout composeBootstrapPl = vkres::CreateComposeBootstrapPipelineLayout(device, frameLayout, meshStages);
+        VkPipelineLayout rasterM5Pl = vkres::CreateRasterForwardM5MinimalPipelineLayout(device, frameLayout, rasterM5DataLayout, meshStages);
         if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl ||
-            !composeBootstrapPl) {
+            !composeBootstrapPl || !rasterM5Pl) {
+            if (rasterM5Pl) vkDestroyPipelineLayout(device, rasterM5Pl, nullptr);
             if (composeBootstrapPl) vkDestroyPipelineLayout(device, composeBootstrapPl, nullptr);
             if (outlinePostPl) vkDestroyPipelineLayout(device, outlinePostPl, nullptr);
             if (iblPl) vkDestroyPipelineLayout(device, iblPl, nullptr);
@@ -1664,6 +1673,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             if (postPl) vkDestroyPipelineLayout(device, postPl, nullptr);
             if (forwardPl) vkDestroyPipelineLayout(device, forwardPl, nullptr);
             vkDestroyDescriptorSetLayout(device, emptyLayout, nullptr);
+            vkDestroyDescriptorSetLayout(device, rasterM5DataLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, outlinePostLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, iblPassLayout, nullptr);
             vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
@@ -1714,8 +1724,10 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_computeGpuCullPipelineLayout = computeGpuCullPl;
         m_iblPipelineLayout = iblPl;
         m_outlinePostSetLayout = outlinePostLayout;
+        m_rasterM5DataSetLayout = rasterM5DataLayout;
         m_outlinePostPipelineLayout = outlinePostPl;
         m_composeBootstrapPipelineLayout = composeBootstrapPl;
+        m_rasterForwardM5MinimalPipelineLayout = rasterM5Pl;
 
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::Frame)] =
             CreatePipelineLayoutWrapperVK(this, frameLayout, MakeResourceSetDesc(IDevice::ResourceSetType::Frame));
@@ -1737,6 +1749,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             CreatePipelineLayoutWrapperVK(this, iblPassLayout, MakeResourceSetDesc(IDevice::ResourceSetType::IBLPass));
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::OutlinePost)] =
             CreatePipelineLayoutWrapperVK(this, outlinePostLayout, MakeResourceSetDesc(IDevice::ResourceSetType::OutlinePost));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::RasterForwardM5Data)] =
+            CreatePipelineLayoutWrapperVK(this, rasterM5DataLayout, MakeResourceSetDesc(IDevice::ResourceSetType::RasterForwardM5Data));
         m_emptyResourceSetLayoutWrapper = CreatePipelineLayoutWrapperVK(this, emptyLayout);
         m_emptyResourceSet = CreateDescriptorSet(m_emptyResourceSetLayoutWrapper);
     }
@@ -2027,6 +2041,7 @@ void* DeviceVK::GetPipelineLayoutForKind(PipelineLayoutKind kind) const {
         static_cast<VkPipelineLayout>(m_iblPipelineLayout),
         static_cast<VkPipelineLayout>(m_outlinePostPipelineLayout),
         static_cast<VkPipelineLayout>(m_composeBootstrapPipelineLayout),
+        static_cast<VkPipelineLayout>(m_rasterForwardM5MinimalPipelineLayout),
         static_cast<VkPipelineLayout>(m_defaultPipelineLayout),
         kind);
 }
@@ -2050,7 +2065,7 @@ bool DeviceVK::ResolveShaderPath(const char* logicalName, ShaderStage stage, std
     case ShaderStage::Fragment:
     default: ext = ".frag"; break;
     }
-    outPath = std::string("assets/shaders/vulkan/") + logicalName + ext;
+    outPath = std::string(eyelib::rendering::shaders::kVulkanRenderingShaderPathPrefix) + logicalName + ext;
     return true;
 }
 
@@ -3480,7 +3495,7 @@ IPipelineLayout* DeviceVK::CreatePipelineLayout(const PipelineLayoutDesc& desc) 
 
 IPipelineLayout* DeviceVK::GetResourceSetLayout(ResourceSetType type) {
     size_t i = static_cast<size_t>(type);
-    return (i < 10) ? m_resourceSetLayouts[i] : nullptr;
+    return (i < 11) ? m_resourceSetLayouts[i] : nullptr;
 }
 
 IPipelineLayout* DeviceVK::GetBindlessPipelineLayout() const {

@@ -14,6 +14,8 @@ inline constexpr const char* kMainHdrRenderTarget   = "MainHdrRenderTarget";
 inline constexpr const char* kMainDepth             = "MainDepth";
 inline constexpr const char* kPerFrameUniformBuffer = "PerFrameUniformBuffer";
 inline constexpr const char* kPerViewUniformBuffer  = "PerViewUniformBuffer";
+inline constexpr const char* kPerObjectStorageBuffer = "PerObjectStorageBuffer";
+inline constexpr const char* kDirectionalLightUniformBuffer = "DirectionalLightUniformBuffer";
 
 }  // namespace resource_names
 

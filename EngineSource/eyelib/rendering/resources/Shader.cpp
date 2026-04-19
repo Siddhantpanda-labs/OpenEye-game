@@ -2,6 +2,7 @@
 #include <cstring>
 #include "eyelib/rendering/resources/Mesh.h"
 #include "eyelib/rendering/shaders/ShaderPathResolve.h"
+#include "eyelib/rendering/shaders/RenderingShaderRoots.h"
 #include "eyelib/rendering/shaders/ShaderSourceLoader.h"
 #include "eyelib/rendering/shaders/PipelineCache.h"
 #include "eyelib/core/Log.h"
@@ -252,9 +253,14 @@ bool Shader::Load(rhi::IDevice* device, const std::string& assetPath, const rhi:
         return false;
     }
     std::string root = platform::filesystem::GetEngineAssetsRoot();
-    std::string basePath = root.empty()
-        ? (std::string("assets/shaders/") + backend + "/" + assetPath)
-        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + assetPath);
+    std::string basePath;
+    if (std::strcmp(backend, "vulkan") == 0) {
+        basePath = shaders::VulkanRenderingShaderBaseDir() + assetPath;
+    } else {
+        basePath = root.empty()
+            ? (std::string("assets/shaders/") + backend + "/" + assetPath)
+            : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + assetPath);
+    }
     std::string vertexPath = basePath + vertExt;
     std::string fragmentPath = basePath + fragExt;
     std::string vertexSrc, fragmentSrc;

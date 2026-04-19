@@ -3,6 +3,7 @@
 #include "eyelib/rendering/resources/Shader.h"
 #include "eyelib/rendering/resources/Mesh.h"
 #include "eyelib/rendering/shaders/ShaderSourceLoader.h"
+#include "eyelib/rendering/shaders/RenderingShaderRoots.h"
 #include "eyelib/rendering/shaders/ShaderTemplateName.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
@@ -73,9 +74,14 @@ std::shared_ptr<Shader> MaterialCompiler::compile(rhi::IDevice* device, const Ma
     if (logicalName.empty()) return nullptr;
 
     std::string root = platform::filesystem::GetEngineAssetsRoot();
-    std::string basePath = root.empty()
-        ? (std::string("assets/shaders/") + backend + "/" + logicalName)
-        : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + logicalName);
+    std::string basePath;
+    if (std::strcmp(backend, "vulkan") == 0) {
+        basePath = shaders::VulkanRenderingShaderBaseDir() + logicalName;
+    } else {
+        basePath = root.empty()
+            ? (std::string("assets/shaders/") + backend + "/" + logicalName)
+            : platform::filesystem::NormalizePath(root + "/assets/shaders/" + backend + "/" + logicalName);
+    }
     std::string vertexPath = basePath + vertExt;
     std::string fragmentPath = basePath + fragExt;
 

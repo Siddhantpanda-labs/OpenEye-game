@@ -15,6 +15,10 @@ enum class BlackboardSlot : uint8_t {
     PerFrameUniformBuffer,
     /** Per-view uniform buffer (camera matrices, viewport, jitter). Null until created (A.5). */
     PerViewUniformBuffer,
+    /** Per-draw instance SSBO (transforms + material ids), std430. Filled in upload phase (B.4). */
+    PerObjectStorageBuffer,
+    /** Single directional light UBO (std140, 256 bytes). Filled in upload phase (B.6). */
+    DirectionalLightUniformBuffer,
     SlotCount
 };
 

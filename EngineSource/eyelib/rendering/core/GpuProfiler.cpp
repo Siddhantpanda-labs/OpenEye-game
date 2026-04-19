@@ -20,6 +20,16 @@ constexpr std::array<const char*, 4> kDefaultPipelineStatNames = {
 
 GpuProfiler::~GpuProfiler() = default;
 
+GpuProfiler::Scope::Scope(rhi::ICommandList* cmd, const char* name) : m_cmd(cmd) {
+    if (m_cmd && name)
+        m_cmd->PushDebugUtilsLabel(name, nullptr);
+}
+
+GpuProfiler::Scope::~Scope() {
+    if (m_cmd)
+        m_cmd->PopDebugUtilsLabel();
+}
+
 void GpuProfiler::BeginFrame(rhi::IDevice* device, rhi::ICommandList* commandList) {
     m_queryOpen = false;
     if (!device || !commandList) return;

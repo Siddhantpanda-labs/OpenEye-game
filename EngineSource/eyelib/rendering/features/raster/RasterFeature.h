@@ -2,9 +2,12 @@
 
 #include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
+#include "eyelib/rendering/shaders/ShaderLibrary.h"
 
 namespace eyelib {
 namespace rendering {
+
+class IMeshHandleResolver;
 
 namespace rhi {
 struct IDevice;
@@ -15,7 +18,7 @@ class FrameGraph;
 class FrameGraphBlackboard;
 
 /**
- * Bootstrap raster path: HDR clear → optional fullscreen compose (GPU) → blit to swapchain.
+ * HDR raster path: clear → forward opaque (M5 minimal) → blit to swapchain.
  */
 class RasterFeature final : public IRenderFeature {
 public:
@@ -24,17 +27,19 @@ public:
 
     const char* FeatureDebugName() const noexcept override { return writer_names::kRasterFeature; }
 
+    void OnRegister(const RenderCapabilities& caps) override;
     void OnUpload(FrameContext& frame, const RenderContext& render) override;
     void OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& blackboard, const RenderContext& render) override;
     void OnShutdown() override;
 
-private:
-    void releaseComposePipeline() noexcept;
-    void ensureComposePipeline(rhi::IDevice* device);
-    static rhi::VertexLayout fullscreenVertexLayout();
+    void SetMeshResolver(const IMeshHandleResolver* resolver) noexcept;
 
-    rhi::IDevice* m_deviceForPipeline = nullptr;
-    rhi::IPipeline* m_composePipeline = nullptr;
+private:
+    static rhi::ShaderGraphicsPipelineCreateInfo makeForwardOpaqueBaselineSpec();
+
+    shaders::ShaderLibrary m_shaderLibrary;
+    rhi::IDevice* m_pipelineDevice = nullptr;
+    const IMeshHandleResolver* m_meshResolver = nullptr;
 };
 
 }  // namespace rendering
