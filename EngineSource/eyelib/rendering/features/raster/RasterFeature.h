@@ -40,6 +40,12 @@ private:
     shaders::ShaderLibrary m_shaderLibrary;
     rhi::IDevice* m_pipelineDevice = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
+
+    bool m_diagLoggedForwardPipelineNull = false;
+    bool m_diagLoggedMeshResolverNull = false;
+    bool m_diagLoggedDrawListNull = false;
+    uint32_t m_diagScheduleLogCounter = 0;
+    bool m_diagLoggedPerViewOnce = false;
 };
 
 }  // namespace rendering

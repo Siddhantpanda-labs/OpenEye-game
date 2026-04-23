@@ -38,6 +38,7 @@ private:
         ShaderPermutationKey key{};
         rhi::ShaderGraphicsPipelineCreateInfo spec{};
         rhi::IPipeline* pipeline = nullptr;
+        bool warmUpFailureLogged = false;
     };
     std::vector<Entry> m_entries;
 };

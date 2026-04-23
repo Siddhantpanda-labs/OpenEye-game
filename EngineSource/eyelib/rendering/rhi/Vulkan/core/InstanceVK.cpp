@@ -11,6 +11,24 @@ namespace eyelib {
 namespace rendering {
 namespace rhi {
 
+#if defined(OPENEYE_VULKAN_VALIDATION) && OPENEYE_VULKAN_VALIDATION
+static VKAPI_ATTR VkBool32 VKAPI_CALL OpenEyeVulkanDebugUtilsCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+    VkDebugUtilsMessageTypeFlagsEXT types,
+    const VkDebugUtilsMessengerCallbackDataEXT* data, void* /*userData*/) {
+    (void)types;
+    const char* msg = (data && data->pMessage) ? data->pMessage : "(no message)";
+    const char* id = (data && data->pMessageIdName) ? data->pMessageIdName : "";
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        core::Log::ErrorF("Vulkan validation [ERROR] %s: %s", id, msg);
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        core::Log::WarnF("Vulkan validation [WARN] %s: %s", id, msg);
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        core::Log::InfoF("Vulkan validation [INFO] %s: %s", id, msg);
+    return VK_FALSE;
+}
+#endif
+
 bool InstanceVK::Create(InstanceVK* out, const char* appName, uint32_t appVersion,
                         const char* engineName, uint32_t engineVersion, uint32_t apiVersion) {
     if (!out) return false;
@@ -74,11 +92,50 @@ bool InstanceVK::Create(InstanceVK* out, const char* appName, uint32_t appVersio
     }
     out->handle = instance;
     out->apiVersion = apiVersion;
+
+#if defined(OPENEYE_VULKAN_VALIDATION) && OPENEYE_VULKAN_VALIDATION
+    // Route validation messages to core::Log (otherwise they are silently dropped without a messenger).
+    if (hasValidation) {
+        auto createFn = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
+            vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+        if (createFn) {
+            VkDebugUtilsMessengerCreateInfoEXT dbgInfo = {};
+            dbgInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+            dbgInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                       VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+            dbgInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                   VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                   VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+            dbgInfo.pfnUserCallback = OpenEyeVulkanDebugUtilsCallback;
+            VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+            VkResult dres = createFn(instance, &dbgInfo, nullptr, &messenger);
+            if (dres == VK_SUCCESS) {
+                out->debugMessenger = messenger;
+                core::Log::Info("Vulkan: debug utils messenger installed (validation → core::Log).");
+            } else {
+                core::Log::WarnF("Vulkan: vkCreateDebugUtilsMessengerEXT failed (0x%x); validation output will be suppressed.", dres);
+            }
+        } else {
+            core::Log::Warn("Vulkan: vkCreateDebugUtilsMessengerEXT not available; validation output will be suppressed.");
+        }
+    }
+#endif
+
     return true;
 }
 
 void InstanceVK::Destroy(InstanceVK* inst) {
     if (!inst || !inst->handle) return;
+#if defined(OPENEYE_VULKAN_VALIDATION) && OPENEYE_VULKAN_VALIDATION
+    if (inst->debugMessenger) {
+        auto destroyFn = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+            vkGetInstanceProcAddr(static_cast<VkInstance>(inst->handle), "vkDestroyDebugUtilsMessengerEXT"));
+        if (destroyFn)
+            destroyFn(static_cast<VkInstance>(inst->handle),
+                      static_cast<VkDebugUtilsMessengerEXT>(inst->debugMessenger), nullptr);
+        inst->debugMessenger = nullptr;
+    }
+#endif
     vkDestroyInstance(static_cast<VkInstance>(inst->handle), nullptr);
     inst->handle = nullptr;
     inst->apiVersion = 0;

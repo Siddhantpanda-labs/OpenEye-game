@@ -43,6 +43,12 @@ private:
 
     rhi::IDescriptorSet* m_forwardDataSet = nullptr;
     uint64_t m_forwardDataBuffersKey = 0;
+
+    bool m_diagLoggedEarlyExit = false;
+    bool m_diagLoggedNoRt = false;
+    bool m_diagLoggedBuffersMissing = false;
+    bool m_diagLoggedNoDraws = false;
+    bool m_diagLoggedFirstDraw = false;
 };
 
 }  // namespace rendering

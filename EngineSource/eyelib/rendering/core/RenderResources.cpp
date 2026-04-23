@@ -1,5 +1,6 @@
 #include "eyelib/rendering/core/RenderResources.h"
 #include "eyelib/rendering/core/PerObjectUniforms.h"
+#include "eyelib/core/Log.h"
 #include "eyelib/rendering/scene/DrawList.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
@@ -189,10 +190,27 @@ bool RenderResources::RecordUniformBufferUploadFromStaging(rhi::ICommandList* cm
     assert(m_debugUploadRecordingDepth > 0 &&
            "RenderResources: buffer upload recording only allowed during upload phase (RenderWorld brackets OnUpload with Begin/End).");
 #endif
-    if (!cmd || !dst || !data || sizeInBytes == 0 || sizeInBytes > kStagingUploadBytes)
+    if (!cmd || !dst || !data || sizeInBytes == 0 || sizeInBytes > kStagingUploadBytes) {
+        static int s_invalidArgsWarnCount = 0;
+        if (s_invalidArgsWarnCount < 8) {
+            ++s_invalidArgsWarnCount;
+            core::Log::WarnF("RenderResources::RecordUniformBufferUploadFromStaging invalid args: cmd=%s dst=%s data=%s size=%zu max=%zu",
+                             cmd ? "ok" : "null",
+                             dst ? "ok" : "null",
+                             data ? "ok" : "null",
+                             sizeInBytes,
+                             kStagingUploadBytes);
+        }
         return false;
-    if (!m_staging)
+    }
+    if (!m_staging) {
+        static int s_missingStagingWarnCount = 0;
+        if (s_missingStagingWarnCount < 8) {
+            ++s_missingStagingWarnCount;
+            core::Log::Warn("RenderResources::RecordUniformBufferUploadFromStaging missing staging upload buffer.");
+        }
         return false;
+    }
 
     if (m_stagingGpuReadPending)
         cmd->BarrierBufferTransferReadToHostWrite(m_staging);
@@ -220,9 +238,28 @@ bool RenderResources::UploadPerFrameUniform(rhi::ICommandList* cmd, const PerFra
 }
 
 bool RenderResources::UploadPerViewUniform(rhi::ICommandList* cmd, const PerViewUniformStd140& data) {
-    if (!m_perViewUbo)
+    if (!m_perViewUbo) {
+        static int s_missingPerViewUboWarnCount = 0;
+        if (s_missingPerViewUboWarnCount < 8) {
+            ++s_missingPerViewUboWarnCount;
+            core::Log::Warn("RenderResources::UploadPerViewUniform failed: m_perViewUbo is null.");
+        }
         return false;
-    return RecordUniformBufferUploadFromStaging(cmd, m_perViewUbo, m_perViewUboUniformPrimed, &data, sizeof(data));
+    }
+    const bool ok = RecordUniformBufferUploadFromStaging(cmd, m_perViewUbo, m_perViewUboUniformPrimed, &data, sizeof(data));
+    if (!ok) {
+        static int s_uploadPerViewFailedWarnCount = 0;
+        if (s_uploadPerViewFailedWarnCount < 8) {
+            ++s_uploadPerViewFailedWarnCount;
+            core::Log::WarnF(
+                "RenderResources::UploadPerViewUniform failed: cmd=%s perViewUbo=%s staging=%s primed=%s",
+                cmd ? "ok" : "null",
+                m_perViewUbo ? "ok" : "null",
+                m_staging ? "ok" : "null",
+                m_perViewUboUniformPrimed ? "true" : "false");
+        }
+    }
+    return ok;
 }
 
 bool RenderResources::UploadDirectionalLightUniform(rhi::ICommandList* cmd, const DirectionalLightStd140& data) {
@@ -277,6 +314,21 @@ bool RenderResources::UploadPerObjectBufferFromDrawList(rhi::ICommandList* cmd, 
     for (uint32_t i = 0; i < n; ++i) {
         const DrawItem& it = list.items[i];
         FillPerObjectGpuRow(it.worldMatrix, it.materialId, it.meshHandle, it.transformIndex, rows[i]);
+    }
+    if (n > 0) {
+        static bool s_loggedFirstPerObjectRow = false;
+        if (!s_loggedFirstPerObjectRow) {
+            s_loggedFirstPerObjectRow = true;
+            const PerObjectGpuStd430& r0 = rows[0];
+            core::Log::InfoF(
+                "RenderResources::UploadPerObjectBufferFromDrawList row0: materialId=%u meshHandle=%u transformIndex=%u "
+                "modelCol0=(%.3f,%.3f,%.3f,%.3f) modelCol3=(%.3f,%.3f,%.3f,%.3f)",
+                r0.materialId,
+                r0.meshHandle,
+                r0.transformIndex,
+                r0.model[0], r0.model[1], r0.model[2], r0.model[3],
+                r0.model[12], r0.model[13], r0.model[14], r0.model[15]);
+        }
     }
     return RecordStorageBufferUploadFromStaging(cmd, m_perObjectSsbo, m_perObjectSsboStoragePrimed, rows.data(), bytes);
 }

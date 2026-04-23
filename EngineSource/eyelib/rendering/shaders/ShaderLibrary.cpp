@@ -1,5 +1,6 @@
 #include "eyelib/rendering/shaders/ShaderLibrary.h"
 
+#include "eyelib/core/Log.h"
 #include "eyelib/rendering/rhi/RHI.h"
 
 namespace eyelib {
@@ -17,8 +18,19 @@ void ShaderLibrary::WarmUpPipelines(rhi::IDevice* device) noexcept {
     if (!device)
         return;
     for (Entry& e : m_entries) {
-        if (!e.pipeline)
+        if (!e.pipeline) {
             e.pipeline = device->CreateGraphicsPipelineFromShaderAsset(e.spec);
+            if (!e.pipeline && !e.warmUpFailureLogged) {
+                e.warmUpFailureLogged = true;
+                core::Log::WarnF(
+                    "ShaderLibrary::WarmUpPipelines: CreateGraphicsPipelineFromShaderAsset returned null for assetPath='%s' "
+                    "(program=%u, msaa=%u, lights=%u).",
+                    e.spec.assetPath.c_str(),
+                    static_cast<unsigned>(e.key.program),
+                    static_cast<unsigned>(e.key.msaaSamples),
+                    static_cast<unsigned>(e.key.directionalLightCount));
+            }
+        }
     }
 }
 

@@ -33,7 +33,9 @@ void main() {
     vec3 radiance = uDirLight.uLightColorIntensity.rgb * uDirLight.uLightColorIntensity.a;
 
     vec3 albedo = vec3(0.72, 0.45, 0.32);
-    if ((vMaterialId & 1u) != 0u)
+    if (vMaterialId == 3u)
+        albedo = vec3(1.0, 0.92, 0.18); // bright yellow debug quad
+    else if ((vMaterialId & 1u) != 0u)
         albedo = vec3(0.32, 0.62, 0.88);
 
     vec3 diffuse = albedo * (1.0 / PI) * NdL * radiance;
@@ -47,5 +49,6 @@ void main() {
     vec3 ambient = albedo * (0.04 + rim);
 
     vec3 Lo = ambient + diffuse + specCol;
-    outColor = vec4(Lo, 1.0);
+    // outColor = vec4(Lo, 1.0);
+    outColor = vec4(20.0, 20.0, 0.0, 1.0);
 }

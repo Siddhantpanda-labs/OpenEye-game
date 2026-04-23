@@ -26,31 +26,26 @@ namespace {
 constexpr uint32_t kWidth = 1280u;
 constexpr uint32_t kHeight = 720u;
 
-eyelib::rendering::MeshDescriptor MakeUnitCubeMeshDescriptor() {
+eyelib::rendering::MeshDescriptor MakeCenterQuadMeshDescriptor() {
     using namespace eyelib::rendering;
     MeshDescriptor d{};
-    const float h = 0.5f;
-    const std::array<eyelib::math::Vec3, 8> p = {{
-        {-h, -h, -h},
-        {h, -h, -h},
-        {h, h, -h},
-        {-h, h, -h},
-        {-h, -h, h},
-        {h, -h, h},
-        {h, h, h},
-        {-h, h, h},
-    }};
-    d.vertices.reserve(8);
-    for (const eyelib::math::Vec3& pos : p) {
-        Vertex v{};
-        v.position = pos;
-        v.normal = glm::normalize(pos);
-        d.vertices.push_back(v);
-    }
-    d.indices32 = {
-        0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 5, 4, 7, 7, 6, 5, 4, 0, 3, 3, 7, 4, 3, 2, 6, 6, 7, 3, 4, 5, 1, 1, 0, 4,
-    };
-    d.submeshes.push_back(Submesh{0u, static_cast<uint32_t>(d.indices32.size()), 0});
+    const float hx = 0.6f;
+    const float hy = 0.6f;
+    const eyelib::math::Vec3 n{0.0f, 0.0f, 1.0f};
+    d.vertices.reserve(4);
+    d.indices32.reserve(6);
+
+    Vertex v0{}; v0.position = {-hx, -hy, 0.0f}; v0.normal = n; v0.uv = {0.0f, 0.0f};
+    Vertex v1{}; v1.position = { hx, -hy, 0.0f}; v1.normal = n; v1.uv = {1.0f, 0.0f};
+    Vertex v2{}; v2.position = { hx,  hy, 0.0f}; v2.normal = n; v2.uv = {1.0f, 1.0f};
+    Vertex v3{}; v3.position = {-hx,  hy, 0.0f}; v3.normal = n; v3.uv = {0.0f, 1.0f};
+    d.vertices.push_back(v0);
+    d.vertices.push_back(v1);
+    d.vertices.push_back(v2);
+    d.vertices.push_back(v3);
+    d.indices32 = {0, 1, 2, 2, 3, 0};
+
+    d.submeshes.push_back(Submesh{0u, 6u, 0});
     return d;
 }
 
@@ -91,9 +86,9 @@ int main() {
         return 3;
     }
 
-    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), MakeUnitCubeMeshDescriptor());
+    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), MakeCenterQuadMeshDescriptor());
     if (!sandboxMesh) {
-        std::fprintf(stderr, "OpenEyeRenderingSandbox: unit cube Mesh::Create failed\n");
+        std::fprintf(stderr, "OpenEyeRenderingSandbox: centered quad Mesh::Create failed\n");
         device.reset();
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -111,23 +106,12 @@ int main() {
         using namespace eyelib::rendering;
         SceneDrawInstance visible{};
         visible.meshHandle = 0u;
-        visible.materialId = 1u;
+        visible.materialId = 3u; // Diagnostic yellow material in forward_opaque.frag
         visible.transformIndex = 0u;
         visible.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.0f, 0.0f, 0.0f));
         visible.localBounds = {{-0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}};
         visible.layer = DrawLayer::Opaque;
-
-        SceneDrawInstance culled{};
-        culled.meshHandle = 0u;
-        culled.materialId = 2u;
-        culled.transformIndex = 1u;
-        // Behind camera (+Z); frustum looks toward -Z from (0,2,8).
-        culled.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.0f, 2.0f, 50.0f));
-        culled.localBounds = {{-0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}};
-        culled.layer = DrawLayer::Opaque;
-
         sceneView.drawInstances.push_back(visible);
-        sceneView.drawInstances.push_back(culled);
     }
 
     eyelib::rendering::RenderWorld world(device.get());
@@ -163,7 +147,6 @@ int main() {
         const double now = glfwGetTime();
         const float dt = static_cast<float>(now - lastT);
         lastT = now;
-
         device->BeginFrame();
         eyelib::rendering::rhi::ICommandList* cmd = device->GetImmediateCommandList();
         if (cmd)

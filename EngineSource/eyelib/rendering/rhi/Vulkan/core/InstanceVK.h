@@ -8,8 +8,9 @@ namespace rhi {
 
 /** Thin wrapper over VkInstance. Handles creation with standard app/engine info and surface extensions. */
 struct InstanceVK {
-    void* handle = nullptr;  // VkInstance
-    uint32_t apiVersion = 0; // Negotiated VkInstance API version
+    void* handle = nullptr;        // VkInstance
+    uint32_t apiVersion = 0;       // Negotiated VkInstance API version
+    void* debugMessenger = nullptr; // VkDebugUtilsMessengerEXT (null if validation disabled or ext missing)
 
     /** Create instance with OpenEye app/engine info and VK_KHR_surface + platform surface extension. Returns true on success. */
     static bool Create(InstanceVK* out,

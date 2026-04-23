@@ -1,5 +1,6 @@
 #include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
 
+#include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
@@ -44,18 +45,36 @@ void ForwardOpaquePass::CollectTextureBarriers(const FrameGraphBlackboard& black
 }
 
 void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
-    if (!cmd || !m_blackboard || !m_pipeline || !m_device || !m_meshResolver || !m_drawList)
+    if (!cmd || !m_blackboard || !m_pipeline || !m_device || !m_meshResolver || !m_drawList) {
+        if (!m_diagLoggedEarlyExit) {
+            m_diagLoggedEarlyExit = true;
+            core::Log::WarnF("ForwardOpaquePass::Execute early-exit: cmd=%s blackboard=%s pipeline=%s device=%s meshResolver=%s drawList=%s",
+                             cmd ? "ok" : "null", m_blackboard ? "ok" : "null", m_pipeline ? "ok" : "null",
+                             m_device ? "ok" : "null", m_meshResolver ? "ok" : "null", m_drawList ? "ok" : "null");
+        }
         return;
+    }
     rhi::IRenderTarget* rt = m_blackboard->TryGetRenderTarget(m_hdrSlot);
-    if (!rt)
+    if (!rt) {
+        if (!m_diagLoggedNoRt) {
+            m_diagLoggedNoRt = true;
+            core::Log::Warn("ForwardOpaquePass::Execute: blackboard MainHdrRenderTarget is null.");
+        }
         return;
+    }
 
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* perObject = m_blackboard->TryGetBuffer(BlackboardSlot::PerObjectStorageBuffer);
     rhi::IBuffer* dirLight = m_blackboard->TryGetBuffer(BlackboardSlot::DirectionalLightUniformBuffer);
-    if (!perFrame || !perView || !perObject || !dirLight)
+    if (!perFrame || !perView || !perObject || !dirLight) {
+        if (!m_diagLoggedBuffersMissing) {
+            m_diagLoggedBuffersMissing = true;
+            core::Log::WarnF("ForwardOpaquePass::Execute: missing blackboard buffer(s) perFrame=%s perView=%s perObject=%s dirLight=%s",
+                             perFrame ? "ok" : "null", perView ? "ok" : "null", perObject ? "ok" : "null", dirLight ? "ok" : "null");
+        }
         return;
+    }
 
     const uint64_t frameKey = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perFrame)) << 32) ^
                               static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perView));
@@ -92,14 +111,41 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
     }
 
     const uint32_t n = m_drawList->VisibleCount();
-    if (n == 0 || !m_frameSet || !m_forwardDataSet)
+    if (n == 0 || !m_frameSet || !m_forwardDataSet) {
+        if (!m_diagLoggedNoDraws) {
+            m_diagLoggedNoDraws = true;
+            core::Log::WarnF("ForwardOpaquePass::Execute: nothing to draw (visible=%u frameSet=%s forwardDataSet=%s).",
+                             n, m_frameSet ? "ok" : "null", m_forwardDataSet ? "ok" : "null");
+        }
         return;
+    }
+
+    if (!m_diagLoggedFirstDraw) {
+        m_diagLoggedFirstDraw = true;
+        core::Log::InfoF("ForwardOpaquePass::Execute: first draw path reached (visible=%u).", n);
+        core::Log::InfoF(
+            "ForwardOpaquePass::Execute buffers/sets: perFrame=%p perView=%p perObject=%p dirLight=%p frameSet=%p forwardDataSet=%p",
+            static_cast<void*>(perFrame),
+            static_cast<void*>(perView),
+            static_cast<void*>(perObject),
+            static_cast<void*>(dirLight),
+            static_cast<void*>(m_frameSet),
+            static_cast<void*>(m_forwardDataSet));
+    }
 
     cmd->SetRenderTarget(rt);
     const uint32_t vw = rt->GetWidth();
     const uint32_t vh = rt->GetHeight();
     if (vw > 0 && vh > 0)
         cmd->SetViewport(0, 0, vw, vh);
+
+    // Pipeline requests depth LESS test with write enabled; ensure dynamic state matches the pipeline
+    // (BindPipeline on Vulkan propagates the command list's tracked depth state via dynamic state commands,
+    // so lingering values from earlier passes like the present-resolve blit would otherwise disable depth here).
+    cmd->SetDepthTest(true);
+    cmd->SetDepthWrite(true);
+    cmd->SetDepthFuncLess(true);
+    cmd->SetCullFace(false);
 
     cmd->BindPipeline(m_pipeline);
     rhi::IDescriptorSet* sets[2] = {m_frameSet, m_forwardDataSet};

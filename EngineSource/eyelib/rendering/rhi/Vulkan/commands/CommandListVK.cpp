@@ -757,6 +757,14 @@ void CommandListVK::BindPipeline(IPipeline* pipeline) {
     if (vkPipe == VK_NULL_HANDLE) {
         // Do not set m_currentPipeline: BindDescriptorSets and draws require a real VkPipeline bind.
         m_currentPipeline = nullptr;
+        {
+            static int s_bindPipelineNullWarned = 0;
+            if (s_bindPipelineNullWarned < 4) {
+                ++s_bindPipelineNullWarned;
+                core::Log::WarnF("CommandListVK::BindPipeline: VkPipeline is VK_NULL_HANDLE (layoutKind=%s); subsequent draws will be skipped.",
+                                 PipelineLayoutKindName(pVK->m_layoutKind));
+            }
+        }
         return;
     }
     m_currentPipeline = pipeline;

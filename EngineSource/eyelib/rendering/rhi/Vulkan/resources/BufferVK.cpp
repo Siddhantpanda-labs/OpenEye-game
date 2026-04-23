@@ -314,6 +314,7 @@ void BufferVK::Update(const void* data, size_t offset, size_t size) {
     void* mapped = Map(offset, copySize);
     if (mapped) {
         memcpy(mapped, data, copySize);
+        FlushHostVisibleWrites(offset, copySize);
         Unmap();
     }
 }
@@ -385,6 +386,7 @@ bool BufferVK::InitFromVkUsage(DeviceVK* deviceObj, size_t sizeInBytes, VkBuffer
             void* mapped = nullptr;
             if (vmaMapMemory(allocator, allocation, &mapped) == VK_SUCCESS) {
                 memcpy(mapped, initialData, sizeInBytes);
+                vmaFlushAllocation(allocator, allocation, 0, static_cast<VkDeviceSize>(sizeInBytes));
                 vmaUnmapMemory(allocator, allocation);
             }
         } else if (hint == BufferMemoryHint::DeviceOnly) {
