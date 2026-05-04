@@ -242,6 +242,7 @@ struct IDevice {
         IBLPass,
         OutlinePost,
         RasterForwardData,
+        RasterGBufferData,
         RasterDeferredLightingData,
     };
     virtual IPipelineLayout* GetResourceSetLayout(ResourceSetType type) { (void)type; return nullptr; }

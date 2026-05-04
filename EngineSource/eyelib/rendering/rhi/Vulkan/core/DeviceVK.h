@@ -375,14 +375,18 @@ private:
     void* m_outlinePostPipelineLayout = nullptr;
     void* m_composeBootstrapPipelineLayout = nullptr;
     void* m_RasterForwardMinimalPipelineLayout = nullptr;
+    /** Full pipeline layout for `PipelineLayoutKind::RasterGBuffer` (set0 Frame, set1 RasterGBufferData). */
+    void* m_RasterGBufferPipelineLayout = nullptr;
     /** Set1 layout for `PipelineLayoutKind::RasterForwardMinimal` (PerObject SSBO + directional light UBO). */
     void* m_rasterForwardDataSetLayout = nullptr;
+    /** Set1 layout for `PipelineLayoutKind::RasterGBuffer` (PerObject SSBO). */
+    void* m_rasterGBufferDataSetLayout = nullptr;
     /** Set1 layout for `PipelineLayoutKind::RasterDeferredLighting` (G-Buffer + dir light). */
     void* m_RasterDeferredLightingDataSetLayout = nullptr;
     /** Full pipeline layout for `PipelineLayoutKind::RasterDeferredLighting` (set0 Frame, set1 RasterDeferredLightingData). */
     void* m_RasterDeferredLightingPipelineLayout = nullptr;
     /** Wrappers for GetResourceSetLayout (single-set IPipelineLayout per type); do not own set layouts. */
-    IPipelineLayout* m_resourceSetLayouts[12] = {};  // Frame … OutlinePost, RasterDeferredLightingData
+    IPipelineLayout* m_resourceSetLayouts[13] = {};  // Frame … OutlinePost, raster data layouts
     void* m_emptyResourceSetLayout = nullptr;       // VkDescriptorSetLayout (0 bindings, placeholder for compute sets 1–3)
     IPipelineLayout* m_emptyResourceSetLayoutWrapper = nullptr;
     IDescriptorSet* m_emptyResourceSet = nullptr;   // one set from m_emptyResourceSetLayout, for BindDescriptorSets placeholder

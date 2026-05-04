@@ -111,6 +111,11 @@ VkDescriptorSetLayout CreateRasterForwardDataSetLayout(VkDevice device, bool inc
 /** RasterForwardMinimal: set0 Frame, set1 RasterForwardData. Push constants 256 bytes (optionally includes mesh push stages). */
 VkPipelineLayout CreateRasterForwardMinimalPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
     VkDescriptorSetLayout rasterForwardDataLayout, bool includeMeshPushStages);
+/** Set 1 — RasterGBufferData: 0 PerObject SSBO. */
+VkDescriptorSetLayout CreateRasterGBufferDataSetLayout(VkDevice device, bool includeMeshShaderStages);
+/** RasterGBuffer: set0 Frame, set1 RasterGBufferData. Push constants 256 bytes (optionally includes mesh push stages). */
+VkPipelineLayout CreateRasterGBufferPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout rasterGBufferDataLayout, bool includeMeshPushStages);
 
 /** Set 1 — RasterDeferredLightingData: 0 albedo, 1 normal, 2 material, 3 depth, 4 dir light UBO. */
 VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device, bool includeMeshShaderStages);
@@ -128,7 +133,8 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
     VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap,
-    VkPipelineLayout RasterForwardMinimal, VkPipelineLayout pushOnly,
+    VkPipelineLayout RasterForwardMinimal, VkPipelineLayout rasterGBuffer, VkPipelineLayout rasterDeferredLighting,
+    VkPipelineLayout pushOnly,
     PipelineLayoutKind kind);
 
 /** Number of descriptor sets the pipeline layout expects. PushOnly/Legacy = 0. */

@@ -519,6 +519,33 @@ VkPipelineLayout CreateRasterForwardMinimalPipelineLayout(VkDevice device, VkDes
     return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
+VkDescriptorSetLayout CreateRasterGBufferDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
+    VkDescriptorSetLayoutBinding binding = {};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = st;
+
+    VkDescriptorSetLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = 1;
+    info.pBindings = &binding;
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VkResult res = vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("VulkanResourceSpaces: CreateRasterGBufferDataSetLayout failed (0x%x)", res);
+        return VK_NULL_HANDLE;
+    }
+    return layout;
+}
+
+VkPipelineLayout CreateRasterGBufferPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout rasterGBufferDataLayout, bool includeMeshPushStages) {
+    VkDescriptorSetLayout layouts[2] = { frameLayout, rasterGBufferDataLayout };
+    return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
+}
+
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
     VkPushConstantRange pushRange = {};
     pushRange.stageFlags = kGraphicsStages;
@@ -569,7 +596,8 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
     VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap,
-    VkPipelineLayout RasterForwardMinimal, VkPipelineLayout pushOnly,
+    VkPipelineLayout RasterForwardMinimal, VkPipelineLayout rasterGBuffer, VkPipelineLayout rasterDeferredLighting,
+    VkPipelineLayout pushOnly,
     PipelineLayoutKind kind) {
     switch (kind) {
         case PipelineLayoutKind::Forward: return forward;
@@ -583,9 +611,8 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::OutlinePost: return outlinePost;
         case PipelineLayoutKind::ComposeBootstrap: return composeBootstrap;
         case PipelineLayoutKind::RasterForwardMinimal: return RasterForwardMinimal;
-        // Deprecated alias (kept for legacy path; new deferred raster passes use RasterDeferredLighting).
-        // It is set0=Frame, set1=RasterDeferredLightingData (image samplers + dir light).
-        case PipelineLayoutKind::RasterDeferredLighting: return deferredLighting;
+        case PipelineLayoutKind::RasterGBuffer: return rasterGBuffer;
+        case PipelineLayoutKind::RasterDeferredLighting: return rasterDeferredLighting;
         case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
     }
     return VK_NULL_HANDLE;
@@ -604,6 +631,7 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::OutlinePost: return 1;
         case PipelineLayoutKind::ComposeBootstrap: return 1;
         case PipelineLayoutKind::RasterForwardMinimal: return 2;
+        case PipelineLayoutKind::RasterGBuffer: return 2; // set0=Frame, set1=RasterGBufferData
         case PipelineLayoutKind::RasterDeferredLighting: return 2; // set0=Frame, set1=RasterDeferredLightingData
         case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
     }

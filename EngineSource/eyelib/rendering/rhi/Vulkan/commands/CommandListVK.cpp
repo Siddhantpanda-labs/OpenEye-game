@@ -76,6 +76,7 @@ const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
     case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
     case PipelineLayoutKind::RasterForwardMinimal: return "RasterForwardMinimal";
+    case PipelineLayoutKind::RasterGBuffer: return "RasterGBuffer";
     case PipelineLayoutKind::RasterDeferredLighting: return "RasterDeferredLighting";
     default: return "Unknown";
     }

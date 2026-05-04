@@ -77,6 +77,7 @@ static void InferAttachmentFormatsFromLayoutKindMesh(PipelineLayoutKind kind, Me
         break;
     case PipelineLayoutKind::ComposeBootstrap:
     case PipelineLayoutKind::RasterForwardMinimal:
+    case PipelineLayoutKind::RasterGBuffer:
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         out.depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
         out.stencilFormat = VK_FORMAT_D24_UNORM_S8_UINT;

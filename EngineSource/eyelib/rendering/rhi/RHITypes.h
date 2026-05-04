@@ -367,8 +367,11 @@ enum class PipelineLayoutKind : uint32_t {
     OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
     /** set0 Frame only (per-frame + per-view UBOs); push constants unchanged. EyelibRendering bootstrap / simple passes. */
     ComposeBootstrap,
-    /** set0 Frame, set1 PerObject SSBO + directional light UBO. Deferred/forward raster passes. */
+    /** set0 Frame, set1 PerObject SSBO + directional light UBO. Forward raster pass. */
     RasterForwardMinimal,
+    /** set0 Frame, set1 PerObject SSBO only. Deferred G-buffer raster pass. */
+    RasterGBuffer,
+    /** set0 Frame, set1 GBuffer/depth textures + directional light UBO. Deferred lighting raster pass. */
     RasterDeferredLighting,
 };
 

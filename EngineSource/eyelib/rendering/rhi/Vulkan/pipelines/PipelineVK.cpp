@@ -62,6 +62,7 @@ static bool PipelineLayoutKindSupportsMeshWithResourceSpace(PipelineLayoutKind k
     case PipelineLayoutKind::OutlinePost:
     case PipelineLayoutKind::ComposeBootstrap:
     case PipelineLayoutKind::RasterForwardMinimal:
+    case PipelineLayoutKind::RasterGBuffer:
     case PipelineLayoutKind::RasterDeferredLighting:
         return true;
     case PipelineLayoutKind::PushOnly:
@@ -127,6 +128,7 @@ static void InferAttachmentFormatsFromLayoutKind(PipelineLayoutKind kind, Render
         break;
     case PipelineLayoutKind::ComposeBootstrap:
     case PipelineLayoutKind::RasterForwardMinimal:
+    case PipelineLayoutKind::RasterGBuffer:
         out.colorFormats = { VK_FORMAT_R16G16B16A16_SFLOAT };
         out.depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
         out.stencilFormat = VK_FORMAT_D24_UNORM_S8_UINT;

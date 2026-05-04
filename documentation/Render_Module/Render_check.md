@@ -228,3 +228,9 @@ Scope: Bx.1-Bx.6 (post-M5 stabilization).
 - Migrated forward first-writer path to explicit begin-clear (HDR color + depth) in `ForwardOpaquePass`; removed default pre-forward clear pass scheduling from `RasterFeature`.
 - Added `FrameGraph::Compile` debug validation for conflicting declared attachment ops on the same render-target textures (bounded warnings).
 - Validation: Debug build successful for `EyelibRendering` and `OpenEyeRenderingSandbox`; sandbox smoke run confirms forward path still rendering (`visible=1`, first draw reached).
+
+### P6 - Deferred layout decoupling update (2026-05-04)
+
+- Added dedicated `RasterGBuffer` contracts (`PipelineLayoutKind::RasterGBuffer`, `ResourceSetType::RasterGBufferData`) to decouple GBuffer from forward layout usage.
+- `GBufferPass` now binds `RasterGBufferData` (PerObject SSBO only); directional-light UBO binding was removed from the GBuffer set contract.
+- Validation: Debug `OpenEyeRenderingSandbox` build passed after integration.

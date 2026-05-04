@@ -3,7 +3,6 @@
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
-#include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/geometry/IMeshHandleResolver.h"
 #include "eyelib/rendering/scene/DrawList.h"
 #include "eyelib/rendering/rhi/RHI.h"
@@ -72,9 +71,7 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* perObject = m_blackboard->TryGetBuffer(BlackboardSlot::PerObjectStorageBuffer);
-    rhi::IBuffer* dirLight = m_blackboard->TryGetBuffer(BlackboardSlot::DirectionalLightUniformBuffer);
-
-    if (!perFrame || !perView || !perObject || !dirLight) return;
+    if (!perFrame || !perView || !perObject) return;
 
     const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
 
@@ -93,18 +90,16 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         }
     }
 
-    // Pass set (reuses RasterForwardData layout: binding0=PerObject SSBO, binding1=DirLight UBO).
-    // GBuffer shader only consumes binding0, but the layout contract requires both bindings to be written.
+    // Pass set (RasterGBufferData): binding0=PerObject SSBO.
     const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perObject));
     if (!m_passSets[frameIdx] || dataKey != m_passSetBuffersKeys[frameIdx]) {
         if (!m_passSets[frameIdx]) {
-            rhi::IPipelineLayout* dataLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterForwardData);
+            rhi::IPipelineLayout* dataLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterGBufferData);
             if (dataLayout) m_passSets[frameIdx] = m_device->CreateDescriptorSet(dataLayout);
         }
         m_passSetBuffersKeys[frameIdx] = dataKey;
         if (m_passSets[frameIdx]) {
             m_passSets[frameIdx]->UpdateStorageBuffer(0, perObject, 0, 0);
-            m_passSets[frameIdx]->UpdateUniformBuffer(1, dirLight, 0, kDirectionalLightUniformGpuBytes);
         }
     }
 

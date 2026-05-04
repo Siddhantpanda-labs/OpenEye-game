@@ -76,7 +76,7 @@ rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeGBufferOpaqueBaselineSp
     gp.assetPath = "raster/deferred/gbuffer_static";
     gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
-    gp.layoutKind = rhi::PipelineLayoutKind::RasterForwardMinimal;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterGBuffer;
     gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
     gp.useDepthStencilOverride = true;
     gp.depthStencilOverride.depthTest = true;
