@@ -37,8 +37,8 @@ vec3 ReconstructWorldPos(vec2 uv, float depth, mat4 invViewProj) {
 }
 
 void main() {
-    // Fullscreen-triangle VS emits vUv in [0,2]; texture() sampling expects normalized [0,1].
-    const vec2 uv = vUv * 0.5;
+    // The fullscreen triangle's oversized vertex UVs interpolate to normalized [0,1] over the viewport.
+    const vec2 uv = vUv;
     float depth = texture(tDepth, uv).r;
 
     vec4 gb0 = texture(tGBuffer0, uv);
