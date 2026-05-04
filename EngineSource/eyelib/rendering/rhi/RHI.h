@@ -2,6 +2,7 @@
 
 #include "eyelib/rendering/rhi/RHITypes.h"
 #include "eyelib/rendering/core/RenderBackend.h"
+#include "eyelib/rendering/framegraph/FrameGraphAttachmentOps.h"
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -240,7 +241,8 @@ struct IDevice {
         DeferredLightingPass,
         IBLPass,
         OutlinePost,
-        RasterForwardM5Data,
+        RasterForwardData,
+        RasterDeferredLightingData,
     };
     virtual IPipelineLayout* GetResourceSetLayout(ResourceSetType type) { (void)type; return nullptr; }
     /** Vulkan resource-space: empty descriptor set (0 bindings) for placeholder slots 1–3 in compute layouts. Returns nullptr if unsupported. */
@@ -350,6 +352,7 @@ struct ICommandList {
     virtual bool IsRecording() const { return false; }
 
     virtual void SetRenderTarget(IRenderTarget* rt) = 0;
+    virtual void SetRenderTarget(IRenderTarget* rt, const ::eyelib::rendering::RenderAttachmentOps& ops) { (void)ops; SetRenderTarget(rt); }
     virtual void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) = 0;
     virtual void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) = 0;
     /** Clear only color attachment(s); depth/stencil remain untouched (for RTs with shared depth). */

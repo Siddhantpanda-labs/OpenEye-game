@@ -437,7 +437,7 @@ VkPipelineLayout CreateComposeBootstrapPipelineLayout(VkDevice device, VkDescrip
     return createPipelineLayoutCommon(device, layouts, 1, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
-VkDescriptorSetLayout CreateRasterForwardM5DataSetLayout(VkDevice device, bool includeMeshShaderStages) {
+VkDescriptorSetLayout CreateRasterForwardDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
     const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[2] = {};
     bindings[0].binding = 0;
@@ -456,15 +456,66 @@ VkDescriptorSetLayout CreateRasterForwardM5DataSetLayout(VkDevice device, bool i
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
     if (res != VK_SUCCESS) {
-        core::Log::ErrorF("VulkanResourceSpaces: CreateRasterForwardM5DataSetLayout failed (0x%x)", res);
+        core::Log::ErrorF("VulkanResourceSpaces: CreateRasterForwardDataSetLayout failed (0x%x)", res);
         return VK_NULL_HANDLE;
     }
     return layout;
 }
 
-VkPipelineLayout CreateRasterForwardM5MinimalPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
-    VkDescriptorSetLayout rasterM5DataLayout, bool includeMeshPushStages) {
-    VkDescriptorSetLayout layouts[2] = { frameLayout, rasterM5DataLayout };
+
+VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    // Set 1 — RasterDeferredLightingData:
+    //   binding 0-3: G-Buffer textures (albedo, normal, material, depth) — sampler2D → COMBINED_IMAGE_SAMPLER.
+    //   binding 4:   Directional light UBO.
+    // NOTE: descriptor type must match the GLSL declaration; sampler2D = COMBINED_IMAGE_SAMPLER.
+    const VkShaderStageFlags fragStage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding bindings[5] = {};
+    for (int i = 0; i < 4; ++i) {
+        bindings[i].binding = static_cast<uint32_t>(i);
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = fragStage;
+    }
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = fragStage;
+    (void)includeMeshShaderStages; // fragment-only pass
+
+    VkDescriptorSetLayoutCreateInfo info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    info.bindingCount = 5;
+    info.pBindings = bindings;
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)
+        core::Log::Error("VulkanResourceSpaces: CreateRasterDeferredLightingDataSetLayout failed");
+    return layout;
+}
+
+
+VkPipelineLayout CreateRasterDeferredLightingPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout dataLayout, bool includeMeshShaderStages) {
+    VkDescriptorSetLayout layouts[2] = { frameLayout, dataLayout };
+    VkPushConstantRange pc = {};
+    pc.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (includeMeshShaderStages)
+        pc.stageFlags |= VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_TASK_BIT_EXT;
+    pc.offset = 0;
+    pc.size = 256;
+
+    VkPipelineLayoutCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    info.setLayoutCount = 2;
+    info.pSetLayouts = layouts;
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &pc;
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(device, &info, nullptr, &layout) != VK_SUCCESS)
+        core::Log::Error("VulkanResourceSpaces: CreateRasterDeferredLightingPipelineLayout failed");
+    return layout;
+}
+
+VkPipelineLayout CreateRasterForwardMinimalPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout rasterForwardDataLayout, bool includeMeshPushStages) {
+    VkDescriptorSetLayout layouts[2] = { frameLayout, rasterForwardDataLayout };
     return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
@@ -518,7 +569,7 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
     VkPipelineLayout gbuffer, VkPipelineLayout deferredLighting,
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
     VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap,
-    VkPipelineLayout rasterForwardM5Minimal, VkPipelineLayout pushOnly,
+    VkPipelineLayout RasterForwardMinimal, VkPipelineLayout pushOnly,
     PipelineLayoutKind kind) {
     switch (kind) {
         case PipelineLayoutKind::Forward: return forward;
@@ -531,7 +582,10 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::IBL: return ibl;
         case PipelineLayoutKind::OutlinePost: return outlinePost;
         case PipelineLayoutKind::ComposeBootstrap: return composeBootstrap;
-        case PipelineLayoutKind::RasterForwardM5Minimal: return rasterForwardM5Minimal;
+        case PipelineLayoutKind::RasterForwardMinimal: return RasterForwardMinimal;
+        // Deprecated alias (kept for legacy path; new deferred raster passes use RasterDeferredLighting).
+        // It is set0=Frame, set1=RasterDeferredLightingData (image samplers + dir light).
+        case PipelineLayoutKind::RasterDeferredLighting: return deferredLighting;
         case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
     }
     return VK_NULL_HANDLE;
@@ -549,7 +603,8 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::IBL: return 1;
         case PipelineLayoutKind::OutlinePost: return 1;
         case PipelineLayoutKind::ComposeBootstrap: return 1;
-        case PipelineLayoutKind::RasterForwardM5Minimal: return 2;
+        case PipelineLayoutKind::RasterForwardMinimal: return 2;
+        case PipelineLayoutKind::RasterDeferredLighting: return 2; // set0=Frame, set1=RasterDeferredLightingData
         case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
     }
     return 0;

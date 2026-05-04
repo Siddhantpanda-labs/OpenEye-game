@@ -1,13 +1,20 @@
 #pragma once
 
 #include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
+#include "eyelib/rendering/framegraph/passes/BlitMainHdrToDefaultPass.h"
+#include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
+#include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
+#include "eyelib/rendering/framegraph/passes/GBufferPass.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
 #include "eyelib/rendering/shaders/ShaderLibrary.h"
+#include <memory>
 
 namespace eyelib {
 namespace rendering {
 
 class IMeshHandleResolver;
+
+enum class RenderMode { Forward, Deferred };
 
 namespace rhi {
 struct IDevice;
@@ -18,7 +25,7 @@ class FrameGraph;
 class FrameGraphBlackboard;
 
 /**
- * HDR raster path: clear → forward opaque (M5 minimal) → blit to swapchain.
+ * HDR raster path: clear → forward opaque (forward minimal) → blit to swapchain.
  */
 class RasterFeature final : public IRenderFeature {
 public:
@@ -33,10 +40,14 @@ public:
     void OnShutdown() override;
 
     void SetMeshResolver(const IMeshHandleResolver* resolver) noexcept;
+    void SetRenderMode(RenderMode mode) noexcept { m_mode = mode; }
 
 private:
     static rhi::ShaderGraphicsPipelineCreateInfo makeForwardOpaqueBaselineSpec();
+    static rhi::ShaderGraphicsPipelineCreateInfo makeGBufferOpaqueBaselineSpec();
+    static rhi::ShaderGraphicsPipelineCreateInfo makeDeferredLightingSpec();
 
+    RenderMode m_mode = RenderMode::Deferred;
     shaders::ShaderLibrary m_shaderLibrary;
     rhi::IDevice* m_pipelineDevice = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
@@ -46,6 +57,12 @@ private:
     bool m_diagLoggedDrawListNull = false;
     uint32_t m_diagScheduleLogCounter = 0;
     bool m_diagLoggedPerViewOnce = false;
+
+    // Persistent pass objects — owned here so their descriptor sets survive across frames.
+    std::unique_ptr<GBufferPass>            m_gbufferPass;
+    std::unique_ptr<DeferredLightingPass>   m_deferredLightingPass;
+    std::unique_ptr<ForwardOpaquePass>      m_forwardOpaquePass;
+    std::unique_ptr<BlitMainHdrToDefaultPass> m_blitPass;
 };
 
 }  // namespace rendering

@@ -58,6 +58,7 @@ struct CommandListVK : ICommandList {
     void End() override;
 
     void SetRenderTarget(IRenderTarget* rt) override;
+    void SetRenderTarget(IRenderTarget* rt, const ::eyelib::rendering::RenderAttachmentOps& ops) override;
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;
     void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) override;
     void ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) override;
@@ -179,7 +180,7 @@ struct CommandListVK : ICommandList {
     /** Begin dynamic rendering into a swapchain color image view (image must already be in COLOR_ATTACHMENT_OPTIMAL). */
     void BeginRenderingSwapchainColor(void* colorImageView, uint32_t width, uint32_t height, bool clear, const float clearColor[4]);
     /** Begin dynamic rendering with given RT. */
-    void BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions);
+    void BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions, const ::eyelib::rendering::RenderAttachmentOps* ops = nullptr);
     /** Push current graphics constants for the currently bound pipeline layout (if available). */
     void PushGraphicsConstantsIfPossible();
     /** Called by DeviceVK::BeginFrame() after reset+begin so the list is marked recording. Do not call from application code. */

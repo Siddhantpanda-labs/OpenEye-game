@@ -388,8 +388,8 @@ When a phase completes, update:
 - P1: RHI copy-own + present clear  
 - P2: Scene + core shells + independent contracts  
 - P3: Frame graph + scheduler + blackboard + RenderWorld  
-- P4: Upload phase + transient pools  
-- P5: Raster forward E2E  
+- [x] P4: Upload phase + transient pools  
+- [x] P5: Raster forward E2E  
 - P6: Raster deferred + modes  
 - P7: Shadows + light grids  
 - P8: Post + temporal in graph  

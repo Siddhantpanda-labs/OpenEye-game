@@ -44,7 +44,7 @@ cd D:\Project\World3d\OpenEye; cmake --build build --target OpenEyeRenderingSand
 | M4.1  | Raster feature bootstrap                                             | [x] Done            | —                              |
 | M4.2  | Fullscreen HDR compose (bootstrap)                                   | [x] Done            | —                              |
 | **A** | **M4 closeout** (uploads, visibility, compile‑time barriers, naming) | [x] Done (A.10 logged) | D1, D2, D4, D5, D6 (see `Render_check.md` §A.10) |
-| **B** | **M5 forward raster E2E** (first real feature)                       | In progress (B.1–B.4, B.6–B.9 landed) | D1, D3, D7, D9, D10            |
+| **B** | **M5 forward raster E2E** (first real feature)                       | [x] Done (B.1–B.4, B.6–B.11; B.5 optional deferred) | D1, D3, D7, D9, D10            |
 
 
 Baseline already landed (do not re‑implement): see `Render_check.md` “Files touched (M2/M3/M4)” + `EngineSource/eyelib/rendering/README.md`. Vulkan RHI baseline is tracked in `documentation/vulkan/steps_todo.md`.
@@ -106,12 +106,34 @@ Baseline already landed (do not re‑implement): see `Render_check.md` “Files 
 | B.7  | [x]    | **Minimal PBR shader.** Embedded GLSL in `RasterFeature.cpp` (`CompileFromSource`), Lambert + Blinn-Phong-style spec + ambient; material id tints albedo; one directional light std140 (256 B). Push constant `objectIndex` for SSBO row (2026-04-18).                                                                                                                                        |
 | B.8  | [x]    | **Graph pass-scope profiling.** `GpuProfiler::Scope` (debug-utils labels via `ICommandList::PushDebugUtilsLabel` / `Pop`); `FrameGraph::Execute` wraps each pass with `DebugName()` (same strings as `pass_names::k*`) (2026-04-18).                                                                                                                                                         |
 | B.9  | [x]    | **Sandbox scene.** `rendering_sandbox/main.cpp`: unit-cube `Mesh::Create`, `SandboxMeshResolver` (handle **0**), `StaticMeshGeometryProvider` instance (for Batch 3 `Submit`); scene uses mesh **0** + material ids; teardown calls `Mesh::Destroy(device)` (2026-04-18).                                                                                                                                                                                   |
-| B.10 | [ ]    | **Hardening stress check.** Run **D1** (graph integrity incl. new passes), **D3** (feature isolation — RasterFeature still owns its state, no cross‑feature includes), **D7** (capabilities / permutations — no compile in execute), **D9** (temporal ownership — no stray history allocations from RasterFeature), **D10** (observability — scopes on every pass). Log in `Render_check.md`. |
-| B.11 | [ ]    | **Close M5 in `Render_check.md`.** Mark M4 fully done, M5 done, update “Files touched” section. Flip the §11 printable checklist in `newrender_roadmap.md` (P4/P5 → done).                                                                                                                                                                                                                    |
+| B.10 | [x]    | **Hardening stress check.** Run **D1** (graph integrity incl. new passes), **D3** (feature isolation — RasterFeature still owns its state, no cross‑feature includes), **D7** (capabilities / permutations — no compile in execute), **D9** (temporal ownership — no stray history allocations from RasterFeature), **D10** (observability — scopes on every pass). Logged in `Render_check.md` (2026-05-02). |
+| B.11 | [x]    | **Close M5 in `Render_check.md`.** Mark M4 fully done, M5 done, update "Files touched" section. Flip the �11 printable checklist in `newrender_roadmap.md` (P4/P5 -> done). Done (2026-05-02). |
 
 
 ---
 
+### Bx - Attachment ops contract (post-M5 stabilization, pre-P6)
+
+**Why here:** The invisible-cube investigation proved current forward now works, but it also exposed fragility in clear/load semantics with dynamic rendering. This refactor should land **after M5 is stable** and **before deferred/shadow growth** so pass IO semantics are explicit before pass count expands.
+
+**Exit criteria:**
+
+1. Passes declare attachment load/store intent explicitly (color/depth + clear values where relevant).
+2. CommandListVK begins dynamic rendering from pass-declared ops (not implicit LOAD + separate clear dependency).
+3. First-writer clear path for forward raster is local to forward pass begin (LOAD_OP_CLEAR) and deterministic.
+4. Compile-time validation warns on conflicting attachment ops for the same resource.
+5. Render_check.md logs D1/D2/D6 hardening after migration.
+
+| Step | Status | Item |
+| ---- | ------ | ---- |
+| Bx.1 | [x] | **Pass-level contract type.** Added `framegraph/FrameGraphAttachmentOps.h` (attachment load/store ops + clear values, backend-agnostic). Done (2026-05-02). |
+| Bx.2 | [x] | **Pass API hookup.** `IFrameGraphPass::DescribeRenderAttachmentOps(...)` added as optional backend-agnostic contract for render-target begin passes. Done (2026-05-02). |
+| Bx.3 | [x] | **Vulkan mapping.** `ICommandList::SetRenderTarget(rt, ops)` and `CommandListVK::BeginRenderingWithTarget(..., ops)` map load/store/clear to `VkRenderingAttachmentInfo`; default path still preserved when no ops provided. Done (2026-05-02). |
+| Bx.4 | [x] | **Forward path migration.** `ForwardOpaquePass` now begins HDR render target with explicit color/depth `LOAD_OP_CLEAR`; default raster schedule no longer injects standalone clear pass before forward. Done (2026-05-02). |
+| Bx.5 | [x] | **Compile-time checks.** `FrameGraph::Compile` now validates conflicting declared attachment ops for the same render-target textures and emits bounded debug warnings. Done (2026-05-02). |
+| Bx.6 | [x] | **Sandbox + docs closeout.** Debug build + sandbox smoke performed; docs updated with Bx implementation + validation notes. Done (2026-05-02). |
+
+---
 ## Section C — Parking lot (next‑scope anchors, **not** active)
 
 Keep as pointers only; expand into full tables when promoted to current scope.
@@ -138,3 +160,4 @@ Keep as pointers only; expand into full tables when promoted to current scope.
 ---
 
 *Update this file whenever a step lands (status + one‑line note). Promote Section C items into full tables only when they become the current scope.*
+

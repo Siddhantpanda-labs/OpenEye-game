@@ -94,6 +94,10 @@ public:
     rhi::IRenderTarget* MainHdrRenderTarget() noexcept { return m_mainHdr; }
     const rhi::IRenderTarget* MainHdrRenderTarget() const noexcept { return m_mainHdr; }
 
+    /** G-Buffer target (Albedo, Normal, Material) with shared depth; null until first successful `EnsureAllocated`. */
+    rhi::IRenderTarget* GBufferRenderTarget() noexcept { return m_gBuffer; }
+    const rhi::IRenderTarget* GBufferRenderTarget() const noexcept { return m_gBuffer; }
+
     /** Standalone depth texture attached to `MainHdrRenderTarget`; also published on its own blackboard slot. */
     rhi::ITexture* MainDepthTexture() noexcept { return m_mainDepth; }
     const rhi::ITexture* MainDepthTexture() const noexcept { return m_mainDepth; }
@@ -115,6 +119,7 @@ public:
     const rhi::IBuffer* DirectionalLightUniformBuffer() const noexcept { return m_dirLightUbo; }
 
 private:
+    size_t AllocateStagingUploadSlice(size_t sizeInBytes, size_t alignment = 16u) noexcept;
     bool RecordUniformBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& uniformPrimed, const void* data,
                                             size_t sizeInBytes);
     bool RecordStorageBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& storagePrimed, const void* data,
@@ -124,6 +129,7 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     rhi::IRenderTarget* m_mainHdr = nullptr;
+    rhi::IRenderTarget* m_gBuffer = nullptr;
     rhi::ITexture* m_mainDepth = nullptr;
     rhi::IBuffer* m_staging = nullptr;
     rhi::IBuffer* m_gpuScratch = nullptr;
@@ -136,6 +142,7 @@ private:
     bool m_perViewUboUniformPrimed = false;
     bool m_dirLightUboUniformPrimed = false;
     bool m_perObjectSsboStoragePrimed = false;
+    size_t m_stagingUploadOffset = 0;
     /** Staging was used as a transfer source on the GPU (needs transfer→host before next CPU write). */
     bool m_stagingGpuReadPending = false;
     /** Scratch buffer was transitioned to uniform read after last successful upload. */

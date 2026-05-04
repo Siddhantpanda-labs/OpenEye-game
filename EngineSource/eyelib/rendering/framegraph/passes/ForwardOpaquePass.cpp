@@ -12,6 +12,11 @@
 namespace eyelib {
 namespace rendering {
 
+namespace {
+bool g_diagLoggedFirstDrawGlobal = false;
+bool g_diagLoggedDrawBuffersGlobal = false;
+}
+
 ForwardOpaquePass::ForwardOpaquePass(FrameGraphBlackboard* blackboard, BlackboardSlot hdrSlot, rhi::IDevice* device,
                                      rhi::IPipeline* pipeline, const IMeshHandleResolver* meshResolver, const DrawList* drawList) noexcept
     : m_blackboard(blackboard)
@@ -22,16 +27,21 @@ ForwardOpaquePass::ForwardOpaquePass(FrameGraphBlackboard* blackboard, Blackboar
     , m_drawList(drawList) {}
 
 ForwardOpaquePass::~ForwardOpaquePass() {
-    if (!m_device)
-        return;
-    if (m_frameSet) {
-        m_device->DestroyDescriptorSet(m_frameSet);
-        m_frameSet = nullptr;
+    if (!m_device) return;
+    for (int i = 0; i < 3; ++i) {
+        if (m_frameSets[i]) m_device->DestroyDescriptorSet(m_frameSets[i]);
+        if (m_forwardDataSets[i]) m_device->DestroyDescriptorSet(m_forwardDataSets[i]);
     }
-    if (m_forwardDataSet) {
-        m_device->DestroyDescriptorSet(m_forwardDataSet);
-        m_forwardDataSet = nullptr;
-    }
+}
+
+void ForwardOpaquePass::Reconfigure(FrameGraphBlackboard* blackboard, BlackboardSlot hdrSlot,
+                                     rhi::IPipeline* pipeline, const IMeshHandleResolver* meshResolver,
+                                     const DrawList* drawList) noexcept {
+    m_blackboard = blackboard;
+    m_hdrSlot = hdrSlot;
+    m_pipeline = pipeline;
+    m_meshResolver = meshResolver;
+    m_drawList = drawList;
 }
 
 void ForwardOpaquePass::CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) {
@@ -42,6 +52,22 @@ void ForwardOpaquePass::CollectTextureBarriers(const FrameGraphBlackboard& black
         out.Push(color, rhi::ResourceState::RenderTarget);
     if (rhi::ITexture* depth = rt->GetDepthTexture())
         out.Push(depth, rhi::ResourceState::DepthWrite);
+}
+
+bool ForwardOpaquePass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt,
+                                                    RenderAttachmentOps& outOps) const {
+    outRt = blackboard.TryGetRenderTarget(m_hdrSlot);
+    if (!outRt)
+        return false;
+    outOps.color.loadOp = AttachmentLoadOp::Clear;
+    outOps.color.storeOp = AttachmentStoreOp::Store;
+    outOps.color.clearValue.rgba = {0.12f, 0.14f, 0.20f, 1.0f};
+    outOps.hasDepth = outRt->GetDepthTexture() != nullptr;
+    outOps.depth.loadOp = AttachmentLoadOp::Clear;
+    outOps.depth.storeOp = AttachmentStoreOp::Store;
+    outOps.depth.clearValue.depth = 1.0f;
+    outOps.depth.clearValue.stencil = 0u;
+    return true;
 }
 
 void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
@@ -76,79 +102,81 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
         return;
     }
 
+    const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
+
     const uint64_t frameKey = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perFrame)) << 32) ^
                               static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perView));
-    if (!m_frameSet || frameKey != m_frameSetBuffersKey) {
-        if (m_frameSet) {
-            m_device->DestroyDescriptorSet(m_frameSet);
-            m_frameSet = nullptr;
+    if (!m_frameSets[frameIdx] || frameKey != m_frameSetBuffersKeys[frameIdx]) {
+        if (!m_frameSets[frameIdx]) {
+            rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
+            if (frameLayout) m_frameSets[frameIdx] = m_device->CreateDescriptorSet(frameLayout);
         }
-        rhi::IPipelineLayout* frameLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::Frame);
-        if (frameLayout)
-            m_frameSet = m_device->CreateDescriptorSet(frameLayout);
-        m_frameSetBuffersKey = frameKey;
-    }
-    if (m_frameSet) {
-        m_frameSet->UpdateUniformBuffer(0, perFrame, 0, kPerFrameUniformGpuBytes);
-        m_frameSet->UpdateUniformBuffer(1, perView, 0, kPerViewUniformGpuBytes);
+        m_frameSetBuffersKeys[frameIdx] = frameKey;
+        if (m_frameSets[frameIdx]) {
+            m_frameSets[frameIdx]->UpdateUniformBuffer(0, perFrame, 0, kPerFrameUniformGpuBytes);
+            m_frameSets[frameIdx]->UpdateUniformBuffer(1, perView, 0, kPerViewUniformGpuBytes);
+        }
     }
 
     const uint64_t dataKey = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perObject)) << 32) ^
                              static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirLight));
-    if (!m_forwardDataSet || dataKey != m_forwardDataBuffersKey) {
-        if (m_forwardDataSet) {
-            m_device->DestroyDescriptorSet(m_forwardDataSet);
-            m_forwardDataSet = nullptr;
+    if (!m_forwardDataSets[frameIdx] || dataKey != m_forwardDataBuffersKeys[frameIdx]) {
+        if (!m_forwardDataSets[frameIdx]) {
+            rhi::IPipelineLayout* dataLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterForwardData);
+            if (dataLayout) m_forwardDataSets[frameIdx] = m_device->CreateDescriptorSet(dataLayout);
         }
-        rhi::IPipelineLayout* dataLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterForwardM5Data);
-        if (dataLayout)
-            m_forwardDataSet = m_device->CreateDescriptorSet(dataLayout);
-        m_forwardDataBuffersKey = dataKey;
-    }
-    if (m_forwardDataSet) {
-        m_forwardDataSet->UpdateStorageBuffer(0, perObject, 0, 0);
-        m_forwardDataSet->UpdateUniformBuffer(1, dirLight, 0, kDirectionalLightUniformGpuBytes);
+        m_forwardDataBuffersKeys[frameIdx] = dataKey;
+        if (m_forwardDataSets[frameIdx]) {
+            m_forwardDataSets[frameIdx]->UpdateStorageBuffer(0, perObject, 0, 0);
+            m_forwardDataSets[frameIdx]->UpdateUniformBuffer(1, dirLight, 0, kDirectionalLightUniformGpuBytes);
+        }
     }
 
     const uint32_t n = m_drawList->VisibleCount();
-    if (n == 0 || !m_frameSet || !m_forwardDataSet) {
+    if (n == 0 || !m_frameSets[frameIdx] || !m_forwardDataSets[frameIdx]) {
         if (!m_diagLoggedNoDraws) {
             m_diagLoggedNoDraws = true;
             core::Log::WarnF("ForwardOpaquePass::Execute: nothing to draw (visible=%u frameSet=%s forwardDataSet=%s).",
-                             n, m_frameSet ? "ok" : "null", m_forwardDataSet ? "ok" : "null");
+                             n, m_frameSets[frameIdx] ? "ok" : "null", m_forwardDataSets[frameIdx] ? "ok" : "null");
         }
         return;
     }
 
-    if (!m_diagLoggedFirstDraw) {
-        m_diagLoggedFirstDraw = true;
+    if (!g_diagLoggedFirstDrawGlobal) {
+        g_diagLoggedFirstDrawGlobal = true;
         core::Log::InfoF("ForwardOpaquePass::Execute: first draw path reached (visible=%u).", n);
+    }
+    if (!g_diagLoggedDrawBuffersGlobal) {
+        g_diagLoggedDrawBuffersGlobal = true;
         core::Log::InfoF(
             "ForwardOpaquePass::Execute buffers/sets: perFrame=%p perView=%p perObject=%p dirLight=%p frameSet=%p forwardDataSet=%p",
             static_cast<void*>(perFrame),
             static_cast<void*>(perView),
             static_cast<void*>(perObject),
             static_cast<void*>(dirLight),
-            static_cast<void*>(m_frameSet),
-            static_cast<void*>(m_forwardDataSet));
+            static_cast<void*>(m_frameSets[frameIdx]),
+            static_cast<void*>(m_forwardDataSets[frameIdx]));
     }
 
-    cmd->SetRenderTarget(rt);
+    RenderAttachmentOps attachmentOps{};
+    rhi::IRenderTarget* declaredRt = nullptr;
+    if (DescribeRenderAttachmentOps(*m_blackboard, declaredRt, attachmentOps) && declaredRt == rt)
+        cmd->SetRenderTarget(rt, attachmentOps);
+    else
+        cmd->SetRenderTarget(rt);
+
     const uint32_t vw = rt->GetWidth();
     const uint32_t vh = rt->GetHeight();
     if (vw > 0 && vh > 0)
         cmd->SetViewport(0, 0, vw, vh);
 
-    // Pipeline requests depth LESS test with write enabled; ensure dynamic state matches the pipeline
-    // (BindPipeline on Vulkan propagates the command list's tracked depth state via dynamic state commands,
-    // so lingering values from earlier passes like the present-resolve blit would otherwise disable depth here).
     cmd->SetDepthTest(true);
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
     cmd->SetCullFace(false);
 
     cmd->BindPipeline(m_pipeline);
-    rhi::IDescriptorSet* sets[2] = {m_frameSet, m_forwardDataSet};
+    rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_forwardDataSets[frameIdx]};
     cmd->BindDescriptorSets(0, 2, sets);
 
     for (uint32_t i = 0; i < n; ++i) {

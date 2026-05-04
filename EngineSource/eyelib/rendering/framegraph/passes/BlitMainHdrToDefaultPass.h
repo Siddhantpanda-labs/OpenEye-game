@@ -22,6 +22,11 @@ public:
 
     const char* DebugName() const noexcept override { return pass_names::kBlitMainHdrToDefault; }
 
+    void Reconfigure(rhi::IDevice* device, FrameGraphBlackboard* blackboard) noexcept {
+        m_device = device;
+        m_blackboard = blackboard;
+    }
+
     void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) override;
     void Execute(rhi::ICommandList* cmd) override;
 

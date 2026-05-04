@@ -7,12 +7,14 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <vector>
 
 namespace eyelib {
 namespace rendering {
 
 void RenderResources::BeginUploadRecordingPhase() noexcept {
+    m_stagingUploadOffset = 0;
 #if !defined(NDEBUG)
     ++m_debugUploadRecordingDepth;
 #endif
@@ -58,12 +60,16 @@ void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
     if (m_mainHdr && device)
         device->DestroyRenderTarget(m_mainHdr);
     m_mainHdr = nullptr;
+    if (m_gBuffer && device)
+        device->DestroyRenderTarget(m_gBuffer);
+    m_gBuffer = nullptr;
     if (m_mainDepth && device)
         device->DestroyTexture(m_mainDepth);
     m_mainDepth = nullptr;
     m_width = 0;
     m_height = 0;
     m_device = nullptr;
+    m_stagingUploadOffset = 0;
     m_stagingGpuReadPending = false;
     m_gpuScratchUniformReady = false;
     m_perFrameUboUniformPrimed = false;
@@ -157,7 +163,7 @@ void RenderResources::EnsureGpuUploadScratchBuffer(rhi::IDevice* device) {
 void RenderResources::EnsureAllocated(rhi::IDevice* device, uint32_t width, uint32_t height) {
     if (!device || width == 0 || height == 0)
         return;
-    if (m_mainHdr && m_mainDepth && m_device == device && m_width == width && m_height == height)
+    if (m_mainHdr && m_gBuffer && m_mainDepth && m_device == device && m_width == width && m_height == height)
         return;
 
     Shutdown(device);
@@ -182,6 +188,26 @@ void RenderResources::EnsureAllocated(rhi::IDevice* device, uint32_t width, uint
     std::vector<rhi::RHITextureFormat> colorFormats;
     colorFormats.push_back(rhi::RHITextureFormat::RGBA16F);
     m_mainHdr = device->CreateRenderTargetWithSharedDepth(width, height, colorFormats, m_mainDepth, 1);
+
+    std::vector<rhi::RHITextureFormat> gbufferFormats;
+    gbufferFormats.push_back(rhi::RHITextureFormat::RGBA8);     // RT0: Albedo (RGB) + Flags (A)
+    gbufferFormats.push_back(rhi::RHITextureFormat::RGBA16F);   // RT1: Normal (XYZ)
+    gbufferFormats.push_back(rhi::RHITextureFormat::RGBA8);     // RT2: Metallic(R), Roughness(G), AO(B), Mask(A)
+    m_gBuffer = device->CreateRenderTargetWithSharedDepth(width, height, gbufferFormats, m_mainDepth, 1);
+}
+
+size_t RenderResources::AllocateStagingUploadSlice(size_t sizeInBytes, size_t alignment) noexcept {
+    if (sizeInBytes == 0 || sizeInBytes > kStagingUploadBytes)
+        return std::numeric_limits<size_t>::max();
+    if (alignment == 0)
+        alignment = 1;
+
+    const size_t alignedOffset = ((m_stagingUploadOffset + alignment - 1u) / alignment) * alignment;
+    if (alignedOffset > kStagingUploadBytes || sizeInBytes > kStagingUploadBytes - alignedOffset)
+        return std::numeric_limits<size_t>::max();
+
+    m_stagingUploadOffset = alignedOffset + sizeInBytes;
+    return alignedOffset;
 }
 
 bool RenderResources::RecordUniformBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& uniformPrimed, const void* data,
@@ -211,11 +237,21 @@ bool RenderResources::RecordUniformBufferUploadFromStaging(rhi::ICommandList* cm
         }
         return false;
     }
+    const size_t stagingOffset = AllocateStagingUploadSlice(sizeInBytes);
+    if (stagingOffset == std::numeric_limits<size_t>::max()) {
+        static int s_stagingOverflowWarnCount = 0;
+        if (s_stagingOverflowWarnCount < 8) {
+            ++s_stagingOverflowWarnCount;
+            core::Log::WarnF("RenderResources::RecordUniformBufferUploadFromStaging staging exhausted: requested=%zu used=%zu max=%zu",
+                             sizeInBytes, m_stagingUploadOffset, kStagingUploadBytes);
+        }
+        return false;
+    }
 
     if (m_stagingGpuReadPending)
         cmd->BarrierBufferTransferReadToHostWrite(m_staging);
 
-    m_staging->Update(data, 0, sizeInBytes);
+    m_staging->Update(data, stagingOffset, sizeInBytes);
     cmd->BarrierHostVisibleBufferToTransferRead(m_staging);
 
     if (uniformPrimed)
@@ -223,7 +259,7 @@ bool RenderResources::RecordUniformBufferUploadFromStaging(rhi::ICommandList* cm
     else
         cmd->BarrierBuffer(dst, rhi::ResourceState::Undefined, rhi::ResourceState::TransferDst);
 
-    cmd->CopyBuffer(m_staging, 0, dst, 0, sizeInBytes);
+    cmd->CopyBuffer(m_staging, stagingOffset, dst, 0, sizeInBytes);
     cmd->BarrierBuffer(dst, rhi::ResourceState::TransferDst, rhi::ResourceState::UniformBuffer);
 
     m_stagingGpuReadPending = true;
@@ -278,11 +314,14 @@ bool RenderResources::RecordStorageBufferUploadFromStaging(rhi::ICommandList* cm
         return false;
     if (!m_staging)
         return false;
+    const size_t stagingOffset = AllocateStagingUploadSlice(sizeInBytes);
+    if (stagingOffset == std::numeric_limits<size_t>::max())
+        return false;
 
     if (m_stagingGpuReadPending)
         cmd->BarrierBufferTransferReadToHostWrite(m_staging);
 
-    m_staging->Update(data, 0, sizeInBytes);
+    m_staging->Update(data, stagingOffset, sizeInBytes);
     cmd->BarrierHostVisibleBufferToTransferRead(m_staging);
 
     if (storagePrimed)
@@ -290,7 +329,7 @@ bool RenderResources::RecordStorageBufferUploadFromStaging(rhi::ICommandList* cm
     else
         cmd->BarrierBuffer(dst, rhi::ResourceState::Undefined, rhi::ResourceState::TransferDst);
 
-    cmd->CopyBuffer(m_staging, 0, dst, 0, sizeInBytes);
+    cmd->CopyBuffer(m_staging, stagingOffset, dst, 0, sizeInBytes);
     cmd->BarrierBuffer(dst, rhi::ResourceState::TransferDst, rhi::ResourceState::StorageBuffer);
 
     m_stagingGpuReadPending = true;
@@ -342,11 +381,14 @@ bool RenderResources::RecordGpuUploadScratchFromStaging(rhi::ICommandList* cmd, 
         return false;
     if (!m_staging || !m_gpuScratch)
         return false;
+    const size_t stagingOffset = AllocateStagingUploadSlice(sizeInBytes);
+    if (stagingOffset == std::numeric_limits<size_t>::max())
+        return false;
 
     if (m_stagingGpuReadPending)
         cmd->BarrierBufferTransferReadToHostWrite(m_staging);
 
-    m_staging->Update(data, 0, sizeInBytes);
+    m_staging->Update(data, stagingOffset, sizeInBytes);
     cmd->BarrierHostVisibleBufferToTransferRead(m_staging);
 
     if (m_gpuScratchUniformReady)
@@ -354,7 +396,7 @@ bool RenderResources::RecordGpuUploadScratchFromStaging(rhi::ICommandList* cmd, 
     else
         cmd->BarrierBuffer(m_gpuScratch, rhi::ResourceState::Undefined, rhi::ResourceState::TransferDst);
 
-    cmd->CopyBuffer(m_staging, 0, m_gpuScratch, 0, sizeInBytes);
+    cmd->CopyBuffer(m_staging, stagingOffset, m_gpuScratch, 0, sizeInBytes);
     cmd->BarrierBuffer(m_gpuScratch, rhi::ResourceState::TransferDst, rhi::ResourceState::UniformBuffer);
 
     m_stagingGpuReadPending = true;

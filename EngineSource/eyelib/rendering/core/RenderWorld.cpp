@@ -57,6 +57,7 @@ void RenderWorld::Initialize() {
 
     m_blackboardWriters.Clear();
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainHdrRenderTarget, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::GBufferRenderTarget, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::MainDepth, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources);
@@ -102,6 +103,8 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
     m_blackboard.ClearFrame();
     if (rhi::IRenderTarget* hdr = m_resources.MainHdrRenderTarget())
         m_blackboard.PublishRenderTarget(BlackboardSlot::MainHdrRenderTarget, writer_names::kRenderResources, hdr);
+    if (rhi::IRenderTarget* gbuffer = m_resources.GBufferRenderTarget())
+        m_blackboard.PublishRenderTarget(BlackboardSlot::GBufferRenderTarget, writer_names::kRenderResources, gbuffer);
     if (rhi::ITexture* depth = m_resources.MainDepthTexture())
         m_blackboard.PublishTexture(BlackboardSlot::MainDepth, writer_names::kRenderResources, depth);
     if (rhi::IBuffer* perFrame = m_resources.PerFrameUniformBuffer())

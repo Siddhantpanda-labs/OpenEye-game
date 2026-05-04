@@ -23,6 +23,10 @@ public:
 
     void AddPass(std::unique_ptr<IFrameGraphPass> pass);
 
+    /** Register a non-owning borrowed pass. The caller must keep it alive beyond the graph lifetime.
+     *  Borrowed passes are cleared from the execute list on Clear() but NOT destroyed. */
+    void AddPassBorrowed(IFrameGraphPass* pass);
+
     /**
      * Assigns pass indices (`OnCompiled`), builds per-pass texture barrier plans from `CollectTextureBarriers`
      * when `blackboard` is non-null, dedupes per pass, then merges against the device barrier tracker (cross-pass noops).
@@ -43,6 +47,7 @@ private:
     void MergeBarrierPlansAgainstTracker(rhi::IDevice* device);
 
     std::vector<std::unique_ptr<IFrameGraphPass>> m_passes;
+    std::vector<IFrameGraphPass*> m_borrowedPasses;  ///< Non-owning; cleared on Clear(), not destroyed.
     std::vector<FrameGraphBarrierList> m_barrierPlans;
 };
 

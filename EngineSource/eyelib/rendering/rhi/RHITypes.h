@@ -367,8 +367,9 @@ enum class PipelineLayoutKind : uint32_t {
     OutlinePost,          ///< set0 OutlinePost (binding 0 = scene color, 1 = entity ID); push: selectedID, outlineColor, invSize
     /** set0 Frame only (per-frame + per-view UBOs); push constants unchanged. EyelibRendering bootstrap / simple passes. */
     ComposeBootstrap,
-    /** set0 Frame, set1 PerObject SSBO + directional light UBO (M5 sandbox forward minimal). */
-    RasterForwardM5Minimal,
+    /** set0 Frame, set1 PerObject SSBO + directional light UBO. Deferred/forward raster passes. */
+    RasterForwardMinimal,
+    RasterDeferredLighting,
 };
 
 /** Vulkan: how to obtain SPIR-V for a shader asset. OpenGL/Diligent ignore where not applicable. */

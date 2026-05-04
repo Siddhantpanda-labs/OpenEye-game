@@ -126,7 +126,7 @@ void UpdateComputeSet0(DeviceVK* deviceObj, CommandListVK* cmd) {
     ITexture* tex4 = cmd->GetBoundTexture(4);
     if (tex4) {
         TextureVK* tVK = static_cast<TextureVK*>(tex4);
-        VkImageView view = static_cast<VkImageView>(tVK->m_imageView);
+        const VkImageView view = tVK->GetVkImageViewForShaderSamplerBinding();
         if (view != VK_NULL_HANDLE) {
             imageInfo.sampler = sampler;
             imageInfo.imageView = view;

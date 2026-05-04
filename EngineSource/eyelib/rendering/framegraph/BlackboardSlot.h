@@ -9,6 +9,8 @@ namespace rendering {
 enum class BlackboardSlot : uint8_t {
     /** Main HDR color render target owned by `RenderResources`; uses `MainDepth` as its shared depth attachment. */
     MainHdrRenderTarget = 0,
+    /** G-Buffer target (Albedo, Normal, Material) owned by `RenderResources`; uses `MainDepth` as its shared depth attachment. */
+    GBufferRenderTarget,
     /** Standalone depth texture shared by `MainHdrRenderTarget` and any depth-only pass (e.g. depth prepass). */
     MainDepth,
     /** Per-frame uniform buffer (time, frame index, global constants). Null until created (A.5). */

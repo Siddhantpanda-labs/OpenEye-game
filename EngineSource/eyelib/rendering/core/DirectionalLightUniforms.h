@@ -10,7 +10,7 @@ namespace rendering {
 
 inline constexpr uint32_t kDirectionalLightUniformGpuBytes = 256u;
 
-/** std140 — binding 1 in `RasterForwardM5Data` set (single directional light). */
+/** std140 — binding 1 in `RasterForwardData` set (single directional light). */
 struct DirectionalLightStd140 {
     math::Vec4 direction{0.35f, -0.85f, 0.25f, 0.f};
     math::Vec4 colorIntensity{1.f, 0.97f, 0.92f, 3.5f};

@@ -148,14 +148,41 @@ void WarnInterPassSimulatedLayoutGap(rhi::IDevice* device, const std::vector<Fra
 }  // namespace
 #endif
 
+#if !defined(NDEBUG)
+namespace {
+struct DeclaredOpsRecord {
+    RenderAttachmentOps ops{};
+    uint32_t passIndex = 0;
+    const char* passName = nullptr;
+};
+
+bool SameOps(const RenderAttachmentOps& a, const RenderAttachmentOps& b) {
+    return a.hasDepth == b.hasDepth &&
+           a.color.loadOp == b.color.loadOp &&
+           a.color.storeOp == b.color.storeOp &&
+           a.color.clearValue.rgba == b.color.clearValue.rgba &&
+           a.depth.loadOp == b.depth.loadOp &&
+           a.depth.storeOp == b.depth.storeOp &&
+           a.depth.clearValue.depth == b.depth.clearValue.depth &&
+           a.depth.clearValue.stencil == b.depth.clearValue.stencil;
+}
+}  // namespace
+#endif
+
 void FrameGraph::Clear() noexcept {
     m_passes.clear();
+    m_borrowedPasses.clear();
     m_barrierPlans.clear();
 }
 
 void FrameGraph::AddPass(std::unique_ptr<IFrameGraphPass> pass) {
     if (pass)
         m_passes.push_back(std::move(pass));
+}
+
+void FrameGraph::AddPassBorrowed(IFrameGraphPass* pass) {
+    if (pass)
+        m_borrowedPasses.push_back(pass);
 }
 
 void FrameGraph::MergeBarrierPlansAgainstTracker(rhi::IDevice* device) {
@@ -187,25 +214,59 @@ void FrameGraph::MergeBarrierPlansAgainstTracker(rhi::IDevice* device) {
 }
 
 void FrameGraph::Compile(rhi::IDevice* device, const FrameGraphBlackboard* blackboard) {
-    m_barrierPlans.resize(m_passes.size());
-    for (uint32_t i = 0; i < m_passes.size(); ++i) {
-        if (m_passes[i])
-            m_passes[i]->OnCompiled(i);
-    }
-    for (size_t i = 0; i < m_passes.size(); ++i) {
+    // Build a unified pass view: owned first, then borrowed.
+    std::vector<IFrameGraphPass*> allPasses;
+    allPasses.reserve(m_passes.size() + m_borrowedPasses.size());
+    for (auto& p : m_passes) if (p) allPasses.push_back(p.get());
+    for (auto* p : m_borrowedPasses) if (p) allPasses.push_back(p);
+
+    m_barrierPlans.resize(allPasses.size());
+    for (uint32_t i = 0; i < allPasses.size(); ++i)
+        allPasses[i]->OnCompiled(i);
+    for (size_t i = 0; i < allPasses.size(); ++i) {
         FrameGraphBarrierList& plan = m_barrierPlans[i];
         plan.Clear();
-        if (blackboard && m_passes[i])
-            m_passes[i]->CollectTextureBarriers(*blackboard, plan);
+        if (blackboard)
+            allPasses[i]->CollectTextureBarriers(*blackboard, plan);
         plan.DedupeConsecutiveSameTargetState();
     }
 #if !defined(NDEBUG)
+    if (blackboard) {
+        std::unordered_map<const rhi::ITexture*, DeclaredOpsRecord> textureOps;
+        int warnBudget = 32;
+        for (size_t i = 0; i < allPasses.size(); ++i) {
+            IFrameGraphPass* pass = allPasses[i];
+            if (!pass)
+                continue;
+            rhi::IRenderTarget* rt = nullptr;
+            RenderAttachmentOps ops{};
+            if (!pass->DescribeRenderAttachmentOps(*blackboard, rt, ops) || !rt)
+                continue;
+            const auto checkTexture = [&](rhi::ITexture* tex) {
+                if (!tex || warnBudget <= 0)
+                    return;
+                const auto it = textureOps.find(tex);
+                if (it == textureOps.end()) {
+                    textureOps.emplace(tex, DeclaredOpsRecord{ops, static_cast<uint32_t>(i), pass->DebugName()});
+                    return;
+                }
+                if (SameOps(it->second.ops, ops))
+                    return;
+                --warnBudget;
+                core::Log::WarnF(
+                    "FrameGraph::Compile: attachment-ops contract mismatch for one render target texture between pass %u '%s' and pass %u '%s'.",
+                    static_cast<unsigned>(it->second.passIndex), it->second.passName ? it->second.passName : "(null)",
+                    static_cast<unsigned>(i), pass->DebugName() ? pass->DebugName() : "(null)");
+            };
+            checkTexture(rt->GetColorTexture(0));
+            if (ops.hasDepth)
+                checkTexture(rt->GetDepthTexture());
+        }
+    }
     {
         int warnBudget = 32;
-        for (size_t i = 0; i < m_passes.size(); ++i) {
-            const IFrameGraphPass* pass = m_passes[i].get();
-            WarnIntrPassBarrierConflicts(pass, static_cast<uint32_t>(i), m_barrierPlans[i], warnBudget);
-        }
+        for (size_t i = 0; i < allPasses.size(); ++i)
+            WarnIntrPassBarrierConflicts(allPasses[i], static_cast<uint32_t>(i), m_barrierPlans[i], warnBudget);
     }
 #endif
     MergeBarrierPlansAgainstTracker(device);
@@ -227,10 +288,16 @@ void FrameGraph::Execute(rhi::IDevice* device, rhi::ICommandList* cmd, const Fra
     if (!cmd)
         return;
 
-    assert(m_barrierPlans.size() == m_passes.size() && "FrameGraph::Execute without matching Compile barrier plans");
+    // Build unified ordered pass view matching Compile order.
+    std::vector<IFrameGraphPass*> allPasses;
+    allPasses.reserve(m_passes.size() + m_borrowedPasses.size());
+    for (auto& p : m_passes) if (p) allPasses.push_back(p.get());
+    for (auto* p : m_borrowedPasses) if (p) allPasses.push_back(p);
 
-    for (size_t i = 0; i < m_passes.size(); ++i) {
-        IFrameGraphPass* p = m_passes[i].get();
+    assert(m_barrierPlans.size() == allPasses.size() && "FrameGraph::Execute without matching Compile barrier plans");
+
+    for (size_t i = 0; i < allPasses.size(); ++i) {
+        IFrameGraphPass* p = allPasses[i];
         if (!p)
             continue;
 

@@ -175,4 +175,56 @@ Scope: milestone **M4 closeout** after A.1–A.9. **No fail** — safe to start 
 
 ---
 
+### B.10 - Section B hardening (1.3 template, 2026-05-02)
+
+Scope: milestone **M5 forward raster E2E** after B.1-B.9.
+
+- **Dimension:** D1 (Frame graph integrity)  
+  **Inspected:** `core/RenderWorld.cpp` (`RunFrame` remains upload -> schedule -> compile -> execute only), `framegraph/FrameGraph.cpp` (`Execute` runs pass barriers + pass bodies), `features/raster/RasterFeature.cpp` (`OnSchedulePasses` contributes clear/forward/blit as graph passes only).  
+  **Result:** **pass**  
+  **Notes:** No GPU write path in RasterFeature outside graph pass execution.
+
+- **Dimension:** D3 (Feature isolation)  
+  **Inspected:** include boundaries under `features/`, `framegraph/`, `scene/`; `RasterFeature` interactions are via `RenderContext` + `FrameGraphBlackboard` only.  
+  **Result:** **pass**  
+  **Notes:** No cross-feature direct calls; `RasterFeature` schedules only its own passes.
+
+- **Dimension:** D7 (Capabilities & permutations)  
+  **Inspected:** `features/raster/RasterFeature.cpp`, `shaders/ShaderLibrary.{h,cpp}`.  
+  **Result:** **pass**  
+  **Notes:** Permutations are declared in `OnRegister`; pipeline creation is centralized in `WarmUpPipelines`; pass `Execute` paths only bind cached pipelines (`TryGetPipeline` result).
+
+- **Dimension:** D9 (Temporal ownership)  
+  **Inspected:** `features/raster/` + `framegraph/passes/` for history allocation/previous-frame ownership.  
+  **Result:** **pass (current scope)**  
+  **Notes:** M5 raster path allocates no temporal history resources; no stray per-feature previous-frame textures/buffers introduced.
+
+- **Dimension:** D10 (Observability)  
+  **Inspected:** `framegraph/FrameGraph.cpp`, `core/GpuProfiler.cpp`, pass debug names.  
+  **Result:** **pass**  
+  **Notes:** Every graph pass is wrapped by `GpuProfiler::Scope` using pass debug names; Vulkan debug labels are emitted through command list hooks.
+
+### B.11 - M5 closeout (2026-05-02)
+
+- **M5 status:** **Done** (forward raster E2E delivered for current scope).
+- **Section B status:** `B.1`-`B.4`, `B.6`-`B.11` complete; `B.5` remains optional and intentionally deferred.
+- **Roadmap checklist:** P4/P5 treated as complete for the current implementation slice (upload phase + forward raster).
+
+**Files touched (B.10/B.11 closeout):**
+
+- `documentation/Render_Module/Render_check.md`
+- `documentation/Render_Module/Render_steps_todo.md`
+- `documentation/Render_Module/newrender_roadmap.md`
+- `EngineSource/eyelib/rendering/framegraph/FrameGraphAttachmentOps.h` (Bx.1 kickoff)
+
 *Update this file whenever a milestone or principle check changes.*
+
+### Bx - Attachment ops contract closeout (2026-05-02)
+
+Scope: Bx.1-Bx.6 (post-M5 stabilization).
+
+- Added `framegraph/FrameGraphAttachmentOps.h` and pass-level optional contract `IFrameGraphPass::DescribeRenderAttachmentOps(...)`.
+- Added `ICommandList::SetRenderTarget(rt, ops)` and Vulkan mapping in `CommandListVK::BeginRenderingWithTarget` to native dynamic-rendering load/store/clear fields.
+- Migrated forward first-writer path to explicit begin-clear (HDR color + depth) in `ForwardOpaquePass`; removed default pre-forward clear pass scheduling from `RasterFeature`.
+- Added `FrameGraph::Compile` debug validation for conflicting declared attachment ops on the same render-target textures (bounded warnings).
+- Validation: Debug build successful for `EyelibRendering` and `OpenEyeRenderingSandbox`; sandbox smoke run confirms forward path still rendering (`visible=1`, first draw reached).

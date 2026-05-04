@@ -49,6 +49,6 @@ void main() {
     vec3 ambient = albedo * (0.04 + rim);
 
     vec3 Lo = ambient + diffuse + specCol;
-    // outColor = vec4(Lo, 1.0);
-    outColor = vec4(20.0, 20.0, 0.0, 1.0);
+    outColor = vec4(Lo, 1.0);
+    // outColor = vec4(20.0, 20.0, 0.0, 1.0);
 }

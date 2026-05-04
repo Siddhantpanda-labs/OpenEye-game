@@ -177,7 +177,7 @@ bool BindlessHeapVK::UpdateDescriptorBufferTexture(uint32_t index, TextureVK* te
     return false;
 #else
     if (!m_usesDescriptorBuffer || !m_descriptorBuffer || !m_device || !tex) return false;
-    VkImageView imageView = tex->m_imageView ? static_cast<VkImageView>(tex->m_imageView) : VK_NULL_HANDLE;
+    const VkImageView imageView = tex->GetVkImageViewForShaderSamplerBinding();
     if (imageView == VK_NULL_HANDLE) return false;
     VkSampler sampler = static_cast<VkSampler>(m_device->GetDefaultSampler());
     if (sampler == VK_NULL_HANDLE) return false;
@@ -257,7 +257,7 @@ BindlessHandle BindlessHeapVK::AllocateTextureHandle(ITexture* texture) {
         return kInvalidBindlessHandle;
     }
     TextureVK* tex = static_cast<TextureVK*>(texture);
-    VkImageView imageView = tex->m_imageView ? static_cast<VkImageView>(tex->m_imageView) : VK_NULL_HANDLE;
+    const VkImageView imageView = tex->GetVkImageViewForShaderSamplerBinding();
     if (imageView == VK_NULL_HANDLE) return kInvalidBindlessHandle;
     VkSampler sampler = static_cast<VkSampler>(m_device->GetDefaultSampler());
     if (sampler == VK_NULL_HANDLE) return kInvalidBindlessHandle;

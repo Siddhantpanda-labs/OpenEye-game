@@ -7,6 +7,7 @@
 #include "eyelib/core/Log.h"
 #include <vulkan/vulkan.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace eyelib {
@@ -43,7 +44,7 @@ void* TextureVK::GetNativeTexture2DViewForArrayLayer(uint32_t layer) {
     viewInfo.image = image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = ToVkFormat(m_format);
-    viewInfo.subresourceRange.aspectMask = ToVkImageAspect(m_format);
+    viewInfo.subresourceRange.aspectMask = ToVkImageAspectForSampledDepthView(m_format);
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = m_mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = layer;
@@ -56,6 +57,12 @@ void* TextureVK::GetNativeTexture2DViewForArrayLayer(uint32_t layer) {
 }
 
 bool TextureVK::IsGpuBindable() const { return !m_retired && m_imageView != nullptr; }
+
+VkImageView TextureVK::GetVkImageViewForShaderSamplerBinding() const noexcept {
+    if (m_depthSrvImageView)
+        return static_cast<VkImageView>(m_depthSrvImageView);
+    return m_imageView ? static_cast<VkImageView>(m_imageView) : VK_NULL_HANDLE;
+}
 
 namespace {
 
@@ -770,9 +777,27 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
         return nullptr;
     }
 
+    VkImageView depthSrvView = VK_NULL_HANDLE;
+    if (desc.format == RHITextureFormat::Depth24Stencil8) {
+        VkImageViewCreateInfo srvInfo = viewInfo;
+        srvInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        res = vkCreateImageView(device, &srvInfo, nullptr, &depthSrvView);
+        if (res != VK_SUCCESS) {
+            vkDestroyImageView(device, imageView, nullptr);
+            vmaDestroyImage(allocator, image, allocation);
+            core::Log::ErrorF("CreateTextureVK: depth-only SRV vkCreateImageView failed (0x%x)", res);
+            return nullptr;
+        }
+    }
+
     if (desc.debugName) {
         SetDebugNameImage(deviceObj, image, desc.debugName);
         SetDebugNameImageView(deviceObj, imageView, desc.debugName);
+        if (depthSrvView != VK_NULL_HANDLE) {
+            char srvName[256];
+            std::snprintf(srvName, sizeof(srvName), "%s#DepthSrv", desc.debugName);
+            SetDebugNameImageView(deviceObj, depthSrvView, srvName);
+        }
     }
     auto* t = new TextureVK(deviceObj);
     t->m_width = desc.width;
@@ -783,6 +808,7 @@ ITexture* CreateTextureVK(DeviceVK* deviceObj, const TextureDesc& desc, const vo
     t->m_mipLevels = desc.mipLevels;
     t->m_image = image;
     t->m_imageView = imageView;
+    t->m_depthSrvImageView = depthSrvView;
     t->m_allocation = allocation;
     if (desc.type == TextureType::Texture2DArray)
         t->m_slice2DViewsByLayer.assign(layerCount, nullptr);

@@ -2,6 +2,7 @@
 
 #include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
+#include "eyelib/rendering/core/DeferredDebugVis.h"
 #include "eyelib/rendering/core/FrameContext.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/RenderContext.h"
@@ -10,8 +11,9 @@
 #include "eyelib/rendering/framegraph/FrameGraph.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/framegraph/passes/BlitMainHdrToDefaultPass.h"
-#include "eyelib/rendering/framegraph/passes/ClearBlackboardRenderTargetPass.h"
 #include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
+#include "eyelib/rendering/framegraph/passes/GBufferPass.h"
+#include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
 #include "eyelib/rendering/geometry/IMeshHandleResolver.h"
 #include "eyelib/rendering/resources/Mesh.h"
 #include "eyelib/rendering/rhi/RHI.h"
@@ -29,12 +31,23 @@ namespace rendering {
 
 namespace {
 
-const shaders::ShaderPermutationKey kPermForwardOpaqueM5Baseline{
+const shaders::ShaderPermutationKey kPermForwardOpaqueBaseline{
     shaders::ShaderPermutationKey::ProgramId::RasterForwardOpaque, 1, 1};
+
+const shaders::ShaderPermutationKey kPermGBufferOpaqueBaseline{
+    shaders::ShaderPermutationKey::ProgramId::RasterGBufferOpaque, 1, 1};
+
+const shaders::ShaderPermutationKey kPermDeferredLightingBaseline{
+    shaders::ShaderPermutationKey::ProgramId::RasterDeferredLighting, 1, 1};
 
 }  // namespace
 
 RasterFeature::~RasterFeature() {
+    // Persistent passes must be destroyed before the pipeline device is cleared.
+    m_gbufferPass.reset();
+    m_deferredLightingPass.reset();
+    m_forwardOpaquePass.reset();
+    m_blitPass.reset();
     m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
     m_shaderLibrary.ClearRegistrations();
     m_pipelineDevice = nullptr;
@@ -49,7 +62,7 @@ rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeForwardOpaqueBaselineSp
     gp.assetPath = "raster/forward/forward_opaque";
     gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
-    gp.layoutKind = rhi::PipelineLayoutKind::RasterForwardM5Minimal;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterForwardMinimal;
     gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
     gp.useDepthStencilOverride = true;
     gp.depthStencilOverride.depthTest = true;
@@ -62,10 +75,52 @@ rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeForwardOpaqueBaselineSp
     return gp;
 }
 
+rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeGBufferOpaqueBaselineSpec() {
+    rhi::ShaderGraphicsPipelineCreateInfo gp{};
+    gp.assetPath = "raster/deferred/gbuffer_static";
+    gp.vertexLayout = Mesh::GetVertexLayoutRHI();
+    gp.topology = rhi::PrimitiveTopology::TriangleList;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterForwardMinimal;
+    gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
+    gp.useDepthStencilOverride = true;
+    gp.depthStencilOverride.depthTest = true;
+    gp.depthStencilOverride.depthWrite = true;
+    gp.depthStencilOverride.depthCompare = rhi::DepthCompare::Less;
+    rhi::PipelineAttachmentFormats att{};
+    att.color.push_back(rhi::RHITextureFormat::RGBA8);
+    att.color.push_back(rhi::RHITextureFormat::RGBA16F);
+    att.color.push_back(rhi::RHITextureFormat::RGBA8);
+    att.depthStencil = rhi::RHITextureFormat::Depth24Stencil8;
+    gp.attachmentFormats = att;
+    return gp;
+}
+
+rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeDeferredLightingSpec() {
+    rhi::ShaderGraphicsPipelineCreateInfo gp{};
+    // Both .vert and .frag live under raster/deferred/deferred_lighting_analytic in the rendering shader root.
+    // The engine resolves: <assetsRoot>/shaders/rendering/vulkan/<assetPath>.vert / .frag (or .spv).
+    gp.assetPath = "raster/deferred/deferred_lighting_analytic";
+    // No vertex layout — full-screen triangle generated from gl_VertexIndex, no VBO.
+    gp.topology = rhi::PrimitiveTopology::TriangleList;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterDeferredLighting;
+    gp.sourcePolicy = rhi::ShaderSourcePolicy::CompileFromSource;
+    gp.useDepthStencilOverride = true;
+    gp.depthStencilOverride.depthTest = false;
+    gp.depthStencilOverride.depthWrite = false;
+    rhi::PipelineAttachmentFormats att{};
+    att.color.push_back(rhi::RHITextureFormat::RGBA16F);
+    att.depthStencil = rhi::RHITextureFormat::None;
+    gp.attachmentFormats = att;
+    return gp;
+}
+
+
 void RasterFeature::OnRegister(const RenderCapabilities& caps) {
     (void)caps;
     m_shaderLibrary.ClearRegistrations();
-    m_shaderLibrary.AddEntry(kPermForwardOpaqueM5Baseline, makeForwardOpaqueBaselineSpec());
+    m_shaderLibrary.AddEntry(kPermForwardOpaqueBaseline, makeForwardOpaqueBaselineSpec());
+    m_shaderLibrary.AddEntry(kPermGBufferOpaqueBaseline, makeGBufferOpaqueBaselineSpec());
+    m_shaderLibrary.AddEntry(kPermDeferredLightingBaseline, makeDeferredLightingSpec());
 }
 
 void RasterFeature::OnShutdown() {
@@ -142,12 +197,9 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
         }
     }
 
-    DirectionalLightStd140 dir{};
-    {
-        glm::vec3 d(dir.direction.x, dir.direction.y, dir.direction.z);
-        d = glm::normalize(d);
-        dir.direction = {d.x, d.y, d.z, 0.f};
-    }
+    DirectionalLightStd140 dir;
+    dir.direction = {-0.35f, -0.85f, -0.25f, 0.0f}; // Sun-like slant
+    dir.colorIntensity = {1.0f, 0.95f, 0.85f, 5.0f}; // Warm light, high intensity
     const bool uploadedDirLight = res->UploadDirectionalLightUniform(render.recordingCommandList, dir);
 
     bool uploadedPerObject = true;
@@ -196,7 +248,7 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
         m_pipelineDevice = render.device;
     }
 
-    rhi::IPipeline* forwardPipeline = m_shaderLibrary.TryGetPipeline(kPermForwardOpaqueM5Baseline);
+    rhi::IPipeline* forwardPipeline = m_shaderLibrary.TryGetPipeline(kPermForwardOpaqueBaseline);
 
     if (!m_diagLoggedForwardPipelineNull && !forwardPipeline) {
         m_diagLoggedForwardPipelineNull = true;
@@ -212,7 +264,7 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     }
 
     const uint32_t visible = render.drawList ? render.drawList->VisibleCount() : 0u;
-    if ((m_diagScheduleLogCounter++ % 120u) == 0u) {
+    if ((m_diagScheduleLogCounter++ % 600u) == 0u) {
         core::Log::InfoF("RasterFeature::OnSchedulePasses: visible=%u forwardPipeline=%s meshResolver=%s drawList=%s",
                          visible,
                          forwardPipeline ? "ok" : "null",
@@ -220,19 +272,58 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
                          render.drawList ? "ok" : "null");
     }
 
-    rhi::ClearValue clear{};
-    clear.color[0] = 0.12f;
-    clear.color[1] = 0.14f;
-    clear.color[2] = 0.20f;
-    clear.color[3] = 1.0f;
-    clear.depth = 1.0f;
-    graph.AddPass(std::make_unique<ClearBlackboardRenderTargetPass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, clear));
+    if (m_mode == RenderMode::Forward) {
+        if (forwardPipeline && m_meshResolver && render.drawList) {
+            if (!m_forwardOpaquePass)
+                m_forwardOpaquePass = std::make_unique<ForwardOpaquePass>(
+                    &blackboard, BlackboardSlot::MainHdrRenderTarget, render.device, forwardPipeline,
+                    m_meshResolver, render.drawList);
+            else
+                m_forwardOpaquePass->Reconfigure(&blackboard, BlackboardSlot::MainHdrRenderTarget,
+                                                 forwardPipeline, m_meshResolver, render.drawList);
+            graph.AddPassBorrowed(m_forwardOpaquePass.get());
+        }
+    } else {
+        rhi::IPipeline* gbufferPipeline = m_shaderLibrary.TryGetPipeline(kPermGBufferOpaqueBaseline);
+        rhi::IPipeline* lightingPipeline = m_shaderLibrary.TryGetPipeline(kPermDeferredLightingBaseline);
+#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
+        if (!(gbufferPipeline && lightingPipeline && m_meshResolver && render.drawList)) {
+            static int s_deferredSkipLog = 0;
+            if (s_deferredSkipLog < 10) {
+                ++s_deferredSkipLog;
+                core::Log::WarnF(
+                    "[DeferredDebug] RasterFeature deferred passes NOT scheduled: gbufferPipeline=%s lightingPipeline=%s "
+                    "meshResolver=%s drawList=%s",
+                    gbufferPipeline ? "ok" : "null",
+                    lightingPipeline ? "ok" : "null",
+                    m_meshResolver ? "ok" : "null",
+                    render.drawList ? "ok" : "null");
+            }
+        }
+#endif
+        if (gbufferPipeline && lightingPipeline && m_meshResolver && render.drawList) {
+            if (!m_gbufferPass)
+                m_gbufferPass = std::make_unique<GBufferPass>(
+                    &blackboard, render.device, gbufferPipeline, m_meshResolver, render.drawList);
+            else
+                m_gbufferPass->Reconfigure(&blackboard, gbufferPipeline, m_meshResolver, render.drawList);
 
-    if (forwardPipeline && m_meshResolver && render.drawList)
-        graph.AddPass(std::make_unique<ForwardOpaquePass>(&blackboard, BlackboardSlot::MainHdrRenderTarget, render.device, forwardPipeline,
-                                                          m_meshResolver, render.drawList));
+            if (!m_deferredLightingPass)
+                m_deferredLightingPass = std::make_unique<DeferredLightingPass>(
+                    &blackboard, render.device, lightingPipeline);
+            else
+                m_deferredLightingPass->Reconfigure(&blackboard, lightingPipeline);
 
-    graph.AddPass(std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard));
+            graph.AddPassBorrowed(m_gbufferPass.get());
+            graph.AddPassBorrowed(m_deferredLightingPass.get());
+        }
+    }
+
+    if (!m_blitPass)
+        m_blitPass = std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard);
+    else
+        m_blitPass->Reconfigure(render.device, &blackboard);
+    graph.AddPassBorrowed(m_blitPass.get());
 }
 
 }  // namespace rendering

@@ -8,12 +8,14 @@ target_include_directories(OpenEyeRenderingSandbox
     PRIVATE
         ${OPENEYE_ENGINE_SOURCE}/eyelib
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/glfw/include
+        ${OPENEYE_ENGINE_SOURCE}/thirdparty/assimp/include
 )
 
 target_link_libraries(OpenEyeRenderingSandbox
     PRIVATE
         EyelibRendering
         glfw
+        ${OPENEYE_ENGINE_SOURCE}/thirdparty/assimp/lib/assimp-vc143-mt.lib
 )
 
 add_dependencies(OpenEyeRenderingSandbox CopyEngineAssets)

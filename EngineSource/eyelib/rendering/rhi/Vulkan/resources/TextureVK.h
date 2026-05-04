@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eyelib/rendering/rhi/RHI.h"
+#include <vulkan/vulkan.h>
 #include <vector>
 
 namespace eyelib {
@@ -24,6 +25,13 @@ struct TextureVK : ITexture {
     void* GetNativeTexture2DViewForArrayLayer(uint32_t layer) override;
     bool IsGpuBindable() const override;
 
+    /**
+     * `VkImageView` for `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` (and similar sampled bindings).
+     * For `Depth24Stencil8`, returns a depth-only subview; the primary `m_imageView` keeps both aspects for
+     * attachments and image barriers (see `ToVkImageAspect` vs `ToVkImageAspectForSampledDepthView`).
+     */
+    VkImageView GetVkImageViewForShaderSamplerBinding() const noexcept;
+
     DeviceVK* m_device = nullptr;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
@@ -36,6 +44,8 @@ struct TextureVK : ITexture {
     bool m_retired = false;
     void* m_image = nullptr;       // VkImage
     void* m_imageView = nullptr;
+    /** Depth-only view when `m_format == Depth24Stencil8`; null otherwise. See `GetVkImageViewForShaderSamplerBinding`. */
+    void* m_depthSrvImageView = nullptr;
     void* m_allocation = nullptr;
     /** Lazily created VK_IMAGE_VIEW_TYPE_2D views (one slot per array layer); used for ImGui sampler2D interop. */
     std::vector<void*> m_slice2DViewsByLayer;

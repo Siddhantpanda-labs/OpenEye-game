@@ -45,6 +45,23 @@ static uint32_t TextureVkArrayLayers(const TextureVK* t) {
     }
 }
 
+static VkAttachmentLoadOp ToVkLoadOp(::eyelib::rendering::AttachmentLoadOp op) {
+    switch (op) {
+    case ::eyelib::rendering::AttachmentLoadOp::Load: return VK_ATTACHMENT_LOAD_OP_LOAD;
+    case ::eyelib::rendering::AttachmentLoadOp::Clear: return VK_ATTACHMENT_LOAD_OP_CLEAR;
+    case ::eyelib::rendering::AttachmentLoadOp::DontCare: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    default: return VK_ATTACHMENT_LOAD_OP_LOAD;
+    }
+}
+
+static VkAttachmentStoreOp ToVkStoreOp(::eyelib::rendering::AttachmentStoreOp op) {
+    switch (op) {
+    case ::eyelib::rendering::AttachmentStoreOp::Store: return VK_ATTACHMENT_STORE_OP_STORE;
+    case ::eyelib::rendering::AttachmentStoreOp::DontCare: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    default: return VK_ATTACHMENT_STORE_OP_STORE;
+    }
+}
+
 const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     switch (kind) {
     case PipelineLayoutKind::PushOnly: return "PushOnly";
@@ -58,7 +75,8 @@ const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
     case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
-    case PipelineLayoutKind::RasterForwardM5Minimal: return "RasterForwardM5Minimal";
+    case PipelineLayoutKind::RasterForwardMinimal: return "RasterForwardMinimal";
+    case PipelineLayoutKind::RasterDeferredLighting: return "RasterDeferredLighting";
     default: return "Unknown";
     }
 }
@@ -336,11 +354,14 @@ void CommandListVK::BeginRenderingSwapchainColor(void* colorImageView, uint32_t 
     m_activeDynamicRenderHeight = height;
 }
 
-void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions) {
+void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransitions, const ::eyelib::rendering::RenderAttachmentOps* ops) {
     if (!rtVK || !m_isRecording || !m_commandBuffer || !m_device) return;
     const uint32_t colorCount = rtVK->GetColorAttachmentCount();
     VkImageView depthView = static_cast<VkImageView>(rtVK->GetDepthImageView());
-    if (colorCount == 0 && depthView == VK_NULL_HANDLE) return;
+    // When ops explicitly declares hasDepth=false, the pass intends to sample depth
+    // as a shader resource — do NOT bind it as an attachment or transition it to DepthWrite.
+    const bool useDepth = (ops ? ops->hasDepth : true) && (depthView != VK_NULL_HANDLE);
+    if (colorCount == 0 && !useDepth) return;
     const uint32_t rtWidth = rtVK->GetWidth();
     const uint32_t rtHeight = rtVK->GetHeight();
     if (rtWidth == 0 || rtHeight == 0) return;
@@ -351,9 +372,11 @@ void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransi
             if (tex && m_device->GetTextureTrackedState(tex) != ResourceState::RenderTarget)
                 m_device->TransitionTextureToState(tex, ResourceState::RenderTarget);
         }
-        ITexture* depthTex = rtVK->GetDepthTexture();
-        if (depthTex && m_device->GetTextureTrackedState(depthTex) != ResourceState::DepthWrite)
-            m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
+        if (useDepth) {
+            ITexture* depthTex = rtVK->GetDepthTexture();
+            if (depthTex && m_device->GetTextureTrackedState(depthTex) != ResourceState::DepthWrite)
+                m_device->TransitionTextureToState(depthTex, ResourceState::DepthWrite);
+        }
         m_device->FlushBarrierTracker(this);
     }
 
@@ -367,9 +390,14 @@ void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransi
         colorAttachments[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         colorAttachments[i].imageView = view;
         colorAttachments[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        colorAttachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        colorAttachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAttachments[i].clearValue.color = { 0.f, 0.f, 0.f, 1.f };
+        colorAttachments[i].loadOp = ops ? ToVkLoadOp(ops->color.loadOp) : VK_ATTACHMENT_LOAD_OP_LOAD;
+        colorAttachments[i].storeOp = ops ? ToVkStoreOp(ops->color.storeOp) : VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachments[i].clearValue.color = {
+            ops ? ops->color.clearValue.rgba[0] : 0.f,
+            ops ? ops->color.clearValue.rgba[1] : 0.f,
+            ops ? ops->color.clearValue.rgba[2] : 0.f,
+            ops ? ops->color.clearValue.rgba[3] : 1.f
+        };
     }
 
     VkRenderingInfo renderingInfo = {};
@@ -381,13 +409,16 @@ void CommandListVK::BeginRenderingWithTarget(RenderTargetVK* rtVK, bool doTransi
     renderingInfo.pDepthAttachment = nullptr;
     renderingInfo.pStencilAttachment = nullptr;
     VkRenderingAttachmentInfo depthAttachment = {};
-    if (depthView != VK_NULL_HANDLE) {
+    if (useDepth) {
         depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         depthAttachment.imageView = depthView;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        depthAttachment.clearValue.depthStencil = { 1.f, 0 };
+        depthAttachment.loadOp = ops ? ToVkLoadOp(ops->depth.loadOp) : VK_ATTACHMENT_LOAD_OP_LOAD;
+        depthAttachment.storeOp = ops ? ToVkStoreOp(ops->depth.storeOp) : VK_ATTACHMENT_STORE_OP_STORE;
+        depthAttachment.clearValue.depthStencil = {
+            ops ? ops->depth.clearValue.depth : 1.f,
+            ops ? ops->depth.clearValue.stencil : 0u
+        };
         renderingInfo.pDepthAttachment = &depthAttachment;
     }
     vkCmdBeginRendering(static_cast<VkCommandBuffer>(m_commandBuffer), &renderingInfo);
@@ -403,7 +434,16 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt) {
     EndRenderingIfActive();
     if (!rt || !m_isRecording || !m_commandBuffer) return;
     RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
-    BeginRenderingWithTarget(rtVK, true);
+    BeginRenderingWithTarget(rtVK, true, nullptr);
+}
+
+void CommandListVK::SetRenderTarget(IRenderTarget* rt, const ::eyelib::rendering::RenderAttachmentOps& ops) {
+    m_hasGraphicsWork = true;
+    m_computeQueueEligible = false;
+    EndRenderingIfActive();
+    if (!rt || !m_isRecording || !m_commandBuffer) return;
+    RenderTargetVK* rtVK = static_cast<RenderTargetVK*>(rt);
+    BeginRenderingWithTarget(rtVK, true, &ops);
 }
 
 void CommandListVK::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) {
@@ -441,7 +481,7 @@ void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear
     }
     if (rtVK->GetDepthImageView() != VK_NULL_HANDLE) {
         VkClearAttachment att = {};
-        att.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        att.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         att.clearValue.depthStencil.depth = clear.depth;
         att.clearValue.depthStencil.stencil = clear.stencil;
         clears.push_back(att);

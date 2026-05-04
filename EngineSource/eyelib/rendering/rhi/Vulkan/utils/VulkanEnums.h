@@ -88,7 +88,11 @@ inline VkPipelineStageFlags ToVkPipelineStage(ResourceState state) {
         case ResourceState::ShaderResource:   return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
         case ResourceState::RenderTarget:     return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         case ResourceState::DepthWrite:      return VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        case ResourceState::DepthRead:       return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        // Depth in READ_ONLY layout may be consumed as a read-only attachment *or* sampled in shaders (e.g. deferred).
+        // Fragment-shader texture() reads require FRAGMENT_SHADER + SHADER_READ on the barrier dst (Vulkan sync2).
+        case ResourceState::DepthRead:
+            return VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         case ResourceState::TransferDst:      return VK_PIPELINE_STAGE_TRANSFER_BIT;
         case ResourceState::TransferSrc:     return VK_PIPELINE_STAGE_TRANSFER_BIT;
         case ResourceState::Present:         return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
@@ -119,7 +123,8 @@ inline VkAccessFlags ToVkAccessFlags(ResourceState state) {
         case ResourceState::ShaderResource:  return VK_ACCESS_SHADER_READ_BIT;
         case ResourceState::RenderTarget:    return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         case ResourceState::DepthWrite:      return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        case ResourceState::DepthRead:       return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        case ResourceState::DepthRead:
+            return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
         case ResourceState::TransferDst:     return VK_ACCESS_TRANSFER_WRITE_BIT;
         case ResourceState::TransferSrc:     return VK_ACCESS_TRANSFER_READ_BIT;
         case ResourceState::Present:        return 0;
@@ -163,13 +168,20 @@ inline VkImageLayout ToVkImageLayout(ResourceState state) {
     }
 }
 
-/** Image aspect for barrier from format (depth/stencil vs color). */
+/** Image aspect for barriers and the default `VkImageView` on depth/stencil images (both planes where applicable). */
 inline VkImageAspectFlags ToVkImageAspect(RHITextureFormat format) {
     if (format == RHITextureFormat::Depth24Stencil8)
         return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
     if (format == RHITextureFormat::Depth24)
         return VK_IMAGE_ASPECT_DEPTH_BIT;
     return VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+/** Aspect for a **sampled** `VkImageView` on combined depth/stencil formats (VUID-VkDescriptorImageInfo-imageView-01976). */
+inline VkImageAspectFlags ToVkImageAspectForSampledDepthView(RHITextureFormat format) {
+    if (format == RHITextureFormat::Depth24Stencil8 || format == RHITextureFormat::Depth24)
+        return VK_IMAGE_ASPECT_DEPTH_BIT;
+    return ToVkImageAspect(format);
 }
 
 /** Image view type for descriptor sampling. */

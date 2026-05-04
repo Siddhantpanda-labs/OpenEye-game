@@ -47,7 +47,8 @@ static const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::IBL: return "IBL";
     case PipelineLayoutKind::OutlinePost: return "OutlinePost";
     case PipelineLayoutKind::ComposeBootstrap: return "ComposeBootstrap";
-    case PipelineLayoutKind::RasterForwardM5Minimal: return "RasterForwardM5Minimal";
+    case PipelineLayoutKind::RasterForwardMinimal: return "RasterForwardMinimal";
+    case PipelineLayoutKind::RasterDeferredLighting: return "RasterDeferredLighting";
     default: return "Unknown";
     }
 }
@@ -111,14 +112,19 @@ void DescriptorSetVK::UpdateTexture(uint32_t binding, ITexture* texture) {
         if (!effective) return;
     }
     TextureVK* texVK = static_cast<TextureVK*>(effective);
-    VkImageView imageView = texVK && texVK->m_imageView ? static_cast<VkImageView>(texVK->m_imageView) : VK_NULL_HANDLE;
+    const VkImageView imageView = texVK ? texVK->GetVkImageViewForShaderSamplerBinding() : VK_NULL_HANDLE;
     const bool needsNearestSampler = (effective && effective->GetFormat() == RHITextureFormat::R32UI);
     VkSampler sampler = static_cast<VkSampler>(needsNearestSampler ? m_device->GetNearestSampler() : m_device->GetDefaultSampler());
     if (sampler == VK_NULL_HANDLE) return;
+    // Depth textures sampled in shaders require DEPTH_STENCIL_READ_ONLY_OPTIMAL; color textures use SHADER_READ_ONLY_OPTIMAL.
+    const bool isDepthFormat = (effective &&
+                                (effective->GetFormat() == RHITextureFormat::Depth24Stencil8 ||
+                                 effective->GetFormat() == RHITextureFormat::Depth24));
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = sampler;
     imageInfo.imageView = imageView;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageLayout = isDepthFormat ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                          : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkWriteDescriptorSet write = {};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = static_cast<VkDescriptorSet>(m_descriptorSet);

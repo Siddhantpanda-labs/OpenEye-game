@@ -35,8 +35,8 @@ private:
     BlackboardSlot m_slot = BlackboardSlot::MainHdrRenderTarget;
     rhi::IDevice* m_device = nullptr;
     rhi::IPipeline* m_pipeline = nullptr;
-    rhi::IDescriptorSet* m_frameSet = nullptr;
-    uint64_t m_frameSetBuffersKey = 0;
+    rhi::IDescriptorSet* m_frameSets[3] = {nullptr, nullptr, nullptr};
+    uint64_t m_frameSetBuffersKeys[3] = {0, 0, 0};
 };
 
 }  // namespace rendering
