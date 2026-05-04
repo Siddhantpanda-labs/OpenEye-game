@@ -29,10 +29,10 @@ layout(std140, set = 1, binding = 4) uniform DirLightUbo {
 
 const float PI = 3.14159265358979323846;
 
-// Temporary probe mode to narrow remaining deferred issues quickly:
+// Optional probe mode to narrow deferred issues quickly:
 // 0 = full lighting, 1 = depth grayscale, 2 = normal visualize, 3 = albedo visualize.
 #ifndef OPENEYE_DEFERRED_LIGHTING_DEBUG_MODE
-#define OPENEYE_DEFERRED_LIGHTING_DEBUG_MODE 1
+#define OPENEYE_DEFERRED_LIGHTING_DEBUG_MODE 0
 #endif
 
 // Function to reconstruct world position from depth
@@ -43,8 +43,8 @@ vec3 ReconstructWorldPos(vec2 uv, float depth, mat4 invViewProj) {
 }
 
 void main() {
-    // Fullscreen-triangle VS emits vUv in [0,2]; texture() sampling expects normalized [0,1].
-    const vec2 uv = vUv * 0.5;
+    // The fullscreen triangle's oversized vertex UVs interpolate to normalized [0,1] over the viewport.
+    const vec2 uv = vUv;
     float depth = texture(tDepth, uv).r;
 
 #if OPENEYE_DEFERRED_LIGHTING_DEBUG_MODE == 1
