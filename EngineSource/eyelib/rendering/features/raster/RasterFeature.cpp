@@ -2,7 +2,6 @@
 
 #include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
-#include "eyelib/rendering/core/DeferredDebugVis.h"
 #include "eyelib/rendering/core/FrameContext.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/RenderContext.h"
@@ -22,9 +21,6 @@
 #include "eyelib/rendering/scene/DrawList.h"
 #include "eyelib/rendering/scene/IRenderSceneView.h"
 #include "eyelib/rendering/shaders/ShaderPermutationKey.h"
-
-#include <glm/geometric.hpp>
-#include <glm/glm.hpp>
 
 namespace eyelib {
 namespace rendering {
@@ -166,37 +162,6 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
         }
     }
 
-    if (!m_diagLoggedPerViewOnce) {
-        m_diagLoggedPerViewOnce = true;
-        const auto& vp = perView.viewProjection;
-        const auto& v = perView.view;
-        const auto& p = perView.projection;
-        core::Log::InfoF("PerView uploaded: viewPos=(%.3f,%.3f,%.3f) outputDims=%ux%u",
-                         perView.viewPosition.x, perView.viewPosition.y, perView.viewPosition.z,
-                         render.outputWidth, render.outputHeight);
-        core::Log::InfoF("PerView view col0=(%.3f,%.3f,%.3f,%.3f) col3=(%.3f,%.3f,%.3f,%.3f)",
-                         v[0][0], v[0][1], v[0][2], v[0][3], v[3][0], v[3][1], v[3][2], v[3][3]);
-        core::Log::InfoF("PerView proj col0=(%.3f,%.3f,%.3f,%.3f) col2=(%.3f,%.3f,%.3f,%.3f) col3=(%.3f,%.3f,%.3f,%.3f)",
-                         p[0][0], p[0][1], p[0][2], p[0][3], p[2][0], p[2][1], p[2][2], p[2][3],
-                         p[3][0], p[3][1], p[3][2], p[3][3]);
-        const glm::vec4 testWorld{0.0f, 0.0f, 0.0f, 1.0f};
-        glm::vec4 clip = vp * testWorld;
-        core::Log::InfoF("Test origin-clip: (%.3f,%.3f,%.3f,%.3f) ndc=(%.3f,%.3f,%.3f)",
-                         clip.x, clip.y, clip.z, clip.w,
-                         clip.w != 0 ? clip.x / clip.w : 0,
-                         clip.w != 0 ? clip.y / clip.w : 0,
-                         clip.w != 0 ? clip.z / clip.w : 0);
-        if (RenderResources* r = render.resources) {
-            if (rhi::IRenderTarget* rt = r->MainHdrRenderTarget()) {
-                core::Log::InfoF("MainHdrRenderTarget dims=%ux%u hasDepth=%s",
-                                 rt->GetWidth(), rt->GetHeight(),
-                                 rt->GetDepthTexture() ? "yes" : "no");
-            } else {
-                core::Log::Warn("MainHdrRenderTarget is null during upload.");
-            }
-        }
-    }
-
     DirectionalLightStd140 dir;
     dir.direction = {-0.35f, -0.85f, -0.25f, 0.0f}; // Sun-like slant
     dir.colorIntensity = {1.0f, 0.95f, 0.85f, 5.0f}; // Warm light, high intensity
@@ -205,27 +170,6 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     bool uploadedPerObject = true;
     if (render.drawList)
         uploadedPerObject = res->UploadPerObjectBufferFromDrawList(render.recordingCommandList, *render.drawList);
-
-    if (render.drawList && render.drawList->VisibleCount() > 0u) {
-        static bool s_loggedFirstDrawItemClip = false;
-        if (!s_loggedFirstDrawItemClip) {
-            s_loggedFirstDrawItemClip = true;
-            const DrawItem& it0 = render.drawList->items[0];
-            const glm::vec4 worldCenter = it0.worldMatrix * glm::vec4(0.f, 0.f, 0.f, 1.f);
-            const glm::vec4 clipCenter = perView.projection * perView.view * worldCenter;
-            core::Log::InfoF(
-                "RasterFeature::OnUpload drawItem0 CPU clip test: materialId=%u meshHandle=%u transformIndex=%u "
-                "worldCenter=(%.3f,%.3f,%.3f,%.3f) clip=(%.3f,%.3f,%.3f,%.3f) ndc=(%.3f,%.3f,%.3f)",
-                it0.materialId,
-                it0.meshHandle,
-                it0.transformIndex,
-                worldCenter.x, worldCenter.y, worldCenter.z, worldCenter.w,
-                clipCenter.x, clipCenter.y, clipCenter.z, clipCenter.w,
-                clipCenter.w != 0.f ? clipCenter.x / clipCenter.w : 0.f,
-                clipCenter.w != 0.f ? clipCenter.y / clipCenter.w : 0.f,
-                clipCenter.w != 0.f ? clipCenter.z / clipCenter.w : 0.f);
-        }
-    }
 
     if (!uploadedPerFrame || !uploadedDirLight || !uploadedPerObject) {
         static int s_uploadFailWarnCount = 0;
@@ -250,28 +194,6 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
 
     rhi::IPipeline* forwardPipeline = m_shaderLibrary.TryGetPipeline(kPermForwardOpaqueBaseline);
 
-    if (!m_diagLoggedForwardPipelineNull && !forwardPipeline) {
-        m_diagLoggedForwardPipelineNull = true;
-        core::Log::Warn("RasterFeature: forward opaque pipeline is null after WarmUpPipelines; ForwardOpaquePass will be skipped.");
-    }
-    if (!m_diagLoggedMeshResolverNull && !m_meshResolver) {
-        m_diagLoggedMeshResolverNull = true;
-        core::Log::Warn("RasterFeature: mesh resolver is null; ForwardOpaquePass will be skipped.");
-    }
-    if (!m_diagLoggedDrawListNull && !render.drawList) {
-        m_diagLoggedDrawListNull = true;
-        core::Log::Warn("RasterFeature: render.drawList is null; ForwardOpaquePass will be skipped.");
-    }
-
-    const uint32_t visible = render.drawList ? render.drawList->VisibleCount() : 0u;
-    if ((m_diagScheduleLogCounter++ % 600u) == 0u) {
-        core::Log::InfoF("RasterFeature::OnSchedulePasses: visible=%u forwardPipeline=%s meshResolver=%s drawList=%s",
-                         visible,
-                         forwardPipeline ? "ok" : "null",
-                         m_meshResolver ? "ok" : "null",
-                         render.drawList ? "ok" : "null");
-    }
-
     if (m_mode == RenderMode::Forward) {
         if (forwardPipeline && m_meshResolver && render.drawList) {
             if (!m_forwardOpaquePass)
@@ -286,21 +208,6 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     } else {
         rhi::IPipeline* gbufferPipeline = m_shaderLibrary.TryGetPipeline(kPermGBufferOpaqueBaseline);
         rhi::IPipeline* lightingPipeline = m_shaderLibrary.TryGetPipeline(kPermDeferredLightingBaseline);
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        if (!(gbufferPipeline && lightingPipeline && m_meshResolver && render.drawList)) {
-            static int s_deferredSkipLog = 0;
-            if (s_deferredSkipLog < 10) {
-                ++s_deferredSkipLog;
-                core::Log::WarnF(
-                    "[DeferredDebug] RasterFeature deferred passes NOT scheduled: gbufferPipeline=%s lightingPipeline=%s "
-                    "meshResolver=%s drawList=%s",
-                    gbufferPipeline ? "ok" : "null",
-                    lightingPipeline ? "ok" : "null",
-                    m_meshResolver ? "ok" : "null",
-                    render.drawList ? "ok" : "null");
-            }
-        }
-#endif
         if (gbufferPipeline && lightingPipeline && m_meshResolver && render.drawList) {
             if (!m_gbufferPass)
                 m_gbufferPass = std::make_unique<GBufferPass>(

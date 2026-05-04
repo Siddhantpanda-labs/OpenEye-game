@@ -1,6 +1,5 @@
 #include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
 
-#include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
@@ -11,11 +10,6 @@
 
 namespace eyelib {
 namespace rendering {
-
-namespace {
-bool g_diagLoggedFirstDrawGlobal = false;
-bool g_diagLoggedDrawBuffersGlobal = false;
-}
 
 ForwardOpaquePass::ForwardOpaquePass(FrameGraphBlackboard* blackboard, BlackboardSlot hdrSlot, rhi::IDevice* device,
                                      rhi::IPipeline* pipeline, const IMeshHandleResolver* meshResolver, const DrawList* drawList) noexcept
@@ -71,36 +65,19 @@ bool ForwardOpaquePass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& 
 }
 
 void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
-    if (!cmd || !m_blackboard || !m_pipeline || !m_device || !m_meshResolver || !m_drawList) {
-        if (!m_diagLoggedEarlyExit) {
-            m_diagLoggedEarlyExit = true;
-            core::Log::WarnF("ForwardOpaquePass::Execute early-exit: cmd=%s blackboard=%s pipeline=%s device=%s meshResolver=%s drawList=%s",
-                             cmd ? "ok" : "null", m_blackboard ? "ok" : "null", m_pipeline ? "ok" : "null",
-                             m_device ? "ok" : "null", m_meshResolver ? "ok" : "null", m_drawList ? "ok" : "null");
-        }
+    if (!cmd || !m_blackboard || !m_pipeline || !m_device || !m_meshResolver || !m_drawList)
         return;
-    }
+
     rhi::IRenderTarget* rt = m_blackboard->TryGetRenderTarget(m_hdrSlot);
-    if (!rt) {
-        if (!m_diagLoggedNoRt) {
-            m_diagLoggedNoRt = true;
-            core::Log::Warn("ForwardOpaquePass::Execute: blackboard MainHdrRenderTarget is null.");
-        }
+    if (!rt)
         return;
-    }
 
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* perObject = m_blackboard->TryGetBuffer(BlackboardSlot::PerObjectStorageBuffer);
     rhi::IBuffer* dirLight = m_blackboard->TryGetBuffer(BlackboardSlot::DirectionalLightUniformBuffer);
-    if (!perFrame || !perView || !perObject || !dirLight) {
-        if (!m_diagLoggedBuffersMissing) {
-            m_diagLoggedBuffersMissing = true;
-            core::Log::WarnF("ForwardOpaquePass::Execute: missing blackboard buffer(s) perFrame=%s perView=%s perObject=%s dirLight=%s",
-                             perFrame ? "ok" : "null", perView ? "ok" : "null", perObject ? "ok" : "null", dirLight ? "ok" : "null");
-        }
+    if (!perFrame || !perView || !perObject || !dirLight)
         return;
-    }
 
     const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
 
@@ -133,30 +110,8 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
     }
 
     const uint32_t n = m_drawList->VisibleCount();
-    if (n == 0 || !m_frameSets[frameIdx] || !m_forwardDataSets[frameIdx]) {
-        if (!m_diagLoggedNoDraws) {
-            m_diagLoggedNoDraws = true;
-            core::Log::WarnF("ForwardOpaquePass::Execute: nothing to draw (visible=%u frameSet=%s forwardDataSet=%s).",
-                             n, m_frameSets[frameIdx] ? "ok" : "null", m_forwardDataSets[frameIdx] ? "ok" : "null");
-        }
+    if (n == 0 || !m_frameSets[frameIdx] || !m_forwardDataSets[frameIdx])
         return;
-    }
-
-    if (!g_diagLoggedFirstDrawGlobal) {
-        g_diagLoggedFirstDrawGlobal = true;
-        core::Log::InfoF("ForwardOpaquePass::Execute: first draw path reached (visible=%u).", n);
-    }
-    if (!g_diagLoggedDrawBuffersGlobal) {
-        g_diagLoggedDrawBuffersGlobal = true;
-        core::Log::InfoF(
-            "ForwardOpaquePass::Execute buffers/sets: perFrame=%p perView=%p perObject=%p dirLight=%p frameSet=%p forwardDataSet=%p",
-            static_cast<void*>(perFrame),
-            static_cast<void*>(perView),
-            static_cast<void*>(perObject),
-            static_cast<void*>(dirLight),
-            static_cast<void*>(m_frameSets[frameIdx]),
-            static_cast<void*>(m_forwardDataSets[frameIdx]));
-    }
 
     RenderAttachmentOps attachmentOps{};
     rhi::IRenderTarget* declaredRt = nullptr;

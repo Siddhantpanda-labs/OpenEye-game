@@ -1,9 +1,7 @@
 #include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
 
-#include "eyelib/core/Log.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
-#include "eyelib/rendering/core/DeferredDebugVis.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/rhi/RHI.h"
@@ -54,7 +52,7 @@ bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboar
 
     outOps.color.loadOp = AttachmentLoadOp::Clear;
     outOps.color.storeOp = AttachmentStoreOp::Store;
-    outOps.color.clearValue.rgba = deferred_debug::kHdrDeferredClearRgba;
+    outOps.color.clearValue.rgba = {0.1f, 0.15f, 0.2f, 1.0f};
     
     outOps.hasDepth = false; // Deferred lighting is a fullscreen pass; depth is read as a sampler, not bound as an attachment.
 
@@ -63,40 +61,20 @@ bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboar
 }
 
 void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
-    if (!cmd || !m_blackboard || !m_pipeline || !m_device) {
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static int s_a;
-        if (s_a++ < 6)
-            core::Log::WarnF("[DeferredDebug] DeferredLightingPass early: cmd/blackboard/pipeline/device");
-#endif
+    if (!cmd || !m_blackboard || !m_pipeline || !m_device)
         return;
-    }
 
     rhi::IRenderTarget* hdr = m_blackboard->TryGetRenderTarget(BlackboardSlot::MainHdrRenderTarget);
     rhi::IRenderTarget* gbuffer = m_blackboard->TryGetRenderTarget(BlackboardSlot::GBufferRenderTarget);
-    if (!hdr || !gbuffer) {
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static int s_b;
-        if (s_b++ < 6)
-            core::Log::WarnF("[DeferredDebug] DeferredLightingPass early: hdr=%s gbuffer=%s",
-                             hdr ? "ok" : "null", gbuffer ? "ok" : "null");
-#endif
+    if (!hdr || !gbuffer)
         return;
-    }
 
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* dirLight = m_blackboard->TryGetBuffer(BlackboardSlot::DirectionalLightUniformBuffer);
 
-    if (!perFrame || !perView || !dirLight) {
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static int s_c;
-        if (s_c++ < 6)
-            core::Log::WarnF("[DeferredDebug] DeferredLightingPass early: perFrame=%s perView=%s dirLight=%s",
-                             perFrame ? "ok" : "null", perView ? "ok" : "null", dirLight ? "ok" : "null");
-#endif
+    if (!perFrame || !perView || !dirLight)
         return;
-    }
 
     const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
 
@@ -143,26 +121,13 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
         }
     }
 
-    if (!m_frameSets[frameIdx] || !m_passSets[frameIdx]) {
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static int s_d;
-        if (s_d++ < 6)
-            core::Log::WarnF("[DeferredDebug] DeferredLightingPass early: frameSet=%s passSet=%s frameIdx=%u",
-                             m_frameSets[frameIdx] ? "ok" : "null", m_passSets[frameIdx] ? "ok" : "null", frameIdx);
-#endif
+    if (!m_frameSets[frameIdx] || !m_passSets[frameIdx])
         return;
-    }
 
     RenderAttachmentOps ops{};
     rhi::IRenderTarget* dummyRt = nullptr;
-    if (!DescribeRenderAttachmentOps(*m_blackboard, dummyRt, ops)) {
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static int s_e;
-        if (s_e++ < 4)
-            core::Log::Warn("[DeferredDebug] DeferredLightingPass: DescribeRenderAttachmentOps failed");
-#endif
+    if (!DescribeRenderAttachmentOps(*m_blackboard, dummyRt, ops))
         return;
-    }
 
     cmd->SetRenderTarget(hdr, ops);
     const uint32_t vw = hdr->GetWidth();
@@ -177,12 +142,6 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
     rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_passSets[frameIdx]};
     cmd->BindDescriptorSets(0, 2, sets);
 
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-    static uint32_t s_drawLog = 0;
-    if ((++s_drawLog % 120u) == 1u)
-        core::Log::InfoF("[DeferredDebug] DeferredLightingPass: vkCmdDraw(3) fullscreen (HDR %ux%u)",
-                         hdr->GetWidth(), hdr->GetHeight());
-#endif
     // Draw fullscreen triangle
     cmd->Draw(3, 0);
 }

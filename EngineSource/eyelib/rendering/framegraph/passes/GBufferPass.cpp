@@ -1,9 +1,7 @@
 #include "eyelib/rendering/framegraph/passes/GBufferPass.h"
 
-#include "eyelib/core/Log.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
-#include "eyelib/rendering/core/DeferredDebugVis.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/geometry/IMeshHandleResolver.h"
@@ -53,7 +51,7 @@ bool GBufferPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackb
 
     outOps.color.loadOp = AttachmentLoadOp::Clear;
     outOps.color.storeOp = AttachmentStoreOp::Store;
-    outOps.color.clearValue.rgba = deferred_debug::kGBufferClearRgba;
+    outOps.color.clearValue.rgba = {0.0f, 0.0f, 0.0f, 1.0f};
     
     outOps.hasDepth = outRt->GetDepthTexture() != nullptr;
     outOps.depth.loadOp = AttachmentLoadOp::Clear;
@@ -67,14 +65,6 @@ bool GBufferPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackb
 void GBufferPass::Execute(rhi::ICommandList* cmd) {
     if (!cmd || !m_blackboard || !m_pipeline || !m_device || !m_meshResolver || !m_drawList)
         return;
-
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-    static uint32_t s_gbufExecLog = 0;
-    if ((++s_gbufExecLog % 120u) == 1u) {
-        core::Log::InfoF("[DeferredDebug] GBufferPass::Execute visible=%u",
-                         m_drawList ? m_drawList->VisibleCount() : 0u);
-    }
-#endif
 
     rhi::IRenderTarget* rt = m_blackboard->TryGetRenderTarget(BlackboardSlot::GBufferRenderTarget);
     if (!rt) return;
@@ -139,78 +129,26 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_passSets[frameIdx]};
     cmd->BindDescriptorSets(0, 2, sets);
 
-    uint32_t opaqueCount = 0;
-    uint32_t meshResolveFailCount = 0;
-    uint32_t meshResolvedCount = 0;
-    uint32_t submeshDrawCallCount = 0;
-    uint32_t indexedDrawCallCount = 0;
-    uint32_t zeroIndexSubmeshCount = 0;
-    uint32_t zeroIndexDrawCount = 0;
-
     for (uint32_t i = 0; i < n; ++i) {
         const DrawItem& it = m_drawList->items[i];
         if (it.layer != DrawLayer::Opaque) continue; // Only draw opaque in GBuffer
-        ++opaqueCount;
 
         const MeshHandle h = m_meshResolver->TryResolveMesh(it.meshHandle);
-        if (!h.IsValid()) {
-            ++meshResolveFailCount;
+        if (!h.IsValid())
             continue;
-        }
-        ++meshResolvedCount;
 
         cmd->SetPushConstants(0, sizeof(uint32_t), &i);
         cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
         cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
 
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-        static uint32_t s_firstMeshInfoLog = 0;
-        if (s_firstMeshInfoLog < 4u) {
-            ++s_firstMeshInfoLog;
-            core::Log::InfoF(
-                "[DeferredDebug] GBufferPass mesh[%u]: vb=%p ib=%p submeshes=%u totalIndexCount=%u",
-                i, h.vertexBuffer, h.indexBuffer, static_cast<uint32_t>(h.submeshes.size()), h.totalIndexCount);
-        }
-#endif
-        
         if (!h.submeshes.empty()) {
             for (const Submesh& sm : h.submeshes) {
-                if (sm.indexCount == 0u) ++zeroIndexSubmeshCount;
                 cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
-                ++submeshDrawCallCount;
             }
         } else {
-            if (h.totalIndexCount == 0u) ++zeroIndexDrawCount;
             cmd->DrawIndexed(h.totalIndexCount, 0, 0);
-            ++indexedDrawCallCount;
         }
     }
-
-#if OPENEYE_RENDER_DEFERRED_DEBUG_PASS_COLORS
-    if ((submeshDrawCallCount + indexedDrawCallCount) == 0u) {
-        static uint32_t s_zeroDrawWarn = 0;
-        if (s_zeroDrawWarn++ < 8u) {
-            core::Log::WarnF(
-                "[DeferredDebug] GBufferPass produced 0 draws: visible=%u opaque=%u resolved=%u resolveFail=%u",
-                n, opaqueCount, meshResolvedCount, meshResolveFailCount);
-        }
-    }
-
-    static uint32_t s_gbufDrawStatsLog = 0;
-    if ((++s_gbufDrawStatsLog % 120u) == 1u) {
-        core::Log::InfoF(
-            "[DeferredDebug] GBufferPass stats: visible=%u opaque=%u resolved=%u resolveFail=%u submeshDraws=%u indexedDraws=%u",
-            n, opaqueCount, meshResolvedCount, meshResolveFailCount, submeshDrawCallCount, indexedDrawCallCount);
-    }
-    if ((zeroIndexSubmeshCount + zeroIndexDrawCount) > 0u) {
-        static uint32_t s_zeroIndexWarn = 0;
-        if (s_zeroIndexWarn++ < 8u) {
-            core::Log::WarnF(
-                "[DeferredDebug] GBufferPass zero-index draws: submeshZero=%u indexedZero=%u",
-                zeroIndexSubmeshCount, zeroIndexDrawCount);
-        }
-    }
-#endif
 }
 
 } // namespace rendering

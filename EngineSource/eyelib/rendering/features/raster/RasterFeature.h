@@ -52,12 +52,6 @@ private:
     rhi::IDevice* m_pipelineDevice = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
 
-    bool m_diagLoggedForwardPipelineNull = false;
-    bool m_diagLoggedMeshResolverNull = false;
-    bool m_diagLoggedDrawListNull = false;
-    uint32_t m_diagScheduleLogCounter = 0;
-    bool m_diagLoggedPerViewOnce = false;
-
     // Persistent pass objects — owned here so their descriptor sets survive across frames.
     std::unique_ptr<GBufferPass>            m_gbufferPass;
     std::unique_ptr<DeferredLightingPass>   m_deferredLightingPass;
