@@ -37,12 +37,14 @@ vec3 ReconstructWorldPos(vec2 uv, float depth, mat4 invViewProj) {
 }
 
 void main() {
-    // Fullscreen-triangle VS emits vUv in [0,2]; texture() sampling expects normalized [0,1].
-    const vec2 uv = vUv * 0.5;
-    float depth = texture(tDepth, uv).r;
+    // Fullscreen-triangle VS: within the visible screen (clip [-1,1]), interpolated vUv is [0,1].
+    const vec2 uv = clamp(vUv, vec2(0.0), vec2(0.999999));
+    const ivec2 gbufSize = textureSize(tDepth, 0);
+    const ivec2 pix = ivec2(uv * vec2(gbufSize));
+    float depth = texelFetch(tDepth, pix, 0).r;
 
-    vec4 gb0 = texture(tGBuffer0, uv);
-    vec4 gb1 = texture(tGBuffer1, uv);
+    vec4 gb0 = texelFetch(tGBuffer0, pix, 0);
+    vec4 gb1 = texelFetch(tGBuffer1, pix, 0);
 
     if (depth >= 1.0) {
         // Skybox / background
@@ -50,7 +52,7 @@ void main() {
         return;
     }
 
-    vec4 gb2 = texture(tGBuffer2, uv);
+    vec4 gb2 = texelFetch(tGBuffer2, pix, 0);
 
     vec3 albedo = gb0.rgb;
     vec3 N = normalize(gb1.xyz);

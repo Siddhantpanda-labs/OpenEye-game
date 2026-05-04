@@ -44,7 +44,7 @@ Temporary deferred debug instrumentation has been reverted:
 | Deferred depth binding | Fixed and kept | Deferred lighting samples `GBufferRenderTarget` depth, not Main HDR depth. |
 | Deferred descriptors | Fixed and kept | Descriptor cache key includes G-buffer color textures and depth. |
 | Depth read synchronization | Fixed and kept | `DepthRead` includes fragment shader + shader-read access. |
-| Fullscreen UV | OK | `fullscreen_triangle.vert` emits `[0,2]`; deferred lighting uses `vUv * 0.5`. |
+| Fullscreen UV | Fixed | `fullscreen_triangle.vert` emits `vUv` in `[0,2]` **at vertices**, but within visible clip `[-1,1]` the interpolated `vUv` is `[0,1]`. Removed erroneous `* 0.5` that compressed sampling and reconstruction to the left-half of NDC/GBuffer. |
 | Stale SPIR-V / dual asset roots | Not the tracked cause | User asked to keep this out of scope; the confirmed fix was runtime upload staging. |
 
 The key lesson is that RenderDoc showing the draw/mesh was not enough: the shader inputs were being corrupted before execution because all recorded uploads referenced the same staging source bytes.

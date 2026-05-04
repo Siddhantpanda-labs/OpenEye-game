@@ -113,13 +113,15 @@ void DescriptorSetVK::UpdateTexture(uint32_t binding, ITexture* texture) {
     }
     TextureVK* texVK = static_cast<TextureVK*>(effective);
     const VkImageView imageView = texVK ? texVK->GetVkImageViewForShaderSamplerBinding() : VK_NULL_HANDLE;
-    const bool needsNearestSampler = (effective && effective->GetFormat() == RHITextureFormat::R32UI);
-    VkSampler sampler = static_cast<VkSampler>(needsNearestSampler ? m_device->GetNearestSampler() : m_device->GetDefaultSampler());
-    if (sampler == VK_NULL_HANDLE) return;
-    // Depth textures sampled in shaders require DEPTH_STENCIL_READ_ONLY_OPTIMAL; color textures use SHADER_READ_ONLY_OPTIMAL.
     const bool isDepthFormat = (effective &&
                                 (effective->GetFormat() == RHITextureFormat::Depth24Stencil8 ||
                                  effective->GetFormat() == RHITextureFormat::Depth24));
+    // Depth and integer attachments are sampled as unfiltered data (nearest + clamp).
+    const bool needsNearestSampler = (effective &&
+                                      (effective->GetFormat() == RHITextureFormat::R32UI || isDepthFormat));
+    VkSampler sampler = static_cast<VkSampler>(needsNearestSampler ? m_device->GetNearestSampler() : m_device->GetDefaultSampler());
+    if (sampler == VK_NULL_HANDLE) return;
+    // Depth textures sampled in shaders require DEPTH_STENCIL_READ_ONLY_OPTIMAL; color textures use SHADER_READ_ONLY_OPTIMAL.
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = sampler;
     imageInfo.imageView = imageView;

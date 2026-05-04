@@ -167,7 +167,7 @@ int main() {
 
     eyelib::rendering::RasterFeature rasterFeature;
     rasterFeature.SetMeshResolver(&meshResolver);
-    rasterFeature.SetRenderMode(eyelib::rendering::RenderMode::Forward);
+    rasterFeature.SetRenderMode(eyelib::rendering::RenderMode::Deferred);
     eyelib::rendering::RenderSceneView sceneView;
 
     {
@@ -229,14 +229,11 @@ int main() {
             firstMouse = true;
         }
         
-        eyelib::math::Vec3 front;
-        front.x = cos(glm::radians(camYaw)) * cos(glm::radians(camPitch));
-        front.y = sin(glm::radians(camPitch));
-        front.z = sin(glm::radians(camYaw)) * cos(glm::radians(camPitch));
-        front = glm::normalize(front);
+        const float yawRad = glm::radians(camYaw);
+        const float pitchRad = glm::radians(camPitch);
+        eyelib::math::Vec3 front = eyelib::rendering::camera::ComputeForward(yawRad, pitchRad);
         
         eyelib::math::Vec3 right = glm::normalize(glm::cross(front, eyelib::math::Vec3(0.0f, 1.0f, 0.0f)));
-        eyelib::math::Vec3 up = glm::normalize(glm::cross(right, front));
         
         float velocity = 5.0f * dt;
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) velocity *= 3.0f;
@@ -257,8 +254,8 @@ int main() {
 
             eyelib::rendering::camera::FreeFlyCameraDesc camDesc{};
             camDesc.position = {camX, camY, camZ};
-            camDesc.yaw = camYaw;
-            camDesc.pitch = camPitch;
+            camDesc.yaw = yawRad;
+            camDesc.pitch = pitchRad;
             camDesc.fovDegrees = 60.0f;
             camDesc.nearPlane = 0.1f;
             camDesc.farPlane = 1000.0f;
