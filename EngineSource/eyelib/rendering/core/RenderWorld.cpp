@@ -99,7 +99,7 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
     m_resources.EnsureStagingUploadBuffer(render.device);
     m_resources.EnsureGpuUploadScratchBuffer(render.device);
     m_resources.EnsurePerObjectBuffer(render.device, m_drawList.VisibleCount());
-    m_resources.EnsureMaterialTableBuffer(render.device, 1u);
+    m_resources.EnsureMaterialTableBufferForDrawList(render.device, m_drawList);
     render.resources = &m_resources;
 
     m_blackboard.ClearFrame();

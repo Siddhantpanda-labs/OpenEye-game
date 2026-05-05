@@ -153,6 +153,17 @@ void RenderResources::EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t m
         m_materialTableCapacity = cap;
 }
 
+void RenderResources::EnsureMaterialTableBufferForDrawList(rhi::IDevice* device, const DrawList& list) {
+    uint32_t requiredRows = 1u;
+    const uint32_t n = list.VisibleCount();
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t materialId = list.items[i].materialId;
+        if (materialId + 1u > requiredRows)
+            requiredRows = materialId + 1u;
+    }
+    EnsureMaterialTableBuffer(device, requiredRows);
+}
+
 void RenderResources::EnsureUniformBuffers(rhi::IDevice* device) {
     if (!device)
         return;

@@ -91,6 +91,8 @@ public:
     bool UploadMaterialTableFromDrawList(rhi::ICommandList* cmd, const DrawList& list);
     /** Ensure material-table SSBO capacity in rows (allocation only — A.8). */
     void EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t minMaterialCount);
+    /** Ensure material-table SSBO capacity for all visible material ids in the draw list. */
+    void EnsureMaterialTableBufferForDrawList(rhi::IDevice* device, const DrawList& list);
 
     uint32_t Width() const noexcept { return m_width; }
     uint32_t Height() const noexcept { return m_height; }
