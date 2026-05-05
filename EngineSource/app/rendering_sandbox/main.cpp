@@ -23,8 +23,10 @@
 
 #include <array>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <random>
+#include <string>
 
 namespace {
 
@@ -79,8 +81,10 @@ eyelib::rendering::MeshDescriptor LoadMeshWithAssimp(const char* path) {
     const aiScene* scene = importer.ReadFile(path, 
         aiProcess_Triangulate | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_FlipUVs | aiProcess_JoinIdenticalVertices);
         
-    if (!scene || !scene->mRootNode) {
-        std::fprintf(stderr, "Assimp failed to load %s\n", path);
+    if (!scene || !scene->mRootNode || scene->mNumMeshes == 0u) {
+        std::fprintf(stderr, "Assimp failed to load '%s': %s\n",
+                     path ? path : "(null)",
+                     importer.GetErrorString());
         return MakeCenterCubeMeshDescriptor(); // Fallback
     }
     
@@ -113,7 +117,38 @@ eyelib::rendering::MeshDescriptor LoadMeshWithAssimp(const char* path) {
         d.submeshes.push_back(sm);
     }
     
+    if (d.vertices.empty() || d.indices32.empty()) {
+        std::fprintf(stderr, "Assimp loaded '%s' but produced no triangles; using fallback cube.\n", path);
+        return MakeCenterCubeMeshDescriptor();
+    }
+
+    std::printf("Sandbox: loaded mesh '%s' (%u meshes, %u vertices, %u indices, %u submeshes)\n",
+                path,
+                static_cast<unsigned>(scene->mNumMeshes),
+                static_cast<unsigned>(d.vertices.size()),
+                static_cast<unsigned>(d.indices32.size()),
+                static_cast<unsigned>(d.submeshes.size()));
     return d;
+}
+
+std::string ResolveSponzaPath() {
+    namespace fs = std::filesystem;
+    const std::array<const char*, 6> candidates = {
+        "assets/models/sponza.glb",
+        "Engine/assets/models/sponza.glb",
+        "../assets/models/sponza.glb",
+        "../Engine/assets/models/sponza.glb",
+        "../../assets/models/sponza.glb",
+        "../../Engine/assets/models/sponza.glb",
+    };
+
+    for (const char* rel : candidates) {
+        const fs::path p(rel);
+        if (fs::exists(p)) {
+            return p.lexically_normal().string();
+        }
+    }
+    return {};
 }
 
 struct SandboxMeshResolver final : eyelib::rendering::IMeshHandleResolver {
@@ -153,9 +188,18 @@ int main() {
         return 3;
     }
 
-    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), MakeCenterCubeMeshDescriptor());
+    eyelib::rendering::MeshDescriptor meshDesc = MakeCenterCubeMeshDescriptor();
+    const std::string sponzaPath = ResolveSponzaPath();
+    if (!sponzaPath.empty()) {
+        meshDesc = LoadMeshWithAssimp(sponzaPath.c_str());
+    } else {
+        std::fprintf(stderr,
+                     "Sandbox: could not find sponza.glb under assets/models; using fallback cube.\n");
+    }
+
+    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), meshDesc);
     if (!sandboxMesh) {
-        std::fprintf(stderr, "OpenEyeRenderingSandbox: centered cube Mesh::Create failed\n");
+        std::fprintf(stderr, "OpenEyeRenderingSandbox: Mesh::Create failed\n");
         device.reset();
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -174,10 +218,10 @@ int main() {
         using namespace eyelib::rendering;
         SceneDrawInstance visible{};
         visible.meshHandle = 0u;
-        visible.materialId = 3u; // Diagnostic yellow material in forward_opaque.frag
+        visible.materialId = 0u;
         visible.transformIndex = 0u;
         visible.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.0f, 0.0f, 0.0f));
-        visible.localBounds = {{-10.0f, -10.0f, -10.0f}, {10.0f, 10.0f, 10.0f}};
+        visible.localBounds = {{-1000.0f, -1000.0f, -1000.0f}, {1000.0f, 1000.0f, 1000.0f}};
         visible.layer = DrawLayer::Opaque;
         sceneView.drawInstances.push_back(visible);
     }
@@ -207,7 +251,7 @@ int main() {
         float dt = static_cast<float>(currentT - lastT);
         lastT = currentT;
 
-        static float camX = 0.0f, camY = 2.0f, camZ = 8.0f;
+        static float camX = 0.0f, camY = 1.5f, camZ = 8.0f;
         static float camYaw = 0.0f, camPitch = 0.0f;
         static double lastMouseX = 0.0, lastMouseY = 0.0;
         static bool firstMouse = true;
@@ -221,7 +265,7 @@ int main() {
             lastMouseX = mouseX; lastMouseY = mouseY;
             
             float sensitivity = 0.1f;
-            camYaw -= xoffset * sensitivity; // Inverted yaw for right-click drag
+            camYaw += xoffset * sensitivity; // Swapped drag direction: moving mouse right rotates camera right.
             camPitch += yoffset * sensitivity;
             if (camPitch > 89.0f) camPitch = 89.0f;
             if (camPitch < -89.0f) camPitch = -89.0f;
@@ -235,7 +279,7 @@ int main() {
         
         eyelib::math::Vec3 right = glm::normalize(glm::cross(front, eyelib::math::Vec3(0.0f, 1.0f, 0.0f)));
         
-        float velocity = 5.0f * dt;
+        float velocity = 50.0f * dt;
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) velocity *= 3.0f;
         
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) { camX += front.x * velocity; camY += front.y * velocity; camZ += front.z * velocity; }
@@ -277,10 +321,8 @@ int main() {
             retargetTimer = retargetDist(rng);
         }
         rotationAngle += dt * rotationSpeed;
-        // Animated Cube
-        eyelib::math::Mat4 model = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, rotationAngle, rotationAxis);
-        sceneView.drawInstances[0].worldTransform = model;
+        // Keep static transform for asset inspection; leave camera as the primary interaction.
+        sceneView.drawInstances[0].worldTransform = glm::scale(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.2f));
 
         device->BeginFrame();
         eyelib::rendering::rhi::ICommandList* cmd = device->GetImmediateCommandList();

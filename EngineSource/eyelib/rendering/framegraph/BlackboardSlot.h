@@ -19,8 +19,16 @@ enum class BlackboardSlot : uint8_t {
     PerViewUniformBuffer,
     /** Per-draw instance SSBO (transforms + material ids), std430. Filled in upload phase (B.4). */
     PerObjectStorageBuffer,
+    /** Material-table SSBO (`materials::MaterialGpuStd430` rows), indexed by `DrawItem::materialId`. */
+    MaterialTableStorageBuffer,
     /** Single directional light UBO (std140, 256 bytes). Filled in upload phase (B.6). */
     DirectionalLightUniformBuffer,
+    /** Default diffuse IBL cubemap (linear RGBA16F); published by `IblDefaultProbes` / `writer_names::kLightingIbl`. */
+    IblIrradianceCubemap,
+    /** Default specular prefilter cubemap (same footprint as irradiance until a mip chain is authored). */
+    IblPrefilterCubemap,
+    /** BRDF split-sum LUT (`RGBA16F`, RG used). */
+    IblBrdfLut,
     SlotCount
 };
 

@@ -41,6 +41,13 @@ void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
     }
     m_perObjectCapacity = 0;
     m_perObjectSsboStoragePrimed = false;
+    if (m_materialTableSsbo && device) {
+        device->DestroyBuffer(m_materialTableSsbo);
+        m_materialTableSsbo = nullptr;
+    }
+    m_materialTableCapacity = 0;
+    m_materialTableSsboStoragePrimed = false;
+    m_materialTable.ResetToDefault();
     if (m_dirLightUbo && device) {
         device->DestroyBuffer(m_dirLightUbo);
         m_dirLightUbo = nullptr;
@@ -115,6 +122,35 @@ void RenderResources::EnsurePerObjectBuffer(rhi::IDevice* device, uint32_t minIn
     m_perObjectSsbo = device->CreateBuffer(d, nullptr);
     if (m_perObjectSsbo)
         m_perObjectCapacity = cap;
+}
+
+void RenderResources::EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t minMaterialCount) {
+    if (!device)
+        return;
+    const uint32_t need = (std::max)(minMaterialCount, 1u);
+    uint32_t cap = 64u;
+    while (cap < need) {
+        if (cap > UINT32_MAX / 2u)
+            break;
+        cap *= 2u;
+    }
+    if (m_materialTableSsbo && m_materialTableCapacity >= cap)
+        return;
+
+    if (m_materialTableSsbo && device)
+        device->DestroyBuffer(m_materialTableSsbo);
+    m_materialTableSsbo = nullptr;
+    m_materialTableCapacity = 0;
+    m_materialTableSsboStoragePrimed = false;
+
+    rhi::BufferDesc d{};
+    d.sizeInBytes = static_cast<size_t>(cap) * sizeof(materials::MaterialGpuStd430);
+    d.usage = rhi::BufferUsage::TransferDst | rhi::BufferUsage::Storage;
+    d.memoryHint = rhi::BufferMemoryHint::DeviceOnly;
+    d.debugName = "EyelibRendering.MaterialTableSsbo";
+    m_materialTableSsbo = device->CreateBuffer(d, nullptr);
+    if (m_materialTableSsbo)
+        m_materialTableCapacity = cap;
 }
 
 void RenderResources::EnsureUniformBuffers(rhi::IDevice* device) {
@@ -370,6 +406,30 @@ bool RenderResources::UploadPerObjectBufferFromDrawList(rhi::ICommandList* cmd, 
         }
     }
     return RecordStorageBufferUploadFromStaging(cmd, m_perObjectSsbo, m_perObjectSsboStoragePrimed, rows.data(), bytes);
+}
+
+bool RenderResources::UploadMaterialTableFromDrawList(rhi::ICommandList* cmd, const DrawList& list) {
+    if (!m_materialTableSsbo)
+        return false;
+
+    uint32_t requiredRows = 1u;
+    const uint32_t n = list.VisibleCount();
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t materialId = list.items[i].materialId;
+        if (materialId + 1u > requiredRows)
+            requiredRows = materialId + 1u;
+    }
+
+    if (requiredRows > m_materialTableCapacity)
+        return false;
+
+    const size_t bytes = static_cast<size_t>(requiredRows) * sizeof(materials::MaterialGpuStd430);
+    if (bytes > kStagingUploadBytes)
+        return false;
+
+    std::vector<materials::MaterialGpuStd430> rows;
+    m_materialTable.BuildGpuRows(requiredRows, rows);
+    return RecordStorageBufferUploadFromStaging(cmd, m_materialTableSsbo, m_materialTableSsboStoragePrimed, rows.data(), bytes);
 }
 
 bool RenderResources::RecordGpuUploadScratchFromStaging(rhi::ICommandList* cmd, const void* data, size_t sizeInBytes) {

@@ -54,6 +54,13 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
                              const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
                              rhi::PipelineLayoutKind layoutKind,
                              const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
+    return BuildFromSource(device, vertexSrc, fragmentSrc, layout, topology, layoutKind, nullptr, attachmentFormats);
+}
+
+bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
+                             const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
+                             rhi::PipelineLayoutKind layoutKind, const rhi::DepthStencilState* depthStencilOverride,
+                             const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats) {
     if (!device) return false;
     if (m_deviceRHI) Destroy(m_deviceRHI);
     m_reflection = ParseShaderReflection(vertexSrc, fragmentSrc);
@@ -71,8 +78,12 @@ bool Shader::BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc,
     desc.topology = topology;
     desc.layoutKind = layoutKind;
     desc.attachmentFormats = attachmentFormats;
-    desc.depthStencil.depthTest = true;
-    desc.depthStencil.depthWrite = true;
+    if (depthStencilOverride) {
+        desc.depthStencil = *depthStencilOverride;
+    } else {
+        desc.depthStencil.depthTest = true;
+        desc.depthStencil.depthWrite = true;
+    }
     rhi::IPipeline* pipe = device->CreateGraphicsPipeline(desc);
     device->DestroyShader(vs);
     device->DestroyShader(fs);

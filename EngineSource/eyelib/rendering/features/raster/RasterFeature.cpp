@@ -46,6 +46,8 @@ RasterFeature::~RasterFeature() {
     m_blitPass.reset();
     m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
     m_shaderLibrary.ClearRegistrations();
+    m_iblDefaultProbes.Shutdown(m_iblDevice);
+    m_iblDevice = nullptr;
     m_pipelineDevice = nullptr;
 }
 
@@ -119,9 +121,24 @@ void RasterFeature::OnRegister(const RenderCapabilities& caps) {
     m_shaderLibrary.AddEntry(kPermDeferredLightingBaseline, makeDeferredLightingSpec());
 }
 
+void RasterFeature::OnRegisterBlackboardWriters(BlackboardWriterRegistry& registry, const RenderCapabilities& caps) {
+    (void)caps;
+    (void)registry.TryReserve(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl);
+    (void)registry.TryReserve(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl);
+    (void)registry.TryReserve(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl);
+}
+
+void RasterFeature::OnUnregisterBlackboardWriters(BlackboardWriterRegistry& registry) {
+    (void)registry.TryRelease(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl);
+    (void)registry.TryRelease(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl);
+    (void)registry.TryRelease(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl);
+}
+
 void RasterFeature::OnShutdown() {
     m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
     m_shaderLibrary.ClearRegistrations();
+    m_iblDefaultProbes.Shutdown(m_iblDevice);
+    m_iblDevice = nullptr;
     m_pipelineDevice = nullptr;
 }
 
@@ -129,6 +146,8 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     RenderResources* res = render.resources;
     if (!res || !render.recordingCommandList || !render.device)
         return;
+    m_iblDevice = render.device;
+    m_iblDefaultProbes.Ensure(render.device);
 
     res->EnsureUniformBuffers(render.device);
 
@@ -170,17 +189,22 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     bool uploadedPerObject = true;
     if (render.drawList)
         uploadedPerObject = res->UploadPerObjectBufferFromDrawList(render.recordingCommandList, *render.drawList);
+    const bool uploadedMaterialTable = render.drawList
+        ? res->UploadMaterialTableFromDrawList(render.recordingCommandList, *render.drawList)
+        : true;
 
-    if (!uploadedPerFrame || !uploadedDirLight || !uploadedPerObject) {
+    if (!uploadedPerFrame || !uploadedDirLight || !uploadedPerObject || !uploadedMaterialTable) {
         static int s_uploadFailWarnCount = 0;
         if (s_uploadFailWarnCount < 8) {
             ++s_uploadFailWarnCount;
             core::Log::WarnF(
-                "RasterFeature::OnUpload resource upload status: perFrame=%s perView=%s dirLight=%s perObject=%s visible=%u",
+                "RasterFeature::OnUpload resource upload status: perFrame=%s perView=%s dirLight=%s perObject=%s "
+                "materialTable=%s visible=%u",
                 uploadedPerFrame ? "ok" : "fail",
                 uploadedPerView ? "ok" : "fail",
                 uploadedDirLight ? "ok" : "fail",
                 uploadedPerObject ? "ok" : "fail",
+                uploadedMaterialTable ? "ok" : "fail",
                 render.drawList ? render.drawList->VisibleCount() : 0u);
         }
     }
@@ -190,7 +214,14 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     if (render.device) {
         m_shaderLibrary.WarmUpPipelines(render.device);
         m_pipelineDevice = render.device;
+        if (!m_iblDevice) m_iblDevice = render.device;
     }
+    if (rhi::ITexture* iblEnv = m_iblDefaultProbes.EnvCubemap()) {
+        blackboard.PublishTexture(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl, iblEnv);
+        blackboard.PublishTexture(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl, iblEnv);
+    }
+    if (rhi::ITexture* iblLut = m_iblDefaultProbes.BrdfLut())
+        blackboard.PublishTexture(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl, iblLut);
 
     rhi::IPipeline* forwardPipeline = m_shaderLibrary.TryGetPipeline(kPermForwardOpaqueBaseline);
 

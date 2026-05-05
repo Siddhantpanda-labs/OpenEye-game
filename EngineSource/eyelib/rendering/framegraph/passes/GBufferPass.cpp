@@ -71,7 +71,8 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* perObject = m_blackboard->TryGetBuffer(BlackboardSlot::PerObjectStorageBuffer);
-    if (!perFrame || !perView || !perObject) return;
+    rhi::IBuffer* materialTable = m_blackboard->TryGetBuffer(BlackboardSlot::MaterialTableStorageBuffer);
+    if (!perFrame || !perView || !perObject || !materialTable) return;
 
     const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
 
@@ -90,8 +91,9 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         }
     }
 
-    // Pass set (RasterGBufferData): binding0=PerObject SSBO.
-    const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perObject));
+    // Pass set (RasterGBufferData): binding0=PerObject SSBO, binding1=MaterialTable SSBO.
+    const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(perObject)) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(materialTable)) << 7u);
     if (!m_passSets[frameIdx] || dataKey != m_passSetBuffersKeys[frameIdx]) {
         if (!m_passSets[frameIdx]) {
             rhi::IPipelineLayout* dataLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterGBufferData);
@@ -100,6 +102,7 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         m_passSetBuffersKeys[frameIdx] = dataKey;
         if (m_passSets[frameIdx]) {
             m_passSets[frameIdx]->UpdateStorageBuffer(0, perObject, 0, 0);
+            m_passSets[frameIdx]->UpdateStorageBuffer(1, materialTable, 0, 0);
         }
     }
 

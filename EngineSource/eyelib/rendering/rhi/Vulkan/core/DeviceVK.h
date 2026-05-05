@@ -381,7 +381,7 @@ private:
     void* m_rasterForwardDataSetLayout = nullptr;
     /** Set1 layout for `PipelineLayoutKind::RasterGBuffer` (PerObject SSBO). */
     void* m_rasterGBufferDataSetLayout = nullptr;
-    /** Set1 layout for `PipelineLayoutKind::RasterDeferredLighting` (G-Buffer + dir light). */
+    /** Set1 layout for `PipelineLayoutKind::RasterDeferredLighting` (GBuffer, dir light UBO, IBL). */
     void* m_RasterDeferredLightingDataSetLayout = nullptr;
     /** Full pipeline layout for `PipelineLayoutKind::RasterDeferredLighting` (set0 Frame, set1 RasterDeferredLightingData). */
     void* m_RasterDeferredLightingPipelineLayout = nullptr;

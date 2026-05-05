@@ -69,30 +69,50 @@ void WarnFirstMergedBarrierTextureUnknownLayout(rhi::IDevice* device, const std:
                                                int& warnBudget) {
     if (!device || !device->GetBarrierTracker())
         return;
-    std::unordered_map<const rhi::ITexture*, uint32_t> firstPass;
+
+    struct FirstTouchInfo {
+        uint32_t passIndex = 0;
+        rhi::ResourceState toState = rhi::ResourceState::Undefined;
+    };
+    auto IsRiskyFirstUseFromUndefined = [](rhi::ResourceState toState) {
+        // True-risk cases: first use is read-only with no known producer/layout handoff.
+        switch (toState) {
+        case rhi::ResourceState::ShaderResource:
+        case rhi::ResourceState::DepthRead:
+            return true;
+        default:
+            return false;
+        }
+    };
+
+    std::unordered_map<const rhi::ITexture*, FirstTouchInfo> firstTouch;
     for (size_t p = 0; p < merged.size(); ++p) {
         for (const FrameGraphBarrierList::Entry& e : merged[p].entries) {
             if (!e.texture)
                 continue;
-            if (firstPass.find(e.texture) != firstPass.end())
+            if (firstTouch.find(e.texture) != firstTouch.end())
                 continue;
-            firstPass[e.texture] = static_cast<uint32_t>(p);
+            firstTouch[e.texture] = FirstTouchInfo{static_cast<uint32_t>(p), e.toState};
         }
     }
-    for (const auto& kv : firstPass) {
+
+    for (const auto& kv : firstTouch) {
         const rhi::ITexture* tex = kv.first;
-        const uint32_t fp = kv.second;
+        const uint32_t fp = kv.second.passIndex;
+        const rhi::ResourceState firstTo = kv.second.toState;
         if (fp == 0)
             continue;
         if (device->GetTextureTrackedState(tex) != rhi::ResourceState::Undefined)
+            continue;
+        if (!IsRiskyFirstUseFromUndefined(firstTo))
             continue;
         if (warnBudget <= 0)
             return;
         --warnBudget;
         core::Log::WarnF(
-            "FrameGraph::Compile: first merged texture barrier is in pass %u but barrier-tracker layout is Undefined "
-            "(no earlier pass in this graph established a known layout for this resource).",
-            static_cast<unsigned>(fp));
+            "FrameGraph::Compile: texture %p first merged barrier is in pass %u with read-state toState=%u while "
+            "barrier-tracker layout is Undefined (possible missing producer/transition handoff).",
+            static_cast<const void*>(tex), static_cast<unsigned>(fp), static_cast<unsigned>(firstTo));
     }
 }
 

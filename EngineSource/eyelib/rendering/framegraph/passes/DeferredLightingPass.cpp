@@ -44,6 +44,15 @@ void DeferredLightingPass::CollectTextureBarriers(const FrameGraphBlackboard& bl
         if (rhi::ITexture* depth = gbuffer->GetDepthTexture())
             out.Push(depth, rhi::ResourceState::DepthRead);
     }
+
+    rhi::ITexture* iblIrr = blackboard.TryGetTexture(BlackboardSlot::IblIrradianceCubemap);
+    rhi::ITexture* iblPre = blackboard.TryGetTexture(BlackboardSlot::IblPrefilterCubemap);
+    if (iblIrr)
+        out.Push(iblIrr, rhi::ResourceState::ShaderResource);
+    if (iblPre && iblPre != iblIrr)
+        out.Push(iblPre, rhi::ResourceState::ShaderResource);
+    if (rhi::ITexture* iblLut = blackboard.TryGetTexture(BlackboardSlot::IblBrdfLut))
+        out.Push(iblLut, rhi::ResourceState::ShaderResource);
 }
 
 bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const {
@@ -101,11 +110,17 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
     rhi::ITexture* c0 = gbuffer->GetColorTexture(0);
     rhi::ITexture* c1 = gbuffer->GetColorTexture(1);
     rhi::ITexture* c2 = gbuffer->GetColorTexture(2);
+    rhi::ITexture* iblIrr = m_blackboard->TryGetTexture(BlackboardSlot::IblIrradianceCubemap);
+    rhi::ITexture* iblSpec = m_blackboard->TryGetTexture(BlackboardSlot::IblPrefilterCubemap);
+    rhi::ITexture* iblLut = m_blackboard->TryGetTexture(BlackboardSlot::IblBrdfLut);
     const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirLight)) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c0)) << 3u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c1)) << 7u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c2)) << 11u) ^
-                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(depthTex)) << 17u);
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(depthTex)) << 17u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblIrr)) << 21u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblSpec)) << 25u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblLut)) << 29u);
     if (!m_passSets[frameIdx] || dataKey != m_passSetKeys[frameIdx]) {
         if (!m_passSets[frameIdx]) {
             rhi::IPipelineLayout* passLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterDeferredLightingData);
@@ -118,6 +133,10 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
             m_passSets[frameIdx]->UpdateTexture(2, gbuffer->GetColorTexture(2));
             m_passSets[frameIdx]->UpdateTexture(3, depthTex); // Read depth (now uses DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             m_passSets[frameIdx]->UpdateUniformBuffer(4, dirLight, 0, kDirectionalLightUniformGpuBytes);
+            // IBL: blackboard from `RenderResources`; `UpdateTexture(nullptr)` uses engine fallbacks when absent.
+            m_passSets[frameIdx]->UpdateTexture(5, iblIrr);
+            m_passSets[frameIdx]->UpdateTexture(6, iblSpec);
+            m_passSets[frameIdx]->UpdateTexture(7, iblLut);
         }
     }
 

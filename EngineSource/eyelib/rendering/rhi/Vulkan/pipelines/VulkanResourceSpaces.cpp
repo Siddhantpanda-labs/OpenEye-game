@@ -467,9 +467,11 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     // Set 1 — RasterDeferredLightingData:
     //   binding 0-3: G-Buffer textures (albedo, normal, material, depth) — sampler2D → COMBINED_IMAGE_SAMPLER.
     //   binding 4:   Directional light UBO.
+    //   binding 5-6: IBL irradiance + prefiltered specular (samplerCube).
+    //   binding 7:   BRDF integration LUT (sampler2D).
     // NOTE: descriptor type must match the GLSL declaration; sampler2D = COMBINED_IMAGE_SAMPLER.
     const VkShaderStageFlags fragStage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutBinding bindings[5] = {};
+    VkDescriptorSetLayoutBinding bindings[8] = {};
     for (int i = 0; i < 4; ++i) {
         bindings[i].binding = static_cast<uint32_t>(i);
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -480,10 +482,20 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[4].descriptorCount = 1;
     bindings[4].stageFlags = fragStage;
+    for (int i = 5; i <= 6; ++i) {
+        bindings[i].binding = static_cast<uint32_t>(i);
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = fragStage;
+    }
+    bindings[7].binding = 7;
+    bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[7].descriptorCount = 1;
+    bindings[7].stageFlags = fragStage;
     (void)includeMeshShaderStages; // fragment-only pass
 
     VkDescriptorSetLayoutCreateInfo info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    info.bindingCount = 5;
+    info.bindingCount = 8;
     info.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)
@@ -521,16 +533,20 @@ VkPipelineLayout CreateRasterForwardMinimalPipelineLayout(VkDevice device, VkDes
 
 VkDescriptorSetLayout CreateRasterGBufferDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
     const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
-    VkDescriptorSetLayoutBinding binding = {};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = st;
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = st;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = st;
 
     VkDescriptorSetLayoutCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    info.bindingCount = 1;
-    info.pBindings = &binding;
+    info.bindingCount = 2;
+    info.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     VkResult res = vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
     if (res != VK_SUCCESS) {

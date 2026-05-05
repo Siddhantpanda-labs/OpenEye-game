@@ -66,7 +66,11 @@ std::shared_ptr<Mesh> CreateCubeMesh(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL,
+    rhi::DepthStencilState ds{};
+    ds.depthTest = false;
+    ds.depthWrite = false;
+    if (!shader->Load(device, "passes/ibl/irradiance_convolution", Mesh::GetVertexLayoutRHI(),
+                      rhi::PrimitiveTopology::TriangleList, &ds, rhi::PipelineLayoutKind::IBL,
                       std::optional{rhi::StandardAttachmentFormats::IBLFaceCapture()})) {
         return nullptr;
     }
@@ -75,7 +79,11 @@ std::shared_ptr<Shader> CreateIrradianceShader(rhi::IDevice* device) {
 
 std::shared_ptr<Shader> CreatePrefilterShader(rhi::IDevice* device) {
     auto shader = std::make_shared<Shader>();
-    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::IBL,
+    rhi::DepthStencilState ds{};
+    ds.depthTest = false;
+    ds.depthWrite = false;
+    if (!shader->Load(device, "passes/ibl/prefilter", Mesh::GetVertexLayoutRHI(),
+                      rhi::PrimitiveTopology::TriangleList, &ds, rhi::PipelineLayoutKind::IBL,
                       std::optional{rhi::StandardAttachmentFormats::IBLFaceCapture()})) {
         return nullptr;
     }
@@ -176,7 +184,11 @@ void main() {
 }
 )";
     auto shader = std::make_shared<Shader>();
-    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(), rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly,
+    rhi::DepthStencilState ds{};
+    ds.depthTest = false;
+    ds.depthWrite = false;
+    if (!shader->BuildFromSource(device, vert, frag, Mesh::GetFullscreenQuadVertexLayoutRHI(),
+                                 rhi::PrimitiveTopology::TriangleList, rhi::PipelineLayoutKind::PushOnly, &ds,
                                  std::optional{rhi::StandardAttachmentFormats::BrdfLutRGBA16F()}))
         return nullptr;
     return shader;
@@ -283,7 +295,7 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
     rhi::ICommandList* cmd = m_deviceRHI->GetActiveRecordingCommandList();
     if (!cmd) return false;
 
-    rhi::BarrierTextureForShaderRead(cmd, environmentCubemap);
+    // Environment cubemap is sampled as SRV; avoid assuming it came from RenderTarget state here.
 
     const math::Mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
     const math::Mat4 captureViews[] = {
@@ -381,6 +393,12 @@ bool IBL::Initialize(rhi::ITexture* environmentCubemap, uint32_t irradianceRes, 
             m_deviceRHI->DestroyRenderTarget(rt);
         }
     }
+
+    // Upload/IBL generation writes these as render targets outside the frame graph.
+    // Transition to SRV now so FrameGraph::Compile sees stable tracker state on first read.
+    cmd->BarrierTexture(m_irradianceRHI, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
+    cmd->BarrierTexture(m_prefilterRHI, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
+    cmd->BarrierTexture(m_brdfLUTRHI, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
 
     return true;
 }
@@ -495,6 +513,10 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             device->DestroyRenderTarget(rt);
         }
     }
+
+    // Generated as render targets; make them shader-readable for downstream frame-graph consumers.
+    cmd->BarrierTexture(outIrradiance, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
+    cmd->BarrierTexture(outPrefilter, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
 
     return true;
 }

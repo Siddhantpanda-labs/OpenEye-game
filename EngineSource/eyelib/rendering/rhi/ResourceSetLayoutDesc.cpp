@@ -94,6 +94,7 @@ PipelineLayoutDesc MakeResourceSetDesc(ResourceSetType type) {
     case ResourceSetType::RasterGBufferData:
         desc.bindings = {
             {0, BindingType::StorageBuffer},
+            {1, BindingType::StorageBuffer},
         };
         break;
     case ResourceSetType::RasterDeferredLightingData:
@@ -103,6 +104,9 @@ PipelineLayoutDesc MakeResourceSetDesc(ResourceSetType type) {
             {2, BindingType::Texture},
             {3, BindingType::Texture},
             {4, BindingType::UniformBuffer},
+            {5, BindingType::TextureCube},
+            {6, BindingType::TextureCube},
+            {7, BindingType::Texture},
         };
         break;
     }

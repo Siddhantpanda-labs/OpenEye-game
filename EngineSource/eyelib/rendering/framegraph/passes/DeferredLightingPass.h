@@ -16,7 +16,8 @@ struct IDescriptorSet;
 
 /**
  * Deferred shading lighting pass.
- * Reads G-buffer MRTs, **G-buffer depth** (same depth target `GBufferPass` wrote), and DirLight UBO; writes HDR color on
+ * Reads G-buffer MRTs, **G-buffer depth** (same depth target `GBufferPass` wrote), DirLight UBO, and IBL textures
+ * (`IblIrradianceCubemap` / `IblPrefilterCubemap` / `IblBrdfLut` on the blackboard). Writes HDR color on
  * `MainHdrRenderTarget`. Binds `PipelineLayoutKind::RasterDeferredLighting`.
  */
 class DeferredLightingPass final : public IFrameGraphPass {

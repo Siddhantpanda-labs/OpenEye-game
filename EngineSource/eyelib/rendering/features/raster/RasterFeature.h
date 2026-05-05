@@ -5,6 +5,7 @@
 #include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
 #include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
 #include "eyelib/rendering/framegraph/passes/GBufferPass.h"
+#include "eyelib/rendering/lighting/ibl/IblDefaultProbes.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
 #include "eyelib/rendering/shaders/ShaderLibrary.h"
 #include <memory>
@@ -35,6 +36,8 @@ public:
     const char* FeatureDebugName() const noexcept override { return writer_names::kRasterFeature; }
 
     void OnRegister(const RenderCapabilities& caps) override;
+    void OnRegisterBlackboardWriters(BlackboardWriterRegistry& registry, const RenderCapabilities& caps) override;
+    void OnUnregisterBlackboardWriters(BlackboardWriterRegistry& registry) override;
     void OnUpload(FrameContext& frame, const RenderContext& render) override;
     void OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& blackboard, const RenderContext& render) override;
     void OnShutdown() override;
@@ -50,7 +53,9 @@ private:
     RenderMode m_mode = RenderMode::Deferred;
     shaders::ShaderLibrary m_shaderLibrary;
     rhi::IDevice* m_pipelineDevice = nullptr;
+    rhi::IDevice* m_iblDevice = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
+    IblDefaultProbes m_iblDefaultProbes;
 
     // Persistent pass objects — owned here so their descriptor sets survive across frames.
     std::unique_ptr<GBufferPass>            m_gbufferPass;

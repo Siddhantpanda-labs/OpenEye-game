@@ -62,6 +62,7 @@ void RenderWorld::Initialize() {
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerFrameUniformBuffer, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::PerObjectStorageBuffer, writer_names::kRenderResources);
+    (void)m_blackboardWriters.TryReserve(BlackboardSlot::MaterialTableStorageBuffer, writer_names::kRenderResources);
     (void)m_blackboardWriters.TryReserve(BlackboardSlot::DirectionalLightUniformBuffer, writer_names::kRenderResources);
     m_blackboard.SetWriterRegistry(&m_blackboardWriters);
 
@@ -98,6 +99,7 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
     m_resources.EnsureStagingUploadBuffer(render.device);
     m_resources.EnsureGpuUploadScratchBuffer(render.device);
     m_resources.EnsurePerObjectBuffer(render.device, m_drawList.VisibleCount());
+    m_resources.EnsureMaterialTableBuffer(render.device, 1u);
     render.resources = &m_resources;
 
     m_blackboard.ClearFrame();
@@ -113,6 +115,8 @@ void RenderWorld::PrepareUploadPhaseResources(RenderContext& render) {
         m_blackboard.PublishBuffer(BlackboardSlot::PerViewUniformBuffer, writer_names::kRenderResources, perView);
     if (rhi::IBuffer* perObj = m_resources.PerObjectStorageBuffer())
         m_blackboard.PublishBuffer(BlackboardSlot::PerObjectStorageBuffer, writer_names::kRenderResources, perObj);
+    if (rhi::IBuffer* matTable = m_resources.MaterialTableStorageBuffer())
+        m_blackboard.PublishBuffer(BlackboardSlot::MaterialTableStorageBuffer, writer_names::kRenderResources, matTable);
     if (rhi::IBuffer* dir = m_resources.DirectionalLightUniformBuffer())
         m_blackboard.PublishBuffer(BlackboardSlot::DirectionalLightUniformBuffer, writer_names::kRenderResources, dir);
 }

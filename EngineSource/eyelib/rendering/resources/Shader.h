@@ -58,6 +58,11 @@ public:
                          const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
                          rhi::PipelineLayoutKind layoutKind,
                          const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats = std::nullopt);
+    /** Build from source with explicit depth/stencil state override. */
+    bool BuildFromSource(rhi::IDevice* device, const std::string& vertexSrc, const std::string& fragmentSrc,
+                         const rhi::VertexLayout& layout, rhi::PrimitiveTopology topology,
+                         rhi::PipelineLayoutKind layoutKind, const rhi::DepthStencilState* depthStencilOverride,
+                         const std::optional<rhi::PipelineAttachmentFormats>& attachmentFormats = std::nullopt);
     /** Build pipeline from pre-created shaders (e.g. vertex from .spv, fragment from compile). Destroys vs/fs after pipeline creation. */
     bool BuildFromShaders(rhi::IDevice* device, rhi::IShader* vs, rhi::IShader* fs, const rhi::VertexLayout& layout,
                          rhi::PrimitiveTopology topology, rhi::PipelineLayoutKind layoutKind,

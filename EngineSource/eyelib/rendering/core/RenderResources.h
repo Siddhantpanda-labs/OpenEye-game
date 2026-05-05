@@ -2,6 +2,7 @@
 
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
+#include "eyelib/rendering/materials/MaterialTable.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -86,6 +87,10 @@ public:
 
     /** Pack visible `DrawList` rows into the PerObject SSBO (OnUpload only). No-op when `list.VisibleCount()==0`. */
     bool UploadPerObjectBufferFromDrawList(rhi::ICommandList* cmd, const DrawList& list);
+    /** Upload material-table rows (`materials::MaterialGpuStd430`) indexed by `DrawItem::materialId` (OnUpload only). */
+    bool UploadMaterialTableFromDrawList(rhi::ICommandList* cmd, const DrawList& list);
+    /** Ensure material-table SSBO capacity in rows (allocation only — A.8). */
+    void EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t minMaterialCount);
 
     uint32_t Width() const noexcept { return m_width; }
     uint32_t Height() const noexcept { return m_height; }
@@ -117,6 +122,12 @@ public:
     /** Directional light UBO (std140, 256 bytes). Created by `EnsureUniformBuffers`. */
     rhi::IBuffer* DirectionalLightUniformBuffer() noexcept { return m_dirLightUbo; }
     const rhi::IBuffer* DirectionalLightUniformBuffer() const noexcept { return m_dirLightUbo; }
+    /** Material-table SSBO (`materials::MaterialGpuStd430` rows). */
+    rhi::IBuffer* MaterialTableStorageBuffer() noexcept { return m_materialTableSsbo; }
+    const rhi::IBuffer* MaterialTableStorageBuffer() const noexcept { return m_materialTableSsbo; }
+    /** Runtime-owned material table addressed by `DrawItem::materialId`. */
+    materials::MaterialTable& MaterialTable() noexcept { return m_materialTable; }
+    const materials::MaterialTable& MaterialTable() const noexcept { return m_materialTable; }
 
 private:
     size_t AllocateStagingUploadSlice(size_t sizeInBytes, size_t alignment = 16u) noexcept;
@@ -136,17 +147,21 @@ private:
     rhi::IBuffer* m_perFrameUbo = nullptr;
     rhi::IBuffer* m_perViewUbo = nullptr;
     rhi::IBuffer* m_perObjectSsbo = nullptr;
+    rhi::IBuffer* m_materialTableSsbo = nullptr;
     rhi::IBuffer* m_dirLightUbo = nullptr;
     uint32_t m_perObjectCapacity = 0;
+    uint32_t m_materialTableCapacity = 0;
     bool m_perFrameUboUniformPrimed = false;
     bool m_perViewUboUniformPrimed = false;
     bool m_dirLightUboUniformPrimed = false;
     bool m_perObjectSsboStoragePrimed = false;
+    bool m_materialTableSsboStoragePrimed = false;
     size_t m_stagingUploadOffset = 0;
     /** Staging was used as a transfer source on the GPU (needs transfer→host before next CPU write). */
     bool m_stagingGpuReadPending = false;
     /** Scratch buffer was transitioned to uniform read after last successful upload. */
     bool m_gpuScratchUniformReady = false;
+    materials::MaterialTable m_materialTable{};
 #if !defined(NDEBUG)
     /** Nested `BeginUploadRecordingPhase` count; GPU upload APIs require depth > 0. */
     uint32_t m_debugUploadRecordingDepth = 0;

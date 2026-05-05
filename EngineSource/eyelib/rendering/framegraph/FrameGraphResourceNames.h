@@ -16,7 +16,11 @@ inline constexpr const char* kGBufferRenderTarget   = "GBufferRenderTarget";
 inline constexpr const char* kPerFrameUniformBuffer = "PerFrameUniformBuffer";
 inline constexpr const char* kPerViewUniformBuffer  = "PerViewUniformBuffer";
 inline constexpr const char* kPerObjectStorageBuffer = "PerObjectStorageBuffer";
+inline constexpr const char* kMaterialTableStorageBuffer = "MaterialTableStorageBuffer";
 inline constexpr const char* kDirectionalLightUniformBuffer = "DirectionalLightUniformBuffer";
+inline constexpr const char* kIblIrradianceCubemap = "IblIrradianceCubemap";
+inline constexpr const char* kIblPrefilterCubemap = "IblPrefilterCubemap";
+inline constexpr const char* kIblBrdfLut = "IblBrdfLut";
 
 }  // namespace resource_names
 
@@ -36,6 +40,9 @@ inline constexpr const char* kRenderResources = "RenderResources";
 
 /** First raster feature (Forward path). Reserved for future publishes (tone-mapped LDR, etc.). */
 inline constexpr const char* kRasterFeature   = "Raster";
+
+/** Default / bootstrap IBL textures (`IblDefaultProbes`); distinct from `RenderResources`. */
+inline constexpr const char* kLightingIbl = "LightingIbl";
 
 }  // namespace writer_names
 

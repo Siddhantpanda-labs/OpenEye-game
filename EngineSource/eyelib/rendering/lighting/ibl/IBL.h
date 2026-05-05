@@ -13,8 +13,8 @@ class Shader;
 class Mesh;
 
 /**
- * @brief Image-Based Lighting system.
- * Generates: Irradiance map (diffuse IBL), Prefiltered environment map (specular IBL), BRDF LUT.
+ * @brief GPU image-based lighting bake from an environment cubemap (irradiance + prefilter + BRDF LUT).
+ * For engine bootstrap without an env map, see `IblDefaultProbes` + `ibl_cpu` in the same folder.
  */
 class IBL {
 public:
