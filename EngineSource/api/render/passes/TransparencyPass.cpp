@@ -1,0 +1,33 @@
+#include "api/render/passes/TransparencyPass.h"
+#include "eyelib/render/passes/TransparencyPass.h"
+
+namespace eyelib {
+namespace api {
+
+namespace {
+::eyelib::render::Drawable ToInternal(const Drawable& d) {
+    ::eyelib::render::Drawable out;
+    out.mesh = d.mesh ? d.mesh->GetInternal() : nullptr;
+    out.material = d.material ? d.material->GetInternal() : nullptr;
+    out.transform = d.transform;
+    return out;
+}
+} // namespace
+
+void TransparencyPass::Render(::eyelib::render::rhi::ICommandList* cmd,
+                              ::eyelib::render::rhi::IDevice* device,
+                              const std::vector<Drawable>& transparent,
+                              const math::Mat4& view,
+                              const math::Mat4& projection,
+                              const math::Vec3& viewPos,
+                              ::eyelib::render::ShaderCache* shaderCache) {
+    std::vector<::eyelib::render::Drawable> internal;
+    internal.reserve(transparent.size());
+    for (const auto& d : transparent) {
+        internal.push_back(ToInternal(d));
+    }
+    ::eyelib::render::TransparencyPass::Render(cmd, device, internal, view, projection, viewPos, shaderCache);
+}
+
+} // namespace api
+} // namespace eyelib

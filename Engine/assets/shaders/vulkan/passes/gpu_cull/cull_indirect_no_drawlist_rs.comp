@@ -1,0 +1,28 @@
+#version 450
+// Resource-space: set 0 Frame (unused), set 4 SceneBuffers binding 1 = indirect output. Writes one indirect command.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  baseVertex;
+    uint baseInstance;
+};
+
+// Set 4 — SceneBuffers: binding 1 = indirect output
+layout(set = 4, binding = 1) buffer IndirectOut {
+    DrawIndexedIndirectCommand outCommands[];
+};
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id == 0u) {
+        outCommands[0].indexCount = 6u;
+        outCommands[0].instanceCount = 1u;
+        outCommands[0].firstIndex = 0u;
+        outCommands[0].baseVertex = 0;
+        outCommands[0].baseInstance = 0u;
+    }
+}

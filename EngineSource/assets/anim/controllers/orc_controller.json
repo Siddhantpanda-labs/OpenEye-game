@@ -1,0 +1,43 @@
+{
+  "name": "OrcController",
+  "params": [
+    { "name": "speed", "type": "float", "defaultFloat": 0.0 },
+    { "name": "die", "type": "trigger" }
+  ],
+  "blendTrees": [],
+  "boneMasks": [
+    { "name": "FullBody", "bones": [] }
+  ],
+  "events": [
+    {
+      "clip": "Start Walking",
+      "track": [
+        { "time": 0.20, "name": "Footstep", "payload": "L" },
+        { "time": 0.55, "name": "Footstep", "payload": "R" }
+      ]
+    }
+  ],
+  "layers": [
+    {
+      "name": "Base",
+      "weight": 1.0,
+      "mask": "FullBody",
+      "defaultState": "Idle",
+      "states": [
+        { "name": "Idle", "speed": 1.0, "loop": true, "motion": { "type": "clip", "clip": "Orc Idle" } },
+        { "name": "Walk", "speed": 1.0, "loop": true, "motion": { "type": "clip", "clip": "Start Walking" } },
+        { "name": "Run", "speed": 1.0, "loop": true, "motion": { "type": "clip", "clip": "Running" } }
+      ],
+      "transitions": [
+        { "from": "Idle", "to": "Walk", "blend": 0.15, "conditions": [ { "param": "speed", "op": ">", "threshold": 0.10 } ] },
+        { "from": "Walk", "to": "Idle", "blend": 0.15, "conditions": [ { "param": "speed", "op": "<", "threshold": 0.10 } ] },
+
+        { "from": "Walk", "to": "Run", "blend": 0.20, "conditions": [ { "param": "speed", "op": ">", "threshold": 0.70 } ] },
+        { "from": "Run", "to": "Walk", "blend": 0.20, "conditions": [ { "param": "speed", "op": "<", "threshold": 0.70 } ] },
+
+        { "from": "Run", "to": "Idle", "blend": 0.25, "conditions": [ { "param": "speed", "op": "<", "threshold": 0.10 } ] }
+      ]
+    }
+  ]
+}
+

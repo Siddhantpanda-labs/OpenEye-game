@@ -1,0 +1,5 @@
+// OpenEye Editor: exe icon (Engine) + project icon for .openeye association (Project)
+// Paths relative to this .rc file's directory (app/editor/)
+// Icon 1 = application icon (Engine); Icon 2 = for .openeye files (Project)
+1 ICON "../../assets/ui/Core/Engine.ico"
+2 ICON "../../assets/ui/Core/Project.ico"

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "shader": "passes/forward/forward",
+  "albedo": [0.2, 0.2, 1.0],
+  "metallic": 0.0,
+  "roughness": 0.7,
+  "emission": [0.0, 0.0, 0.0],
+  "ao": 1.0,
+  "alpha": 1.0
+}

@@ -1,0 +1,237 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+#include <array>
+#include "eyelib/math/Types.h"
+#include "eyelib/render/rhi/RHI.h"
+#include "eyelib/render/rhi/RHITypes.h"
+
+namespace eyelib {
+namespace render {
+
+class GBuffer;
+class Shader;
+class FullscreenQuad;
+
+/**
+ * @brief Post-processing pipeline manager
+ * 
+ * Handles: HDR tone mapping, Bloom, FXAA, SSAO, SSR, Motion Blur, Vignette, Film Grain, etc.
+ */
+class PostProcessor {
+public:
+    PostProcessor();
+    ~PostProcessor();
+
+    PostProcessor(const PostProcessor&) = delete;
+    PostProcessor& operator=(const PostProcessor&) = delete;
+
+    bool Initialize(uint32_t width, uint32_t height, rhi::IDevice* device = nullptr);
+    void Resize(uint32_t width, uint32_t height);
+    void Shutdown();
+
+    /**
+     * @brief Post-processing settings
+     */
+    struct Settings {
+        // Tone mapping
+        float exposure = 1.0f;
+        bool useACES = true;  // ACES filmic tone mapping
+
+        // Bloom
+        bool enableBloom = true;
+        float bloomThreshold = 1.0f;
+        float bloomIntensity = 0.5f;
+        int bloomIterations = 5;
+
+        // FXAA
+        bool enableFXAA = true;
+
+        // General Blur
+        bool enableBlur = false;
+        float blurIntensity = 1.0f;
+        int blurIterations = 3;
+
+        // Chromatic Aberration
+        bool enableChromaticAberration = false;
+        float chromaticAberrationIntensity = 0.002f;
+
+        // SSAO
+        bool enableSSAO = false;
+        float ssaoRadius = 0.5f;
+        float ssaoBias = 0.025f;
+        int ssaoSamples = 16;
+
+        // SSR (Screen-Space Reflections)
+        bool enableSSR = false;
+        float ssrStepSize = 0.1f;
+        int ssrMaxSteps = 32;
+        float ssrThickness = 0.01f;
+        float ssrNearPlane = 0.1f;
+        float ssrFarPlane = 1000.0f;
+
+        // Motion Blur
+        bool enableMotionBlur = false;
+        float motionBlurIntensity = 1.0f;
+        int motionBlurSamples = 8;
+
+        // Vignette
+        bool enableVignette = false;
+        float vignetteIntensity = 0.5f;
+        float vignetteRadius = 0.75f;
+        float vignetteSoftness = 0.5f;
+
+        // Film Grain
+        bool enableFilmGrain = false;
+        float filmGrainIntensity = 0.1f;
+    };
+
+    /**
+     * @brief Apply full post-processing chain
+     * @param hdrInputTexture HDR color texture from lighting pass
+     * @param gbuffer GBuffer for SSAO/SSR
+     * @param settings Post-processing settings
+     * @param viewMatrix, projectionMatrix, invViewMatrix, invProjectionMatrix, viewPos For SSR
+     * @param skyboxTexture Skybox cubemap for SSR fallback (0 if not available)
+     * @return Final LDR output texture
+     */
+    rhi::ITexture* ApplyPostProcessing(rhi::ITexture* hdrInputTexture, const GBuffer& gbuffer, const Settings& settings,
+                                       const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                                       const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                                       const math::Vec3& viewPos, rhi::ITexture* skyboxTexture = nullptr, float time = 0.0f,
+                                       rhi::ITexture* reflectionProbeTexture = nullptr);
+
+    /**
+     * @brief Individual effect methods (for testing/debugging)
+     */
+    rhi::ITexture* ApplyToneMapping(rhi::ITexture* hdrTexture, const Settings& settings);
+    rhi::ITexture* ExtractBloom(rhi::ITexture* hdrTexture, float threshold);
+    rhi::ITexture* BlurTexture(rhi::ITexture* texture, int iterations);
+    rhi::ITexture* ApplyGeneralBlur(rhi::ITexture* texture, float intensity, int iterations);
+    rhi::ITexture* ApplyChromaticAberration(rhi::ITexture* texture, float intensity);
+    rhi::ITexture* ApplyFXAA(rhi::ITexture* texture);
+    rhi::ITexture* ApplySSAO(const GBuffer& gbuffer, const Settings& settings, const math::Mat4& viewMatrix,
+                             const math::Mat4& projectionMatrix);
+    /** When outputRT is non-null, SSR renders to it (e.g. ping-pong for HDR chain); when null, uses internal output RT.
+     *  reflectionProbeTexture: optional cubemap for fallback when SSR misses (1=SSR hit, 2=probe, 3=skybox). */
+    rhi::ITexture* ApplySSR(rhi::ITexture* sceneTexture, const GBuffer& gbuffer, rhi::ITexture* skyboxTexture, const Settings& settings,
+                            const math::Mat4& viewMatrix, const math::Mat4& projectionMatrix,
+                            const math::Mat4& invViewMatrix, const math::Mat4& invProjectionMatrix,
+                            const math::Vec3& viewPos, rhi::IRenderTarget* outputRT = nullptr, rhi::ITexture* reflectionProbeTexture = nullptr);
+    rhi::ITexture* ApplyMotionBlur(rhi::ITexture* texture, rhi::ITexture* velocityTexture, const Settings& settings);
+    rhi::ITexture* ApplyVignette(rhi::ITexture* texture, const Settings& settings);
+    rhi::ITexture* ApplyFilmGrain(rhi::ITexture* texture, const Settings& settings, float time = 0.0f);
+
+    /**
+     * @brief Get output texture (after full chain)
+     */
+    rhi::IRenderTarget* GetOutputRenderTargetRHI() const;
+    rhi::ITexture* GetOutputTextureRHI() const;
+    /** E6: Ping-pong RT for graph-driven post (e.g. tone-mapped intermediate). Index 0 or 1. */
+    rhi::IRenderTarget* GetPingPongRT(int index) const { return (index >= 0 && index <= 1) ? m_pingPongRT[index] : nullptr; }
+    bool HasValidOutputFrame() const { return m_lastOutputValid; }
+
+    /**
+     * E6: Add post-processing as frame-graph passes. Each effect is one pass; order is modular.
+     * hdrInput: FG handle for HDR color. toneMappedOutput: FG handle for tone-map result (e.g. ping-pong RT texture). finalOutput: FG handle for final LDR (e.g. m_outputRT texture).
+     * Call after adding main passes; adds ToneMap then FXAA. Side-effect.
+     */
+    void AddPostPassesToFrameGraph(class FrameGraph* fg, int hdrInput, int toneMappedOutput, int finalOutput,
+                                  const Settings& settings, rhi::ICommandList* cmd);
+
+    /** Reload all shaders that were loaded by name (for hot-reload when files change). */
+    void ReloadShaders();
+
+private:
+    static constexpr uint32_t kMaxFramesInFlight = 3;
+    void CreateFramebuffers();
+    void DestroyFramebuffers();
+    rhi::ITexture* GetColorTexture(rhi::IRenderTarget* rt) const;
+    /** For LDR passes only: returns an LDR RT (m_outputRT or m_ldrPingPong) different from input. */
+    rhi::IRenderTarget* SelectPostTargetLDR(rhi::ITexture* inputTexture) const;
+    /** Ping-pong between HDR RGB16F RTs; used for HDR SSAO blend and HDR bloom composite before tonemap. */
+    rhi::IRenderTarget* SelectPostTargetHDR(rhi::ITexture* inputTexture) const;
+    rhi::IRenderTarget* SelectPostTarget(rhi::ITexture* inputTexture) const;
+    rhi::IRenderTarget* ResolveRenderTargetForTexture(rhi::ITexture* texture) const;
+    /** Linear display-referred LDR (0–1) → sRGB-encoded for UNORM8 / swapchain; run after all LDR effects (e.g. FXAA). */
+    rhi::ITexture* ApplyDisplayEncoding(rhi::ITexture* linearLdr);
+    /** Multiply scene by SSAO in linear HDR (before bloom and tonemap). */
+    rhi::ITexture* ApplySSAOBlendHDR(rhi::ITexture* hdrScene, rhi::ITexture* ssaoTexture);
+    /** Additive bloom in linear HDR before tonemap (scene and bloom share the same color space). */
+    rhi::ITexture* ApplyBloomCompositeHDR(rhi::ITexture* hdrScene, rhi::ITexture* bloomTexture, const Settings& settings);
+    void LoadShaders();
+    void RecycleTransientPostSetsIfNeeded();
+    rhi::IDescriptorSet* CreateTransientPostSet(const std::vector<std::pair<uint32_t, rhi::ITexture*>>& bindings);
+    /** Vulkan Post layout: set0=Frame, set1=PostPass — bind both in one call. */
+    void BindPostPassDescriptorSets(rhi::ICommandList* cmd, rhi::IDescriptorSet* postPassSet);
+    /** Build Hi-Z depth pyramid from GBuffer depth; call before ApplySSR when pyramid is used. */
+    void BuildDepthPyramid(const GBuffer& gbuffer, float nearPlane, float farPlane);
+
+    rhi::IDevice* m_deviceRHI = nullptr;
+
+    // Descriptor set for single-texture passes (Phase 3: layout-driven binding)
+    rhi::IPipelineLayout* m_singleTexLayout = nullptr;
+    rhi::IDescriptorSet* m_singleTexSet = nullptr;
+    // Resource-space Post path (set 0 Frame, set 1 PostPass). When non-null, use BindDescriptorSets instead of legacy.
+    rhi::IDescriptorSet* m_frameSet = nullptr;
+    rhi::IDescriptorSet* m_postPassSet = nullptr;
+    rhi::IPipelineLayout* m_postPassLayout = nullptr;
+    rhi::IBuffer* m_frameUBO = nullptr;
+    std::array<std::vector<rhi::IDescriptorSet*>, kMaxFramesInFlight> m_transientPostSetsByFrame;
+    uint32_t m_transientPostFrameIndex = 0xFFFFFFFFu;
+    bool m_useVulkanTransientPostSets = false;
+
+    // Ping-pong render targets for multi-pass effects
+    rhi::IRenderTarget* m_pingPongRT[2] = {nullptr, nullptr};
+
+    // SSR: previous frame for temporal accumulation; copy shader to resolve to it
+    rhi::IRenderTarget* m_ssrPrevRT = nullptr;
+    bool m_ssrHasPrevFrame = false;
+
+    // Output render target (final result); LDR (R8G8B8A8)
+    rhi::IRenderTarget* m_outputRT = nullptr;
+    // LDR ping-pong for LDR-only passes (tone map, FXAA, etc.); R8G8B8A8
+    rhi::IRenderTarget* m_ldrPingPong = nullptr;
+
+    // Bloom extraction render target
+    rhi::IRenderTarget* m_bloomExtractRT = nullptr;
+    /** HDR scratch used only for bloom blur ping-pong with m_bloomExtractRT (never shares ping-pong with scene/SSR). */
+    rhi::IRenderTarget* m_bloomBlurScratchRT = nullptr;
+
+    // SSAO render target (raw then overwritten by blur result)
+    rhi::IRenderTarget* m_ssaoRT = nullptr;
+    rhi::IRenderTarget* m_ssaoBlurRT = nullptr;
+
+    uint32_t m_width = 0;
+    uint32_t m_height = 0;
+    bool m_lastOutputValid = false;
+    rhi::ITexture* m_lastOutputTexture = nullptr;
+    rhi::IRenderTarget* m_lastOutputRT = nullptr;
+
+    // Shaders
+    std::shared_ptr<Shader> m_toneMappingShader;
+    std::shared_ptr<Shader> m_bloomExtractShader;
+    std::shared_ptr<Shader> m_bloomBlurShader;
+    std::shared_ptr<Shader> m_bloomCompositeShader;
+    std::shared_ptr<Shader> m_blurShader;
+    std::shared_ptr<Shader> m_chromaticAberrationShader;
+    std::shared_ptr<Shader> m_fxaaShader;
+    std::shared_ptr<Shader> m_ssaoShader;
+    std::shared_ptr<Shader> m_ssrShader;
+    std::shared_ptr<Shader> m_motionBlurShader;
+    std::shared_ptr<Shader> m_vignetteShader;
+    std::shared_ptr<Shader> m_filmGrainShader;
+    std::shared_ptr<Shader> m_ssaoBlendShader;  // For blending SSAO with scene
+    std::shared_ptr<Shader> m_ssaoBlurShader;   // Bilateral blur for SSAO (Limitless-style)
+    std::shared_ptr<Shader> m_copyShader;       // Fullscreen copy (e.g. SSR temporal)
+    std::shared_ptr<Shader> m_displayEncodeShader; // Linear LDR → sRGB (final post before present)
+    std::shared_ptr<Shader> m_depthPyramidShader;
+    rhi::ITexture* m_depthPyramidTexture = nullptr;
+    std::vector<rhi::IRenderTarget*> m_depthPyramidRTs;
+    static constexpr uint32_t kDepthPyramidLevels = 8;
+};
+
+} // namespace render
+} // namespace eyelib

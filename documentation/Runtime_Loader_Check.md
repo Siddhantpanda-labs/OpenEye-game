@@ -56,7 +56,7 @@ So the runtime can render:
 
 - **Mesh** — Referenced by `meshAssetId` (e.g. `models/cube.obj`). Loaded as a model; first mesh (and first material) used for the drawable.
 - **Material** — Referenced by `materialAssetId` (e.g. `materials/solid_red.mat`). Loaded from `.mat` JSON (shader path, albedo, metallic, roughness, textures, etc.). Must be resolvable under `options.assetRoots` and loaded into the registry (via `BindAssets`) so the render bridge can find it by resolved path.
-- **Shader** — Materials reference shaders (e.g. `../shaders/basic` or `assets/shaders/passes/forward/basic`). The default/fallback material uses hardcoded paths under `assets/shaders/passes/forward/` (e.g. basic, skinned).
+- **Shader** — Materials reference shaders (e.g. `../shaders/forward` or `assets/shaders/passes/forward/forward`). The default/fallback material uses hardcoded paths under `assets/shaders/passes/forward/` (e.g. forward, forward_skinned).
 
 ### What it does *not* render (out of scope for this loader)
 

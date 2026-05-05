@@ -1,6 +1,6 @@
 # OpenEye
 
-OpenEye is a **C++20 3D engine library** (`eyelib/`) with a **stable public API layer** (`api/`) and a set of apps/tests (`app/`) built on top of that API.
+OpenEye is a **C++20 3D engine library** (`EngineSource/eyelib/`) with a **stable public API layer** (`EngineSource/api/`) and a set of apps/tests (`EngineSource/app/`) built on top of that API.
 
 The long-term direction is an **AI-operable simulation world** where *all world edits* flow through a single **World Mutation System** (commands, validation, transactions, snapshots), enabling deterministic replay, tooling, and safe automation.
 
@@ -14,12 +14,17 @@ The long-term direction is an **AI-operable simulation world** where *all world 
 
 ```
 OpenEye/
-├── api/             # Public stable API surface (client-facing)
-├── eyelib/          # Engine/library implementation (internal)
-├── app/             # Apps built using api/ (tests, experiments)
-├── assets/          # Shaders, textures, scripts, sample assets
-├── documentation/   # Project vision + architecture/implementation docs
-├── thirdparty/      # Vendored dependencies (glfw, glad, imgui, bullet3, lua, ...)
+├── EngineSource/    # Engine source (api, eyelib, app, thirdparty, assets)
+│   ├── api/         # Public stable API surface (client-facing)
+│   ├── eyelib/      # Engine/library implementation (internal)
+│   ├── app/         # Apps built using api/ (editor, player, tests, experiments)
+│   ├── assets/      # Engine shaders, default materials, icons
+│   ├── thirdparty/  # Vendored dependencies (glfw, glad, imgui, Jolt, lua, ...)
+│   └── cmake/
+├── Engine/          # Built runtime (bin/, lib/) — output of build
+├── Projects/        # User projects (e.g. MyWorld with Assets/, Cache/)
+├── documentation/  # Project vision + architecture/implementation docs
+├── build/           # CMake build directory
 └── CMakeLists.txt
 ```
 
@@ -44,14 +49,19 @@ cmake --build . --config Debug
 
 ### What gets built
 
+- **Output**: Executables and libraries go to `Engine/bin/` and `Engine/lib/` (engine runtime layout).
 - **Libraries**: `Eyelib*` modules + `Eyelib*API` modules (e.g. `EyelibWorld` and `EyelibWorldAPI`).
 - **Executable(s)**:
-  - `OpenEyeApiTests` (from `app/test/`) when `OPENEYE_BUILD_TESTS=ON` (default).
+  - `OpenEyePlayer` (from `EngineSource/app/player/`) when `OPENEYE_BUILD_PLAYER=ON` (default).
+  - `OpenEyeAIPlayground` (from `EngineSource/app/ai_playground/`) when `OPENEYE_BUILD_AI_PLAYGROUND=ON` (default): scene + chat shell for AI tooling; see `EngineSource/app/ai_playground/README.md`.
+  - `OpenEyeRenderingSandbox` (from `EngineSource/app/rendering_sandbox/`) when `OPENEYE_BUILD_RENDERING_SANDBOX=ON` (default): isolated harness for `EyelibRendering` (`eyelib/rendering/`); does not link `EyelibRender`. Set `OPENEYE_BUILD_RENDERING_SANDBOX=OFF` to skip.
+  - `OpenEyeApiTests` (from `EngineSource/app/test/`) when `OPENEYE_BUILD_TESTS=ON` and `app/test` exists.
   - A “game app” is scaffolded to live under `app/openmeta`, but game/editor targets are currently forced off in the root CMake configuration.
 
 ### Useful CMake options
 
 - `OPENEYE_BUILD_EYELIB` (default ON): build the `eyelib/` + `api/` module set
+- `OPENEYE_BUILD_AI_PLAYGROUND` (default ON): build `OpenEyeAIPlayground` (pulls in `app/player` for `OpenEyeGameRuntime`)
 - `OPENEYE_BUILD_TESTS` (default ON): build `OpenEyeApiTests`
 - `OPENEYE_USE_LZ4`, `OPENEYE_USE_ZSTD`: compression toggles used by serialization/assets
 

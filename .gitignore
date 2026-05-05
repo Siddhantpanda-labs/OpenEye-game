@@ -1,13 +1,32 @@
 # Build directories
+_build_verify/
 build/
 build_eyelib/
 build1/
 out/
 bin/
-lib/
-thirdparty/bullet3/
-thirdparty/bgfx.cmake/
-thirdparty/diligent/
+
+# Engine runtime output (binaries, libs)
+Engine/bin/
+Engine/lib/
+Engine/assets/*
+
+
+# Project cache (generated runtime data)
+Projects/
+Reference/
+
+# Third-party (under EngineSource after refactor)
+EngineSource/thirdparty/bullet3/
+EngineSource/thirdparty/joltPhysics/
+EngineSource/thirdparty/bgfx.cmake/
+EngineSource/thirdparty/diligent/
+EngineSource/thirdparty/OpenXR-SDK/
+EngineSource/thirdparty/libjpeg-turbo/
+EngineSource/thirdparty/Aespinosa_vulkan/
+EngineSource/thirdparty/Wicked_engine/
+EngineSource/thirdparty/Vulkan_Samples/
+EngineSource/thirdparty/Sascha_Vulkan/
 *.user
 *.suo
 *.sdf
@@ -45,6 +64,13 @@ _deps
 *.dylib
 *.so
 
+# Shaders
+*.spv
+
+# Local LLM API keys (never commit)
+gemini.key.txt
+chatgpt.key.txt
+
 # Logs
 *.log
 
@@ -61,9 +87,23 @@ Thumbs.db
 .idea/
 *.code-workspace
 
-# Assets (large files - customize as needed)
-assets/models/*
-# assets/textures/*
-# !assets/models/.gitkeep
-# !assets/textures/.gitkeep
+# Local API keys and secrets (never commit)
+chatgpt.key.txt
+*openai*key*.txt
+*api*key*.txt
 
+# Nested / duplicate tree (do not commit)
+OpenEye-game-forwardgl/
+
+# Assets (large files - customize as needed)
+EngineSource/assets/models/*
+# EngineSource/assets/textures/*
+
+EngineSource/app/metaworld/client/meta_client/.dart_tool/
+EngineSource/app/metaworld/client/meta_client/build/
+EngineSource/app/metaworld/client/meta_client/ios/
+EngineSource/app/metaworld/client/meta_client/macos/
+EngineSource/app/metaworld/client/meta_client/web/
+EngineSource/app/metaworld/client/meta_client/windows/
+EngineSource/app/metaworld/client/meta_client/linux/
+EngineSource/app/metaworld/client/meta_client/.idea/

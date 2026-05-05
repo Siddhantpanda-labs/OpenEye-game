@@ -1,125 +1,829 @@
 {
-  "version": 1,
-  "registry": {
-    "generations": [0, 0, 0],
-    "freeList": []
-  },
-  "graph": {
-    "metadata": [
-      {
-        "entity": { "index": 0, "generation": 0 },
-        "name": "MainCamera",
-        "flags": 0
-      },
-      {
-        "entity": { "index": 1, "generation": 0 },
-        "name": "MainLight",
-        "flags": 0
-      },
-      {
-        "entity": { "index": 2, "generation": 0 },
-        "name": "Cube",
-        "flags": 0
-      }
-    ],
-    "hierarchy": [],
-    "tags": []
-  },
   "components": {
-    "Name": {
-      "version": 1,
-      "items": [
-        {
-          "entity": { "index": 0, "generation": 0 },
-          "data": "MainCamera"
-        },
-        {
-          "entity": { "index": 1, "generation": 0 },
-          "data": "MainLight"
-        },
-        {
-          "entity": { "index": 2, "generation": 0 },
-          "data": "Cube"
-        }
-      ]
+    "ActiveSystems": {
+      "items": [],
+      "version": 1
     },
-    "Transform": {
-      "version": 1,
-      "items": [
-        {
-          "entity": { "index": 0, "generation": 0 },
-          "data": {
-            "position": [0.0, 1.0, 5.0],
-            "rotation": [1.0, 0.0, 0.0, 0.0],
-            "scale": [1.0, 1.0, 1.0]
-          }
-        },
-        {
-          "entity": { "index": 1, "generation": 0 },
-          "data": {
-            "position": [2.0, 4.0, 2.0],
-            "rotation": [1.0, 0.0, 0.0, 0.0],
-            "scale": [1.0, 1.0, 1.0]
-          }
-        },
-        {
-          "entity": { "index": 2, "generation": 0 },
-          "data": {
-            "position": [0.0, 0.0, 0.0],
-            "rotation": [1.0, 0.0, 0.0, 0.0],
-            "scale": [1.0, 1.0, 1.0]
-          }
-        }
-      ]
+    "Animator": {
+      "items": [],
+      "version": 1
     },
     "Camera": {
-      "version": 1,
       "items": [
         {
-          "entity": { "index": 0, "generation": 0 },
           "data": {
-            "isPrimary": true,
-            "isPerspective": true,
-            "fov": 45.0,
-            "aspect": 1.7777778,
-            "near": 0.1,
+            "aspect": 1.7777777910232544,
             "far": 1000.0,
+            "fov": 50.0,
+            "isPerspective": true,
+            "isPrimary": true,
+            "near": 0.10000000149011612,
             "orthoSize": 10.0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
           }
         }
-      ]
+      ],
+      "version": 1
+    },
+    "Collider": {
+      "items": [
+        {
+          "data": {
+            "center": [
+              0.0,
+              1.139,
+              0.0
+            ],
+            "height": 2.5,
+            "radius": 0.231,
+            "size": [
+              0.3899,
+              1.860,
+              0.389
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "center": [
+              -0.1599999964237213,
+              0.3400000035762787,
+              -0.6100000143051147
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              7.510000228881836,
+              0.7710000276565552,
+              6.389999866485596
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 8
+          }
+        },
+        {
+          "data": {
+            "center": [
+              3.880000114440918,
+              68.18000030517578,
+              0.0
+            ],
+            "height": 184.42999267578125,
+            "radius": 20.0,
+            "size": [
+              50.0,
+              110.0,
+              20.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        }
+      ],
+      "version": 1
     },
     "Light": {
-      "version": 1,
       "items": [
         {
-          "entity": { "index": 1, "generation": 0 },
           "data": {
-            "type": 0,
-            "color": [1.0, 1.0, 1.0],
-            "intensity": 3.0,
-            "range": 20.0,
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
             "innerCone": 15.0,
+            "intensity": 0.5,
             "outerCone": 30.0,
-            "castShadows": true
+            "range": 20.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 5.0,
+            "outerCone": 30.0,
+            "range": 12.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "castShadows": false,
+            "color": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 5.0,
+            "outerCone": 30.0,
+            "range": 12.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "castShadows": false,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 10.0,
+            "intensity": 15.0,
+            "outerCone": 25.0,
+            "range": 38.0,
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              0.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 12.0,
+            "outerCone": 30.0,
+            "range": 20.0,
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
           }
         }
-      ]
+      ],
+      "version": 1
+    },
+    "Name": {
+      "items": [
+        {
+          "data": "SpotLight",
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": "Cubeo",
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": "CobbleStones",
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": "Eyeball",
+          "entity": {
+            "generation": 0,
+            "index": 7
+          }
+        },
+        {
+          "data": "Spaceship",
+          "entity": {
+            "generation": 0,
+            "index": 8
+          }
+        },
+        {
+          "data": "MainCamera",
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": "MainLight",
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": "PointLightLeft",
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": "PointLightRight",
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        }
+      ],
+      "version": 1
+    },
+    "RegionMembership": {
+      "items": [],
+      "version": 1
     },
     "Renderable": {
-      "version": 1,
       "items": [
         {
-          "entity": { "index": 2, "generation": 0 },
           "data": {
-            "meshAssetId": "models/cube.obj",
-            "materialAssetId": "materials/solid_red.mat",
-            "visible": true,
             "activeLOD": 0,
-            "lodMeshAssetIds": []
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "models/it.glb",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "models/animation/Running.fbx",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "materials/solid_blue.mat",
+            "meshAssetId": "models/eyeball.obj",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 7
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "materials/solid_red.mat",
+            "meshAssetId": "models/Spaceship.obj",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 8
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
           }
         }
-      ]
+      ],
+      "version": 1
+    },
+    "RigidBody": {
+      "items": [
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.8200000524520874,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": false
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": false
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Script": {
+      "items": [],
+      "version": 1
+    },
+    "SystemBindings": {
+      "items": [],
+      "version": 1
+    },
+    "Transform": {
+      "items": [
+        {
+          "data": {
+            "position": [
+              -29.513565063476563,
+              33.55619812011719,
+              54.23997497558594
+            ],
+            "rotation": [
+              0.9772540926933289,
+              -0.17235904932022095,
+              -0.12031009048223495,
+              -0.028147000819444656
+            ],
+            "scale": [
+              0.999998927116394,
+              1.0000131130218506,
+              1.0000163316726685
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "position": [
+              2.0,
+              4.0,
+              2.0
+            ],
+            "rotation": [
+              0.9457257986068726,
+              -0.32496586441993713,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -2.0,
+              0.0,
+              3.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "position": [
+              3.0,
+              2.0,
+              1.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -13.718002319335938,
+              9.77781867980957,
+              1.4797569513320923
+            ],
+            "rotation": [
+              0.913284420967102,
+              -0.4073224365711212,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -13.923891067504883,
+              29.937095642089844,
+              -7.552999973297119
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              1.8942757833428914e-06,
+              0.0
+            ],
+            "scale": [
+              6.255000114440918,
+              6.255000114440918,
+              7.7754411697387695
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -19.603435516357422,
+              6.406654357910156,
+              6.790781021118164
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              0.10603897273540497,
+              0.10603897273540497,
+              0.10603897273540497
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
+        {
+          "data": {
+            "position": [
+              1.0914603471755981,
+              3.0517578125e-05,
+              8.924958229064941
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 7
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -13.382235527038574,
+              -5.6712141036987305,
+              -5.119481086730957
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              9.60084056854248,
+              3.197086811065674,
+              13.795686721801758
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 8
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              29.663841247558594,
+              -16.800222396850586
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              12.088798522949219,
+              12.088798522949219,
+              12.088798522949219
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 9
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -30.513002395629883,
+              4.089962959289551,
+              -10.729433059692383
+            ],
+            "rotation": [
+              0.7560901641845703,
+              -0.539698600769043,
+              0.30727288126945496,
+              0.20648610591888428
+            ],
+            "scale": [
+              0.9999999403953552,
+              1.0000011920928955,
+              1.0000025033950806
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 10
+          }
+        }
+      ],
+      "version": 1
     }
-  }
+  },
+  "graph": {
+    "hierarchy": [],
+    "metadata": [
+      {
+        "entity": {
+          "generation": 0,
+          "index": 0
+        },
+        "flags": 0,
+        "name": "MainCamera"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "MainLight"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "PointLightLeft"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "PointLightRight"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "SpotLight"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 9
+        },
+        "flags": 0,
+        "name": "Cube1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "CobbleStones"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Cubeo"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 8
+        },
+        "flags": 0,
+        "name": "Spaceship"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 7
+        },
+        "flags": 0,
+        "name": "Entity"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 10
+        },
+        "flags": 0,
+        "name": "Spot Light"
+      }
+    ],
+    "tags": []
+  },
+  "registry": {
+    "freeList": [],
+    "generations": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "skybox": "Skybox/cloud",
+  "version": 1
 }

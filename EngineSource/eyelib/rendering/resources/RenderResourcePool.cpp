@@ -1,0 +1,6 @@
+#include "eyelib/rendering/resources/RenderResourcePool.h"
+
+namespace eyelib {
+namespace rendering {
+}  // namespace rendering
+}  // namespace eyelib

@@ -1,0 +1,373 @@
+{
+  "components": {
+    "Camera": {
+      "items": [],
+      "version": 1
+    },
+    "Collider": {
+      "items": [
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              0.009999999776482582,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Light": {
+      "items": [
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              0.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 0.5,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Renderable": {
+      "items": [
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Torus",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cylinder",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Plane",
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Transform": {
+      "items": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              14.065770149230957,
+              1.0,
+              11.55417251586914
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              6.205244541168213,
+              0.0
+            ],
+            "rotation": [
+              0.8736583590507507,
+              -0.48653993010520935,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              0.9999996423721313,
+              0.9999996423721313
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              1.5205682516098022,
+              -1.2532010078430176
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.9655240774154663,
+              4.2683424949646,
+              1.8254457712173462
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "position": [
+              1.7231810092926025,
+              3.6093263626098633,
+              -0.4372625946998596
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -3.937922477722168,
+              4.086421489715576,
+              4.7365264892578125
+            ],
+            "rotation": [
+              0.9777011275291443,
+              0.0,
+              -0.21000133454799652,
+              0.0
+            ],
+            "scale": [
+              0.9999995231628418,
+              1.0,
+              0.9999995231628418
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.44921690225601196,
+              3.0952508449554443,
+              1.9693245887756348
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              3.0795559883117676,
+              1.0,
+              3.4179461002349854
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        }
+      ],
+      "version": 1
+    },
+    "XRCamera": {
+      "items": [
+        {
+          "data": {
+            "farPlane": 1000.0,
+            "isPrimary": true,
+            "nearPlane": 0.10000000149011612
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        }
+      ],
+      "version": 1
+    }
+  },
+  "graph": {
+    "hierarchy": [],
+    "metadata": [
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Torus"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "XR Camera"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Point Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "Cylinder"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "Directional Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 0
+        },
+        "flags": 0,
+        "name": "Plane"
+      }
+    ],
+    "tags": []
+  },
+  "registry": {
+    "freeList": [],
+    "generations": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "version": 1
+}

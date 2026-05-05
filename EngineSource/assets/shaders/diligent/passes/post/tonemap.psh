@@ -1,0 +1,28 @@
+// passes/post/tonemap — same logic as opengl tonemap.frag
+Texture2D u_HDRTexture : register(t0);
+SamplerState u_LinearSampler : register(s0);
+
+cbuffer Constants : register(b0)
+{
+    float u_Exposure;
+    int u_UseACES;
+    float _pad0;
+    float _pad1;
+};
+
+struct PSInput { float4 Position : SV_POSITION; float2 TexCoord : TEXCOORD0; };
+
+float3 ACESFilmic(float3 x)
+{
+    float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+float3 Reinhard(float3 color) { return color / (color + 1.0); }
+
+void main(in PSInput PSIn, out float4 FragColor : SV_TARGET0)
+{
+    float3 hdrColor = u_HDRTexture.Sample(u_LinearSampler, PSIn.TexCoord).rgb * u_Exposure;
+    float3 ldrColor = u_UseACES ? ACESFilmic(hdrColor) : Reinhard(hdrColor);
+    FragColor = float4(ldrColor, 1.0);
+}

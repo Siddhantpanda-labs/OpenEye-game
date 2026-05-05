@@ -1,0 +1,494 @@
+{
+  "components": {
+    "Collider": {
+      "items": [
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.4900000095367432,
+            "radius": 0.49000000953674316,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Light": {
+      "items": [
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              0.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 20.0,
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Renderable": {
+      "items": [
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "NewMaterial.mat",
+            "meshAssetId": "builtin://Sphere",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Sphere",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "NewMaterial.mat",
+            "meshAssetId": "builtin://Torus",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cone",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "activeLOD": 0,
+            "lodMeshAssetIds": [],
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
+            "submeshIndex": -1,
+            "visible": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        }
+      ],
+      "version": 1
+    },
+    "RigidBody": {
+      "items": [
+        {
+          "data": {
+            "angularVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.30000001192092896,
+            "isKinematic": false,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 1.0,
+            "restitution": 0.5,
+            "syncTransform": true,
+            "useGravity": true
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        }
+      ],
+      "version": 1
+    },
+    "Script": {
+      "items": [],
+      "version": 1
+    },
+    "Transform": {
+      "items": [
+        {
+          "data": {
+            "position": [
+              -0.14611351490020752,
+              0.0476071834564209,
+              12.237907409667969
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              7.3152995109558105,
+              7.3152995109558105,
+              7.3152995109558105
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 0
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -0.5620434284210205,
+              6.329864501953125,
+              11.122316360473633
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              5.934900283813477,
+              5.934900283813477,
+              5.934900283813477
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 1
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -5.961455462966114e-05,
+              6.70313835144043,
+              10.721397399902344
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              8.57518196105957,
+              8.57518196105957,
+              8.57518196105957
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 2
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -6.020048141479492,
+              7.489574432373047,
+              8.868448257446289
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              6.0839996337890625,
+              6.0839996337890625,
+              6.0839996337890625
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.004220503848046064,
+              12.220060348510742,
+              10.88697338104248
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              2.690000057220459,
+              2.690000057220459,
+              2.690000057220459
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
+          }
+        },
+        {
+          "data": {
+            "position": [
+              -2.0320188999176025,
+              9.06053638458252,
+              9.074559211730957
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 5
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        }
+      ],
+      "version": 1
+    }
+  },
+  "graph": {
+    "hierarchy": [],
+    "metadata": [
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "Sphere1"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Sphere"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "Torus"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "Cone"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 0
+        },
+        "flags": 0,
+        "name": "Cube"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 5
+        },
+        "flags": 0,
+        "name": "Point Light"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 6
+        },
+        "flags": 0,
+        "name": "Directional Light"
+      }
+    ],
+    "tags": []
+  },
+  "registry": {
+    "freeList": [],
+    "generations": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "renderPipelineMode": "Hybrid",
+  "skybox": "procedural",
+  "version": 1
+}

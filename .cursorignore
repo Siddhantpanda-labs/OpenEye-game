@@ -1,0 +1,22 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+EngineSource/thirdparty/bullet3/
+EngineSource/thirdparty/bgfx.cmake/
+EngineSource/thirdparty/diligent/DiligentCore/
+EngineSource/thirdparty/imgui/
+EngineSource/thirdparty/glfw/
+EngineSource/thirdparty/glm/
+EngineSource/thirdparty/nlohmann/
+EngineSource/thirdparty/stb/
+EngineSource/thirdparty/assimp/
+EngineSource/thirdparty/glad/
+EngineSource/thirdparty/openal-soft/
+EngineSource/thirdparty/lua/
+EngineSource/thirdparty/JoltPhysics/
+EngineSource/thirdparty/ImGuizmo/
+
+Engine/assets/
+
+Reference/DiligentCore
+Reference/DiligentFX
+Reference/ogre
+Reference/limitless-engine

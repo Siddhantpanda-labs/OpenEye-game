@@ -1,0 +1,22 @@
+// Solid color pixel shader (Diligent HLSL) - test/solid
+// Declares u_Texture/sampler so PRS matches (copy-like); outputs green.
+
+Texture2D    u_Texture : register(t0);
+SamplerState u_Texture_sampler : register(s0);
+
+struct PSInput
+{
+    float4 Position : SV_POSITION;
+    float2 TexCoord : TEXCOORD0;
+};
+
+struct PSOutput
+{
+    float4 Color : SV_TARGET0;
+};
+
+void main(in PSInput PSIn, out PSOutput PSOut)
+{
+    // u_Texture/u_Texture_sampler declared for PRS; we output solid green
+    PSOut.Color = float4(0.0, 1.0, 0.0, 1.0);  // full green (linear)
+}

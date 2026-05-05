@@ -1,0 +1,51 @@
+#pragma once
+
+#include "api/render/TextureTypes.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace eyelib {
+namespace api { struct RenderDevice; }
+namespace render { class TextureCube; }
+namespace api {
+
+class TextureCube {
+public:
+    TextureCube();
+    ~TextureCube();
+
+    TextureCube(const TextureCube&) = delete;
+    TextureCube& operator=(const TextureCube&) = delete;
+    TextureCube(TextureCube&& other) noexcept;
+    TextureCube& operator=(TextureCube&& other) noexcept;
+
+    /** Load 6 faces. Device required for GPU upload. */
+    bool LoadFromFiles(RenderDevice device, const std::string& px, const std::string& nx,
+                       const std::string& py, const std::string& ny,
+                       const std::string& pz, const std::string& nz,
+                       bool isSRGB = false, bool generateMipmaps = true);
+    bool LoadFromFiles(RenderDevice device, const std::vector<std::string>& facePaths,
+                       bool isSRGB = false, bool generateMipmaps = true);
+
+    /** Load from a single horizontal-cross image (e.g. 2048x1536 with 512x512 faces). */
+    bool LoadFromCrossLayout(RenderDevice device, const std::string& path, uint32_t faceSize = 512, bool isSRGB = false, bool generateMipmaps = true);
+
+    void GenerateMipmaps();
+    void SetFilter(TextureFilter minFilter, TextureFilter magFilter);
+    void SetWrap(TextureWrap s, TextureWrap t, TextureWrap r);
+
+    int GetSize() const;
+    bool IsValid() const;
+
+    std::shared_ptr<::eyelib::render::TextureCube> GetInternal() const;
+    static std::shared_ptr<TextureCube> WrapInternal(const std::shared_ptr<::eyelib::render::TextureCube>& texture);
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+} // namespace api
+} // namespace eyelib
