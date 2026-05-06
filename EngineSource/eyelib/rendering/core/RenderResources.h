@@ -132,6 +132,8 @@ public:
     const materials::MaterialTable& MaterialTable() const noexcept { return m_materialTable; }
 
 private:
+    void ReleaseOutputRenderTargets(rhi::IDevice* device) noexcept;
+
     size_t AllocateStagingUploadSlice(size_t sizeInBytes, size_t alignment = 16u) noexcept;
     bool RecordUniformBufferUploadFromStaging(rhi::ICommandList* cmd, rhi::IBuffer* dst, bool& uniformPrimed, const void* data,
                                             size_t sizeInBytes);

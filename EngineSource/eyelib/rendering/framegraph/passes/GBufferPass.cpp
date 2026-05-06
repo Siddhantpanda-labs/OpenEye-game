@@ -11,6 +11,13 @@
 namespace eyelib {
 namespace rendering {
 
+namespace {
+struct GBufferPushConstants {
+    uint32_t objectIndex = 0;
+    uint32_t materialIdOverride = 0xFFFFFFFFu;
+};
+} // namespace
+
 GBufferPass::GBufferPass(FrameGraphBlackboard* blackboard, rhi::IDevice* device,
                          rhi::IPipeline* pipeline, const IMeshHandleResolver* meshResolver,
                          const DrawList* drawList) noexcept
@@ -124,8 +131,12 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetCullFace(false);
 
     cmd->BindPipeline(m_pipeline);
-    rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_passSets[frameIdx]};
-    cmd->BindDescriptorSets(0, 2, sets);
+    rhi::IBindlessHeap* bindless = m_device->GetOrCreateSharedBindlessHeap();
+    rhi::IDescriptorSet* bindlessSet = bindless ? bindless->GetDescriptorSet() : nullptr;
+    if (!bindlessSet)
+        return;
+    rhi::IDescriptorSet* sets[3] = {m_frameSets[frameIdx], m_passSets[frameIdx], bindlessSet};
+    cmd->BindDescriptorSets(0, 3, sets);
 
     for (uint32_t i = 0; i < n; ++i) {
         const DrawItem& it = m_drawList->items[i];
@@ -135,15 +146,21 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         if (!h.IsValid())
             continue;
 
-        cmd->SetPushConstants(0, sizeof(uint32_t), &i);
         cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
         cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
 
         if (!h.submeshes.empty()) {
             for (const Submesh& sm : h.submeshes) {
+                GBufferPushConstants pc{};
+                pc.objectIndex = i;
+                pc.materialIdOverride = sm.materialIndex;
+                cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
                 cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
             }
         } else {
+            GBufferPushConstants pc{};
+            pc.objectIndex = i;
+            cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
             cmd->DrawIndexed(h.totalIndexCount, 0, 0);
         }
     }

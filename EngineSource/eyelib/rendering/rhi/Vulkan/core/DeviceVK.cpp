@@ -1671,7 +1671,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
         VkPipelineLayout composeBootstrapPl = vkres::CreateComposeBootstrapPipelineLayout(device, frameLayout, meshStages);
         VkPipelineLayout rasterForwardMinimalPl = vkres::CreateRasterForwardMinimalPipelineLayout(device, frameLayout, rasterForwardDataLayout, meshStages);
-        VkPipelineLayout rasterGBufferPl = vkres::CreateRasterGBufferPipelineLayout(device, frameLayout, rasterGBufferDataLayout, meshStages);
+        VkPipelineLayout rasterGBufferPl = vkres::CreateRasterGBufferPipelineLayout(
+            device, frameLayout, rasterGBufferDataLayout, bindlessSetLayout, m_supportsDescriptorBuffer, meshStages);
         VkDescriptorSetLayout deferredLightDataLayout = vkres::CreateRasterDeferredLightingDataSetLayout(device, meshStages);
         VkPipelineLayout deferredLightPl = vkres::CreateRasterDeferredLightingPipelineLayout(device, frameLayout, deferredLightDataLayout, meshStages);
         if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl ||

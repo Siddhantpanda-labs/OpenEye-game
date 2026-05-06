@@ -9,12 +9,19 @@
 #include "eyelib/rendering/scene/SceneDrawInstance.h"
 #include "eyelib/rendering/geometry/IMeshHandleResolver.h"
 #include "eyelib/rendering/geometry/MeshDescriptor.h"
+#include "eyelib/rendering/materials/MaterialSchema.h"
 #include "eyelib/rendering/resources/Mesh.h"
+#include "eyelib/rendering/resources/Texture2D.h"
 #include "eyelib/rendering/rhi/Vulkan/core/CreateDeviceVulkan.h"
 
 #include <assimp/Importer.hpp>
+#include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "thirdparty/stb/stb_image_write.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -27,6 +34,8 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -73,9 +82,160 @@ eyelib::rendering::MeshDescriptor MakeCenterCubeMeshDescriptor() {
     return d;
 }
 
-eyelib::rendering::MeshDescriptor LoadMeshWithAssimp(const char* path) {
+struct TextureSource {
+    std::string filePath;
+    std::vector<uint8_t> encodedBytes;
+    bool valid = false;
+};
+
+struct ImportedMaterialData {
+    eyelib::rendering::materials::MaterialRecord record{};
+    TextureSource baseColor;
+    TextureSource normal;
+    TextureSource metallicRoughness;
+    TextureSource emissive;
+    TextureSource occlusion;
+};
+
+struct ImportedSceneData {
+    eyelib::rendering::MeshDescriptor mesh{};
+    std::vector<ImportedMaterialData> materials;
+    uint32_t maxMaterialId = 0u;
+};
+
+bool ResolveMaterialTextureSource(const aiScene* scene, const std::filesystem::path& modelDir,
+                                  const aiMaterial* material, aiTextureType textureType, TextureSource& out);
+
+bool EncodeRgbaToPngBytes(const uint8_t* rgba, uint32_t width, uint32_t height, std::vector<uint8_t>& outBytes) {
+    if (!rgba || width == 0u || height == 0u)
+        return false;
+    outBytes.clear();
+    auto writeFn = [](void* context, void* data, int size) {
+        auto* dst = static_cast<std::vector<uint8_t>*>(context);
+        const auto* src = static_cast<const uint8_t*>(data);
+        dst->insert(dst->end(), src, src + size);
+    };
+    const int stride = static_cast<int>(width) * 4;
+    return stbi_write_png_to_func(writeFn, &outBytes, static_cast<int>(width), static_cast<int>(height), 4, rgba, stride) != 0;
+}
+
+bool TryEncodeEmbeddedTextureToBytes(const aiTexture* embedded, std::vector<uint8_t>& outBytes) {
+    if (!embedded)
+        return false;
+    // Assimp embedded compressed payload (PNG/JPG/etc) - decodeable by stb_image.
+    if (embedded->mHeight == 0 && embedded->pcData && embedded->mWidth > 0u) {
+        const uint8_t* src = reinterpret_cast<const uint8_t*>(embedded->pcData);
+        outBytes.assign(src, src + embedded->mWidth);
+        return !outBytes.empty();
+    }
+    // Assimp embedded uncompressed payload (aiTexel RGBA) - encode to PNG for LoadFromMemory().
+    if (embedded->mHeight > 0 && embedded->pcData && embedded->mWidth > 0u) {
+        const uint32_t w = embedded->mWidth;
+        const uint32_t h = embedded->mHeight;
+        const size_t texelCount = static_cast<size_t>(w) * static_cast<size_t>(h);
+        std::vector<uint8_t> rgba(texelCount * 4u);
+        for (size_t i = 0; i < texelCount; ++i) {
+            const aiTexel& t = embedded->pcData[i];
+            rgba[i * 4u + 0u] = t.r;
+            rgba[i * 4u + 1u] = t.g;
+            rgba[i * 4u + 2u] = t.b;
+            rgba[i * 4u + 3u] = t.a;
+        }
+        return EncodeRgbaToPngBytes(rgba.data(), w, h, outBytes);
+    }
+    return false;
+}
+
+bool TryGetEmbeddedTextureEncodedBytes(const aiScene* scene, const aiString& ref, std::vector<uint8_t>& outBytes) {
+    if (!scene)
+        return false;
+    const char* s = ref.C_Str();
+    if (!s || s[0] == '\0')
+        return false;
+
+    // Handle explicit *index references.
+    if (s[0] == '*') {
+        const int idx = std::atoi(s + 1);
+        if (idx >= 0 && static_cast<unsigned>(idx) < scene->mNumTextures) {
+            if (TryEncodeEmbeddedTextureToBytes(scene->mTextures[idx], outBytes))
+                return true;
+        }
+    }
+
+    // Handle named/URI-style embedded refs (common in Assimp glTF paths).
+    if (const aiTexture* embedded = scene->GetEmbeddedTexture(s))
+        return TryEncodeEmbeddedTextureToBytes(embedded, outBytes);
+
+    return false;
+}
+
+bool ResolveMaterialTextureSourceMulti(const aiScene* scene, const std::filesystem::path& modelDir,
+                                       const aiMaterial* material, const std::initializer_list<aiTextureType>& types,
+                                       TextureSource& out) {
+    for (aiTextureType t : types) {
+        if (ResolveMaterialTextureSource(scene, modelDir, material, t, out))
+            return true;
+    }
+    return false;
+}
+
+bool ResolveMaterialTextureSource(const aiScene* scene, const std::filesystem::path& modelDir,
+                                  const aiMaterial* material, aiTextureType textureType, TextureSource& out) {
+    if (!material || material->GetTextureCount(textureType) == 0u)
+        return false;
+    aiString texRef;
+    if (material->GetTexture(textureType, 0, &texRef) != aiReturn_SUCCESS)
+        return false;
+
+    std::vector<uint8_t> embeddedBytes;
+    if (TryGetEmbeddedTextureEncodedBytes(scene, texRef, embeddedBytes)) {
+        out.encodedBytes = std::move(embeddedBytes);
+        out.valid = true;
+        return true;
+    }
+
+    const std::filesystem::path rel(texRef.C_Str());
+    const std::filesystem::path abs = (modelDir / rel).lexically_normal();
+    if (std::filesystem::exists(abs)) {
+        out.filePath = abs.string();
+        out.valid = true;
+        return true;
+    }
+    return false;
+}
+
+eyelib::rendering::materials::MaterialRecord ParseAssimpMaterialFactors(const aiMaterial* material) {
+    using namespace eyelib::rendering::materials;
+    MaterialRecord out = MakeDefaultMaterialRecord();
+    if (!material)
+        return out;
+
+    aiColor4D baseColor{1.f, 1.f, 1.f, 1.f};
+    if (material->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS) {
+        aiColor3D diffuse{1.f, 1.f, 1.f};
+        if (material->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse) == aiReturn_SUCCESS) {
+            baseColor = aiColor4D(diffuse.r, diffuse.g, diffuse.b, 1.f);
+        }
+    }
+    out.baseColorFactor = {baseColor.r, baseColor.g, baseColor.b, baseColor.a};
+
+    aiColor3D emissive{0.f, 0.f, 0.f};
+    if (material->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == aiReturn_SUCCESS) {
+        out.emissiveFactor = {emissive.r, emissive.g, emissive.b, 1.f};
+    }
+
+    float metallic = out.metallicFactor;
+    if (material->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == aiReturn_SUCCESS)
+        out.metallicFactor = metallic;
+    float roughness = out.roughnessFactor;
+    if (material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == aiReturn_SUCCESS)
+        out.roughnessFactor = roughness;
+    return out;
+}
+
+ImportedSceneData LoadSceneWithAssimp(const char* path) {
     using namespace eyelib::rendering;
-    MeshDescriptor d{};
+    ImportedSceneData out{};
     
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path, 
@@ -85,17 +245,49 @@ eyelib::rendering::MeshDescriptor LoadMeshWithAssimp(const char* path) {
         std::fprintf(stderr, "Assimp failed to load '%s': %s\n",
                      path ? path : "(null)",
                      importer.GetErrorString());
-        return MakeCenterCubeMeshDescriptor(); // Fallback
+        out.mesh = MakeCenterCubeMeshDescriptor(); // Fallback
+        return out;
+    }
+
+    const std::filesystem::path modelDir = std::filesystem::path(path).parent_path();
+    out.materials.resize(scene->mNumMaterials);
+    for (unsigned int m = 0; m < scene->mNumMaterials; ++m) {
+        const aiMaterial* aiMat = scene->mMaterials[m];
+        ImportedMaterialData material{};
+        material.record = ParseAssimpMaterialFactors(aiMat);
+        ResolveMaterialTextureSourceMulti(
+            scene, modelDir, aiMat,
+            {aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE, aiTextureType_UNKNOWN},
+            material.baseColor);
+        ResolveMaterialTextureSourceMulti(
+            scene, modelDir, aiMat,
+            {aiTextureType_NORMALS, aiTextureType_NORMAL_CAMERA, aiTextureType_HEIGHT},
+            material.normal);
+        ResolveMaterialTextureSourceMulti(
+            scene, modelDir, aiMat,
+            {aiTextureType_METALNESS, aiTextureType_DIFFUSE_ROUGHNESS, aiTextureType_SPECULAR, aiTextureType_UNKNOWN},
+            material.metallicRoughness);
+        ResolveMaterialTextureSourceMulti(
+            scene, modelDir, aiMat,
+            {aiTextureType_EMISSIVE, aiTextureType_EMISSION_COLOR},
+            material.emissive);
+        ResolveMaterialTextureSourceMulti(
+            scene, modelDir, aiMat,
+            {aiTextureType_LIGHTMAP, aiTextureType_AMBIENT_OCCLUSION, aiTextureType_AMBIENT},
+            material.occlusion);
+        out.materials[m] = std::move(material);
     }
     
     for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
         aiMesh* ai_mesh = scene->mMeshes[i];
         Submesh sm{};
-        sm.indexOffset = static_cast<uint32_t>(d.indices32.size());
+        sm.indexOffset = static_cast<uint32_t>(out.mesh.indices32.size());
         sm.indexCount = ai_mesh->mNumFaces * 3;
         sm.materialIndex = ai_mesh->mMaterialIndex;
+        if (sm.materialIndex > out.maxMaterialId)
+            out.maxMaterialId = sm.materialIndex;
         
-        uint32_t vertexBase = static_cast<uint32_t>(d.vertices.size());
+        uint32_t vertexBase = static_cast<uint32_t>(out.mesh.vertices.size());
         
         for (unsigned int v = 0; v < ai_mesh->mNumVertices; v++) {
             Vertex vert{};
@@ -104,31 +296,34 @@ eyelib::rendering::MeshDescriptor LoadMeshWithAssimp(const char* path) {
                 vert.normal = { ai_mesh->mNormals[v].x, ai_mesh->mNormals[v].y, ai_mesh->mNormals[v].z };
             if (ai_mesh->mTextureCoords[0])
                 vert.uv = { ai_mesh->mTextureCoords[0][v].x, ai_mesh->mTextureCoords[0][v].y };
-            d.vertices.push_back(vert);
+            out.mesh.vertices.push_back(vert);
         }
         
         for (unsigned int f = 0; f < ai_mesh->mNumFaces; f++) {
             aiFace face = ai_mesh->mFaces[f];
             for (unsigned int ind = 0; ind < face.mNumIndices; ind++) {
-                d.indices32.push_back(vertexBase + face.mIndices[ind]);
+                out.mesh.indices32.push_back(vertexBase + face.mIndices[ind]);
             }
         }
         
-        d.submeshes.push_back(sm);
+        out.mesh.submeshes.push_back(sm);
     }
     
-    if (d.vertices.empty() || d.indices32.empty()) {
+    if (out.mesh.vertices.empty() || out.mesh.indices32.empty()) {
         std::fprintf(stderr, "Assimp loaded '%s' but produced no triangles; using fallback cube.\n", path);
-        return MakeCenterCubeMeshDescriptor();
+        out.mesh = MakeCenterCubeMeshDescriptor();
+        out.materials.clear();
+        out.maxMaterialId = 0u;
+        return out;
     }
 
     std::printf("Sandbox: loaded mesh '%s' (%u meshes, %u vertices, %u indices, %u submeshes)\n",
                 path,
                 static_cast<unsigned>(scene->mNumMeshes),
-                static_cast<unsigned>(d.vertices.size()),
-                static_cast<unsigned>(d.indices32.size()),
-                static_cast<unsigned>(d.submeshes.size()));
-    return d;
+                static_cast<unsigned>(out.mesh.vertices.size()),
+                static_cast<unsigned>(out.mesh.indices32.size()),
+                static_cast<unsigned>(out.mesh.submeshes.size()));
+    return out;
 }
 
 std::string ResolveSponzaPath() {
@@ -188,16 +383,17 @@ int main() {
         return 3;
     }
 
-    eyelib::rendering::MeshDescriptor meshDesc = MakeCenterCubeMeshDescriptor();
+    ImportedSceneData imported{};
+    imported.mesh = MakeCenterCubeMeshDescriptor();
     const std::string sponzaPath = ResolveSponzaPath();
     if (!sponzaPath.empty()) {
-        meshDesc = LoadMeshWithAssimp(sponzaPath.c_str());
+        imported = LoadSceneWithAssimp(sponzaPath.c_str());
     } else {
         std::fprintf(stderr,
                      "Sandbox: could not find sponza.glb under assets/models; using fallback cube.\n");
     }
 
-    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), meshDesc);
+    std::shared_ptr<eyelib::rendering::Mesh> sandboxMesh = eyelib::rendering::Mesh::Create(device.get(), imported.mesh);
     if (!sandboxMesh) {
         std::fprintf(stderr, "OpenEyeRenderingSandbox: Mesh::Create failed\n");
         device.reset();
@@ -218,7 +414,7 @@ int main() {
         using namespace eyelib::rendering;
         SceneDrawInstance visible{};
         visible.meshHandle = 0u;
-        visible.materialId = 0u;
+        visible.materialId = imported.maxMaterialId;
         visible.transformIndex = 0u;
         visible.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(0.0f, 0.0f, 0.0f));
         visible.localBounds = {{-1000.0f, -1000.0f, -1000.0f}, {1000.0f, 1000.0f, 1000.0f}};
@@ -242,6 +438,61 @@ int main() {
     world.SetSceneView(&sceneView);
     world.TrySubscribeFeature(&rasterFeature);
     world.Initialize();
+
+    std::vector<std::shared_ptr<eyelib::rendering::Texture2D>> loadedTextures;
+    loadedTextures.reserve(256);
+    std::unordered_map<std::string, uint32_t> fileHandleCache;
+    std::unordered_map<size_t, uint32_t> memoryHandleCache;
+    const auto loadTextureHandle = [&](const TextureSource& src, bool isSrgb) -> uint32_t {
+        using namespace eyelib::rendering;
+        if (!src.valid)
+            return materials::kInvalidMaterialTextureHandle;
+
+        if (!src.filePath.empty()) {
+            const auto it = fileHandleCache.find(src.filePath);
+            if (it != fileHandleCache.end())
+                return it->second;
+        } else if (!src.encodedBytes.empty()) {
+            const size_t key = std::hash<std::string_view>{}(std::string_view(
+                reinterpret_cast<const char*>(src.encodedBytes.data()), src.encodedBytes.size()));
+            const auto it = memoryHandleCache.find(key);
+            if (it != memoryHandleCache.end())
+                return it->second;
+        }
+
+        std::shared_ptr<Texture2D> tex = std::make_shared<Texture2D>();
+        bool ok = false;
+        if (!src.filePath.empty())
+            ok = tex->LoadFromFile(device.get(), src.filePath, isSrgb, false);
+        else if (!src.encodedBytes.empty())
+            ok = tex->LoadFromMemory(device.get(), src.encodedBytes.data(), src.encodedBytes.size(), isSrgb, false);
+        if (!ok || !tex->GetTextureRHI())
+            return materials::kInvalidMaterialTextureHandle;
+
+        const uint64_t handle64 = device->GetOrAllocateSharedBindlessTextureHandle(tex->GetTextureRHI());
+        if (handle64 == 0u || handle64 > 0xFFFFFFFFull)
+            return materials::kInvalidMaterialTextureHandle;
+        const uint32_t handle = static_cast<uint32_t>(handle64);
+        loadedTextures.push_back(tex);
+        if (!src.filePath.empty()) {
+            fileHandleCache[src.filePath] = handle;
+        } else if (!src.encodedBytes.empty()) {
+            const size_t key = std::hash<std::string_view>{}(std::string_view(
+                reinterpret_cast<const char*>(src.encodedBytes.data()), src.encodedBytes.size()));
+            memoryHandleCache[key] = handle;
+        }
+        return handle;
+    };
+
+    for (uint32_t materialId = 0; materialId < imported.materials.size(); ++materialId) {
+        auto materialData = imported.materials[materialId];
+        materialData.record.baseColorTexture = loadTextureHandle(materialData.baseColor, true);
+        materialData.record.normalTexture = loadTextureHandle(materialData.normal, false);
+        materialData.record.metallicRoughnessTexture = loadTextureHandle(materialData.metallicRoughness, false);
+        materialData.record.emissiveTexture = loadTextureHandle(materialData.emissive, true);
+        materialData.record.occlusionTexture = loadTextureHandle(materialData.occlusion, false);
+        world.Resources().MaterialTable().SetMaterial(materialId, materialData.record);
+    }
 
     double lastT = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {

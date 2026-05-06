@@ -49,6 +49,7 @@ layout(std430, set = 1, binding = 1) readonly buffer MaterialTableSsbo {
 
 layout(push_constant) uniform Push {
     uint objectIndex;
+    uint materialIdOverride;
 } pc;
 
 layout(location = 0) out vec3 vWorldPos;
@@ -59,20 +60,25 @@ layout(location = 4) flat out vec4 vBaseColor;
 layout(location = 5) flat out vec3 vMrao;
 layout(location = 6) flat out float vEmissiveStrength;
 layout(location = 7) flat out float vPackedFlags;
+layout(location = 8) flat out uvec4 vTextureHandles01;
+layout(location = 9) flat out uvec4 vTextureHandles23;
 
 void main() {
     PerObjectRow row = gPerObject.items[pc.objectIndex];
-    MaterialRow mat = gMaterialTable.rows[row.materialId];
+    uint matId = (pc.materialIdOverride != 0xFFFFFFFFu) ? pc.materialIdOverride : row.materialId;
+    MaterialRow mat = gMaterialTable.rows[matId];
     vec4 worldPos = row.model * vec4(inPosition, 1.0);
     mat3 nMat = mat3(transpose(inverse(row.model)));
     vWorldPos = worldPos.xyz;
     vWorldN = normalize(nMat * inNormal);
     vUv = inUv;
-    vMaterialId = row.materialId;
+    vMaterialId = matId;
     vBaseColor = mat.baseColorFactor;
     vMrao = vec3(mat.metallicFactor, mat.roughnessFactor, mat.occlusionStrength);
     vEmissiveStrength = max(max(mat.emissiveFactor.r, mat.emissiveFactor.g), mat.emissiveFactor.b);
     uint flags = (mat.alphaMode & 0x3u) | ((mat.doubleSided & 0x1u) << 2u);
     vPackedFlags = float(flags) / 255.0;
+    vTextureHandles01 = mat.textureHandles01;
+    vTextureHandles23 = mat.textureHandles23;
     gl_Position = uPerView.uProjection * uPerView.uView * worldPos;
 }

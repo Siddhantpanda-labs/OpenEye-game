@@ -27,6 +27,18 @@ void RenderResources::EndUploadRecordingPhase() noexcept {
 #endif
 }
 
+void RenderResources::ReleaseOutputRenderTargets(rhi::IDevice* device) noexcept {
+    if (m_mainHdr && device)
+        device->DestroyRenderTarget(m_mainHdr);
+    m_mainHdr = nullptr;
+    if (m_gBuffer && device)
+        device->DestroyRenderTarget(m_gBuffer);
+    m_gBuffer = nullptr;
+    if (m_mainDepth && device)
+        device->DestroyTexture(m_mainDepth);
+    m_mainDepth = nullptr;
+}
+
 void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
 #if !defined(NDEBUG)
     assert(m_debugUploadRecordingDepth == 0 && "RenderResources::Shutdown while upload recording scope is active");
@@ -47,7 +59,6 @@ void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
     }
     m_materialTableCapacity = 0;
     m_materialTableSsboStoragePrimed = false;
-    m_materialTable.ResetToDefault();
     if (m_dirLightUbo && device) {
         device->DestroyBuffer(m_dirLightUbo);
         m_dirLightUbo = nullptr;
@@ -64,15 +75,7 @@ void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
         device->DestroyBuffer(m_staging);
         m_staging = nullptr;
     }
-    if (m_mainHdr && device)
-        device->DestroyRenderTarget(m_mainHdr);
-    m_mainHdr = nullptr;
-    if (m_gBuffer && device)
-        device->DestroyRenderTarget(m_gBuffer);
-    m_gBuffer = nullptr;
-    if (m_mainDepth && device)
-        device->DestroyTexture(m_mainDepth);
-    m_mainDepth = nullptr;
+    ReleaseOutputRenderTargets(device);
     m_width = 0;
     m_height = 0;
     m_device = nullptr;
@@ -154,7 +157,7 @@ void RenderResources::EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t m
 }
 
 void RenderResources::EnsureMaterialTableBufferForDrawList(rhi::IDevice* device, const DrawList& list) {
-    uint32_t requiredRows = 1u;
+    uint32_t requiredRows = (std::max)(m_materialTable.MaterialCount(), 1u);
     const uint32_t n = list.VisibleCount();
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t materialId = list.items[i].materialId;
@@ -213,7 +216,7 @@ void RenderResources::EnsureAllocated(rhi::IDevice* device, uint32_t width, uint
     if (m_mainHdr && m_gBuffer && m_mainDepth && m_device == device && m_width == width && m_height == height)
         return;
 
-    Shutdown(device);
+    ReleaseOutputRenderTargets(m_device ? m_device : device);
     m_device = device;
     m_width = width;
     m_height = height;
@@ -423,7 +426,7 @@ bool RenderResources::UploadMaterialTableFromDrawList(rhi::ICommandList* cmd, co
     if (!m_materialTableSsbo)
         return false;
 
-    uint32_t requiredRows = 1u;
+    uint32_t requiredRows = (std::max)(m_materialTable.MaterialCount(), 1u);
     const uint32_t n = list.VisibleCount();
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t materialId = list.items[i].materialId;

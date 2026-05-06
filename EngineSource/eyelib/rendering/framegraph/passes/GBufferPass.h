@@ -18,7 +18,7 @@ struct IDescriptorSet;
 
 /**
  * Deferred Shading: G-Buffer Pass.
- * Binds `PipelineLayoutKind::RasterForwardMinimal` (reused since it just needs PerObject SSBO).
+ * Binds `PipelineLayoutKind::RasterGBuffer` (Frame + GBuffer data + bindless textures).
  * Writes to `BlackboardSlot::GBufferRenderTarget`.
  */
 class GBufferPass final : public IFrameGraphPass {

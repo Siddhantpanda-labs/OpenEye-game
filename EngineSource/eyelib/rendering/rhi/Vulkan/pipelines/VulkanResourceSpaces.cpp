@@ -557,9 +557,17 @@ VkDescriptorSetLayout CreateRasterGBufferDataSetLayout(VkDevice device, bool inc
 }
 
 VkPipelineLayout CreateRasterGBufferPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
-    VkDescriptorSetLayout rasterGBufferDataLayout, bool includeMeshPushStages) {
-    VkDescriptorSetLayout layouts[2] = { frameLayout, rasterGBufferDataLayout };
-    return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
+    VkDescriptorSetLayout rasterGBufferDataLayout, VkDescriptorSetLayout bindlessLayout,
+    bool useIndependentSets, bool includeMeshPushStages) {
+    VkDescriptorSetLayout layouts[3] = { frameLayout, rasterGBufferDataLayout, bindlessLayout };
+#if defined(VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT)
+    const VkPipelineLayoutCreateFlags flags =
+        useIndependentSets ? VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT : 0u;
+#else
+    (void)useIndependentSets;
+    const VkPipelineLayoutCreateFlags flags = 0u;
+#endif
+    return createPipelineLayoutCommon(device, layouts, 3, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), flags);
 }
 
 VkPipelineLayout CreatePushOnlyPipelineLayout(VkDevice device) {
@@ -647,7 +655,7 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::OutlinePost: return 1;
         case PipelineLayoutKind::ComposeBootstrap: return 1;
         case PipelineLayoutKind::RasterForwardMinimal: return 2;
-        case PipelineLayoutKind::RasterGBuffer: return 2; // set0=Frame, set1=RasterGBufferData
+        case PipelineLayoutKind::RasterGBuffer: return 3; // set0=Frame, set1=RasterGBufferData, set2=Bindless
         case PipelineLayoutKind::RasterDeferredLighting: return 2; // set0=Frame, set1=RasterDeferredLightingData
         case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
     }
