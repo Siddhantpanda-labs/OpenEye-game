@@ -18,8 +18,6 @@ target_link_libraries(OpenEyeRenderingSandbox
         ${OPENEYE_ENGINE_SOURCE}/thirdparty/assimp/lib/assimp-vc143-mt.lib
 )
 
-add_dependencies(OpenEyeRenderingSandbox CopyEngineAssets)
-
 if(MSVC)
     target_compile_options(OpenEyeRenderingSandbox PRIVATE /W4 /wd4100)
 endif()
@@ -38,7 +36,6 @@ target_link_libraries(OpenEyeRenderingSandboxChecker
         EyelibRendering
         glfw
 )
-add_dependencies(OpenEyeRenderingSandboxChecker CopyEngineAssets)
 if(MSVC)
     target_compile_options(OpenEyeRenderingSandboxChecker PRIVATE /W4 /wd4100)
 endif()

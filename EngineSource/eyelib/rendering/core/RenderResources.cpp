@@ -85,6 +85,8 @@ void RenderResources::Shutdown(rhi::IDevice* device) noexcept {
     m_perFrameUboUniformPrimed = false;
     m_perViewUboUniformPrimed = false;
     m_dirLightUboUniformPrimed = false;
+    m_materialTableUploadedRevision = 0;
+    m_materialTableUploadedRows = 0;
 }
 
 void RenderResources::EnsureStagingUploadBuffer(rhi::IDevice* device) {
@@ -145,6 +147,7 @@ void RenderResources::EnsureMaterialTableBuffer(rhi::IDevice* device, uint32_t m
     m_materialTableSsbo = nullptr;
     m_materialTableCapacity = 0;
     m_materialTableSsboStoragePrimed = false;
+    m_materialTableUploadedRows = 0;
 
     rhi::BufferDesc d{};
     d.sizeInBytes = static_cast<size_t>(cap) * sizeof(materials::MaterialGpuStd430);
@@ -437,13 +440,25 @@ bool RenderResources::UploadMaterialTableFromDrawList(rhi::ICommandList* cmd, co
     if (requiredRows > m_materialTableCapacity)
         return false;
 
+    const uint64_t tableRevision = m_materialTable.Revision();
+    if (m_materialTableSsboStoragePrimed &&
+        m_materialTableUploadedRevision == tableRevision &&
+        m_materialTableUploadedRows == requiredRows) {
+        return true;
+    }
+
     const size_t bytes = static_cast<size_t>(requiredRows) * sizeof(materials::MaterialGpuStd430);
     if (bytes > kStagingUploadBytes)
         return false;
 
     std::vector<materials::MaterialGpuStd430> rows;
     m_materialTable.BuildGpuRows(requiredRows, rows);
-    return RecordStorageBufferUploadFromStaging(cmd, m_materialTableSsbo, m_materialTableSsboStoragePrimed, rows.data(), bytes);
+    const bool uploaded = RecordStorageBufferUploadFromStaging(cmd, m_materialTableSsbo, m_materialTableSsboStoragePrimed, rows.data(), bytes);
+    if (uploaded) {
+        m_materialTableUploadedRevision = tableRevision;
+        m_materialTableUploadedRows = requiredRows;
+    }
+    return uploaded;
 }
 
 bool RenderResources::RecordGpuUploadScratchFromStaging(rhi::ICommandList* cmd, const void* data, size_t sizeInBytes) {

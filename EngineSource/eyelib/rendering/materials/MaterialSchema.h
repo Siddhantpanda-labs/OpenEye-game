@@ -3,6 +3,7 @@
 #include "eyelib/math/Types.h"
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 
@@ -66,12 +67,12 @@ inline MaterialRecord MakeDefaultMaterialRecord() noexcept {
 inline void FillMaterialGpuRow(const MaterialRecord& src, MaterialGpuStd430& out) noexcept {
     std::memcpy(out.baseColorFactor, &src.baseColorFactor.x, sizeof(out.baseColorFactor));
     std::memcpy(out.emissiveFactor, &src.emissiveFactor.x, sizeof(out.emissiveFactor));
-    out.metallicFactor = src.metallicFactor;
-    out.roughnessFactor = src.roughnessFactor;
-    out.normalScale = src.normalScale;
-    out.occlusionStrength = src.occlusionStrength;
-    out.alphaCutoff = src.alphaCutoff;
-    out.alphaMode = static_cast<uint32_t>(src.alphaMode);
+    out.metallicFactor = (std::clamp)(src.metallicFactor, 0.0f, 1.0f);
+    out.roughnessFactor = (std::clamp)(src.roughnessFactor, 0.04f, 1.0f);
+    out.normalScale = (std::max)(src.normalScale, 0.0f);
+    out.occlusionStrength = (std::clamp)(src.occlusionStrength, 0.0f, 1.0f);
+    out.alphaCutoff = (std::clamp)(src.alphaCutoff, 0.0f, 1.0f);
+    out.alphaMode = (std::min)(static_cast<uint32_t>(src.alphaMode), 2u);
     out.doubleSided = src.doubleSided ? 1u : 0u;
     out._pad0 = 0u;
     out.textureHandles[0] = src.baseColorTexture;

@@ -241,4 +241,18 @@ Scope: Bx.1-Bx.6 (post-M5 stabilization).
 - **Root cause of prior failure:** stale Vulkan SPIR-V for `raster/deferred/gbuffer_static` caused runtime to execute outdated shader code that did not reflect current bindless texture-sampling GLSL changes.
 - **Verification path:** checker-textured rotating cube sandbox entry + Sponza sandbox both exercise bindless material texture handles through `MaterialTable` and `RasterGBuffer`.
 - **Tooling hardening:** `EngineSource/tools/compile_vulkan_shaders.py` now persists Vulkan shader compile state in `EngineSource/assets/shaders/vulkan_shader_compile_state.json`, supports `--reset-state`, and updates state per successfully compiled shader so stale `.spv` regressions are detectable/retriable.
-- **Status impact:** P6.8 remains open for full validation matrix, but core textured deferred path is functionally proven in sandbox.
+- **Status impact:** resolved foundational texture-path correctness; full matrix validation was completed in P6.11.
+
+### P6.12 - Deferred hardening closeout (2026-05-07)
+
+Final closeout across D1/D2/D3/D5/D6/D7/D10 after P6.8-P6.11 validation.
+
+- **D1 (Frame graph integrity):** **pass** — deferred rendering remains pass-owned (`Upload -> Schedule -> Compile -> Execute` only).
+- **D2 (Blackboard hygiene):** **pass** — typed slots + single-writer ownership maintained (`RenderResources`, `kLightingIbl`).
+- **D3 (Feature isolation):** **pass** — raster passes live under `features/raster`; no cross-feature coupling added.
+- **D5 (Upload phase reality):** **pass** — material/per-object/light uploads stay in `OnUpload`; P6.10 adds safe redundant-upload skipping.
+- **D6 (Barriers & scheduling):** **pass** — deferred transitions stay graph-declared and compile-merged.
+- **D7 (Capabilities & permutations):** **pass** — no execute-time compile path; permutations warmed and bind-only at runtime.
+- **D10 (Observability):** **pass** — framegraph pass scopes + sandbox matrix/mode-toggle evidence available.
+
+**Closeout status:** **P6 complete** for current deferred scope.

@@ -1,5 +1,7 @@
 #include "eyelib/rendering/materials/MaterialTable.h"
 
+#include <cstring>
+
 namespace eyelib {
 namespace rendering {
 namespace materials {
@@ -11,6 +13,7 @@ MaterialTable::MaterialTable() {
 void MaterialTable::ResetToDefault() {
     m_records.clear();
     m_records.push_back(MakeDefaultMaterialRecord());
+    ++m_revision;
 }
 
 uint32_t MaterialTable::MaterialCount() const noexcept {
@@ -21,13 +24,17 @@ void MaterialTable::EnsureMaterialId(uint32_t materialId) {
     if (materialId < m_records.size())
         return;
     m_records.resize(static_cast<size_t>(materialId) + 1u, MakeDefaultMaterialRecord());
+    ++m_revision;
 }
 
 bool MaterialTable::SetMaterial(uint32_t materialId, const MaterialRecord& record) {
     EnsureMaterialId(materialId);
     if (materialId >= m_records.size())
         return false;
+    if (std::memcmp(&m_records[materialId], &record, sizeof(MaterialRecord)) == 0)
+        return true;
     m_records[materialId] = record;
+    ++m_revision;
     return true;
 }
 

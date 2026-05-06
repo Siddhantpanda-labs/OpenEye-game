@@ -101,7 +101,7 @@ rhi::ShaderGraphicsPipelineCreateInfo RasterFeature::makeDeferredLightingSpec() 
     // No vertex layout — full-screen triangle generated from gl_VertexIndex, no VBO.
     gp.topology = rhi::PrimitiveTopology::TriangleList;
     gp.layoutKind = rhi::PipelineLayoutKind::RasterDeferredLighting;
-    gp.sourcePolicy = rhi::ShaderSourcePolicy::CompileFromSource;
+    gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
     gp.useDepthStencilOverride = true;
     gp.depthStencilOverride.depthTest = false;
     gp.depthStencilOverride.depthWrite = false;

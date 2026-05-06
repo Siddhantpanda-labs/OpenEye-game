@@ -21,6 +21,7 @@ public:
 
     void EnsureMaterialId(uint32_t materialId);
     bool SetMaterial(uint32_t materialId, const MaterialRecord& record);
+    uint64_t Revision() const noexcept { return m_revision; }
 
     const MaterialRecord& GetMaterialOrDefault(uint32_t materialId) const noexcept;
 
@@ -28,6 +29,7 @@ public:
 
 private:
     std::vector<MaterialRecord> m_records;
+    uint64_t m_revision = 0;
 };
 
 } // namespace materials

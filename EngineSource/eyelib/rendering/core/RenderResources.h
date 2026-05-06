@@ -165,6 +165,9 @@ private:
     bool m_stagingGpuReadPending = false;
     /** Scratch buffer was transitioned to uniform read after last successful upload. */
     bool m_gpuScratchUniformReady = false;
+    /** Last material-table content revision uploaded to GPU; paired with row count for upload skip. */
+    uint64_t m_materialTableUploadedRevision = 0;
+    uint32_t m_materialTableUploadedRows = 0;
     materials::MaterialTable m_materialTable{};
 #if !defined(NDEBUG)
     /** Nested `BeginUploadRecordingPhase` count; GPU upload APIs require depth > 0. */
