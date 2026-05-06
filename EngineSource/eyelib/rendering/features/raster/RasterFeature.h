@@ -2,9 +2,9 @@
 
 #include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
 #include "eyelib/rendering/framegraph/passes/BlitMainHdrToDefaultPass.h"
-#include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
-#include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
-#include "eyelib/rendering/framegraph/passes/GBufferPass.h"
+#include "eyelib/rendering/features/raster/DeferredLightingPass.h"
+#include "eyelib/rendering/features/raster/ForwardOpaquePass.h"
+#include "eyelib/rendering/features/raster/GBufferPass.h"
 #include "eyelib/rendering/lighting/ibl/IblDefaultProbes.h"
 #include "eyelib/rendering/scheduler/RenderFeature.h"
 #include "eyelib/rendering/shaders/ShaderLibrary.h"

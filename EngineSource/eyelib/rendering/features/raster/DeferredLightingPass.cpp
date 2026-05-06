@@ -1,4 +1,4 @@
-#include "eyelib/rendering/framegraph/passes/DeferredLightingPass.h"
+#include "eyelib/rendering/features/raster/DeferredLightingPass.h"
 
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"

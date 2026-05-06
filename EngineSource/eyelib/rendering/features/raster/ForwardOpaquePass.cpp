@@ -1,4 +1,4 @@
-#include "eyelib/rendering/framegraph/passes/ForwardOpaquePass.h"
+#include "eyelib/rendering/features/raster/ForwardOpaquePass.h"
 
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"

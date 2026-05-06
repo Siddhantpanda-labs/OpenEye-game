@@ -234,3 +234,11 @@ Scope: Bx.1-Bx.6 (post-M5 stabilization).
 - Added dedicated `RasterGBuffer` contracts (`PipelineLayoutKind::RasterGBuffer`, `ResourceSetType::RasterGBufferData`) to decouple GBuffer from forward layout usage.
 - `GBufferPass` now binds `RasterGBufferData` (PerObject SSBO only); directional-light UBO binding was removed from the GBuffer set contract.
 - Validation: Debug `OpenEyeRenderingSandbox` build passed after integration.
+
+### P6 - Material texture parity milestone (2026-05-06)
+
+- **Outcome:** `OpenEyeRenderingSandbox` now renders Sponza with expected textures (no flat cream fallback appearance).
+- **Root cause of prior failure:** stale Vulkan SPIR-V for `raster/deferred/gbuffer_static` caused runtime to execute outdated shader code that did not reflect current bindless texture-sampling GLSL changes.
+- **Verification path:** checker-textured rotating cube sandbox entry + Sponza sandbox both exercise bindless material texture handles through `MaterialTable` and `RasterGBuffer`.
+- **Tooling hardening:** `EngineSource/tools/compile_vulkan_shaders.py` now persists Vulkan shader compile state in `EngineSource/assets/shaders/vulkan_shader_compile_state.json`, supports `--reset-state`, and updates state per successfully compiled shader so stale `.spv` regressions are detectable/retriable.
+- **Status impact:** P6.8 remains open for full validation matrix, but core textured deferred path is functionally proven in sandbox.
