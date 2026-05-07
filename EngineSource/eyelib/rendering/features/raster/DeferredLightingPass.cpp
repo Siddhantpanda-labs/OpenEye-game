@@ -1,5 +1,6 @@
 #include "eyelib/rendering/features/raster/DeferredLightingPass.h"
 
+#include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/framegraph/FrameGraphBarrierList.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
 #include "eyelib/rendering/core/FrameViewUniforms.h"
@@ -53,6 +54,8 @@ void DeferredLightingPass::CollectTextureBarriers(const FrameGraphBlackboard& bl
         out.Push(iblPre, rhi::ResourceState::ShaderResource);
     if (rhi::ITexture* iblLut = blackboard.TryGetTexture(BlackboardSlot::IblBrdfLut))
         out.Push(iblLut, rhi::ResourceState::ShaderResource);
+    if (rhi::ITexture* dirShadow = blackboard.TryGetTexture(BlackboardSlot::DirectionalShadowMapArray))
+        out.Push(dirShadow, rhi::ResourceState::DepthRead);
 }
 
 bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const {
@@ -81,8 +84,9 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
     rhi::IBuffer* perFrame = m_blackboard->TryGetBuffer(BlackboardSlot::PerFrameUniformBuffer);
     rhi::IBuffer* perView = m_blackboard->TryGetBuffer(BlackboardSlot::PerViewUniformBuffer);
     rhi::IBuffer* dirLight = m_blackboard->TryGetBuffer(BlackboardSlot::DirectionalLightUniformBuffer);
+    rhi::IBuffer* shadowParams = m_blackboard->TryGetBuffer(BlackboardSlot::ShadowParamsBuffer);
 
-    if (!perFrame || !perView || !dirLight)
+    if (!perFrame || !perView || !dirLight || !shadowParams)
         return;
 
     const uint32_t frameIdx = m_device->GetCurrentFrameIndex();
@@ -113,6 +117,7 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
     rhi::ITexture* iblIrr = m_blackboard->TryGetTexture(BlackboardSlot::IblIrradianceCubemap);
     rhi::ITexture* iblSpec = m_blackboard->TryGetTexture(BlackboardSlot::IblPrefilterCubemap);
     rhi::ITexture* iblLut = m_blackboard->TryGetTexture(BlackboardSlot::IblBrdfLut);
+    rhi::ITexture* dirShadow = m_blackboard->TryGetTexture(BlackboardSlot::DirectionalShadowMapArray);
     const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirLight)) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c0)) << 3u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c1)) << 7u) ^
@@ -120,7 +125,9 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(depthTex)) << 17u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblIrr)) << 21u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblSpec)) << 25u) ^
-                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblLut)) << 29u);
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(iblLut)) << 29u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(shadowParams)) << 33u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirShadow)) << 37u);
     if (!m_passSets[frameIdx] || dataKey != m_passSetKeys[frameIdx]) {
         if (!m_passSets[frameIdx]) {
             rhi::IPipelineLayout* passLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterDeferredLightingData);
@@ -137,6 +144,8 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
             m_passSets[frameIdx]->UpdateTexture(5, iblIrr);
             m_passSets[frameIdx]->UpdateTexture(6, iblSpec);
             m_passSets[frameIdx]->UpdateTexture(7, iblLut);
+            m_passSets[frameIdx]->UpdateUniformBuffer(8, shadowParams, 0, 0);
+            m_passSets[frameIdx]->UpdateTexture(9, dirShadow);
         }
     }
 

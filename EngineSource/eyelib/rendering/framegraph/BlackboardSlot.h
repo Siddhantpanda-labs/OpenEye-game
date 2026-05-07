@@ -29,6 +29,14 @@ enum class BlackboardSlot : uint8_t {
     IblPrefilterCubemap,
     /** BRDF split-sum LUT (`RGBA16F`, RG used). */
     IblBrdfLut,
+    /** Directional shadow depth array (CSM slices). */
+    DirectionalShadowMapArray,
+    /** Spot-light shadow atlas/depth target. */
+    SpotShadowMapAtlas,
+    /** Point-light shadow cubemap array/atlas target. */
+    PointShadowCubemapArray,
+    /** Shadow parameter uniform/storage buffer (splits, matrices, bias/filter settings). */
+    ShadowParamsBuffer,
     SlotCount
 };
 

@@ -119,7 +119,7 @@ VkPipelineLayout CreateRasterGBufferPipelineLayout(VkDevice device, VkDescriptor
     VkDescriptorSetLayout rasterGBufferDataLayout, VkDescriptorSetLayout bindlessLayout,
     bool useIndependentSets, bool includeMeshPushStages);
 
-/** Set 1 — RasterDeferredLightingData: 0–3 GBuffer+depth, 4 dir light UBO, 5–6 IBL cubes, 7 BRDF LUT. */
+/** Set 1 — RasterDeferredLightingData: 0–3 GBuffer+depth, 4 dir light UBO, 5–6 IBL cubes, 7 BRDF LUT, 8 shadow params UBO, 9 directional shadow map array. */
 VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device, bool includeMeshShaderStages);
 /** RasterDeferredLighting: set0 Frame, set1 RasterDeferredLightingData. Push constants 256 bytes. */
 VkPipelineLayout CreateRasterDeferredLightingPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,

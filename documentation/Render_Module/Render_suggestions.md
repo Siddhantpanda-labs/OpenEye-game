@@ -194,3 +194,23 @@ Filament shaders are GLSL and heavily commented with paper references. Wicked sh
 ### One thing to keep in mind
 
 Sascha's samples use **legacy render passes** (pre-dynamic rendering). When you reference his rendering technique samples, the **algorithm and pass structure** is what you extract — not the render pass setup code, which you replace with your dynamic rendering path. The shading logic, attachment layout, and pass ordering are all still valid.
+
+---
+
+### Local reference mirrors in this workspace
+
+The key reference repos discussed above are also available locally under:
+`EngineSource/thirdparty/`
+
+Confirmed local mirrors:
+
+- `Sascha_Vulkan`
+- `Wicked_engine`
+- `Vulkan_Samples`
+- `Aespinosa_vulkan`
+- `diligent`
+
+Practical usage note:
+
+- Use these local mirrors for fast code search and side-by-side comparison while implementing P7/P8.
+- Extract **technique structure and shader/math logic** (CSM splits, bias strategy, PCF/filtering, clustered lighting flow), but keep integration aligned with this engine's framegraph/blackboard/upload discipline.

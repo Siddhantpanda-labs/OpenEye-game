@@ -469,9 +469,11 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     //   binding 4:   Directional light UBO.
     //   binding 5-6: IBL irradiance + prefiltered specular (samplerCube).
     //   binding 7:   BRDF integration LUT (sampler2D).
+    //   binding 8:   Directional shadow params UBO.
+    //   binding 9:   Directional shadow map array (sampler2DArray).
     // NOTE: descriptor type must match the GLSL declaration; sampler2D = COMBINED_IMAGE_SAMPLER.
     const VkShaderStageFlags fragStage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutBinding bindings[8] = {};
+    VkDescriptorSetLayoutBinding bindings[10] = {};
     for (int i = 0; i < 4; ++i) {
         bindings[i].binding = static_cast<uint32_t>(i);
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -492,10 +494,18 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     bindings[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[7].descriptorCount = 1;
     bindings[7].stageFlags = fragStage;
+    bindings[8].binding = 8;
+    bindings[8].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[8].descriptorCount = 1;
+    bindings[8].stageFlags = fragStage;
+    bindings[9].binding = 9;
+    bindings[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[9].descriptorCount = 1;
+    bindings[9].stageFlags = fragStage;
     (void)includeMeshShaderStages; // fragment-only pass
 
     VkDescriptorSetLayoutCreateInfo info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    info.bindingCount = 8;
+    info.bindingCount = 10;
     info.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)

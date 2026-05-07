@@ -17,6 +17,7 @@ inline constexpr const char* kBlitMainHdrToDefault        = "BlitMainHdrToDefaul
 
 inline constexpr const char* kDepthPrepass                = "DepthPrepass";
 inline constexpr const char* kForwardOpaque               = "ForwardOpaque";
+inline constexpr const char* kDirectionalShadow           = "DirectionalShadow";
 
 }  // namespace pass_names
 

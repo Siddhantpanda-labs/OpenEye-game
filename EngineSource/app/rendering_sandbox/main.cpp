@@ -4,6 +4,7 @@
 #include "eyelib/rendering/core/RenderBackend.h"
 #include "eyelib/rendering/core/RenderWorld.h"
 #include "eyelib/rendering/features/raster/RasterFeature.h"
+#include "eyelib/rendering/features/shadows/ShadowFeature.h"
 #include "eyelib/rendering/scene/CameraConventions.h"
 #include "eyelib/rendering/scene/RenderSceneView.h"
 #include "eyelib/rendering/scene/SceneDrawInstance.h"
@@ -406,7 +407,9 @@ int main() {
     meshResolver.mesh = sandboxMesh.get();
 
     eyelib::rendering::RasterFeature rasterFeature;
+    eyelib::rendering::ShadowFeature shadowFeature;
     rasterFeature.SetMeshResolver(&meshResolver);
+    shadowFeature.SetMeshResolver(&meshResolver);
     rasterFeature.SetRenderMode(eyelib::rendering::RenderMode::Deferred);
     eyelib::rendering::RenderSceneView sceneView;
 
@@ -436,6 +439,7 @@ int main() {
     eyelib::rendering::RenderWorld world(device.get());
     world.SetOutputSize(kWidth, kHeight);
     world.SetSceneView(&sceneView);
+    world.TrySubscribeFeature(&shadowFeature);
     world.TrySubscribeFeature(&rasterFeature);
     world.Initialize();
 

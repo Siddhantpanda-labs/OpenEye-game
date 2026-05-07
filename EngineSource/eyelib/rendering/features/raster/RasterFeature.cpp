@@ -14,6 +14,7 @@
 #include "eyelib/rendering/features/raster/GBufferPass.h"
 #include "eyelib/rendering/features/raster/DeferredLightingPass.h"
 #include "eyelib/rendering/geometry/IMeshHandleResolver.h"
+#include "eyelib/rendering/lighting/SceneLighting.h"
 #include "eyelib/rendering/resources/Mesh.h"
 #include "eyelib/rendering/rhi/RHI.h"
 #include "eyelib/rendering/rhi/RHITypes.h"
@@ -182,8 +183,9 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     }
 
     DirectionalLightStd140 dir;
-    dir.direction = {-0.35f, -0.85f, -0.25f, 0.0f}; // Sun-like slant
-    dir.colorIntensity = {1.0f, 0.95f, 0.85f, 5.0f}; // Warm light, high intensity
+    const DirectionalLightSceneState sceneLight = SceneLighting::GetDirectionalLight();
+    dir.direction = {sceneLight.direction.x, sceneLight.direction.y, sceneLight.direction.z, 0.0f};
+    dir.colorIntensity = {sceneLight.color.x, sceneLight.color.y, sceneLight.color.z, sceneLight.intensity};
     const bool uploadedDirLight = res->UploadDirectionalLightUniform(render.recordingCommandList, dir);
 
     bool uploadedPerObject = true;

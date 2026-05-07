@@ -21,6 +21,10 @@ inline constexpr const char* kDirectionalLightUniformBuffer = "DirectionalLightU
 inline constexpr const char* kIblIrradianceCubemap = "IblIrradianceCubemap";
 inline constexpr const char* kIblPrefilterCubemap = "IblPrefilterCubemap";
 inline constexpr const char* kIblBrdfLut = "IblBrdfLut";
+inline constexpr const char* kDirectionalShadowMapArray = "DirectionalShadowMapArray";
+inline constexpr const char* kSpotShadowMapAtlas = "SpotShadowMapAtlas";
+inline constexpr const char* kPointShadowCubemapArray = "PointShadowCubemapArray";
+inline constexpr const char* kShadowParamsBuffer = "ShadowParamsBuffer";
 
 }  // namespace resource_names
 
@@ -43,6 +47,8 @@ inline constexpr const char* kRasterFeature   = "Raster";
 
 /** Default / bootstrap IBL textures (`IblDefaultProbes`); distinct from `RenderResources`. */
 inline constexpr const char* kLightingIbl = "LightingIbl";
+/** Shadow feature-owned resources (`features/shadows`). */
+inline constexpr const char* kShadowFeature = "ShadowFeature";
 
 }  // namespace writer_names
 

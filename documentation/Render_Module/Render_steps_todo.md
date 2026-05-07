@@ -159,6 +159,11 @@ Default quality/perf target (initial):
 
 Use existing folders as follows to avoid wrong placement or extra files:
 
+- **`EngineSource/eyelib/rendering/lighting/` (light data + culling system layer)**
+  - Start from existing scaffolds: `SceneLighting`, `LightingSystem`, `LightCuller`, `ClusteredLightGrid`, `TiledLightGrid`.
+  - Own: CPU-side light model (directional/point/spot records), light-list/culling policy, and shared light-data assembly for deferred consumption.
+  - Keep this layer pass-agnostic: no framegraph scheduling or pass execution code here.
+
 - **`EngineSource/eyelib/rendering/features/shadows/` (feature orchestration only)**
   - Use existing `ShadowFeature.h/.cpp` as the entry feature for P7 scheduling.
   - Own: feature lifecycle (`OnRegister`, `OnUpload`, `OnSchedulePasses`, `OnShutdown`), blackboard slot reservations/publication, shader permutation registration/warm-up.
@@ -170,8 +175,8 @@ Use existing folders as follows to avoid wrong placement or extra files:
   - Keep this layer pass-agnostic (no direct framegraph scheduling logic).
 
 - **`EngineSource/eyelib/rendering/features/raster/` (lighting consumption path)**
-  - Keep deferred lighting shadow sampling integration in raster/deferred consumption code (existing deferred pass/shader contracts).
-  - Own only shading-side consumption and bindings; do not move strategy/policy logic from `lighting/shadows` into raster.
+  - Keep deferred lighting + shadow sampling integration in raster/deferred consumption code (existing deferred pass/shader contracts).
+  - Own only shading-side consumption and bindings; do not move light-model ownership or shadow strategy/policy logic into raster.
 
 - **`EngineSource/eyelib/rendering/framegraph/passes/`**
   - Add new shadow pass files here **only** if they are truly cross-feature/infrastructure-generic.
@@ -182,6 +187,7 @@ Use existing folders as follows to avoid wrong placement or extra files:
   - Keep shadow map generation and deferred sampling shaders separate (generation vs consumption).
 
 - **Contracts that must be extended before shadow pass wiring**
+  - `core/DirectionalLightUniforms.h` + new light buffer contracts: evolve from single directional UBO to P7 light-data contracts (directional/point/spot + shadow params) in upload-phase owned buffers.
   - `framegraph/BlackboardSlot.h` and `framegraph/FrameGraphResourceNames.h`: add typed shadow resources/owners first.
   - `rhi` set/layout contracts: reuse existing shadow-capable pipeline layout/resource-set scaffolding; do not invent parallel ad-hoc set contracts.
 
@@ -191,20 +197,26 @@ Expected new files (only where needed):
   - `DirectionalShadowPass.h/.cpp` (required for P7.2/P7.3)
   - `SpotShadowPass.h/.cpp` (P7.4)
   - point-shadow pass files only when P7.5 shadowed point path is enabled
+- `lighting/`:
+  - add focused light data/culling files only if existing `SceneLighting` / `LightingSystem` / `LightCuller` scaffolds become multi-role or oversized
 - `lighting/shadows/`:
   - add focused helper/source files only if existing scaffold files would become multi-role or oversized
 - avoid creating new top-level rendering subfolders for P7 unless a clear cross-feature ownership boundary appears
 
 | Step | Status | Implementation order (whole system) |
 | ---- | ------ | ---- |
-| P7.1 | [ ] | **Freeze shadow/light contracts.** Define blackboard slots, set/binding layout contracts, pass order, and fallback rules for missing shadow resources. |
-| P7.2 | [ ] | **Directional shadow foundation.** Add directional shadow-map pass, light-space matrix upload, and deferred directional shadow sampling path. |
-| P7.3 | [ ] | **CSM stabilization + quality.** Implement 3 cascades, practical split scheme, texel snapping, cascade blending, and tuned depth/normal/slope bias. |
+| P7.1 | [x] | **Freeze shadow/light contracts.** Landed typed shadow slots + names (`DirectionalShadowMapArray`, `SpotShadowMapAtlas`, `PointShadowCubemapArray`, `ShadowParamsBuffer`) in blackboard/resource-name constants, plus `features/shadows/ShadowFeature` as an `IRenderFeature` scaffold that reserves/releases these slots under `writer_names::kShadowFeature` (2026-05-07). |
+| P7.2 | [x] | **Directional shadow foundation.** Completed (2026-05-07): `DirectionalShadowPass` now renders real opaque/alpha-test casters into 3-layer depth-array shadow map, `ShadowFeature` computes scene-camera-derived directional cascade light-space matrices and uploads `ShadowParamsBuffer`, and deferred lighting consumes/binds/samples directional shadow resources (`RasterDeferredLightingData` bindings 8/9, shader PCF sampling path). |
+| P7.3 | [ ] | **CSM stabilization + quality.** In progress (2026-05-07): added directional cascade texel snapping stabilization in `ShadowFeature`, shader-side cascade transition blending in deferred shadow sampling, a dedicated shadow-caster list path (scene-instance based, per-cascade light-frustum filtered) so shadow casting is no longer tied to camera-visible draw-list membership, and moved directional light ownership to `lighting/SceneLighting` (consumed by raster + shadows) so `RasterFeature` no longer owns light state. Remaining in this step: finalize bias slope/normal tuning policy and complete stability validation matrix notes. |
+| P7.3a | [ ] | **Hardware slope-scaled depth bias.** Add `SetDepthBias(constantFactor, slopeFactor)` to `ICommandList` RHI. Call it in `DirectionalShadowPass::Execute` during the shadow raster phase (matching Aespinosa `cmd.set_depth_bias` pattern). Remove the fragment-shader NDC bias path; the RHI path is zero-cost in the lighting shader and handles all slopes natively. Register a pipeline flag (`VK_DYNAMIC_STATE_DEPTH_BIAS`) in the shadow pipeline at warm-up time. Pair with a small constant in `ShadowParamsStd140` for the lighting shader to retain cascade-invariant receiver-side normal offset only. |
+| P7.3b | [ ] | **Per-cascade soft penumbra (PCF extent tuning).** Expose a per-cascade `filterExtent[3]` in `ShadowParamsStd140` (replaces single `pcfKernel` scalar). Cascade 0 = 1 texel (sharp contact), cascade 1 = 2 texels, cascade 2 = 3 texels. Deferred sampling shader reads `uShadow.uFilterExtent[cascadeIndex]` instead of a flat radius. Cap max kernel at 5×5 to bound cost at default quality tier (tied to P7.6 quality settings). |
+| P7.3c | [ ] | **Variance Shadow Maps (VSM).** Replace the depth-only `DirectionalShadowMapArray` (Depth24) with a 2-channel RG16F color RT storing `(depth, depth²)` moments. Add a `VarianceDirectionalShadowPass` under `features/shadows/` that writes moments; optionally add a single-axis Gaussian blur pass to soften the VSM (eliminates PCF kernel noise entirely). In the deferred lighting shader, replace `SampleDirectionalShadowCascadePCF` with `SampleDirectionalShadowVSM` using Chebyshev Upper Bound and `linstep` light-leak suppression (matches Aespinosa `computeVarianceShadow`). Wire as an opt-in quality tier in P7.6 quality settings. Eliminates all filter jitter, makes cascade transition blending seamless, and correctly handles contact shadows without bias. |
 | P7.4 | [ ] | **Spot light shadows.** Add spot-light shadow pass and deferred spot shadow sampling with bounded filter cost. |
 | P7.5 | [ ] | **Point light integration.** Add point lights to deferred shading; shadowed point path as phased/quality-tier feature with strict cost controls. |
-| P7.6 | [ ] | **Shadow filtering/perf tiers.** Expose low/medium/high shadow settings (cascade count/resolution/filter kernel) with sane defaults. |
-| P7.7 | [ ] | **Validation matrix.** Run sandbox tests for near-edge quality, cascade transitions, camera motion stability, multi-light stress, and mode switching. |
-| P7.8 | [ ] | **Hardening closeout.** Record D1/D2/D3/D5/D6/D7/D10 checks in `render_check.md`, then mark P7 complete. |
+| P7.6 | [ ] | **Shadow filtering/perf tiers.** Expose low/medium/high shadow settings (cascade count/resolution/filter kernel) with sane defaults. Low = PCF 1-tap + no VSM. Medium = PCF 3×3 + per-cascade extent. High = VSM + optional blur pass. |
+| P7.7 | [ ] | **Screen-space contact shadows.** Add a fullscreen compute pass (after GBuffer, before deferred lighting) that ray-marches each pixel toward the light direction in view-space depth, catching sub-texel contact geometry (e.g. sphere-on-plane base) that CSM at 2048px cannot resolve. Result feeds a 1-bit `contactShadow` mask composited with the CSM shadow term in the deferred lighting shader. Bounded by a max ray step count (16–32 taps) for cost control. |
+| P7.8 | [ ] | **Validation matrix.** Run sandbox tests for near-edge quality, cascade transitions, camera motion stability, multi-light stress, and mode switching. |
+| P7.9 | [ ] | **Hardening closeout.** Record D1/D2/D3/D5/D6/D7/D10 checks in `render_check.md`, then mark P7 complete. |
 
 ---
 
