@@ -57,7 +57,12 @@ bool DirectionalShadowPass::DescribeRenderAttachmentOps(const FrameGraphBlackboa
     outOps.depth.storeOp = AttachmentStoreOp::Store;
     outOps.depth.clearValue.depth = 1.0f;
     outOps.depth.clearValue.stencil = 0;
-    return outOps.hasDepth;
+    if (outRt->GetColorTexture(0) != nullptr) {
+        outOps.color.loadOp = AttachmentLoadOp::Clear;
+        outOps.color.storeOp = AttachmentStoreOp::Store;
+        outOps.color.clearValue.rgba = {1.0f, 1.0f, 1.0f, 1.0f};
+    }
+    return true;
 }
 
 void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
@@ -69,7 +74,12 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
     ops.depth.storeOp = AttachmentStoreOp::Store;
     ops.depth.clearValue.depth = 1.0f;
     ops.depth.clearValue.stencil = 0;
-    if (!ops.hasDepth)
+    if (m_directionalShadowRt->GetColorTexture(0) != nullptr) {
+        ops.color.loadOp = AttachmentLoadOp::Clear;
+        ops.color.storeOp = AttachmentStoreOp::Store;
+        ops.color.clearValue.rgba = {1.0f, 1.0f, 1.0f, 1.0f};
+    }
+    if (!ops.hasDepth && m_directionalShadowRt->GetColorTexture(0) == nullptr)
         return;
     const uint32_t w = m_directionalShadowRt->GetWidth();
     const uint32_t h = m_directionalShadowRt->GetHeight();
@@ -78,6 +88,11 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
     cmd->SetCullFace(true);
+    // Hardware slope-scaled depth bias (P7.3a): GPU applies per-fragment bias during rasterization.
+    // constantFactor=1.0 = flat depth offset in shadow-map depth units (hardware quantization).
+    // slopeFactor=2.0 = scales by the polygon's max depth slope, handling grazing-angle acne.
+    // Near-perpendicular surfaces (overhead sun) get near-zero slope → minimal bias → contact shadows work.
+    cmd->SetDepthBias(1.0f, 2.0f);
     cmd->BindPipeline(m_shadowPipeline);
 
     for (uint32_t layer = 0; layer < 3u; ++layer) {

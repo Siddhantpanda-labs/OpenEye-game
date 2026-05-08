@@ -85,6 +85,7 @@ enum class RHITextureFormat {
     BGRA8,
     ///< A2B10G10R10 UNORM; common HDR10 swapchain / wide color (Vulkan `VK_FORMAT_A2B10G10R10_UNORM_PACK32`).
     BGR10A2,
+    R16G16_SFLOAT,
     RGB16F,
     RGBA16F,
     R32UI,  ///< Single-channel unsigned int (e.g. entity ID buffer)
@@ -405,6 +406,8 @@ struct ShaderGraphicsPipelineCreateInfo {
     std::string fragmentSourceOverride;
     /** When set, Vulkan uses these for VkPipelineRenderingCreateInfo (must match BeginRendering attachments). When unset, formats are inferred from layoutKind only. */
     std::optional<PipelineAttachmentFormats> attachmentFormats;
+    /** When set, overrides the RasterState used for pipeline creation (e.g. depthBiasEnable for shadow passes). */
+    std::optional<RasterState> rasterStateOverride;
 };
 
 struct PipelineDesc {

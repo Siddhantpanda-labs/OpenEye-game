@@ -393,7 +393,8 @@ void* CreateVkGraphicsPipeline(DeviceVK* device, const PipelineDesc& desc, void*
     }
 #endif
 
-    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                                                   VK_DYNAMIC_STATE_DEPTH_BIAS };
     if (device->SupportsExtendedDynamicState()) {
         dynamicStates.push_back(VK_DYNAMIC_STATE_CULL_MODE);
         dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE);
@@ -705,6 +706,8 @@ IPipeline* CreateGraphicsPipelineFromShaderAssetVK(DeviceVK* device, const Shade
         desc.depthStencil.depthTest = true;
         desc.depthStencil.depthWrite = true;
     }
+    if (info.rasterStateOverride.has_value())
+        desc.raster = *info.rasterStateOverride;
     IPipeline* pipe = CreateGraphicsPipelineVK(device, desc);
     destroyStages();
     return pipe;

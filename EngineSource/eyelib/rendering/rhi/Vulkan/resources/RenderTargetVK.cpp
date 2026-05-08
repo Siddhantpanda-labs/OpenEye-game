@@ -37,6 +37,8 @@ void RenderTargetVK::SetDepthLayer(uint32_t layer) { m_depthArrayLayer = layer; 
 uint32_t RenderTargetVK::GetDepthLayer() const { return m_depthArrayLayer; }
 
 void* RenderTargetVK::GetColorImageView(uint32_t index) const {
+    if (index < m_colorLayerViews.size() && !m_colorLayerViews[index].empty() && m_depthArrayLayer < m_colorLayerViews[index].size() && m_colorLayerViews[index][m_depthArrayLayer] != nullptr)
+        return m_colorLayerViews[index][m_depthArrayLayer];
     if (index < m_colorAttachmentViews.size() && m_colorAttachmentViews[index] != nullptr)
         return m_colorAttachmentViews[index];
     if (index < m_colorTextures.size() && m_colorTextures[index])
@@ -144,6 +146,90 @@ IRenderTarget* CreateDepthOnlyRenderTargetArrayVK(DeviceVK* deviceObj, uint32_t 
     return rt;
 }
 
+IRenderTarget* CreateRenderTargetArrayVK(DeviceVK* deviceObj, uint32_t width, uint32_t height, uint32_t arrayLayers,
+                                         const std::vector<RHITextureFormat>& colorFormats, RHITextureFormat depthFormat,
+                                         uint32_t samples, bool transient) {
+    if (!deviceObj || width == 0 || height == 0 || arrayLayers == 0) return nullptr;
+    auto* rt = new RenderTargetVK(deviceObj);
+    rt->m_width = width;
+    rt->m_height = height;
+
+    TextureDesc td;
+    td.type = TextureType::Texture2DArray;
+    td.width = width;
+    td.height = height;
+    td.depthOrArrayLayers = arrayLayers;
+    td.mipLevels = 1;
+    td.samples = (samples > 0) ? samples : 1u;
+    td.transient = transient;
+    
+    // We create per-layer image views so SetDepthLayer can change the active rendering layer.
+    VkDevice device = static_cast<VkDevice>(deviceObj->GetDevice());
+    
+    for (size_t i = 0; i < colorFormats.size(); ++i) {
+        td.format = colorFormats[i];
+        td.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc | TextureUsage::TransferDst);
+        td.debugName = (i == 0) ? "RT_ColorArray0" : nullptr;
+        ITexture* tex = deviceObj->CreateTexture(td, nullptr);
+        if (!tex) { DestroyRenderTargetVK(deviceObj, rt); return nullptr; }
+        rt->m_colorTextures.push_back(std::unique_ptr<TextureVK>(static_cast<TextureVK*>(tex)));
+        
+        rt->m_colorLayerViews.push_back(std::vector<void*>(arrayLayers, nullptr));
+        TextureVK* colorTex = static_cast<TextureVK*>(tex);
+        VkFormat format = ToVkFormat(colorTex->m_format);
+        for (uint32_t layer = 0; layer < arrayLayers; ++layer) {
+            VkImageViewCreateInfo viewInfo = {};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = static_cast<VkImage>(colorTex->m_image);
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = format;
+            viewInfo.subresourceRange.aspectMask = ToVkImageAspect(colorTex->m_format);
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = layer;
+            viewInfo.subresourceRange.layerCount = 1;
+            VkImageView layerView = VK_NULL_HANDLE;
+            if (vkCreateImageView(device, &viewInfo, nullptr, &layerView) != VK_SUCCESS) {
+                DestroyRenderTargetVK(deviceObj, rt);
+                return nullptr;
+            }
+            rt->m_colorLayerViews[i][layer] = layerView;
+        }
+    }
+
+    if (depthFormat != RHITextureFormat::None) {
+        td.format = depthFormat;
+        td.usage = transient ? TextureUsage::RenderTarget : (TextureUsage::RenderTarget | TextureUsage::ShaderResource | TextureUsage::TransferSrc | TextureUsage::TransferDst);
+        td.debugName = "RT_DepthArray";
+        ITexture* depth = deviceObj->CreateTexture(td, nullptr);
+        if (!depth) { DestroyRenderTargetVK(deviceObj, rt); return nullptr; }
+        rt->m_depthTexture = std::unique_ptr<TextureVK>(static_cast<TextureVK*>(depth));
+        
+        rt->m_depthLayerViews.resize(arrayLayers, nullptr);
+        TextureVK* depthTex = rt->m_depthTexture.get();
+        VkFormat format = ToVkFormat(depthTex->m_format);
+        for (uint32_t layer = 0; layer < arrayLayers; ++layer) {
+            VkImageViewCreateInfo viewInfo = {};
+            viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            viewInfo.image = static_cast<VkImage>(depthTex->m_image);
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format = format;
+            viewInfo.subresourceRange.aspectMask = ToVkImageAspect(depthTex->m_format);
+            viewInfo.subresourceRange.baseMipLevel = 0;
+            viewInfo.subresourceRange.levelCount = 1;
+            viewInfo.subresourceRange.baseArrayLayer = layer;
+            viewInfo.subresourceRange.layerCount = 1;
+            VkImageView layerView = VK_NULL_HANDLE;
+            if (vkCreateImageView(device, &viewInfo, nullptr, &layerView) != VK_SUCCESS) {
+                DestroyRenderTargetVK(deviceObj, rt);
+                return nullptr;
+            }
+            rt->m_depthLayerViews[layer] = layerView;
+        }
+    }
+    return rt;
+}
+
 IRenderTarget* CreateRenderTargetWithSharedDepthVK(DeviceVK* deviceObj, uint32_t width, uint32_t height,
                                                    const std::vector<RHITextureFormat>& colorFormats,
                                                    ITexture* sharedDepthTexture, uint32_t samples) {
@@ -234,6 +320,12 @@ void DestroyRenderTargetVK(DeviceVK* deviceObj, IRenderTarget* rt) {
     DeletionQueueVK* dq = deviceObj->GetDeletionQueue();
     void* device = deviceObj->GetDevice();
     if (dq && device) {
+        for (auto& layerViews : rtVK->m_colorLayerViews) {
+            for (void* v : layerViews) {
+                if (v) dq->EnqueueImageView(frameIndex, device, v);
+            }
+        }
+        rtVK->m_colorLayerViews.clear();
         for (void* v : rtVK->m_colorAttachmentViews) {
             if (v) dq->EnqueueImageView(frameIndex, device, v);
         }

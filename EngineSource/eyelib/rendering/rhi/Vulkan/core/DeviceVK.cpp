@@ -3406,6 +3406,14 @@ IRenderTarget* DeviceVK::CreateRenderTarget(uint32_t width, uint32_t height,
     return CreateRenderTargetVK(this, width, height, colorFormats, depthFormat, samples, transient);
 }
 
+IRenderTarget* DeviceVK::CreateRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers,
+                                                 const std::vector<RHITextureFormat>& colorFormats,
+                                                 RHITextureFormat depthFormat,
+                                                 uint32_t samples,
+                                                 bool transient) {
+    return CreateRenderTargetArrayVK(this, width, height, arrayLayers, colorFormats, depthFormat, samples, transient);
+}
+
 IRenderTarget* DeviceVK::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) {
     return CreateDepthOnlyRenderTargetArrayVK(this, width, height, arrayLayers);
 }

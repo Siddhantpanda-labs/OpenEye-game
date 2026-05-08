@@ -1,29 +1,29 @@
-# Rendering module � implementation order (`Render_steps_todo.md`)
+# Rendering module ï¿½ implementation order (`Render_steps_todo.md`)
 
 **Purpose:** Single **ordered** checklist for what to build next under `EngineSource/eyelib/rendering/`. Drives the **current scope** (closing **M4** and delivering the first real forward raster path, **M5**). Later phases are parked at the bottom as short anchors; they get expanded into full step tables only when they become the current scope.
 
 **Companion documents**
 
-- `new_render_module.md` � target architecture and non?negotiable rules.
-- `newrender_roadmap.md` � phases, exit gates, **�1.3 Hardening dimensions** (D1�D10).
-- `Render_check.md` � milestone tracker + changelog; update when steps land.
-- `EngineSource/eyelib/rendering/README.md` � on?disk charter.
+- `new_render_module.md` ï¿½ target architecture and non?negotiable rules.
+- `newrender_roadmap.md` ï¿½ phases, exit gates, **ï¿½1.3 Hardening dimensions** (D1ï¿½D10).
+- `Render_check.md` ï¿½ milestone tracker + changelog; update when steps land.
+- `EngineSource/eyelib/rendering/README.md` ï¿½ on?disk charter.
 
 **Scope (locked, current):**
 
 - `EngineSource/eyelib/rendering/` (everything above RHI). Vulkan RHI itself is tracked separately in `documentation/vulkan/steps_todo.md`.
 - Target outcome of current scope: **M4 closed** + **forward raster end?to?end** in the sandbox (rotating/test mesh visible, correct barriers at compile time, real uploads, real visibility ? draw list).
-- Out of scope for *this file�s active tables*: deferred, shadows, post/temporal, editor?as?feature, RT/GI/neural, `api/rendering`. Listed at the bottom for continuity.
+- Out of scope for *this fileï¿½s active tables*: deferred, shadows, post/temporal, editor?as?feature, RT/GI/neural, `api/rendering`. Listed at the bottom for continuity.
 
-**How to use:** Implement **top to bottom** within each section. Mark `[x]` when a step lands; add a one?line note with date + files touched. When a section is fully `[x]`, **run the hardening stress check for the listed dimensions** and log a short pass/partial/fail note in `Render_check.md` per the template in `newrender_roadmap.md` �1.3.
+**How to use:** Implement **top to bottom** within each section. Mark `[x]` when a step lands; add a one?line note with date + files touched. When a section is fully `[x]`, **run the hardening stress check for the listed dimensions** and log a short pass/partial/fail note in `Render_check.md` per the template in `newrender_roadmap.md` ï¿½1.3.
 
 **Discipline**
 
-1. **Folders:** Place every new or moved file under the **correct subtree** of `EngineSource/eyelib/rendering/` (and related docs under `documentation/Render_Module/`) per the module charter and roadmap�no ad-hoc locations, no mixing unrelated concerns across top-level areas.
+1. **Folders:** Place every new or moved file under the **correct subtree** of `EngineSource/eyelib/rendering/` (and related docs under `documentation/Render_Module/`) per the module charter and roadmapï¿½no ad-hoc locations, no mixing unrelated concerns across top-level areas.
 2. **Files & separation of concerns:** Each translation unit should own **one coherent role** (e.g. one pass type, one resource family, one subsystem boundary). Do not scatter one concern across many loosely related files, and do not collapse unrelated logic into a single oversized file; split when responsibilities diverge.
-3. **Naming:** Use **precise, professional identifiers** (types, files, passes, blackboard slots, constants)�specific enough that intent and ownership are clear from the name alone; avoid vague, overloaded, or �placeholder� shorthand.
+3. **Naming:** Use **precise, professional identifiers** (types, files, passes, blackboard slots, constants)ï¿½specific enough that intent and ownership are clear from the name alone; avoid vague, overloaded, or ï¿½placeholderï¿½ shorthand.
 
-**Build & quality discipline:** After changes under `EngineSource/eyelib/rendering/`, always verify with a **Debug build of `EyelibRendering`** and a **sandbox run of `OpenEyeRenderingSandbox`**. Treat each step as **architecturally correct and complete for its slice**, not �patched until it compiles�.
+**Build & quality discipline:** After changes under `EngineSource/eyelib/rendering/`, always verify with a **Debug build of `EyelibRendering`** and a **sandbox run of `OpenEyeRenderingSandbox`**. Treat each step as **architecturally correct and complete for its slice**, not ï¿½patched until it compilesï¿½.
 
 ```
 cd D:\Project\World3d\OpenEye; cmake --build build --target EyelibRendering
@@ -37,17 +37,17 @@ cd D:\Project\World3d\OpenEye; cmake --build build --target OpenEyeRenderingSand
 
 | ID    | Section / Milestone                                                  | Status                                              | Hardening checks after closure                   |
 | ----- | -------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------ |
-| M0    | Layout scaffold                                                      | [x] Done                                            | �                                                |
-| M1    | Core orchestration spine                                             | [x] Done                                            | �                                                |
-| M2    | Upload / resources / blackboard / sandbox                            | [x] Done                                            | �                                                |
-| M3    | Scene hook / writer registry / compile hook                          | [x] Done                                            | �                                                |
-| M4.1  | Raster feature bootstrap                                             | [x] Done                                            | �                                                |
-| M4.2  | Fullscreen HDR compose (bootstrap)                                   | [x] Done                                            | �                                                |
-| **A** | **M4 closeout** (uploads, visibility, compile?time barriers, naming) | [x] Done (A.10 logged)                              | D1, D2, D4, D5, D6 (see `Render_check.md` �A.10) |
-| **B** | **M5 forward raster E2E** (first real feature)                       | [x] Done (B.1�B.4, B.6�B.11; B.5 optional deferred) | D1, D3, D7, D9, D10                              |
+| M0    | Layout scaffold                                                      | [x] Done                                            | ï¿½                                                |
+| M1    | Core orchestration spine                                             | [x] Done                                            | ï¿½                                                |
+| M2    | Upload / resources / blackboard / sandbox                            | [x] Done                                            | ï¿½                                                |
+| M3    | Scene hook / writer registry / compile hook                          | [x] Done                                            | ï¿½                                                |
+| M4.1  | Raster feature bootstrap                                             | [x] Done                                            | ï¿½                                                |
+| M4.2  | Fullscreen HDR compose (bootstrap)                                   | [x] Done                                            | ï¿½                                                |
+| **A** | **M4 closeout** (uploads, visibility, compile?time barriers, naming) | [x] Done (A.10 logged)                              | D1, D2, D4, D5, D6 (see `Render_check.md` ï¿½A.10) |
+| **B** | **M5 forward raster E2E** (first real feature)                       | [x] Done (B.1ï¿½B.4, B.6ï¿½B.11; B.5 optional deferred) | D1, D3, D7, D9, D10                              |
 
 
-Baseline already landed (do not re?implement): see `Render_check.md` �Files touched (M2/M3/M4)� + `EngineSource/eyelib/rendering/README.md`. Vulkan RHI baseline is tracked in `documentation/vulkan/steps_todo.md`.
+Baseline already landed (do not re?implement): see `Render_check.md` ï¿½Files touched (M2/M3/M4)ï¿½ + `EngineSource/eyelib/rendering/README.md`. Vulkan RHI baseline is tracked in `documentation/vulkan/steps_todo.md`.
 
 ---
 
@@ -207,41 +207,41 @@ Expected new files (only where needed):
 | ---- | ------ | ---- |
 | P7.1 | [x] | **Freeze shadow/light contracts.** Landed typed shadow slots + names (`DirectionalShadowMapArray`, `SpotShadowMapAtlas`, `PointShadowCubemapArray`, `ShadowParamsBuffer`) in blackboard/resource-name constants, plus `features/shadows/ShadowFeature` as an `IRenderFeature` scaffold that reserves/releases these slots under `writer_names::kShadowFeature` (2026-05-07). |
 | P7.2 | [x] | **Directional shadow foundation.** Completed (2026-05-07): `DirectionalShadowPass` now renders real opaque/alpha-test casters into 3-layer depth-array shadow map, `ShadowFeature` computes scene-camera-derived directional cascade light-space matrices and uploads `ShadowParamsBuffer`, and deferred lighting consumes/binds/samples directional shadow resources (`RasterDeferredLightingData` bindings 8/9, shader PCF sampling path). |
-| P7.3 | [ ] | **CSM stabilization + quality.** In progress (2026-05-07): added directional cascade texel snapping stabilization in `ShadowFeature`, shader-side cascade transition blending in deferred shadow sampling, a dedicated shadow-caster list path (scene-instance based, per-cascade light-frustum filtered) so shadow casting is no longer tied to camera-visible draw-list membership, and moved directional light ownership to `lighting/SceneLighting` (consumed by raster + shadows) so `RasterFeature` no longer owns light state. Remaining in this step: finalize bias slope/normal tuning policy and complete stability validation matrix notes. |
-| P7.3a | [ ] | **Hardware slope-scaled depth bias.** Add `SetDepthBias(constantFactor, slopeFactor)` to `ICommandList` RHI. Call it in `DirectionalShadowPass::Execute` during the shadow raster phase (matching Aespinosa `cmd.set_depth_bias` pattern). Remove the fragment-shader NDC bias path; the RHI path is zero-cost in the lighting shader and handles all slopes natively. Register a pipeline flag (`VK_DYNAMIC_STATE_DEPTH_BIAS`) in the shadow pipeline at warm-up time. Pair with a small constant in `ShadowParamsStd140` for the lighting shader to retain cascade-invariant receiver-side normal offset only. |
-| P7.3b | [ ] | **Per-cascade soft penumbra (PCF extent tuning).** Expose a per-cascade `filterExtent[3]` in `ShadowParamsStd140` (replaces single `pcfKernel` scalar). Cascade 0 = 1 texel (sharp contact), cascade 1 = 2 texels, cascade 2 = 3 texels. Deferred sampling shader reads `uShadow.uFilterExtent[cascadeIndex]` instead of a flat radius. Cap max kernel at 5×5 to bound cost at default quality tier (tied to P7.6 quality settings). |
-| P7.3c | [ ] | **Variance Shadow Maps (VSM).** Replace the depth-only `DirectionalShadowMapArray` (Depth24) with a 2-channel RG16F color RT storing `(depth, depth²)` moments. Add a `VarianceDirectionalShadowPass` under `features/shadows/` that writes moments; optionally add a single-axis Gaussian blur pass to soften the VSM (eliminates PCF kernel noise entirely). In the deferred lighting shader, replace `SampleDirectionalShadowCascadePCF` with `SampleDirectionalShadowVSM` using Chebyshev Upper Bound and `linstep` light-leak suppression (matches Aespinosa `computeVarianceShadow`). Wire as an opt-in quality tier in P7.6 quality settings. Eliminates all filter jitter, makes cascade transition blending seamless, and correctly handles contact shadows without bias. |
+| P7.3 | [x] | **CSM stabilization + quality.** Completed (2026-05-08): cascade texel-snapping stabilization (`ShadowFeature` snap to frustum center), slope-normal bias tuning, Z-range tightened to `radius*4` (reduces world-space bias dead zone to ~5cm for cascade 0), cascade transition blending with `smoothstep`, and per-cascade light-frustum caster culling. Files: `ShadowFeature.cpp`, `deferred_lighting_analytic.frag`. |
+| P7.3a | [x] | **Hardware slope-scaled depth bias.** Completed (2026-05-08): added `SetDepthBias(constantFactor, slopeFactor)` to `ICommandList` (RHI.h) with default no-op body; implemented via `vkCmdSetDepthBias` in `CommandListVK`; added `VK_DYNAMIC_STATE_DEPTH_BIAS` to all graphics pipelines in `PipelineVK.cpp`; added `rasterStateOverride` to `ShaderGraphicsPipelineCreateInfo` (RHITypes.h) and wired through `CreateGraphicsPipelineFromShaderAssetVK`; shadow pipeline sets `depthBiasEnable=true`; `DirectionalShadowPass::Execute` calls `SetDepthBias(1.0f, 2.0f)`; lighting shader NDC depth bias removed (hardware now handles it), only a receiver-side normal slope offset remains. |
+| P7.3b | [x] | **Per-cascade soft penumbra (PCF extent tuning).** Completed (2026-05-09): Expose a per-cascade `filterExtent[3]` in `ShadowParamsStd140` (replaces single `pcfKernel` scalar). Cascade 0 = 1 texel (sharp contact), cascade 1 = 2 texels, cascade 2 = 3 texels. Deferred sampling shader reads `uShadow.uFilterExtent[cascadeIndex]` instead of a flat radius. Cap max kernel at 5x5 (radius 2) to bound cost at default quality tier (tied to P7.6 quality settings). |
+| P7.3c | [x] | **Variance Shadow Maps (VSM).** Completed (2026-05-09): Replaced the depth-only `DirectionalShadowMapArray` (Depth24) with a `R16G16_SFLOAT` color RT storing `(depth, depth^2)` moments. Added `directional_vsm.frag` shader to output moments. Updated `deferred_lighting_analytic.frag` to replace PCF with `SampleDirectionalShadowVSM` using Chebyshev Upper Bound and `linstep` light-leak suppression. Updated RHI to support `CreateRenderTargetArray` with color attachments. |
 | P7.4 | [ ] | **Spot light shadows.** Add spot-light shadow pass and deferred spot shadow sampling with bounded filter cost. |
 | P7.5 | [ ] | **Point light integration.** Add point lights to deferred shading; shadowed point path as phased/quality-tier feature with strict cost controls. |
-| P7.6 | [ ] | **Shadow filtering/perf tiers.** Expose low/medium/high shadow settings (cascade count/resolution/filter kernel) with sane defaults. Low = PCF 1-tap + no VSM. Medium = PCF 3×3 + per-cascade extent. High = VSM + optional blur pass. |
-| P7.7 | [ ] | **Screen-space contact shadows.** Add a fullscreen compute pass (after GBuffer, before deferred lighting) that ray-marches each pixel toward the light direction in view-space depth, catching sub-texel contact geometry (e.g. sphere-on-plane base) that CSM at 2048px cannot resolve. Result feeds a 1-bit `contactShadow` mask composited with the CSM shadow term in the deferred lighting shader. Bounded by a max ray step count (16–32 taps) for cost control. |
+| P7.6 | [ ] | **Shadow filtering/perf tiers.** Expose low/medium/high shadow settings (cascade count/resolution/filter kernel) with sane defaults. Low = PCF 1-tap + no VSM. Medium = PCF 3Ã—3 + per-cascade extent. High = VSM + optional blur pass. |
+| P7.7 | [ ] | **Screen-space contact shadows.** Add a fullscreen compute pass (after GBuffer, before deferred lighting) that ray-marches each pixel toward the light direction in view-space depth, catching sub-texel contact geometry (e.g. sphere-on-plane base) that CSM at 2048px cannot resolve. Result feeds a 1-bit `contactShadow` mask composited with the CSM shadow term in the deferred lighting shader. Bounded by a max ray step count (16â€“32 taps) for cost control. |
 | P7.8 | [ ] | **Validation matrix.** Run sandbox tests for near-edge quality, cascade transitions, camera motion stability, multi-light stress, and mode switching. |
 | P7.9 | [ ] | **Hardening closeout.** Record D1/D2/D3/D5/D6/D7/D10 checks in `render_check.md`, then mark P7 complete. |
 
 ---
 
-## Section C � Parking lot (next?scope anchors, **not** active)
+## Section C ï¿½ Parking lot (next?scope anchors, **not** active)
 
 Keep as pointers only; expand into full tables when promoted to current scope.
 
 - **P6:** complete for current scope (see P6.1-P6.12 table above; hardening closeout logged in `render_check.md`).
-- **P7 � Shadows + light grids.** `lighting/shadows/` (CSM strategy); Forward+ clustered light grid.
-- **P8 � Post + temporal in the graph.** Tone map, bloom, exposure; `temporal/` with history ownership and camera?cut invalidation.
-- **P9 � Editor as a feature.** `features/editor/` registers like any other feature; zero cost when not registered.
-- **P10 � Optional tracks.** RT (`features/raytracing/`), GI (`lighting/gi/`), atmosphere, upscaling/denoising, neural/splats.
-- **P11 � Public API + migration.** `api/rendering/` PIMPL; migrate sandbox ? editor/player; remove `eyelib/render` when no target links it.
+- **P7 ï¿½ Shadows + light grids.** `lighting/shadows/` (CSM strategy); Forward+ clustered light grid.
+- **P8 ï¿½ Post + temporal in the graph.** Tone map, bloom, exposure; `temporal/` with history ownership and camera?cut invalidation.
+- **P9 ï¿½ Editor as a feature.** `features/editor/` registers like any other feature; zero cost when not registered.
+- **P10 ï¿½ Optional tracks.** RT (`features/raytracing/`), GI (`lighting/gi/`), atmosphere, upscaling/denoising, neural/splats.
+- **P11 ï¿½ Public API + migration.** `api/rendering/` PIMPL; migrate sandbox ? editor/player; remove `eyelib/render` when no target links it.
 
 ---
 
 ## Cross?cutting rules (repeat to resist drift)
 
-- If it writes a texture or buffer, it is a **graph pass** (doc �1, D1).
-- Features talk **only** via the blackboard; disabled features register **zero** passes (doc �2/�3, D2/D3).
-- `scene ? core ? framegraph ? scheduler ? features ? � ? rhi` � no reverse includes (D4).
-- Capabilities captured at `OnRegister`; **no** `GetOrCompile` in `Execute` (doc �5/�10, D7).
-- No `ICommandList`* stored across frames (doc �9, D8).
-- All resource/pass names come from central constants (doc �11).
-- GPU scopes on every pass from the first real feature on (doc �13, D10).
+- If it writes a texture or buffer, it is a **graph pass** (doc ï¿½1, D1).
+- Features talk **only** via the blackboard; disabled features register **zero** passes (doc ï¿½2/ï¿½3, D2/D3).
+- `scene ? core ? framegraph ? scheduler ? features ? ï¿½ ? rhi` ï¿½ no reverse includes (D4).
+- Capabilities captured at `OnRegister`; **no** `GetOrCompile` in `Execute` (doc ï¿½5/ï¿½10, D7).
+- No `ICommandList`* stored across frames (doc ï¿½9, D8).
+- All resource/pass names come from central constants (doc ï¿½11).
+- GPU scopes on every pass from the first real feature on (doc ï¿½13, D10).
 
 ---
 

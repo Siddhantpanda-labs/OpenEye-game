@@ -25,8 +25,10 @@ namespace {
 struct ShadowParamsStd140 {
   float splitDepths[4] = {10.0f, 30.0f, 80.0f, 0.0f};
   float biasAndFilter[4] = {
-      0.0001f, 0.0005f, 3.0f,
-      0.08f}; // depthBias, normalBias, pcfKernel, cascadeBlend
+      0.0001f, 0.0005f, 0.0f,
+      0.08f}; // depthBias, normalBias, reserved, cascadeBlend
+  float filterExtent[4] = {
+      1.0f, 2.0f, 3.0f, 0.0f}; // Extent for cascade 0, 1, 2
   float lightViewProj[3][16] = {
       {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f,
        0.f, 1.f},
@@ -35,7 +37,7 @@ struct ShadowParamsStd140 {
       {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f,
        0.f, 1.f},
   };
-  float padding[16] = {};
+  float padding[12] = {};
 };
 
 static_assert(sizeof(ShadowParamsStd140) <= 512u,
@@ -85,56 +87,72 @@ void buildDirectionalCascades(const CameraView &cam,
   };
 
   const math::Vec3 lightDir = glm::normalize(lightDirInput);
+  // Light view: eye at WORLD ORIGIN (zero), look along light direction.
+  // Wicked Engine comment: "important to not move (zero out eye vector) the light view matrix
+  // itself because texel snapping must be done on projection matrix!"
+  // Moving the eye causes the snap math to fight the view translation every frame → swimming.
+  const math::Vec3 worldUp(0.0f, 1.0f, 0.0f);
+  const float upDot = glm::abs(glm::dot(lightDir, worldUp));
+  const math::Vec3 safeUp = (upDot > 0.99f) ? math::Vec3(1.0f, 0.0f, 0.0f) : worldUp;
+  // lightView maps world → light view space; eye is at origin.
+  const math::Mat4 lightView = glm::lookAt(math::Vec3(0.0f), lightDir, safeUp);
+
   constexpr float kShadowMapResolution = 2048.0f;
   for (int c = 0; c < cascadeCount; ++c) {
     const float nearDist = cascadeEnds[c];
-    const float farDist = cascadeEnds[c + 1];
-    const float tNear = (nearDist - n) / clipRange;
-    const float tFar = (farDist - n) / clipRange;
+    const float farDist  = cascadeEnds[c + 1];
+    const float tNear    = (nearDist - n) / clipRange;
+    const float tFar     = (farDist  - n) / clipRange;
 
+    // Transform frustum corners into LIGHT-VIEW-SPACE (not world space).
+    // Working in light space avoids world-space floating-point precision loss
+    // and makes the bounding sphere radius rotation-invariant exactly.
     math::Vec3 corners[8];
     for (int i = 0; i < 4; ++i) {
-      corners[i] = frustumNear[i] + (frustumFar[i] - frustumNear[i]) * tNear;
-      corners[i + 4] = frustumNear[i] + (frustumFar[i] - frustumNear[i]) * tFar;
+      const math::Vec3 wNear = frustumNear[i] + (frustumFar[i] - frustumNear[i]) * tNear;
+      const math::Vec3 wFar  = frustumNear[i] + (frustumFar[i] - frustumNear[i]) * tFar;
+      corners[i]     = math::Vec3(lightView * math::Vec4(wNear, 1.0f));
+      corners[i + 4] = math::Vec3(lightView * math::Vec4(wFar,  1.0f));
     }
 
-    math::Vec3 center(0.0f);
-    for (const math::Vec3 &v : corners)
-      center += v;
-    center *= (1.0f / 8.0f);
+    // Bounding sphere in light-view-space.
+    math::Vec3 lsCenter(0.0f);
+    for (const math::Vec3& v : corners) lsCenter += v;
+    lsCenter *= (1.0f / 8.0f);
 
     float radius = 0.0f;
-    for (const math::Vec3 &v : corners)
-      radius = (std::max)(radius, glm::length(v - center));
-    radius = std::ceil(radius * 16.0f) / 16.0f;
+    for (const math::Vec3& v : corners)
+      radius = (std::max)(radius, glm::length(v - lsCenter));
 
-    const math::Vec3 eye = center - lightDir * (radius * 2.5f);
-    const math::Vec3 worldUp(0.0f, 1.0f, 0.0f);
-    // Avoid lookAt degeneracy when light is (near-)parallel to world up (e.g.,
-    // straight top-down light).
-    const float upDot = glm::abs(glm::dot(lightDir, worldUp));
-    const math::Vec3 safeUp =
-        (upDot > 0.99f) ? math::Vec3(0.0f, 0.0f, 1.0f) : worldUp;
-    const math::Mat4 lightView = glm::lookAt(eye, center, safeUp);
-    // Use a Z-range proportional to the cascade radius to capture casters
-    // behind the frustum without destroying depth precision (which would cause
-    // massive Peter Panning with fixed biases).
-    math::Mat4 lightProj = glm::ortho(-radius, radius, -radius, radius,
-                                      -radius * 4.0f, radius * 4.0f);
+    // Fit AABB onto bounding sphere in light space.
+    math::Vec3 vMin = lsCenter - math::Vec3(radius);
+    math::Vec3 vMax = lsCenter + math::Vec3(radius);
 
-    // CSM stabilization: snap projection to frustum CENTER (not world origin).
-    // Using (0,0,0) fails when camera is far from scene origin.
-    const math::Mat4 shadowMatrix = lightProj * lightView;
-    const math::Vec4 shadowCenter = shadowMatrix * math::Vec4(center, 1.0f);
-    const math::Vec2 shadowTexelCenter =
-        math::Vec2(shadowCenter) * (kShadowMapResolution * 0.5f);
-    const math::Vec2 roundedCenter = glm::round(shadowTexelCenter);
-    const math::Vec2 roundOffset =
-        (roundedCenter - shadowTexelCenter) * (2.0f / kShadowMapResolution);
-    lightProj[3][0] += roundOffset.x;
-    lightProj[3][1] += roundOffset.y;
+    // Texel-snap in light-view-space (Wicked Engine technique):
+    // Snap vMin and vMax to the shadow-map texel grid BEFORE building the ortho matrix.
+    // This ensures the projection bounds only move in whole-texel steps regardless of
+    // camera rotation or translation → zero sub-texel drift → stable shadow edges.
+    const float texelSizeX = (vMax.x - vMin.x) / kShadowMapResolution;
+    const float texelSizeY = (vMax.y - vMin.y) / kShadowMapResolution;
+    vMin.x = glm::floor(vMin.x / texelSizeX) * texelSizeX;
+    vMin.y = glm::floor(vMin.y / texelSizeY) * texelSizeY;
+    vMax.x = glm::floor(vMax.x / texelSizeX) * texelSizeX;
+    vMax.y = glm::floor(vMax.y / texelSizeY) * texelSizeY;
+    // Recompute center from snapped bounds.
+    const math::Vec3 center = (vMin + vMax) * 0.5f;
 
-    // Apply Vulkan Z-range adjustment [0, 1] to prevent near-plane clipping
+    // Z range: tight × 4 for depth precision (Wicked Engine: ext * 4).
+    // This allows casters behind the camera frustum without ballooning the depth range.
+    const float zExt = glm::abs(center.z - vMin.z) * 4.0f;
+    const float zNearLS = center.z - zExt;
+    const float zFarLS  = center.z + zExt;
+
+    // Build ortho in light-view-space directly from snapped AABB.
+    // GLM ortho: near/far along +Z axis in view space.
+    // lightView looks in +Z (light direction), so near = zNearLS, far = zFarLS.
+    math::Mat4 lightProj = glm::ortho(vMin.x, vMax.x, vMin.y, vMax.y, zNearLS, zFarLS);
+
+    // Apply Vulkan [0,1] depth range + Y-flip.
     lightProj = camera::AdjustProjectionForBackend(
         lightProj, camera::PolicyForBackend(RenderBackend::Vulkan));
 
@@ -206,12 +224,13 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
   }
 
   if (!m_directionalShadowRt) {
+    std::vector<rhi::RHITextureFormat> colorFormats = {rhi::RHITextureFormat::R16G16_SFLOAT};
     m_directionalShadowRt =
-        render.device->CreateDepthOnlyRenderTargetArray(2048u, 2048u, 3u);
+        render.device->CreateRenderTargetArray(2048u, 2048u, 3u, colorFormats, rhi::RHITextureFormat::Depth24);
   }
   if (!m_shadowPipeline) {
     rhi::ShaderGraphicsPipelineCreateInfo gp{};
-    gp.assetPath = "raster/shadow/directional_depth";
+    gp.assetPath = "raster/shadow/directional_vsm";
     gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
     gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
@@ -220,7 +239,13 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
     gp.depthStencilOverride.depthTest = true;
     gp.depthStencilOverride.depthWrite = true;
     gp.depthStencilOverride.depthCompare = rhi::DepthCompare::Less;
+    rhi::RasterState rasterState{};
+    rasterState.depthBiasEnable = true;   // Required for vkCmdSetDepthBias to take effect (see P7.3a)
+    rasterState.depthBiasConstant = 0.f;  // Overridden per-frame in DirectionalShadowPass::Execute
+    rasterState.depthBiasSlope = 0.f;
+    gp.rasterStateOverride = rasterState;
     rhi::PipelineAttachmentFormats att{};
+    att.color = {rhi::RHITextureFormat::R16G16_SFLOAT};
     att.depthStencil = rhi::RHITextureFormat::Depth24;
     gp.attachmentFormats = att;
     m_shadowPipeline = render.device->CreateGraphicsPipelineFromShaderAsset(gp);

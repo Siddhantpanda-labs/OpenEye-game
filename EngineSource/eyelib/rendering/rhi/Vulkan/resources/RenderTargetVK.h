@@ -45,6 +45,7 @@ struct RenderTargetVK : IRenderTarget {
     TextureVK* m_externalDepthTexture = nullptr;
     // Optional per-attachment views owned by this render target (used for array layer/mip views).
     std::vector<void*> m_colorAttachmentViews;
+    std::vector<std::vector<void*>> m_colorLayerViews; // [attachmentIndex][layerIndex]
     void* m_depthAttachmentView = nullptr;
     std::vector<void*> m_depthLayerViews;
     void* m_framebuffer = nullptr;  // VkFramebuffer when used; often null (dynamic rendering only)
@@ -54,6 +55,9 @@ IRenderTarget* CreateRenderTargetVK(DeviceVK* device, uint32_t width, uint32_t h
                                     const std::vector<RHITextureFormat>& colorFormats,
                                     RHITextureFormat depthFormat, uint32_t samples, bool transient);
 IRenderTarget* CreateDepthOnlyRenderTargetArrayVK(DeviceVK* device, uint32_t width, uint32_t height, uint32_t arrayLayers);
+IRenderTarget* CreateRenderTargetArrayVK(DeviceVK* device, uint32_t width, uint32_t height, uint32_t arrayLayers,
+                                         const std::vector<RHITextureFormat>& colorFormats, RHITextureFormat depthFormat,
+                                         uint32_t samples, bool transient);
 IRenderTarget* CreateRenderTargetWithSharedDepthVK(DeviceVK* device, uint32_t width, uint32_t height,
                                                    const std::vector<RHITextureFormat>& colorFormats,
                                                    ITexture* sharedDepthTexture, uint32_t samples);

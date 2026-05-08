@@ -191,6 +191,14 @@ struct IDevice {
                                               RHITextureFormat depthFormat,
                                               uint32_t samples = 1,
                                               bool transient = false) = 0;
+    /** Create a render target with array layers (for CSM color+depth VSM maps). */
+    virtual IRenderTarget* CreateRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers,
+                                                   const std::vector<RHITextureFormat>& colorFormats,
+                                                   RHITextureFormat depthFormat,
+                                                   uint32_t samples = 1,
+                                                   bool transient = false) { 
+        (void)width; (void)height; (void)arrayLayers; (void)colorFormats; (void)depthFormat; (void)samples; (void)transient; return nullptr; 
+    }
     /** Depth-only render target with 2D array depth texture (for cascade shadow maps). Use SetDepthLayer then SetRenderTarget to render to each layer. */
     virtual IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) { (void)width; (void)height; (void)arrayLayers; return nullptr; }
     /** Create render target with color attachment(s) and shared depth (e.g. entity ID pass reusing main depth). sharedDepthTexture must outlive the RT. */
@@ -374,6 +382,12 @@ struct ICommandList {
     virtual void SetBlendFunc(BlendFactor src, BlendFactor dst) = 0;
     /** Polygon offset for lines (GL_POLYGON_OFFSET_LINE + glPolygonOffset). Bias line depth toward camera; use negative factor/units so wireframe wins when co-planar but stays occluded when behind. Other backends may no-op. */
     virtual void SetPolygonOffsetLine(bool enable, float factor, float units) = 0;
+    /** Hardware slope-scaled depth bias applied during rasterization (shadow map generation).
+     *  constantFactor: flat bias added to each fragment's depth.
+     *  slopeFactor: scale applied to the polygon's maximum depth slope (tan of angle from light).
+     *  Vulkan: vkCmdSetDepthBias. OpenGL: glPolygonOffset. Requires depthBiasEnable=true in PipelineDesc::raster.
+     *  Call before each shadow cascade draw to supply per-cascade values. */
+    virtual void SetDepthBias(float constantFactor, float slopeFactor) {}
 
     virtual void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) = 0;
     virtual void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) = 0;

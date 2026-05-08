@@ -116,6 +116,11 @@ struct DeviceVK : IDevice {
                                       RHITextureFormat depthFormat,
                                       uint32_t samples = 1,
                                       bool transient = false) override;
+    IRenderTarget* CreateRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers,
+                                           const std::vector<RHITextureFormat>& colorFormats,
+                                           RHITextureFormat depthFormat,
+                                           uint32_t samples = 1,
+                                           bool transient = false) override;
     IRenderTarget* CreateDepthOnlyRenderTargetArray(uint32_t width, uint32_t height, uint32_t arrayLayers) override;
     IRenderTarget* CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,
                                                      const std::vector<RHITextureFormat>& colorFormats,

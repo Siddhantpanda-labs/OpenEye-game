@@ -73,6 +73,7 @@ struct CommandListVK : ICommandList {
     void SetBlend(bool enable) override;
     void SetBlendFunc(BlendFactor src, BlendFactor dst) override;
     void SetPolygonOffsetLine(bool enable, float factor, float units) override;
+    void SetDepthBias(float constantFactor, float slopeFactor) override;
 
     void BarrierBuffer(IBuffer* buffer, ResourceState fromState, ResourceState toState) override;
     void BarrierTexture(ITexture* texture, ResourceState fromState, ResourceState toState) override;

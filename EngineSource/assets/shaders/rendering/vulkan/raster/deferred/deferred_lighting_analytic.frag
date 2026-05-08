@@ -33,7 +33,8 @@ layout(set = 1, binding = 6) uniform samplerCube tPrefilter;
 layout(set = 1, binding = 7) uniform sampler2D tBrdfLut;
 layout(std140, set = 1, binding = 8) uniform ShadowParamsUbo {
     vec4 uCascadeSplits;      // xyz used for split end distances, w reserved.
-    vec4 uShadowMeta;         // x=depthBias, y=normalBias, z=pcfRadius, w=cascadeBlend
+    vec4 uShadowMeta;         // x=depthBias, y=normalBias, z=reserved, w=cascadeBlend
+    vec4 uFilterExtent;       // xyz used for filter extents of cascades 0, 1, 2.
     mat4 uLightViewProj[3];
 } uShadow;
 layout(set = 1, binding = 9) uniform sampler2DArray tDirectionalShadowMap;
@@ -80,7 +81,11 @@ vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
         * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-float SampleDirectionalShadowCascadePCF(vec3 worldPos, vec3 N, vec3 L, int cascadeIndex) {
+float linstep(float low, float high, float v) {
+    return clamp((v - low) / (high - low), 0.0, 1.0);
+}
+
+float SampleDirectionalShadowCascadeVSM(vec3 worldPos, vec3 N, vec3 L, int cascadeIndex) {
     vec4 lightClip = uShadow.uLightViewProj[cascadeIndex] * vec4(worldPos, 1.0);
     if (lightClip.w <= 0.0) {
         return 1.0;
@@ -92,36 +97,23 @@ float SampleDirectionalShadowCascadePCF(vec3 worldPos, vec3 N, vec3 L, int casca
         return 1.0;
     }
 
-    float depthBias = max(uShadow.uShadowMeta.x, 0.00005);
-    float normalBias = max(uShadow.uShadowMeta.y, 0.0);
-    float NdL_shadow = max(dot(N, L), 0.0);
-    // Slope-scale bias: minimal at perpendicular (NdL=1) so close/contact shadows work,
-    // ramps up at grazing angles (NdL->0) to prevent shadow acne.
-    float slopeScale = clamp(sqrt(max(1.0 - NdL_shadow * NdL_shadow, 0.0)) / max(NdL_shadow, 0.01), 0.0, 3.0);
-    float bias = depthBias + normalBias * slopeScale;
-    float pcfRadius = max(uShadow.uShadowMeta.z, 1.0);
+    vec2 moments = texture(tDirectionalShadowMap, vec3(shadowUv, float(cascadeIndex))).rg;
+    
+    float p = step(shadowDepth, moments.x);
+    float variance = max(moments.y - moments.x * moments.x, 0.00002);
+    
+    float d = shadowDepth - moments.x;
+    float pMax = linstep(0.2, 1.0, variance / (variance + d * d)); // light-leak suppression
 
-    vec2 texelSize = 1.0 / vec2(textureSize(tDirectionalShadowMap, 0).xy);
-    float lit = 0.0;
-    float taps = 0.0;
-    int radius = int(pcfRadius);
-    for (int y = -radius; y <= radius; ++y) {
-        for (int x = -radius; x <= radius; ++x) {
-            vec2 uv = shadowUv + vec2(float(x), float(y)) * texelSize;
-            float mapDepth = texture(tDirectionalShadowMap, vec3(uv, float(cascadeIndex))).r;
-            lit += (shadowDepth - bias <= mapDepth) ? 1.0 : 0.0;
-            taps += 1.0;
-        }
-    }
-    return lit / max(taps, 1.0);
+    return min(max(p, pMax), 1.0);
 }
 
-float SampleDirectionalShadowPCF(vec3 worldPos, vec3 N, vec3 L, float viewDistance) {
+float SampleDirectionalShadowVSM(vec3 worldPos, vec3 N, vec3 L, float viewDistance) {
     int cascadeIndex = 0;
     if (viewDistance > uShadow.uCascadeSplits.x) cascadeIndex = 1;
     if (viewDistance > uShadow.uCascadeSplits.y) cascadeIndex = 2;
 
-    float shadowCurrent = SampleDirectionalShadowCascadePCF(worldPos, N, L, cascadeIndex);
+    float shadowCurrent = SampleDirectionalShadowCascadeVSM(worldPos, N, L, cascadeIndex);
     if (cascadeIndex >= 2) {
         return shadowCurrent;
     }
@@ -135,7 +127,7 @@ float SampleDirectionalShadowPCF(vec3 worldPos, vec3 N, vec3 L, float viewDistan
         return shadowCurrent;
     }
 
-    float shadowNext = SampleDirectionalShadowCascadePCF(worldPos, N, L, cascadeIndex + 1);
+    float shadowNext = SampleDirectionalShadowCascadeVSM(worldPos, N, L, cascadeIndex + 1);
     return mix(shadowCurrent, shadowNext, blendToNext);
 }
 
@@ -177,7 +169,7 @@ void main() {
     vec3 radiance = uDirLight.uLightColorIntensity.rgb * uDirLight.uLightColorIntensity.a;
     // Use view-space Z-depth to match cascade splitting criteria, avoiding edge-of-screen cascade mismatch.
     float viewDistance = abs((uPerView.uView * vec4(worldPos, 1.0)).z);
-    float shadow = SampleDirectionalShadowPCF(worldPos, N, L, viewDistance);
+    float shadow = SampleDirectionalShadowVSM(worldPos, N, L, viewDistance);
 
     vec3 F0 = mix(vec3(0.04), albedo, clamp(metallic, 0.0, 1.0));
     vec3 F = FresnelSchlick(VdH, F0);
