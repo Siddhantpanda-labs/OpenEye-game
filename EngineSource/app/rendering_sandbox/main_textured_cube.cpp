@@ -200,8 +200,23 @@ int main() {
     shadowFeature.SetMeshResolver(&meshResolver);
     rasterFeature.SetRenderMode(eyelib::rendering::RenderMode::Deferred);
 
-    // Straight top-to-bottom directional light; use higher intensity so effect is clearly visible against IBL.
-    eyelib::rendering::SceneLighting::SetDirectionalLight({0.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, 18.0f);
+    // Directional light disabled — scene lit exclusively by spot light below.
+    eyelib::rendering::SceneLighting::SetDirectionalLight({0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0.0f);
+
+    // Light-blue downward spot light centered high above the scene.
+    {
+        eyelib::rendering::SceneLighting::ClearSpotLights();
+        eyelib::rendering::SceneLighting::SpotLightSceneState spot{};
+        spot.position      = {0.0f, 18.0f, 0.0f};    // High above scene center
+        spot.direction     = {0.0f, -1.0f, 0.0f};    // Straight down
+        spot.color         = {1.0f, 0.85f, 0.1f};    // Bright yellow
+        spot.intensity     = 200.0f;                  // Very bright
+        spot.range         = 35.0f;                   // Covers ground plane
+        spot.innerConeCos  = std::cos(glm::radians(20.0f)); // Narrower hot center (lower radius)
+        spot.outerConeCos  = std::cos(glm::radians(35.0f)); // Tighter edge
+        spot.castShadows   = true;
+        eyelib::rendering::SceneLighting::AddSpotLight(spot);
+    }
 
     eyelib::rendering::RenderSceneView sceneView;
     sceneView.drawInstances.reserve(3);
@@ -220,7 +235,7 @@ int main() {
         sphere.meshHandle = 1u;
         sphere.materialId = 1u;
         sphere.transformIndex = 1u;
-        sphere.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(-1.4f, 4.2f, 0.0f));
+        sphere.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(-3.5f, 6.5f, 0.0f));
         sphere.localBounds = {{-3.75f, -3.75f, -3.75f}, {3.75f, 3.75f, 3.75f}};
         sphere.layer = DrawLayer::Opaque;
         sceneView.drawInstances.push_back(sphere);
@@ -229,7 +244,7 @@ int main() {
         cube.meshHandle = 2u;
         cube.materialId = 2u;
         cube.transformIndex = 2u;
-        cube.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(1.3f, 2.8f, 0.35f));
+        cube.worldTransform = glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(3.5f, 5.0f, 0.0f));
         cube.localBounds = {{-2.5f, -2.5f, -2.5f}, {2.5f, 2.5f, 2.5f}};
         cube.layer = DrawLayer::Opaque;
         sceneView.drawInstances.push_back(cube);
@@ -264,7 +279,7 @@ int main() {
     }
 
     std::printf("RenderingSandbox: scene loaded (plane=green, sphere=blue, cube=red)\n");
-    std::printf("RenderingSandbox: Deferred mode with directional light ~80 degrees from vertical\n");
+    std::printf("RenderingSandbox: light-blue downward spot light, no directional light\n");
 
     double lastT = glfwGetTime();
     static float camX = 0.0f, camY = 2.3f, camZ = 7.0f;
@@ -285,7 +300,7 @@ int main() {
             const eyelib::math::Vec3 axis = glm::normalize(eyelib::math::Vec3(1.0f, 1.0f, 0.45f));
             const eyelib::math::Mat4 rotation = glm::rotate(eyelib::math::Mat4(1.0f), angle, axis);
             const eyelib::math::Mat4 translation =
-                glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(1.3f, 2.8f, 0.35f));
+                glm::translate(eyelib::math::Mat4(1.0f), eyelib::math::Vec3(3.5f, 5.0f, 0.0f));
             sceneView.drawInstances[2].worldTransform = translation * rotation;
         }
 

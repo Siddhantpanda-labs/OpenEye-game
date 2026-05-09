@@ -1,6 +1,7 @@
 #include "eyelib/rendering/lighting/SceneLighting.h"
 
 #include <algorithm>
+#include <vector>
 #include <glm/geometric.hpp>
 
 namespace eyelib {
@@ -8,6 +9,7 @@ namespace rendering {
 
 namespace {
 DirectionalLightSceneState g_directionalLight{};
+std::vector<SceneLighting::SpotLightSceneState> g_SpotLights;
 } // namespace
 
 void SceneLighting::SetDirectionalLight(const math::Vec3& direction, const math::Vec3& color, float intensity) noexcept {
@@ -21,6 +23,21 @@ void SceneLighting::SetDirectionalLight(const math::Vec3& direction, const math:
 
 DirectionalLightSceneState SceneLighting::GetDirectionalLight() noexcept {
     return g_directionalLight;
+}
+
+void SceneLighting::ClearSpotLights() noexcept {
+    g_SpotLights.clear();
+}
+
+void SceneLighting::AddSpotLight(const SpotLightSceneState& spotLight) noexcept {
+    if (g_SpotLights.size() < 16) { // hard limit for now
+        g_SpotLights.push_back(spotLight);
+    }
+}
+
+const SceneLighting::SpotLightSceneState* SceneLighting::GetSpotLights(uint32_t& outCount) noexcept {
+    outCount = static_cast<uint32_t>(g_SpotLights.size());
+    return g_SpotLights.data();
 }
 
 }  // namespace rendering

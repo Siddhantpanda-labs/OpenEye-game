@@ -39,6 +39,21 @@ layout(std140, set = 1, binding = 8) uniform ShadowParamsUbo {
 } uShadow;
 layout(set = 1, binding = 9) uniform sampler2DArray tDirectionalShadowMap;
 
+struct SpotLight {
+    vec4 positionAndRange;      // xyz = position, w = range
+    vec4 directionAndInnerCone; // xyz = direction, w = innerConeCos
+    vec4 colorAndOuterCone;     // xyz = color * intensity, w = outerConeCos
+    mat4 lightViewProj;
+    vec4 shadowParams;          // x = shadowMapIndex (-1 if none), yzw = padding
+};
+
+layout(std140, set = 1, binding = 10) uniform SpotLightUbo {
+    vec4 countAndPadding; // x = count
+    SpotLight lights[16];
+} uSpotLights;
+
+layout(set = 1, binding = 11) uniform sampler2DArray tSpotShadowMap;
+
 const float PI = 3.14159265358979323846;
 const float EPSILON = 1e-5;
 
@@ -86,7 +101,10 @@ float linstep(float low, float high, float v) {
 }
 
 float SampleDirectionalShadowCascadeVSM(vec3 worldPos, vec3 N, vec3 L, int cascadeIndex) {
-    vec4 lightClip = uShadow.uLightViewProj[cascadeIndex] * vec4(worldPos, 1.0);
+    // T1.1 Normal Offset Bias
+    float normalBias = uShadow.uShadowMeta.y * max(1.0 - dot(N, L), 0.1);
+    vec3 biasedPos = worldPos + N * normalBias;
+    vec4 lightClip = uShadow.uLightViewProj[cascadeIndex] * vec4(biasedPos, 1.0);
     if (lightClip.w <= 0.0) {
         return 1.0;
     }
@@ -131,6 +149,35 @@ float SampleDirectionalShadowVSM(vec3 worldPos, vec3 N, vec3 L, float viewDistan
     return mix(shadowCurrent, shadowNext, blendToNext);
 }
 
+float SampleSpotShadowVSM(vec3 worldPos, vec3 N, vec3 L, int shadowIndex, mat4 lightViewProj) {
+    if (shadowIndex < 0) return 1.0;
+    
+    // T1.1 Normal Offset Bias
+    float normalBias = uShadow.uShadowMeta.y * max(1.0 - dot(N, L), 0.1);
+    vec3 biasedPos = worldPos + N * normalBias;
+    vec4 lightClip = lightViewProj * vec4(biasedPos, 1.0);
+    if (lightClip.w <= 0.0) return 1.0;
+    
+    vec3 lightNdc = lightClip.xyz / lightClip.w;
+    vec2 shadowUv = lightNdc.xy * 0.5 + 0.5;
+    float shadowDepth = lightNdc.z;
+    
+    if (shadowUv.x <= 0.0 || shadowUv.x >= 1.0 || shadowUv.y <= 0.0 || shadowUv.y >= 1.0 || shadowDepth <= 0.0 || shadowDepth >= 1.0) {
+        return 1.0;
+    }
+
+    vec2 moments = texture(tSpotShadowMap, vec3(shadowUv, float(shadowIndex))).rg;
+    
+    float p = step(shadowDepth, moments.x);
+    float variance = max(moments.y - moments.x * moments.x, 0.00002);
+    
+    float d = shadowDepth - moments.x;
+    float pMax = linstep(0.2, 1.0, variance / (variance + d * d)); // light-leak suppression
+
+    return min(max(p, pMax), 1.0);
+}
+
+
 void main() {
     // Fullscreen-triangle VS: within the visible screen (clip [-1,1]), interpolated vUv is [0,1].
     const vec2 uv = clamp(vUv, vec2(0.0), vec2(0.999999));
@@ -159,29 +206,79 @@ void main() {
     mat4 invViewProj = inverse(uPerView.uViewProjection);
     vec3 worldPos = ReconstructWorldPos(uv, depth, invViewProj);
     
-    vec3 L = normalize(-uDirLight.uLightDir.xyz);
     vec3 V = normalize(uPerView.uViewPos.xyz - worldPos);
-    
-    float NdL = max(dot(N, L), 0.0);
     float NdV = max(dot(N, V), 0.0);
-    vec3 H = normalize(V + L);
-    float VdH = max(dot(V, H), 0.0);
-    vec3 radiance = uDirLight.uLightColorIntensity.rgb * uDirLight.uLightColorIntensity.a;
-    // Use view-space Z-depth to match cascade splitting criteria, avoiding edge-of-screen cascade mismatch.
-    float viewDistance = abs((uPerView.uView * vec4(worldPos, 1.0)).z);
-    float shadow = SampleDirectionalShadowVSM(worldPos, N, L, viewDistance);
-
     vec3 F0 = mix(vec3(0.04), albedo, clamp(metallic, 0.0, 1.0));
-    vec3 F = FresnelSchlick(VdH, F0);
-    float NDF = DistributionGGX(N, H, roughness);
-    float G = GeometrySmith(N, V, L, roughness);
-    vec3 numerator = NDF * G * F;
-    float denominator = max(4.0 * NdV * NdL, EPSILON);
-    vec3 specular = numerator / denominator;
+    vec3 Lo = vec3(0.0);
 
-    vec3 kS = F;
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-    vec3 diffuse = kD * albedo / PI;
+    // Directional Light
+    {
+        vec3 L = normalize(-uDirLight.uLightDir.xyz);
+        float NdL = max(dot(N, L), 0.0);
+        vec3 H = normalize(V + L);
+        float VdH = max(dot(V, H), 0.0);
+        vec3 radiance = uDirLight.uLightColorIntensity.rgb * uDirLight.uLightColorIntensity.a;
+        float viewDistance = abs((uPerView.uView * vec4(worldPos, 1.0)).z);
+        float shadow = SampleDirectionalShadowVSM(worldPos, N, L, viewDistance);
+
+        vec3 F = FresnelSchlick(VdH, F0);
+        float NDF = DistributionGGX(N, H, roughness);
+        float G = GeometrySmith(N, V, L, roughness);
+        vec3 numerator = NDF * G * F;
+        float denominator = max(4.0 * NdV * NdL, EPSILON);
+        vec3 specular = numerator / denominator;
+
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        Lo += (kD * albedo / PI + specular) * radiance * NdL * shadow;
+    }
+
+    // Spot Lights
+    int spotCount = min(int(uSpotLights.countAndPadding.x), 16);
+    for (int i = 0; i < spotCount; ++i) {
+        SpotLight sl = uSpotLights.lights[i];
+        vec3 lightPos = sl.positionAndRange.xyz;
+        float range = sl.positionAndRange.w;
+        vec3 lightDir = sl.directionAndInnerCone.xyz;
+        float innerConeCos = sl.directionAndInnerCone.w;
+        vec3 colorIntensity = sl.colorAndOuterCone.xyz;
+        float outerConeCos = sl.colorAndOuterCone.w;
+
+        vec3 L = lightPos - worldPos;
+        float distance = length(L);
+        if (distance > range) continue;
+
+        L /= distance;
+        float NdL = max(dot(N, L), 0.0);
+        if (NdL <= 0.0) continue;
+
+        float theta = dot(-L, lightDir);
+        if (theta < outerConeCos) continue;
+
+        float epsilon = max(innerConeCos - outerConeCos, EPSILON);
+        float intensity = clamp((theta - outerConeCos) / epsilon, 0.0, 1.0);
+        
+        float attenuation = 1.0 - clamp(distance / range, 0.0, 1.0);
+        attenuation *= attenuation;
+
+        int shadowIndex = int(sl.shadowParams.x);
+        float shadow = SampleSpotShadowVSM(worldPos, N, L, shadowIndex, sl.lightViewProj);
+
+        vec3 radiance = colorIntensity * intensity * attenuation;
+
+        vec3 H = normalize(V + L);
+        float VdH = max(dot(V, H), 0.0);
+        vec3 F = FresnelSchlick(VdH, F0);
+        float NDF = DistributionGGX(N, H, roughness);
+        float G = GeometrySmith(N, V, L, roughness);
+        vec3 numerator = NDF * G * F;
+        float denominator = max(4.0 * NdV * NdL, EPSILON);
+        vec3 specular = numerator / denominator;
+
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        Lo += (kD * albedo / PI + specular) * radiance * NdL * shadow;
+    }
 
     vec3 Fr = FresnelSchlickRoughness(NdV, F0, roughness);
     vec3 kS_IBL = Fr;
@@ -198,6 +295,6 @@ void main() {
     vec3 ibl = (iblDiffuse + iblSpecular) * ao;
 
     vec3 emissive = albedo * emissiveStrength;
-    vec3 Lo = ibl + emissive + (diffuse + specular) * radiance * NdL * shadow;
-    outColor = vec4(Lo, 1.0);
+    vec3 finalColor = Lo + ibl + emissive;
+    outColor = vec4(finalColor, 1.0);
 }

@@ -45,6 +45,8 @@ void DirectionalShadowPass::CollectTextureBarriers(const FrameGraphBlackboard& b
         return;
     if (rhi::ITexture* depth = m_directionalShadowRt->GetDepthTexture())
         out.Push(depth, rhi::ResourceState::DepthWrite);
+    if (rhi::ITexture* color = m_directionalShadowRt->GetColorTexture(0))
+        out.Push(color, rhi::ResourceState::RenderTarget);
 }
 
 bool DirectionalShadowPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const {

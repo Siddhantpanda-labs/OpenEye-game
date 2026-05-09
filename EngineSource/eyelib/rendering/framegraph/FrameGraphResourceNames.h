@@ -18,6 +18,7 @@ inline constexpr const char* kPerViewUniformBuffer  = "PerViewUniformBuffer";
 inline constexpr const char* kPerObjectStorageBuffer = "PerObjectStorageBuffer";
 inline constexpr const char* kMaterialTableStorageBuffer = "MaterialTableStorageBuffer";
 inline constexpr const char* kDirectionalLightUniformBuffer = "DirectionalLightUniformBuffer";
+inline constexpr const char* kSpotLightUniformBuffer = "SpotLightUniformBuffer";
 inline constexpr const char* kIblIrradianceCubemap = "IblIrradianceCubemap";
 inline constexpr const char* kIblPrefilterCubemap = "IblPrefilterCubemap";
 inline constexpr const char* kIblBrdfLut = "IblBrdfLut";

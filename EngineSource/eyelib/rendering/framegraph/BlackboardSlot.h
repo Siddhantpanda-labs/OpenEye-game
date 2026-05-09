@@ -23,6 +23,8 @@ enum class BlackboardSlot : uint8_t {
     MaterialTableStorageBuffer,
     /** Single directional light UBO (std140, 256 bytes). Filled in upload phase (B.6). */
     DirectionalLightUniformBuffer,
+    /** Spot light array UBO (std140). */
+    SpotLightUniformBuffer,
     /** Default diffuse IBL cubemap (linear RGBA16F); published by `IblDefaultProbes` / `writer_names::kLightingIbl`. */
     IblIrradianceCubemap,
     /** Default specular prefilter cubemap (same footprint as irradiance until a mip chain is authored). */

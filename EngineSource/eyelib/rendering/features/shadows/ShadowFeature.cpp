@@ -1,7 +1,9 @@
 #include "eyelib/rendering/features/shadows/ShadowFeature.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
+#include "eyelib/rendering/core/SpotLightUniforms.h"
 #include "eyelib/rendering/features/shadows/DirectionalShadowPass.h"
+#include "eyelib/rendering/features/shadows/SpotShadowPass.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/framegraph/FrameGraph.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
@@ -12,6 +14,7 @@
 #include "eyelib/rendering/scene/CameraView.h"
 #include "eyelib/rendering/scene/IRenderSceneView.h"
 #include "eyelib/rendering/scene/SceneDrawInstance.h"
+#include "eyelib/rendering/features/shadows/ShadowBlurPass.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -25,7 +28,7 @@ namespace {
 struct ShadowParamsStd140 {
   float splitDepths[4] = {10.0f, 30.0f, 80.0f, 0.0f};
   float biasAndFilter[4] = {
-      0.0001f, 0.0005f, 0.0f,
+      0.0001f, 0.05f, 0.0f,
       0.08f}; // depthBias, normalBias, reserved, cascadeBlend
   float filterExtent[4] = {
       1.0f, 2.0f, 3.0f, 0.0f}; // Extent for cascade 0, 1, 2
@@ -172,6 +175,8 @@ void ShadowFeature::OnRegisterBlackboardWriters(
                             writer_names::kShadowFeature);
   (void)registry.TryReserve(BlackboardSlot::SpotShadowMapAtlas,
                             writer_names::kShadowFeature);
+  (void)registry.TryReserve(BlackboardSlot::SpotLightUniformBuffer,
+                            writer_names::kShadowFeature);
   (void)registry.TryReserve(BlackboardSlot::PointShadowCubemapArray,
                             writer_names::kShadowFeature);
   (void)registry.TryReserve(BlackboardSlot::ShadowParamsBuffer,
@@ -183,6 +188,8 @@ void ShadowFeature::OnUnregisterBlackboardWriters(
   (void)registry.TryRelease(BlackboardSlot::DirectionalShadowMapArray,
                             writer_names::kShadowFeature);
   (void)registry.TryRelease(BlackboardSlot::SpotShadowMapAtlas,
+                            writer_names::kShadowFeature);
+  (void)registry.TryRelease(BlackboardSlot::SpotLightUniformBuffer,
                             writer_names::kShadowFeature);
   (void)registry.TryRelease(BlackboardSlot::PointShadowCubemapArray,
                             writer_names::kShadowFeature);
@@ -277,6 +284,47 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
     }
     m_shadowParamsBuffer->Update(&params, 0, sizeof(params));
   }
+
+  // Spot light logic
+  uint32_t spotCount = 0;
+  const SceneLighting::SpotLightSceneState* spotLights = SceneLighting::GetSpotLights(spotCount);
+  
+  if (!m_spotShadowRt) {
+      std::vector<rhi::RHITextureFormat> colorFormats = {rhi::RHITextureFormat::R16G16_SFLOAT};
+      m_spotShadowRt = render.device->CreateRenderTargetArray(512u, 512u, std::max(1u, spotCount), colorFormats, rhi::RHITextureFormat::Depth24);
+      m_spotShadowScratchRt = render.device->CreateRenderTargetArray(512u, 512u, std::max(1u, spotCount), colorFormats, rhi::RHITextureFormat::Depth24); // Needs depth? No, but let's keep format same
+  }
+  
+  if (!m_spotLightUniformBuffer) {
+      rhi::BufferDesc d{};
+      d.sizeInBytes = kSpotLightUniformGpuBytes;
+      d.usage = rhi::BufferUsage::Uniform;
+      d.memoryHint = rhi::BufferMemoryHint::HostVisible;
+      d.debugName = "ShadowFeature.SpotLightUniformBuffer";
+      m_spotLightUniformBuffer = render.device->CreateBuffer(d, nullptr);
+  }
+  
+  if (m_spotLightUniformBuffer) {
+      SpotLightArrayStd140 spotData{};
+      spotData.countAndPadding.x = static_cast<float>(spotCount);
+      for (uint32_t i = 0; i < std::min(spotCount, kMaxSpotLights); ++i) {
+          const auto& sl = spotLights[i];
+          spotData.lights[i].positionAndRange = math::Vec4(sl.position, sl.range);
+          spotData.lights[i].directionAndInnerCone = math::Vec4(sl.direction, sl.innerConeCos);
+          spotData.lights[i].colorAndOuterCone = math::Vec4(sl.color * sl.intensity, sl.outerConeCos);
+          
+          math::Mat4 proj = glm::perspective(std::acos(sl.outerConeCos) * 2.0f, 1.0f, 0.1f, sl.range);
+          proj = camera::AdjustProjectionForBackend(proj, camera::PolicyForBackend(RenderBackend::Vulkan));
+          const math::Vec3 worldUp(0.0f, 1.0f, 0.0f);
+          const math::Vec3 safeUp = (glm::abs(glm::dot(sl.direction, worldUp)) > 0.99f)
+              ? math::Vec3(1.0f, 0.0f, 0.0f) : worldUp;
+          math::Mat4 view = glm::lookAt(sl.position, sl.position + sl.direction, safeUp);
+          spotData.lights[i].lightViewProj = proj * view;
+          
+          spotData.lights[i].shadowParams = math::Vec4(sl.castShadows ? static_cast<float>(i) : -1.0f, 0.0f, 0.0f, 0.0f);
+      }
+      m_spotLightUniformBuffer->Update(&spotData, 0, sizeof(spotData));
+  }
 }
 
 void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
@@ -284,9 +332,9 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
                                      const RenderContext &render) {
   (void)render;
   if (m_directionalShadowRt) {
-    if (rhi::ITexture *depth = m_directionalShadowRt->GetDepthTexture()) {
+    if (rhi::ITexture *color = m_directionalShadowRt->GetColorTexture(0)) {
       blackboard.PublishTexture(BlackboardSlot::DirectionalShadowMapArray,
-                                writer_names::kShadowFeature, depth);
+                                writer_names::kShadowFeature, color);
     }
   }
   if (m_shadowParamsBuffer) {
@@ -307,23 +355,77 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
           m_shadowCasterList, &m_lightViewProj);
     graph.AddPassBorrowed(m_directionalShadowPass.get());
   }
+
+  if (m_spotShadowRt) {
+      if (rhi::ITexture* color = m_spotShadowRt->GetColorTexture(0)) {
+          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature, color);
+      }
+  }
+  if (m_spotLightUniformBuffer) {
+      blackboard.PublishBuffer(BlackboardSlot::SpotLightUniformBuffer, writer_names::kShadowFeature, m_spotLightUniformBuffer);
+  }
+
+  if (m_spotShadowRt && m_shadowPipeline && m_meshResolver && m_shadowCasterList) {
+      uint32_t spotCount = 0;
+      const SceneLighting::SpotLightSceneState* spotLights = SceneLighting::GetSpotLights(spotCount);
+      std::vector<math::Mat4> spotProjs;
+      for (uint32_t i = 0; i < std::min(spotCount, kMaxSpotLights); ++i) {
+          if (spotLights[i].castShadows) {
+              math::Mat4 proj = glm::perspective(std::acos(spotLights[i].outerConeCos) * 2.0f, 1.0f, 0.1f, spotLights[i].range);
+              proj = camera::AdjustProjectionForBackend(proj, camera::PolicyForBackend(RenderBackend::Vulkan));
+              const math::Vec3 worldUp(0.0f, 1.0f, 0.0f);
+              const math::Vec3 safeUp = (glm::abs(glm::dot(spotLights[i].direction, worldUp)) > 0.99f)
+                  ? math::Vec3(1.0f, 0.0f, 0.0f) : worldUp;
+              math::Mat4 view = glm::lookAt(spotLights[i].position, spotLights[i].position + spotLights[i].direction, safeUp);
+              spotProjs.push_back(proj * view);
+              core::Log::DebugF("ShadowFeature: scheduling spot shadow pass for light %u (castShadows=%d, range=%.1f)",
+                  i, spotLights[i].castShadows, spotLights[i].range);
+          }
+      }
+      
+      if (spotCount > 0) {
+          if (!m_spotShadowPass) m_spotShadowPass = std::make_unique<SpotShadowPass>();
+          
+          m_spotShadowPass->Setup(m_spotShadowRt, m_shadowPipeline, m_meshResolver, m_shadowCasterList, spotProjs);
+          graph.AddPassBorrowed(m_spotShadowPass.get());
+          
+          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature,
+                                    m_spotShadowRt->GetColorTexture(0));
+      }
+  }
 }
 
 void ShadowFeature::OnShutdown() {
   m_directionalShadowPass.reset();
+  m_spotShadowPass.reset();
+  m_shadowBlurPass.reset();
   if (m_device) {
     if (m_shadowPipeline)
       m_device->DestroyPipeline(m_shadowPipeline);
     if (m_shadowParamsBuffer)
       m_device->DestroyBuffer(m_shadowParamsBuffer);
+    if (m_spotLightUniformBuffer) {
+        m_device->DestroyBuffer(m_spotLightUniformBuffer);
+        m_spotLightUniformBuffer = nullptr;
+    }
     if (m_directionalShadowRt)
       m_device->DestroyRenderTarget(m_directionalShadowRt);
+    if (m_spotShadowRt) {
+      m_device->DestroyRenderTarget(m_spotShadowRt);
+      m_spotShadowRt = nullptr;
+    }
+    if (m_spotShadowScratchRt) {
+      m_device->DestroyRenderTarget(m_spotShadowScratchRt);
+      m_spotShadowScratchRt = nullptr;
+    }
   }
   m_shadowPipeline = nullptr;
   m_shadowParamsBuffer = nullptr;
   m_directionalShadowRt = nullptr;
   m_shadowCasterList = nullptr;
   m_ownedShadowCasterList.reset();
+  m_spotShadowCasterList = nullptr;
+  m_ownedSpotShadowCasterList.reset();
   m_device = nullptr;
 }
 

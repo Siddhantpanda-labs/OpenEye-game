@@ -11,6 +11,8 @@ namespace eyelib {
 namespace rendering {
 
 class DirectionalShadowPass;
+class SpotShadowPass;
+class ShadowBlurPass;
 class FrameGraph;
 class FrameGraphBlackboard;
 struct ShadowCasterList;
@@ -49,6 +51,13 @@ private:
     std::unique_ptr<ShadowCasterList> m_ownedShadowCasterList;
     std::array<math::Mat4, 3> m_lightViewProj = {math::Mat4{1.0f}, math::Mat4{1.0f}, math::Mat4{1.0f}};
     std::unique_ptr<DirectionalShadowPass> m_directionalShadowPass;
+    rhi::IRenderTarget* m_spotShadowRt = nullptr;
+    rhi::IRenderTarget* m_spotShadowScratchRt = nullptr;
+    rhi::IBuffer* m_spotLightUniformBuffer = nullptr;
+    std::unique_ptr<SpotShadowPass> m_spotShadowPass;
+    std::unique_ptr<ShadowBlurPass> m_shadowBlurPass;
+    ShadowCasterList* m_spotShadowCasterList = nullptr;
+    std::unique_ptr<ShadowCasterList> m_ownedSpotShadowCasterList;
 };
 
 }  // namespace rendering

@@ -9,7 +9,7 @@ layout(set = 0, binding = 1) uniform usampler2D u_EntityID;
 layout(push_constant, std430) uniform OutlinePostPush {
     layout(offset = 0) uint u_SelectedID;
     layout(offset = 16) vec3 u_OutlineColor;
-    layout(offset = 28) vec2 u_InvSize;
+    layout(offset = 32) vec2 u_InvSize;
 } pc;
 
 void main() {
