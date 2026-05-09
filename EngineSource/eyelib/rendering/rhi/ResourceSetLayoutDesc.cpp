@@ -111,6 +111,8 @@ PipelineLayoutDesc MakeResourceSetDesc(ResourceSetType type) {
             {9, BindingType::Texture},
             {10, BindingType::UniformBuffer},
             {11, BindingType::Texture},
+            {12, BindingType::UniformBuffer},
+            {13, BindingType::Texture},
         };
         break;
     }

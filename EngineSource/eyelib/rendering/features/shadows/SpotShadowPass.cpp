@@ -127,9 +127,8 @@ void SpotShadowPass::Execute(rhi::ICommandList* cmd) {
             }
         }
 
-        // After first layer, switch to Load so we don't clear subsequent layers
-        ops.depth.loadOp = AttachmentLoadOp::Load;
-        ops.color.loadOp = AttachmentLoadOp::Load;
+        // Keep Clear for every array layer. Each layer is an independent shadow map
+        // slice and must not inherit stale depth from earlier frames.
     }
 }
 

@@ -200,22 +200,20 @@ int main() {
     shadowFeature.SetMeshResolver(&meshResolver);
     rasterFeature.SetRenderMode(eyelib::rendering::RenderMode::Deferred);
 
-    // Directional light disabled — scene lit exclusively by spot light below.
+    // Directional + spot disabled — single orange point light between sphere and cube.
     eyelib::rendering::SceneLighting::SetDirectionalLight({0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0.0f);
+    eyelib::rendering::SceneLighting::ClearSpotLights();
 
-    // Light-blue downward spot light centered high above the scene.
+    // Orange point light slightly above the midpoint of sphere (-3.5,6.5,0) and cube (3.5,5,0).
     {
-        eyelib::rendering::SceneLighting::ClearSpotLights();
-        eyelib::rendering::SceneLighting::SpotLightSceneState spot{};
-        spot.position      = {0.0f, 18.0f, 0.0f};    // High above scene center
-        spot.direction     = {0.0f, -1.0f, 0.0f};    // Straight down
-        spot.color         = {1.0f, 0.85f, 0.1f};    // Bright yellow
-        spot.intensity     = 200.0f;                  // Very bright
-        spot.range         = 35.0f;                   // Covers ground plane
-        spot.innerConeCos  = std::cos(glm::radians(20.0f)); // Narrower hot center (lower radius)
-        spot.outerConeCos  = std::cos(glm::radians(35.0f)); // Tighter edge
-        spot.castShadows   = true;
-        eyelib::rendering::SceneLighting::AddSpotLight(spot);
+        eyelib::rendering::SceneLighting::ClearPointLights();
+        eyelib::rendering::SceneLighting::PointLightSceneState point{};
+        point.position = {0.0f, 8.8f, 0.0f};
+        point.range = 28.0f;
+        point.color = {1.0f, 0.42f, 0.05f};
+        point.intensity = 200.0f;
+        point.castShadows = true;
+        eyelib::rendering::SceneLighting::AddPointLight(point);
     }
 
     eyelib::rendering::RenderSceneView sceneView;
@@ -279,7 +277,7 @@ int main() {
     }
 
     std::printf("RenderingSandbox: scene loaded (plane=green, sphere=blue, cube=red)\n");
-    std::printf("RenderingSandbox: light-blue downward spot light, no directional light\n");
+    std::printf("RenderingSandbox: orange point light (cubemap shadow), no spot/directional\n");
 
     double lastT = glfwGetTime();
     static float camX = 0.0f, camY = 2.3f, camZ = 7.0f;

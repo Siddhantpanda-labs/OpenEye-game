@@ -13,6 +13,7 @@ namespace rendering {
 
 class DirectionalShadowPass;
 class SpotShadowPass;
+class PointShadowPass;
 class FrameGraph;
 class FrameGraphBlackboard;
 struct ShadowCasterList;
@@ -57,6 +58,11 @@ private:
     std::unique_ptr<SpotShadowPass> m_spotShadowPass;
     std::vector<math::Mat4> m_spotShadowViewProjs;
     uint32_t m_spotShadowLayerCount = 0u;
+    rhi::IRenderTarget* m_pointShadowRt = nullptr;
+    rhi::IBuffer* m_pointLightUniformBuffer = nullptr;
+    std::unique_ptr<PointShadowPass> m_pointShadowPass;
+    std::vector<math::Mat4> m_pointShadowFaceViewProjs;
+    uint32_t m_pointShadowLayerCount = 0u;
 };
 
 }  // namespace rendering

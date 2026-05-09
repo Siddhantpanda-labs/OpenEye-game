@@ -6,7 +6,7 @@
     "rendering/vulkan/passes/ibl/prefilter.vert": 1778005620577619700,
     "rendering/vulkan/passes/post/present_resolve.frag": 1778005620577619700,
     "rendering/vulkan/passes/post/present_resolve.vert": 1778005620577619700,
-    "rendering/vulkan/raster/deferred/deferred_lighting_analytic.frag": 1778337569989999000,
+    "rendering/vulkan/raster/deferred/deferred_lighting_analytic.frag": 1778339378747881000,
     "rendering/vulkan/raster/deferred/deferred_lighting_analytic.vert": 1778005620578965700,
     "rendering/vulkan/raster/deferred/gbuffer_static.frag": 1778006468175227300,
     "rendering/vulkan/raster/deferred/gbuffer_static.vert": 1778006454303231600,

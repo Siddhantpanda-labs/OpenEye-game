@@ -10,6 +10,7 @@ namespace rendering {
 namespace {
 DirectionalLightSceneState g_directionalLight{};
 std::vector<SceneLighting::SpotLightSceneState> g_SpotLights;
+std::vector<SceneLighting::PointLightSceneState> g_PointLights;
 } // namespace
 
 void SceneLighting::SetDirectionalLight(const math::Vec3& direction, const math::Vec3& color, float intensity) noexcept {
@@ -38,6 +39,21 @@ void SceneLighting::AddSpotLight(const SpotLightSceneState& spotLight) noexcept 
 const SceneLighting::SpotLightSceneState* SceneLighting::GetSpotLights(uint32_t& outCount) noexcept {
     outCount = static_cast<uint32_t>(g_SpotLights.size());
     return g_SpotLights.data();
+}
+
+void SceneLighting::ClearPointLights() noexcept {
+    g_PointLights.clear();
+}
+
+void SceneLighting::AddPointLight(const PointLightSceneState& pointLight) noexcept {
+    if (g_PointLights.size() < SceneLighting::kMaxScenePointLights) {
+        g_PointLights.push_back(pointLight);
+    }
+}
+
+const SceneLighting::PointLightSceneState* SceneLighting::GetPointLights(uint32_t& outCount) noexcept {
+    outCount = static_cast<uint32_t>(g_PointLights.size());
+    return g_PointLights.data();
 }
 
 }  // namespace rendering

@@ -39,6 +39,8 @@ enum class BlackboardSlot : uint8_t {
     PointShadowCubemapArray,
     /** Shadow parameter uniform/storage buffer (splits, matrices, bias/filter settings). */
     ShadowParamsBuffer,
+    /** Point light array UBO (std140, cubemap face matrices + params). */
+    PointLightUniformBuffer,
     SlotCount
 };
 

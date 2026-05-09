@@ -1,8 +1,10 @@
 #include "eyelib/rendering/features/shadows/ShadowFeature.h"
 #include "eyelib/core/Log.h"
 #include "eyelib/rendering/core/DirectionalLightUniforms.h"
+#include "eyelib/rendering/core/PointLightUniforms.h"
 #include "eyelib/rendering/core/SpotLightUniforms.h"
 #include "eyelib/rendering/features/shadows/DirectionalShadowPass.h"
+#include "eyelib/rendering/features/shadows/PointShadowPass.h"
 #include "eyelib/rendering/features/shadows/SpotShadowPass.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/framegraph/FrameGraph.h"
@@ -27,7 +29,7 @@ namespace {
 struct ShadowParamsStd140 {
   float splitDepths[4] = {10.0f, 30.0f, 80.0f, 0.0f};
   float biasAndFilter[4] = {
-      0.0001f, 0.05f, 0.0f,
+      0.00025f, 0.015f, 0.0f,
       0.08f}; // depthBias, normalBias, reserved, cascadeBlend
   float filterExtent[4] = {
       1.0f, 2.0f, 3.0f, 0.0f}; // Extent for cascade 0, 1, 2
@@ -162,6 +164,26 @@ void buildDirectionalCascades(const CameraView &cam,
   }
 }
 
+void buildPointLightFaceViewProjs(const math::Vec3& pos, float range,
+                                  math::Mat4 outFaces[kPointLightFaces]) {
+  const float zNear = 0.1f;
+  const float zFar = (range > zNear + 0.01f) ? range : (zNear + 0.01f);
+  math::Mat4 proj = glm::perspective(glm::radians(90.0f), 1.0f, zNear, zFar);
+  proj = camera::AdjustProjectionForBackend(proj, camera::PolicyForBackend(RenderBackend::Vulkan));
+  const math::Vec3 fwd[kPointLightFaces] = {
+      {1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f},
+      {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, -1.0f},
+  };
+  const math::Vec3 up[kPointLightFaces] = {
+      {0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f},
+      {0.0f, 0.0f, -1.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, -1.0f, 0.0f},
+  };
+  for (uint32_t f = 0; f < kPointLightFaces; ++f) {
+    const math::Mat4 view = glm::lookAt(pos, pos + fwd[f], up[f]);
+    outFaces[f] = proj * view;
+  }
+}
+
 } // namespace
 
 ShadowFeature::ShadowFeature() = default;
@@ -178,6 +200,8 @@ void ShadowFeature::OnRegisterBlackboardWriters(
                             writer_names::kShadowFeature);
   (void)registry.TryReserve(BlackboardSlot::PointShadowCubemapArray,
                             writer_names::kShadowFeature);
+  (void)registry.TryReserve(BlackboardSlot::PointLightUniformBuffer,
+                            writer_names::kShadowFeature);
   (void)registry.TryReserve(BlackboardSlot::ShadowParamsBuffer,
                             writer_names::kShadowFeature);
 }
@@ -191,6 +215,8 @@ void ShadowFeature::OnUnregisterBlackboardWriters(
   (void)registry.TryRelease(BlackboardSlot::SpotLightUniformBuffer,
                             writer_names::kShadowFeature);
   (void)registry.TryRelease(BlackboardSlot::PointShadowCubemapArray,
+                            writer_names::kShadowFeature);
+  (void)registry.TryRelease(BlackboardSlot::PointLightUniformBuffer,
                             writer_names::kShadowFeature);
   (void)registry.TryRelease(BlackboardSlot::ShadowParamsBuffer,
                             writer_names::kShadowFeature);
@@ -230,13 +256,12 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
   }
 
   if (!m_directionalShadowRt) {
-    std::vector<rhi::RHITextureFormat> colorFormats = {rhi::RHITextureFormat::R16G16_SFLOAT};
     m_directionalShadowRt =
-        render.device->CreateRenderTargetArray(2048u, 2048u, 3u, colorFormats, rhi::RHITextureFormat::Depth24);
+        render.device->CreateDepthOnlyRenderTargetArray(2048u, 2048u, 3u);
   }
   if (!m_shadowPipeline) {
     rhi::ShaderGraphicsPipelineCreateInfo gp{};
-    gp.assetPath = "raster/shadow/directional_vsm";
+    gp.assetPath = "raster/shadow/directional_depth";
     gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
     gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
@@ -251,7 +276,6 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
     rasterState.depthBiasSlope = 0.f;
     gp.rasterStateOverride = rasterState;
     rhi::PipelineAttachmentFormats att{};
-    att.color = {rhi::RHITextureFormat::R16G16_SFLOAT};
     att.depthStencil = rhi::RHITextureFormat::Depth24;
     gp.attachmentFormats = att;
     m_shadowPipeline = render.device->CreateGraphicsPipelineFromShaderAsset(gp);
@@ -368,6 +392,69 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
       }
       m_spotLightUniformBuffer->Update(&spotData, 0, sizeof(spotData));
   }
+
+  // Point lights + cubemap shadow layers (6 faces per shadow-casting light, capped).
+  uint32_t pointCount = 0;
+  const SceneLighting::PointLightSceneState* pointLights = SceneLighting::GetPointLights(pointCount);
+  const uint32_t clampedPointCount = std::min(pointCount, kMaxPointLights);
+
+  m_pointShadowFaceViewProjs.clear();
+  PointLightArrayStd140 pointData{};
+  pointData.countAndPadding.x = static_cast<float>(clampedPointCount);
+
+  uint32_t pointShadowSlot = 0;
+  for (uint32_t i = 0; i < clampedPointCount; ++i) {
+    const auto& pl = pointLights[i];
+    PointLightStd140& dst = pointData.lights[i];
+    dst.positionAndRange = math::Vec4(pl.position, pl.range);
+    dst.colorIntensity = math::Vec4(pl.color.x * pl.intensity, pl.color.y * pl.intensity,
+                                    pl.color.z * pl.intensity, pl.intensity);
+    if (pl.castShadows && pointShadowSlot < kMaxPointShadowCasters) {
+      const float baseLayer = static_cast<float>(pointShadowSlot * kPointLightFaces);
+      dst.shadowParams = math::Vec4(baseLayer, 0.0f, 0.0f, 0.0f);
+      math::Mat4 faces[kPointLightFaces];
+      buildPointLightFaceViewProjs(pl.position, pl.range, faces);
+      for (uint32_t f = 0; f < kPointLightFaces; ++f) {
+        dst.faceViewProj[f] = faces[f];
+        m_pointShadowFaceViewProjs.push_back(faces[f]);
+      }
+      ++pointShadowSlot;
+    } else {
+      dst.shadowParams = math::Vec4(-1.0f, 0.0f, 0.0f, 0.0f);
+      for (uint32_t f = 0; f < kPointLightFaces; ++f)
+        dst.faceViewProj[f] = math::Mat4(1.0f);
+    }
+  }
+
+  const uint32_t requiredPointLayers = pointShadowSlot * kPointLightFaces;
+  if (pointShadowSlot > 0) {
+    if (!m_pointShadowRt || m_pointShadowLayerCount != requiredPointLayers) {
+      if (m_pointShadowRt)
+        render.device->DestroyRenderTarget(m_pointShadowRt);
+      m_pointShadowRt = nullptr;
+      constexpr uint32_t kPointShadowResolution = 512u;
+      m_pointShadowRt = render.device->CreateDepthOnlyRenderTargetArray(
+          kPointShadowResolution, kPointShadowResolution, requiredPointLayers);
+      m_pointShadowLayerCount = requiredPointLayers;
+    }
+  } else {
+    if (m_pointShadowRt) {
+      render.device->DestroyRenderTarget(m_pointShadowRt);
+      m_pointShadowRt = nullptr;
+    }
+    m_pointShadowLayerCount = 0u;
+  }
+
+  if (!m_pointLightUniformBuffer) {
+    rhi::BufferDesc d{};
+    d.sizeInBytes = kPointLightUniformGpuBytes;
+    d.usage = rhi::BufferUsage::Uniform;
+    d.memoryHint = rhi::BufferMemoryHint::HostVisible;
+    d.debugName = "ShadowFeature.PointLightUniformBuffer";
+    m_pointLightUniformBuffer = render.device->CreateBuffer(d, nullptr);
+  }
+  if (m_pointLightUniformBuffer)
+    m_pointLightUniformBuffer->Update(&pointData, 0, sizeof(pointData));
 }
 
 void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
@@ -375,9 +462,9 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
                                      const RenderContext &render) {
   (void)render;
   if (m_directionalShadowRt) {
-    if (rhi::ITexture *color = m_directionalShadowRt->GetColorTexture(0)) {
+    if (rhi::ITexture *depth = m_directionalShadowRt->GetDepthTexture()) {
       blackboard.PublishTexture(BlackboardSlot::DirectionalShadowMapArray,
-                                writer_names::kShadowFeature, color);
+                                writer_names::kShadowFeature, depth);
     }
   }
   if (m_shadowParamsBuffer) {
@@ -419,11 +506,38 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
                                     m_spotShadowRt->GetDepthTexture());
       }
   }
+
+  if (m_pointLightUniformBuffer) {
+    blackboard.PublishBuffer(BlackboardSlot::PointLightUniformBuffer, writer_names::kShadowFeature,
+                             m_pointLightUniformBuffer);
+  }
+
+  if (m_pointShadowRt && m_spotShadowPipeline && m_meshResolver && m_shadowCasterList &&
+      !m_pointShadowFaceViewProjs.empty()) {
+    if (!m_pointShadowPass)
+      m_pointShadowPass = std::make_unique<PointShadowPass>();
+    m_pointShadowPass->Setup(m_pointShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList,
+                             m_pointShadowFaceViewProjs);
+    graph.AddPassBorrowed(m_pointShadowPass.get());
+  }
+
+  {
+    rhi::ITexture* pointDepth = nullptr;
+    if (m_pointShadowRt)
+      pointDepth = m_pointShadowRt->GetDepthTexture();
+    if (!pointDepth && render.device)
+      pointDepth = render.device->GetSharedShadowMapArrayDummyRenderTarget()->GetDepthTexture();
+    if (pointDepth) {
+      blackboard.PublishTexture(BlackboardSlot::PointShadowCubemapArray, writer_names::kShadowFeature,
+                                pointDepth);
+    }
+  }
 }
 
 void ShadowFeature::OnShutdown() {
   m_directionalShadowPass.reset();
   m_spotShadowPass.reset();
+  m_pointShadowPass.reset();
   if (m_device) {
     if (m_shadowPipeline)
       m_device->DestroyPipeline(m_shadowPipeline);
@@ -441,6 +555,14 @@ void ShadowFeature::OnShutdown() {
       m_device->DestroyRenderTarget(m_spotShadowRt);
       m_spotShadowRt = nullptr;
     }
+    if (m_pointLightUniformBuffer) {
+      m_device->DestroyBuffer(m_pointLightUniformBuffer);
+      m_pointLightUniformBuffer = nullptr;
+    }
+    if (m_pointShadowRt) {
+      m_device->DestroyRenderTarget(m_pointShadowRt);
+      m_pointShadowRt = nullptr;
+    }
   }
   m_shadowPipeline = nullptr;
   m_spotShadowPipeline = nullptr;
@@ -450,6 +572,8 @@ void ShadowFeature::OnShutdown() {
   m_ownedShadowCasterList.reset();
   m_spotShadowViewProjs.clear();
   m_spotShadowLayerCount = 0u;
+  m_pointShadowFaceViewProjs.clear();
+  m_pointShadowLayerCount = 0u;
   m_device = nullptr;
 }
 

@@ -26,6 +26,7 @@ inline constexpr const char* kDirectionalShadowMapArray = "DirectionalShadowMapA
 inline constexpr const char* kSpotShadowMapAtlas = "SpotShadowMapAtlas";
 inline constexpr const char* kPointShadowCubemapArray = "PointShadowCubemapArray";
 inline constexpr const char* kShadowParamsBuffer = "ShadowParamsBuffer";
+inline constexpr const char* kPointLightUniformBuffer = "PointLightUniformBuffer";
 
 }  // namespace resource_names
 

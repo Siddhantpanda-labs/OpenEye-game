@@ -55,9 +55,11 @@ void DeferredLightingPass::CollectTextureBarriers(const FrameGraphBlackboard& bl
     if (rhi::ITexture* iblLut = blackboard.TryGetTexture(BlackboardSlot::IblBrdfLut))
         out.Push(iblLut, rhi::ResourceState::ShaderResource);
     if (rhi::ITexture* dirShadow = blackboard.TryGetTexture(BlackboardSlot::DirectionalShadowMapArray))
-        out.Push(dirShadow, rhi::ResourceState::ShaderResource);
+        out.Push(dirShadow, rhi::ResourceState::DepthRead);
     if (rhi::ITexture* spotShadow = blackboard.TryGetTexture(BlackboardSlot::SpotShadowMapAtlas))
         out.Push(spotShadow, rhi::ResourceState::DepthRead);
+    if (rhi::ITexture* pointShadow = blackboard.TryGetTexture(BlackboardSlot::PointShadowCubemapArray))
+        out.Push(pointShadow, rhi::ResourceState::DepthRead);
 }
 
 bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const {
@@ -122,7 +124,9 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
     rhi::ITexture* dirShadow = m_blackboard->TryGetTexture(BlackboardSlot::DirectionalShadowMapArray);
     rhi::IBuffer* spotLightBuf = m_blackboard->TryGetBuffer(BlackboardSlot::SpotLightUniformBuffer);
     rhi::ITexture* spotShadow = m_blackboard->TryGetTexture(BlackboardSlot::SpotShadowMapAtlas);
-    
+    rhi::IBuffer* pointLightBuf = m_blackboard->TryGetBuffer(BlackboardSlot::PointLightUniformBuffer);
+    rhi::ITexture* pointShadow = m_blackboard->TryGetTexture(BlackboardSlot::PointShadowCubemapArray);
+
     const uint64_t dataKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirLight)) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c0)) << 3u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(c1)) << 7u) ^
@@ -134,7 +138,9 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(shadowParams)) << 33u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dirShadow)) << 37u) ^
                              (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(spotLightBuf)) << 41u) ^
-                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(spotShadow)) << 45u);
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(spotShadow)) << 45u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointLightBuf)) << 49u) ^
+                             (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointShadow)) << 53u);
     if (!m_passSets[frameIdx] || dataKey != m_passSetKeys[frameIdx]) {
         if (!m_passSets[frameIdx]) {
             rhi::IPipelineLayout* passLayout = m_device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterDeferredLightingData);
@@ -155,6 +161,8 @@ void DeferredLightingPass::Execute(rhi::ICommandList* cmd) {
             m_passSets[frameIdx]->UpdateTexture(9, dirShadow);
             m_passSets[frameIdx]->UpdateUniformBuffer(10, spotLightBuf, 0, 0);
             m_passSets[frameIdx]->UpdateTexture(11, spotShadow);
+            m_passSets[frameIdx]->UpdateUniformBuffer(12, pointLightBuf, 0, 0);
+            m_passSets[frameIdx]->UpdateTexture(13, pointShadow);
         }
     }
 

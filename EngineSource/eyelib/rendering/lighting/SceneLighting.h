@@ -13,6 +13,9 @@ struct DirectionalLightSceneState {
 
 class SceneLighting {
 public:
+    /** Matches `kMaxPointLights` in deferred UBO; extra lights are ignored on GPU. */
+    static constexpr uint32_t kMaxScenePointLights = 8u;
+
     SceneLighting() = default;
 
     static void SetDirectionalLight(const math::Vec3& direction, const math::Vec3& color, float intensity) noexcept;
@@ -32,6 +35,18 @@ public:
     static void ClearSpotLights() noexcept;
     static void AddSpotLight(const SpotLightSceneState& spotLight) noexcept;
     static const SpotLightSceneState* GetSpotLights(uint32_t& outCount) noexcept;
+
+    struct PointLightSceneState {
+        math::Vec3 position = {0.0f, 3.0f, 0.0f};
+        float range = 15.0f;
+        math::Vec3 color = {1.0f, 1.0f, 1.0f};
+        float intensity = 10.0f;
+        bool castShadows = true;
+    };
+
+    static void ClearPointLights() noexcept;
+    static void AddPointLight(const PointLightSceneState& pointLight) noexcept;
+    static const PointLightSceneState* GetPointLights(uint32_t& outCount) noexcept;
 };
 }  // namespace rendering
 }  // namespace eyelib

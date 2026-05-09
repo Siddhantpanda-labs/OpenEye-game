@@ -473,7 +473,7 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     //   binding 9:   Directional shadow map array (sampler2DArray).
     // NOTE: descriptor type must match the GLSL declaration; sampler2D = COMBINED_IMAGE_SAMPLER.
     const VkShaderStageFlags fragStage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutBinding bindings[12] = {};
+    VkDescriptorSetLayoutBinding bindings[14] = {};
     for (int i = 0; i < 4; ++i) {
         bindings[i].binding = static_cast<uint32_t>(i);
         bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -514,10 +514,20 @@ VkDescriptorSetLayout CreateRasterDeferredLightingDataSetLayout(VkDevice device,
     bindings[11].descriptorCount = 1;
     bindings[11].stageFlags = fragStage;
 
+    bindings[12].binding = 12;
+    bindings[12].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[12].descriptorCount = 1;
+    bindings[12].stageFlags = fragStage;
+
+    bindings[13].binding = 13;
+    bindings[13].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[13].descriptorCount = 1;
+    bindings[13].stageFlags = fragStage;
+
     (void)includeMeshShaderStages; // fragment-only pass
 
     VkDescriptorSetLayoutCreateInfo info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    info.bindingCount = 12;
+    info.bindingCount = 14;
     info.pBindings = bindings;
     VkDescriptorSetLayout layout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)
