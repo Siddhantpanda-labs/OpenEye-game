@@ -15,14 +15,15 @@ This document tracks the prioritized fixes and upgrades to resolve shadow artifa
 | :-- | :--- | :---------- | :----- |
 | T1.1 | **Normal Offset Bias** | Implement vertex-normal-driven position nudging in `deferred_lighting_analytic.frag`. | [x] |
 | T1.2 | **Slope-Scaled Bias Tuning** | Adjust RHI-side hardware depth bias factors in `SpotShadowPass` and `DirectionalShadowPass`. | [ ] |
-| T1.3 | **Chebyshev Epsilon Tuning** | Refine the variance epsilon to reduce noise in high-variance areas. | [ ] |
+| T1.3 | **Chebyshev Epsilon Tuning** | Refine directional/spot VSM variance epsilon and light-leak suppression windows to reduce striping/noise near contact surfaces. | [x] |
+| T1.4 | **Spot shadow layer indexing correctness** | Use compact shadow-caster layer indices (no sparse/light-index mapping), share exact same spot view-proj matrices between UBO and shadow pass, and resize spot shadow atlas when caster count changes. | [x] |
 
 ### Phase 2: Softness & Fidelity (Premium Quality)
 | ID  | Step | Description | Status |
 | :-- | :--- | :---------- | :----- |
 | T2.1 | **VSM Gaussian Blur Pass** | Add a dual-pass (Horizontal/Vertical) blur pass for shadow atlases to make them "flat and solid". | [ ] |
 | T2.2 | **R32G32 Precision Tier** | Switch atlas to 32-bit floats for "High" settings to eliminate moment-precision banding. | [ ] |
-| T2.3 | **Light Leak Suppression** | Expose and tune the `linstep` suppression constants for better "solid" shadow centers. | [ ] |
+| T2.3 | **Light Leak Suppression** | Expose and tune the `linstep` suppression constants for better "solid" shadow centers. | [x] |
 
 ### Phase 3: Advanced Industry Methods (Unreal/Unity Parity)
 | ID  | Step | Description | Status |
@@ -52,3 +53,10 @@ This document tracks the prioritized fixes and upgrades to resolve shadow artifa
 ## Progress Log
 
 *   **2026-05-09:** Initial track created to address "stripped" shadow regression. Root cause identified as missing shader-side normal offset bias.
+*   **2026-05-09:** Spot light visibility fix landed: disabled unstable blur-pass scheduling path and corrected spot shadow layer mapping in `ShadowFeature` (compact caster-layer indexing + shared view-proj mapping + dynamic layer-count RT reallocation). This removed the "light present but shadowed out" failure mode caused by invalid/sparse atlas layer addressing.
+*   **2026-05-09:** VSM quality tuning pass landed in deferred shader: added shared `ComputeVsmVisibility`, applied receiver depth bias in VSM compare depth, and tuned separate variance/leak-suppression ranges for directional vs spot shadow sampling to reduce near-surface striping and stabilize contact response.
+*   **2026-05-09:** Solid-shadow clamp pass landed: directional/spot VSM visibility is now clamped with a depth-only 3x3 PCF term (`min(VSM, PCF)`) to eliminate faded/striped translucent shadows and restore dark, stable shadow cores while keeping soft transitions.
+*   **2026-05-09:** Lit-side striping mitigation landed: replaced global hard `min(VSM,PCF)` behavior with contact-weighted blending (`mix(VSM, min(VSM,PCF), contactWeight)`) and added derivative+slope-aware receiver depth stabilization in deferred shadow sampling. This targets rotating-cube slit artifacts and jagged bright-side striping in directional/Sponza lighting.
+*   **2026-05-09:** Spot-shadow regression correction: reduced spot receiver stabilization aggressiveness (lower slope/derivative scaling), softened spot VSM suppression constants, and tightened contact-weighted clamp window to restore coherent spot shadow shape while keeping directional striping mitigation active.
+*   **2026-05-09:** Spot method switch completed: removed VSM from spot shadows and migrated to depth-only shadow map + PCF sampling path. `ShadowFeature` now builds a dedicated depth-only spot shadow pipeline and publishes spot depth array for deferred sampling (`SampleSpotShadowPCF`), improving stability and avoiding moment-based striping/regression.
+*   **2026-05-09:** Contact grounding refinement: calibrated spot-specific caster/receiver bias to professional depth+PCF defaults (lower spot hardware slope bias in `SpotShadowPass`, reduced spot normal-offset and receiver-depth bias in deferred shader) to eliminate near-surface bright inner circles while preserving acne resistance.

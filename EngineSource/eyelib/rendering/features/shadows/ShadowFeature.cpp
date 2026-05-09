@@ -14,7 +14,6 @@
 #include "eyelib/rendering/scene/CameraView.h"
 #include "eyelib/rendering/scene/IRenderSceneView.h"
 #include "eyelib/rendering/scene/SceneDrawInstance.h"
-#include "eyelib/rendering/features/shadows/ShadowBlurPass.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -288,11 +287,48 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
   // Spot light logic
   uint32_t spotCount = 0;
   const SceneLighting::SpotLightSceneState* spotLights = SceneLighting::GetSpotLights(spotCount);
-  
-  if (!m_spotShadowRt) {
-      std::vector<rhi::RHITextureFormat> colorFormats = {rhi::RHITextureFormat::R16G16_SFLOAT};
-      m_spotShadowRt = render.device->CreateRenderTargetArray(512u, 512u, std::max(1u, spotCount), colorFormats, rhi::RHITextureFormat::Depth24);
-      m_spotShadowScratchRt = render.device->CreateRenderTargetArray(512u, 512u, std::max(1u, spotCount), colorFormats, rhi::RHITextureFormat::Depth24); // Needs depth? No, but let's keep format same
+  const uint32_t clampedSpotCount = std::min(spotCount, kMaxSpotLights);
+
+  m_spotShadowViewProjs.clear();
+  m_spotShadowViewProjs.reserve(clampedSpotCount);
+  uint32_t shadowCastingSpotCount = 0;
+  for (uint32_t i = 0; i < clampedSpotCount; ++i) {
+      if (spotLights[i].castShadows)
+          ++shadowCastingSpotCount;
+  }
+
+  const uint32_t requiredLayers = std::max(1u, shadowCastingSpotCount);
+  if (!m_spotShadowRt || m_spotShadowLayerCount != requiredLayers) {
+      if (m_spotShadowRt)
+          render.device->DestroyRenderTarget(m_spotShadowRt);
+      m_spotShadowRt = nullptr;
+      m_spotShadowRt = render.device->CreateDepthOnlyRenderTargetArray(512u, 512u, requiredLayers);
+      m_spotShadowLayerCount = requiredLayers;
+  }
+
+  if (!m_spotShadowPipeline) {
+      rhi::ShaderGraphicsPipelineCreateInfo gp{};
+      gp.assetPath = "raster/shadow/directional_depth";
+      gp.vertexLayout = Mesh::GetVertexLayoutRHI();
+      gp.topology = rhi::PrimitiveTopology::TriangleList;
+      gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
+      gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
+      gp.useDepthStencilOverride = true;
+      gp.depthStencilOverride.depthTest = true;
+      gp.depthStencilOverride.depthWrite = true;
+      gp.depthStencilOverride.depthCompare = rhi::DepthCompare::Less;
+      rhi::RasterState rasterState{};
+      rasterState.depthBiasEnable = true;
+      rasterState.depthBiasConstant = 0.f;
+      rasterState.depthBiasSlope = 0.f;
+      gp.rasterStateOverride = rasterState;
+      rhi::PipelineAttachmentFormats att{};
+      att.depthStencil = rhi::RHITextureFormat::Depth24;
+      gp.attachmentFormats = att;
+      m_spotShadowPipeline = render.device->CreateGraphicsPipelineFromShaderAsset(gp);
+      if (!m_spotShadowPipeline) {
+          core::Log::Warn("ShadowFeature: failed to create spot shadow depth pipeline.");
+      }
   }
   
   if (!m_spotLightUniformBuffer) {
@@ -306,8 +342,8 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
   
   if (m_spotLightUniformBuffer) {
       SpotLightArrayStd140 spotData{};
-      spotData.countAndPadding.x = static_cast<float>(spotCount);
-      for (uint32_t i = 0; i < std::min(spotCount, kMaxSpotLights); ++i) {
+      spotData.countAndPadding.x = static_cast<float>(clampedSpotCount);
+      for (uint32_t i = 0; i < clampedSpotCount; ++i) {
           const auto& sl = spotLights[i];
           spotData.lights[i].positionAndRange = math::Vec4(sl.position, sl.range);
           spotData.lights[i].directionAndInnerCone = math::Vec4(sl.direction, sl.innerConeCos);
@@ -319,9 +355,16 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
           const math::Vec3 safeUp = (glm::abs(glm::dot(sl.direction, worldUp)) > 0.99f)
               ? math::Vec3(1.0f, 0.0f, 0.0f) : worldUp;
           math::Mat4 view = glm::lookAt(sl.position, sl.position + sl.direction, safeUp);
-          spotData.lights[i].lightViewProj = proj * view;
-          
-          spotData.lights[i].shadowParams = math::Vec4(sl.castShadows ? static_cast<float>(i) : -1.0f, 0.0f, 0.0f, 0.0f);
+          const math::Mat4 viewProj = proj * view;
+          spotData.lights[i].lightViewProj = viewProj;
+
+          if (sl.castShadows) {
+              const float shadowLayer = static_cast<float>(m_spotShadowViewProjs.size());
+              m_spotShadowViewProjs.push_back(viewProj);
+              spotData.lights[i].shadowParams = math::Vec4(shadowLayer, 0.0f, 0.0f, 0.0f);
+          } else {
+              spotData.lights[i].shadowParams = math::Vec4(-1.0f, 0.0f, 0.0f, 0.0f);
+          }
       }
       m_spotLightUniformBuffer->Update(&spotData, 0, sizeof(spotData));
   }
@@ -357,40 +400,23 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
   }
 
   if (m_spotShadowRt) {
-      if (rhi::ITexture* color = m_spotShadowRt->GetColorTexture(0)) {
-          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature, color);
+      if (rhi::ITexture* depth = m_spotShadowRt->GetDepthTexture()) {
+          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature, depth);
       }
   }
   if (m_spotLightUniformBuffer) {
       blackboard.PublishBuffer(BlackboardSlot::SpotLightUniformBuffer, writer_names::kShadowFeature, m_spotLightUniformBuffer);
   }
 
-  if (m_spotShadowRt && m_shadowPipeline && m_meshResolver && m_shadowCasterList) {
-      uint32_t spotCount = 0;
-      const SceneLighting::SpotLightSceneState* spotLights = SceneLighting::GetSpotLights(spotCount);
-      std::vector<math::Mat4> spotProjs;
-      for (uint32_t i = 0; i < std::min(spotCount, kMaxSpotLights); ++i) {
-          if (spotLights[i].castShadows) {
-              math::Mat4 proj = glm::perspective(std::acos(spotLights[i].outerConeCos) * 2.0f, 1.0f, 0.1f, spotLights[i].range);
-              proj = camera::AdjustProjectionForBackend(proj, camera::PolicyForBackend(RenderBackend::Vulkan));
-              const math::Vec3 worldUp(0.0f, 1.0f, 0.0f);
-              const math::Vec3 safeUp = (glm::abs(glm::dot(spotLights[i].direction, worldUp)) > 0.99f)
-                  ? math::Vec3(1.0f, 0.0f, 0.0f) : worldUp;
-              math::Mat4 view = glm::lookAt(spotLights[i].position, spotLights[i].position + spotLights[i].direction, safeUp);
-              spotProjs.push_back(proj * view);
-              core::Log::DebugF("ShadowFeature: scheduling spot shadow pass for light %u (castShadows=%d, range=%.1f)",
-                  i, spotLights[i].castShadows, spotLights[i].range);
-          }
-      }
-      
-      if (spotCount > 0) {
+  if (m_spotShadowRt && m_spotShadowPipeline && m_meshResolver && m_shadowCasterList) {
+      if (!m_spotShadowViewProjs.empty()) {
           if (!m_spotShadowPass) m_spotShadowPass = std::make_unique<SpotShadowPass>();
           
-          m_spotShadowPass->Setup(m_spotShadowRt, m_shadowPipeline, m_meshResolver, m_shadowCasterList, spotProjs);
+          m_spotShadowPass->Setup(m_spotShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList, m_spotShadowViewProjs);
           graph.AddPassBorrowed(m_spotShadowPass.get());
           
           blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature,
-                                    m_spotShadowRt->GetColorTexture(0));
+                                    m_spotShadowRt->GetDepthTexture());
       }
   }
 }
@@ -398,10 +424,11 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
 void ShadowFeature::OnShutdown() {
   m_directionalShadowPass.reset();
   m_spotShadowPass.reset();
-  m_shadowBlurPass.reset();
   if (m_device) {
     if (m_shadowPipeline)
       m_device->DestroyPipeline(m_shadowPipeline);
+    if (m_spotShadowPipeline)
+      m_device->DestroyPipeline(m_spotShadowPipeline);
     if (m_shadowParamsBuffer)
       m_device->DestroyBuffer(m_shadowParamsBuffer);
     if (m_spotLightUniformBuffer) {
@@ -414,18 +441,15 @@ void ShadowFeature::OnShutdown() {
       m_device->DestroyRenderTarget(m_spotShadowRt);
       m_spotShadowRt = nullptr;
     }
-    if (m_spotShadowScratchRt) {
-      m_device->DestroyRenderTarget(m_spotShadowScratchRt);
-      m_spotShadowScratchRt = nullptr;
-    }
   }
   m_shadowPipeline = nullptr;
+  m_spotShadowPipeline = nullptr;
   m_shadowParamsBuffer = nullptr;
   m_directionalShadowRt = nullptr;
   m_shadowCasterList = nullptr;
   m_ownedShadowCasterList.reset();
-  m_spotShadowCasterList = nullptr;
-  m_ownedSpotShadowCasterList.reset();
+  m_spotShadowViewProjs.clear();
+  m_spotShadowLayerCount = 0u;
   m_device = nullptr;
 }
 

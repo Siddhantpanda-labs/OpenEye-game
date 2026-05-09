@@ -57,7 +57,7 @@ void DeferredLightingPass::CollectTextureBarriers(const FrameGraphBlackboard& bl
     if (rhi::ITexture* dirShadow = blackboard.TryGetTexture(BlackboardSlot::DirectionalShadowMapArray))
         out.Push(dirShadow, rhi::ResourceState::ShaderResource);
     if (rhi::ITexture* spotShadow = blackboard.TryGetTexture(BlackboardSlot::SpotShadowMapAtlas))
-        out.Push(spotShadow, rhi::ResourceState::ShaderResource);
+        out.Push(spotShadow, rhi::ResourceState::DepthRead);
 }
 
 bool DeferredLightingPass::DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const {

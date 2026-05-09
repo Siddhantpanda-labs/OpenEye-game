@@ -100,9 +100,40 @@ float linstep(float low, float high, float v) {
     return clamp((v - low) / (high - low), 0.0, 1.0);
 }
 
+float ComputeVsmVisibility(vec2 moments, float compareDepth, float minVariance, float bleedLow, float bleedHigh) {
+    float p = step(compareDepth, moments.x);
+    float variance = max(moments.y - moments.x * moments.x, minVariance);
+    float d = compareDepth - moments.x;
+    float pMax = linstep(bleedLow, bleedHigh, variance / (variance + d * d));
+    return min(max(p, pMax), 1.0);
+}
+
+float ComputeStableReceiverDepth(float shadowDepth, vec3 N, vec3 L, float baseBias, float slopeScale, float derivScale) {
+    float slope = max(1.0 - dot(N, L), 0.0);
+    float slopeBias = baseBias * slope * slopeScale;
+    float derivativeBias = fwidth(shadowDepth) * derivScale;
+    float receiverBias = baseBias + slopeBias + derivativeBias;
+    return shadowDepth - receiverBias;
+}
+
+float SampleDepthOnlyPcf2DArray(sampler2DArray shadowMap, vec2 uv, int layer, float compareDepth, int radius) {
+    vec2 texelSize = 1.0 / vec2(textureSize(shadowMap, 0).xy);
+    float lit = 0.0;
+    float taps = 0.0;
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            vec2 pcfUv = uv + vec2(float(x), float(y)) * texelSize;
+            float mapDepth = texture(shadowMap, vec3(pcfUv, float(layer))).r;
+            lit += (compareDepth <= mapDepth) ? 1.0 : 0.0;
+            taps += 1.0;
+        }
+    }
+    return lit / max(taps, 1.0);
+}
+
 float SampleDirectionalShadowCascadeVSM(vec3 worldPos, vec3 N, vec3 L, int cascadeIndex) {
     // T1.1 Normal Offset Bias
-    float normalBias = uShadow.uShadowMeta.y * max(1.0 - dot(N, L), 0.1);
+    float normalBias = max(uShadow.uShadowMeta.y, 0.0) * max(1.0 - dot(N, L), 0.1);
     vec3 biasedPos = worldPos + N * normalBias;
     vec4 lightClip = uShadow.uLightViewProj[cascadeIndex] * vec4(biasedPos, 1.0);
     if (lightClip.w <= 0.0) {
@@ -110,20 +141,17 @@ float SampleDirectionalShadowCascadeVSM(vec3 worldPos, vec3 N, vec3 L, int casca
     }
     vec3 lightNdc = lightClip.xyz / lightClip.w;
     vec2 shadowUv = lightNdc.xy * 0.5 + 0.5;
-    float shadowDepth = lightNdc.z;
+    float shadowDepth = ComputeStableReceiverDepth(lightNdc.z, N, L, max(uShadow.uShadowMeta.x, 0.00005), 1.0, 2.0);
     if (shadowUv.x <= 0.0 || shadowUv.x >= 1.0 || shadowUv.y <= 0.0 || shadowUv.y >= 1.0 || shadowDepth <= 0.0 || shadowDepth >= 1.0) {
         return 1.0;
     }
 
     vec2 moments = texture(tDirectionalShadowMap, vec3(shadowUv, float(cascadeIndex))).rg;
-    
-    float p = step(shadowDepth, moments.x);
-    float variance = max(moments.y - moments.x * moments.x, 0.00002);
-    
-    float d = shadowDepth - moments.x;
-    float pMax = linstep(0.2, 1.0, variance / (variance + d * d)); // light-leak suppression
-
-    return min(max(p, pMax), 1.0);
+    float vsm = ComputeVsmVisibility(moments, shadowDepth, 0.00008, 0.40, 1.0);
+    float pcf = SampleDepthOnlyPcf2DArray(tDirectionalShadowMap, shadowUv, cascadeIndex, shadowDepth, 1);
+    float contactWeight = 1.0 - smoothstep(0.002, 0.02, abs(shadowDepth - moments.x));
+    // Use PCF clamp only near contact to keep dark cores without introducing lit-side striping.
+    return mix(vsm, min(vsm, pcf), contactWeight);
 }
 
 float SampleDirectionalShadowVSM(vec3 worldPos, vec3 N, vec3 L, float viewDistance) {
@@ -149,32 +177,26 @@ float SampleDirectionalShadowVSM(vec3 worldPos, vec3 N, vec3 L, float viewDistan
     return mix(shadowCurrent, shadowNext, blendToNext);
 }
 
-float SampleSpotShadowVSM(vec3 worldPos, vec3 N, vec3 L, int shadowIndex, mat4 lightViewProj) {
+float SampleSpotShadowPCF(vec3 worldPos, vec3 N, vec3 L, int shadowIndex, mat4 lightViewProj) {
     if (shadowIndex < 0) return 1.0;
     
     // T1.1 Normal Offset Bias
-    float normalBias = uShadow.uShadowMeta.y * max(1.0 - dot(N, L), 0.1);
+    // Spot contact should stay grounded. Use a dedicated small normal bias budget.
+    float normalBias = 0.0020 * max(1.0 - dot(N, L), 0.05);
     vec3 biasedPos = worldPos + N * normalBias;
     vec4 lightClip = lightViewProj * vec4(biasedPos, 1.0);
     if (lightClip.w <= 0.0) return 1.0;
     
     vec3 lightNdc = lightClip.xyz / lightClip.w;
     vec2 shadowUv = lightNdc.xy * 0.5 + 0.5;
-    float shadowDepth = lightNdc.z;
+    float shadowDepth = ComputeStableReceiverDepth(lightNdc.z, N, L, 0.000035, 0.20, 0.35);
     
     if (shadowUv.x <= 0.0 || shadowUv.x >= 1.0 || shadowUv.y <= 0.0 || shadowUv.y >= 1.0 || shadowDepth <= 0.0 || shadowDepth >= 1.0) {
         return 1.0;
     }
 
-    vec2 moments = texture(tSpotShadowMap, vec3(shadowUv, float(shadowIndex))).rg;
-    
-    float p = step(shadowDepth, moments.x);
-    float variance = max(moments.y - moments.x * moments.x, 0.00002);
-    
-    float d = shadowDepth - moments.x;
-    float pMax = linstep(0.2, 1.0, variance / (variance + d * d)); // light-leak suppression
-
-    return min(max(p, pMax), 1.0);
+    // Spot shadows use depth-only PCF (no VSM) for stable, solid contact and predictable behavior.
+    return SampleDepthOnlyPcf2DArray(tSpotShadowMap, shadowUv, shadowIndex, shadowDepth, 1);
 }
 
 
@@ -262,7 +284,7 @@ void main() {
         attenuation *= attenuation;
 
         int shadowIndex = int(sl.shadowParams.x);
-        float shadow = SampleSpotShadowVSM(worldPos, N, L, shadowIndex, sl.lightViewProj);
+        float shadow = SampleSpotShadowPCF(worldPos, N, L, shadowIndex, sl.lightViewProj);
 
         vec3 radiance = colorIntensity * intensity * attenuation;
 

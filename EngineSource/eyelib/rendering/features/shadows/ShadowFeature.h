@@ -6,13 +6,13 @@
 #include "eyelib/math/Types.h"
 #include <array>
 #include <memory>
+#include <vector>
 
 namespace eyelib {
 namespace rendering {
 
 class DirectionalShadowPass;
 class SpotShadowPass;
-class ShadowBlurPass;
 class FrameGraph;
 class FrameGraphBlackboard;
 struct ShadowCasterList;
@@ -45,6 +45,7 @@ private:
     rhi::IRenderTarget* m_directionalShadowRt = nullptr;
     rhi::IBuffer* m_shadowParamsBuffer = nullptr;
     rhi::IPipeline* m_shadowPipeline = nullptr;
+    rhi::IPipeline* m_spotShadowPipeline = nullptr;
     rhi::IDevice* m_device = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
     ShadowCasterList* m_shadowCasterList = nullptr;
@@ -52,12 +53,10 @@ private:
     std::array<math::Mat4, 3> m_lightViewProj = {math::Mat4{1.0f}, math::Mat4{1.0f}, math::Mat4{1.0f}};
     std::unique_ptr<DirectionalShadowPass> m_directionalShadowPass;
     rhi::IRenderTarget* m_spotShadowRt = nullptr;
-    rhi::IRenderTarget* m_spotShadowScratchRt = nullptr;
     rhi::IBuffer* m_spotLightUniformBuffer = nullptr;
     std::unique_ptr<SpotShadowPass> m_spotShadowPass;
-    std::unique_ptr<ShadowBlurPass> m_shadowBlurPass;
-    ShadowCasterList* m_spotShadowCasterList = nullptr;
-    std::unique_ptr<ShadowCasterList> m_ownedSpotShadowCasterList;
+    std::vector<math::Mat4> m_spotShadowViewProjs;
+    uint32_t m_spotShadowLayerCount = 0u;
 };
 
 }  // namespace rendering

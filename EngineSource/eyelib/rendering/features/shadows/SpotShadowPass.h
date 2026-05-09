@@ -18,8 +18,8 @@ struct IPipeline;
 /**
  * P7.4 Spot-light shadow pass.
  * Renders all opaque/alpha-test casters into each spot-light slice of the
- * SpotShadowMapAtlas (a layered R16G16_SFLOAT + Depth24 target). One layer
- * per shadow-casting spot light. Uses the same VSM shader as directional.
+ * SpotShadowMapAtlas depth array (Depth24 target). One layer per
+ * shadow-casting spot light. Sampling path uses depth-only PCF.
  */
 class SpotShadowPass final : public IFrameGraphPass {
 public:

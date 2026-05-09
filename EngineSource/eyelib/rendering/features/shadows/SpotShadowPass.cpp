@@ -80,7 +80,9 @@ void SpotShadowPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
     cmd->SetCullFace(true);
-    cmd->SetDepthBias(1.0f, 2.0f);
+    // Spot shadows are short-range and contact-sensitive; use milder hardware bias
+    // than directional cascades to avoid contact detachment (peter-panning).
+    cmd->SetDepthBias(0.35f, 1.0f);
     cmd->BindPipeline(m_shadowPipeline);
 
     const uint32_t layerCount = static_cast<uint32_t>(m_spotLightViewProjs.size());
