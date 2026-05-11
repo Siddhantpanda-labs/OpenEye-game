@@ -152,7 +152,8 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 eyelib::api::rendering::RenderScene sceneNew;
                 eyelib::api::debug::Profiler::BeginSample("GameView Build (new)");
                 s_builderNew.Build(sceneNew, snapshot, ctx->editorCamera, w, h, ctx->assetRoots,
-                    ctx->assetRegistry, nullptr, nullptr, ctx->resourceCacheNew);
+                    ctx->assetRegistry, nullptr, nullptr,
+                    ctx->gpuResolverNew, ctx->builtinManagerNew);
                 eyelib::api::debug::Profiler::EndSample();
 
                 // Override editor-camera view with the scene-camera transform + projection,

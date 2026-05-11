@@ -16,29 +16,36 @@ class ResourceCache;
 namespace openeye::player {
 
 /**
- * M4.3 — Player-side parallel resource resolver vending `eyelib::api::rendering::Mesh /
- * Material / Texture2D` handles via `eyelib::api::rendering::ResourceCache`.
+ * Runtime-shared resource resolver vending `eyelib::api::rendering::Mesh / Material /
+ * Texture2D` handles via `eyelib::api::rendering::ResourceCache`.
  *
- * Cold-path peer of `RendererGPUResourceCache` (legacy) for the duration of M4.
+ * **Hosted in `OpenEyeGameRuntime`; consumed by both clients:**
+ *  - **Player** (`WorldRenderBridge`, M4.3) — used to fill new-API scene draws during the
+ *    legacy/new dual-stack and after the M4.4 device flip.
+ *  - **Editor** (`EditorSceneBuilderNew`, M3.7) — same resolver fronting the editor's
+ *    `ResourceCache` so scene-view + game-view panels get real `meshHandle` / `materialId`
+ *    tokens instead of placeholder zeros.
+ *
  * Sources data from `eyelib::api::AssetRegistry`'s legacy descriptor catalog
  * (`GetMeshDescriptor / GetTextureDescriptor / GetMaterialDescriptor`) and translates
  * those descriptors into the public POD types (`MeshData / TextureData / MaterialRecord`)
- * before handing them to the new cache.
+ * before handing them to the new cache. This is the only legal point where legacy
+ * descriptor types touch the new API surface — kept inside `OpenEyeGameRuntime` so the
+ * editor / player executables themselves stay free of the legacy descriptor includes.
  *
- * **Lifetime + threading.** Owned by `WorldRenderBridge`. Constructed with a borrowed
- * pointer to a `ResourceCache` (the cache itself owns GPU buffers and the new module
- * resource lifetimes). The legacy `RendererGPUResourceCache` is the one wired into
- * `AssetRegistry::SetGPUResolver` for the legacy stack — this `*New` adapter is queried
- * directly by the new-API scene builder once non-null, so it does not need to plug into
- * `IGPUResourceResolver` (whose surface vends legacy types only).
+ * **Lifetime + threading.** Owned by the host bridge (`WorldRenderBridge` for the player;
+ * `EditorApp` stash for the editor). Constructed with a borrowed pointer to a
+ * `ResourceCache` (the cache itself owns GPU buffers and the new module resource
+ * lifetimes). The legacy `RendererGPUResourceCache` is the one wired into
+ * `AssetRegistry::SetGPUResolver` for the legacy stack — this resolver is queried
+ * directly by the new-API scene builders, so it does not need to plug into
+ * `IGPUResourceResolver` (whose surface vends legacy types only). Not thread-safe;
+ * game-thread / main-thread only.
  *
  * **Cold-path posture.** When the underlying `ResourceCache` was constructed without a
  * live device (`ResourceCache::IsValid() == false`), `Create*` calls inside the cache
  * already warn-once and return invalid handles. This adapter passes through that
- * behaviour — `Get*` simply returns invalid handles to the caller, and the parallel
- * scene builder keeps placeholder zero tokens. The runtime flip happens at M4.4 when the
- * new `RenderPipeline` is initialized and `m_resourceCacheNew` is rebuilt against its
- * device.
+ * behaviour — `Get*` simply returns invalid handles to the caller.
  */
 class RendererGPUResourceCacheNew {
 public:

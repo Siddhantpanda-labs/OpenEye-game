@@ -14,21 +14,23 @@ class ResourceCache;
 namespace openeye::player {
 
 /**
- * M4.3 — Player-side parallel builtin resource manager vending
- * `eyelib::api::rendering::Mesh` + `Material` for builtin primitive ids
- * (`builtin://Cube`, `builtin://Sphere`, …) via `ResourceCache`.
+ * Runtime-shared builtin resource manager vending `eyelib::api::rendering::Mesh` +
+ * `Material` for builtin primitive ids (`builtin://Cube`, `builtin://Sphere`, …) via
+ * `ResourceCache`.
  *
- * Cold-path peer of `BuiltinResourceManager` (legacy). Until the new pipeline is
- * initialized (M4.4) the underlying `ResourceCache` runs in cold-path mode (no live
- * device) and `GetPrimitiveEntry` returns invalid handles after warning once. Once
- * `m_resourceCacheNew` is rebuilt against a live device, primitives upload through
- * `ResourceCache::CreateMesh` exactly as their legacy counterparts upload through the
- * legacy `Primitives::Create*` factories.
+ * **Hosted in `OpenEyeGameRuntime`; consumed by both clients:**
+ *  - **Player** (`WorldRenderBridge`, M4.3) — primitive resolution during the dual-stack
+ *    and after the M4.4 device flip.
+ *  - **Editor** (`EditorSceneBuilderNew`, M3.7) — primitive resolution for scene-view +
+ *    game-view panels so cubes / spheres / planes draw with the shared default material.
  *
  * **Default material.** Authored once via `ResourceCache::CreateMaterial` under a stable
- * synthetic asset id so every primitive shares the same row in the MaterialTable.
+ * synthetic asset id so every primitive shares the same row in the MaterialTable. Both
+ * clients also call `GetDefaultMaterial()` as a fallback when an entity has no explicit
+ * material assigned.
  *
- * **Threading.** Not thread-safe. Game-thread only (matches the legacy manager).
+ * **Threading.** Not thread-safe. Game-thread / main-thread only (matches the legacy
+ * manager).
  */
 class BuiltinResourceManagerNew {
 public:

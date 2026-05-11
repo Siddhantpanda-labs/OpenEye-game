@@ -9,7 +9,10 @@
 #include <vector>
 
 namespace eyelib { namespace api { class AssetRegistry; } }
-namespace eyelib { namespace api { namespace rendering { class ResourceCache; } } }
+namespace openeye { namespace player {
+class RendererGPUResourceCacheNew;
+class BuiltinResourceManagerNew;
+} }
 
 namespace openeye::editor {
 
@@ -18,21 +21,23 @@ namespace openeye::editor {
  *
  * Mirrors the legacy `EditorSceneBuilder` shape (snapshot in, scene out, optional entity-id
  * passthrough) but emits `eyelib::api::rendering::RenderScene` instead of the legacy
- * `eyelib::api::RenderScene`. This is the M2.3 deliverable: the data plumbing on the new API
- * is wired and compiles end-to-end.
+ * `eyelib::api::RenderScene`.
  *
- * **Resource resolution gap (intentional, tracked).** v1 leaves
- * `DrawableInstance::meshHandle` and `materialId` at the zero (invalid) token — the editor's
- * GPU resource cache still vends legacy `eyelib::api::Mesh/Material` shared-pointers and has
- * no path to the new façade's opaque tokens until M3.7 (`EditorGPUResourceCache` migration).
- * Camera, world transform, draw-bucket routing, instance flags, and per-entity passthrough
- * arrays are all populated for real, so the M3 closeout edit only has to wire up the cache
- * lookup — every other contract is already shaped here.
+ * **Resource resolution.** Mesh + material handles come from the runtime-shared resolver
+ * (`openeye::player::RendererGPUResourceCacheNew`) + builtin-primitive vendor
+ * (`openeye::player::BuiltinResourceManagerNew`) — the same two classes the player uses,
+ * hosted in `OpenEyeGameRuntime`. Both are required for the builder to fill real tokens;
+ * either being null falls back to zero handles (cold path). Built-in mesh ids
+ * (`builtin://Cube`, …) resolve through the builtin manager; file assets go through the
+ * resolver (legacy `AssetRegistry` descriptor → public POD → `ResourceCache::Create*` on
+ * first reference). Materials missing a row default to `BuiltinResourceManagerNew::
+ * GetDefaultMaterial()` so untextured drawables still render.
  *
- * **Lights and skybox are not in `eyelib::api::rendering::RenderScene` v1** (see
- * `RenderScene.h` docstring). The new module's lighting bus reaches the editor through the
- * façade's lifecycle hooks, not the per-frame scene POD; this builder's surface stays
- * snapshot-in-only and does not iterate `snapshot.lights` / `snapshot.skyboxAssetId`.
+ * **Lights** are pushed through `RenderScene` per-frame (directional / point / spot) — the
+ * builder mirrors the player's `WorldRenderBridge` conversion so editor + player share one
+ * light convention. Skybox is still on the legacy stack until per-scene IBL probe swap
+ * lands (see `Render_steps_todo.md` Section C); `snapshot.skyboxAssetId` is intentionally
+ * not consumed here.
  *
  * **Hard-constraint discipline.** This translation unit is the *only* editor file that may
  * include `api/rendering/...`. It must never include `eyelib/rendering/...` directly (the
@@ -43,7 +48,9 @@ public:
     /**
      * Build the new POD scene from world snapshot + editor camera. Parallels the legacy
      * `EditorSceneBuilder::Build` shape (entity-id passthrough arrays included for M2.5
-     * picking parity), but without the legacy resource caches — see class docstring.
+     * picking parity). Pass the runtime-shared resolver + builtin manager (typically
+     * `ctx.gpuResolverNew` / `ctx.builtinManagerNew`) to get real GPU handles; pass null
+     * for the cold path.
      */
     void Build(eyelib::api::rendering::RenderScene& scene,
                const eyelib::api::world::World::RenderSnapshot& snapshot,
@@ -54,11 +61,8 @@ public:
                eyelib::api::AssetRegistry* assetRegistry,
                std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr,
                std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity = nullptr,
-               // M3.7 — optional new-API resource cache. When non-null, the builder
-               // resolves snapshot meshAssetId / materialAssetId to real
-               // `eyelib::api::rendering::Mesh::GetMeshHandle()` / `Material::GetMaterialId()`
-               // tokens; otherwise `meshHandle` / `materialId` stay 0 (cold path).
-               eyelib::api::rendering::ResourceCache* resourceCacheNew = nullptr);
+               openeye::player::RendererGPUResourceCacheNew* gpuResolverNew = nullptr,
+               openeye::player::BuiltinResourceManagerNew*   builtinManagerNew = nullptr);
 };
 
 } // namespace openeye::editor

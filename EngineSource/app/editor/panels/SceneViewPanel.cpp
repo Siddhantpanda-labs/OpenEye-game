@@ -285,7 +285,8 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             eyelib::api::rendering::RenderScene newScene;
             eyelib::api::debug::Profiler::BeginSample("SceneView Build (new)");
             s_newBuilder.Build(newScene, newSnapshot, ctx->editorCamera, w, h, ctx->assetRoots,
-                ctx->assetRegistry, nullptr, nullptr, ctx->resourceCacheNew);
+                ctx->assetRegistry, nullptr, nullptr,
+                ctx->gpuResolverNew, ctx->builtinManagerNew);
             eyelib::api::debug::Profiler::EndSample();
 
             // M3.6 — bracket new-pipeline recording in the api/rendering slice scope so

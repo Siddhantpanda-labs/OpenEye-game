@@ -65,3 +65,39 @@ Run after a fix: editor binary at `Engine/bin/Debug/OpenEyeEditor.exe`, player a
 **Files:**
 - `api/rendering/RenderPipeline.cpp` — drop `device->OnWindowResized` from `Resize`.
 - `api/rendering/RenderPipeline.h` — docstring: render output only.
+
+---
+
+## 2026-05-11 · Editor lights never reach `SceneLighting` (scene stuck at dark-violet IBL)
+
+**Symptom:** scene view black; after adding a mesh it goes dark-violet (= `IblDefaultProbes` ambient only); adding a `Light::Directional` entity has no visible effect.
+
+**Cause:** `EditorSceneBuilderNew::Build` did not iterate `snapshot.lights`. `RenderScene::directionalLightActive` stayed `false`, so `RenderPipeline::PublishLightsToSceneLighting` left the directional slot untouched and dropped all point + spot entries. The new module's lighting bus only ever saw the default neutral fallback.
+
+**Fix:** Editor adapter now mirrors the player's `WorldRenderBridge` light conversion in one place — walks `snapshot.lights`, fills `scene.directionalLight{.direction/.color/.intensity/.castShadows}` + sets `directionalLightActive = true` for the first directional, and pushes `PointLight` / `SpotLight` PODs (range, cone cosines, castShadows). Direction comes from the entity transform's quaternion via `ForwardFromRotation` (canonical forward = `(0,0,-1)`) — identical convention to the player so editor + player share light shape.
+
+**Files:**
+- `app/editor/EditorSceneBuilderNew.cpp` — add `DegreesToRadians` / `ForwardFromRotation` helpers; clear `scene.pointLights` / `scene.spotLights` / `directionalLightActive` at the top of `Build`; new loop over `snapshot.lights` after drawables.
+- `app/editor/EditorSceneBuilderNew.h` — docstring: lights now populated per-frame; skybox stays on legacy until per-scene IBL probe swap lands.
+
+---
+
+## 2026-05-11 · Editor drawables have `meshHandle=0` / `materialId=0` (cache never uploads)
+
+**Symptom:** every visible draw row logs `materialId=0 meshHandle=0` plus warn-once `EditorSceneBuilderNew: scene built with placeholder mesh/material handles`. Scene-view + game-view panels stay empty even with mesh + light entities present.
+
+**Cause:** `EditorSceneBuilderNew::Build` was calling `ResourceCache::GetMesh / GetMaterial` directly — those are pure lookups (no upload, no descriptor fetch). The editor never authored any entries into the new cache (only the legacy `EditorGPUResourceCache` was wired, and only into the legacy stack). The player avoids this by routing through two adapters that *upload on miss*: `RendererGPUResourceCacheNew` (legacy `AssetRegistry` descriptor → public POD → `ResourceCache::Create*`) + `BuiltinResourceManagerNew` (primitives + shared default material).
+
+**Fix:** Promote both adapters as runtime-shared (they already live in `OpenEyeGameRuntime`, which the editor links). Docstrings updated to call out the dual client; namespace + file location preserved (single source of truth, zero duplication). Editor now:
+1. Constructs both adapters right after `resourceCache` inside the editor's main scope, borrowing `&assetRegistry`.
+2. Stashes raw pointers on `EditorContext::gpuResolverNew` + `builtinManagerNew`.
+3. `EditorSceneBuilderNew::Build` takes the resolver + builtin instead of the bare cache, and mirrors `WorldRenderBridge::resolveHandles` exactly: built-in mesh ids → builtin manager (mesh + material); file assets → resolver; material miss → `GetDefaultMaterial()` fallback. The placeholder warn-once is gone — the cold path no longer exists.
+
+**Files:**
+- `app/player/RendererGPUResourceCacheNew.h` — docstring: runtime-shared, dual client (player + editor).
+- `app/player/BuiltinResourceManagerNew.h` — docstring: runtime-shared, dual client.
+- `app/editor/EditorContext.h` — forward-declare both adapter classes; add `gpuResolverNew` + `builtinManagerNew` fields.
+- `app/editor/EditorApp.cpp` — include both headers; construct adapters after `resourceCache` (inside the ImGui scope so `assetRegistry` is in scope); stash on `ctx`.
+- `app/editor/EditorSceneBuilderNew.h` — signature: drop `ResourceCache*`, take `RendererGPUResourceCacheNew*` + `BuiltinResourceManagerNew*`.
+- `app/editor/EditorSceneBuilderNew.cpp` — new `resolveHandles` lambda mirroring the player; drop `LogResourceResolutionGapOnce`.
+- `app/editor/panels/SceneViewPanel.cpp` + `panels/GameViewPanel.cpp` — pass `ctx->gpuResolverNew` + `ctx->builtinManagerNew` instead of `ctx->resourceCacheNew`.

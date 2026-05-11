@@ -14,6 +14,8 @@
 #include "panels/AssetPanel.h"
 #include "panels/ProfilerPanel.h"
 #include "GameRuntime.h"
+#include "RendererGPUResourceCacheNew.h"
+#include "BuiltinResourceManagerNew.h"
 
 #include "api/asset/All.h"
 #include "api/asset/GPUResourceResolverBackend.h"
@@ -519,6 +521,17 @@ int RunEditor(int argc, char** argv) {
             assetRegistry.SetAssetRoot(engineAssets);
             assetRegistry.Scan();
 
+            // M3.7 — runtime-shared resource resolver + builtin manager (same classes the
+            // player uses; hosted in `OpenEyeGameRuntime`). These translate legacy
+            // `AssetRegistry` descriptors → public POD → `ResourceCache::Create*` on first
+            // reference, so the scene builder gets real `meshHandle` / `materialId` tokens.
+            // Lifetime nests inside `resourceCache` (outer scope) — destructor order is
+            // resolver/builtin first, then cache.
+            auto gpuResolverNew = std::make_unique<openeye::player::RendererGPUResourceCacheNew>(
+                resourceCache.get(), &assetRegistry);
+            auto builtinManagerNew = std::make_unique<openeye::player::BuiltinResourceManagerNew>(
+                resourceCache.get());
+
             openeye::editor::EditorContext ctx;
             ctx.sceneViewPipeline = nullptr;
             ctx.gameViewPipeline = nullptr;
@@ -527,6 +540,8 @@ int RunEditor(int argc, char** argv) {
             ctx.gameViewPipelineNew = gameOk ? &gameVN : nullptr;
             ctx.materialPreviewPipelineNew = matOk ? &matVN : nullptr;
             ctx.resourceCacheNew = resourceCache.get();
+            ctx.gpuResolverNew = gpuResolverNew.get();
+            ctx.builtinManagerNew = builtinManagerNew.get();
             ctx.assetRegistry = &assetRegistry;
             ctx.assetRoots = { engineAssets };
             ctx.engineAssetsPath = engineAssets;

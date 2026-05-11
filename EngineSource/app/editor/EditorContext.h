@@ -9,7 +9,11 @@
 
 namespace eyelib { namespace api { class AssetRegistry; class Material; class RenderPipeline; class Window; } }
 namespace eyelib { namespace api { namespace rendering { class RenderPipeline; class ResourceCache; } } }
-namespace openeye { namespace player { class GameRuntime; } }
+namespace openeye { namespace player {
+class GameRuntime;
+class RendererGPUResourceCacheNew;   // runtime-shared resource resolver (api/rendering)
+class BuiltinResourceManagerNew;     // runtime-shared builtin primitive vendor (api/rendering)
+} }
 
 namespace openeye::editor {
 
@@ -84,12 +88,24 @@ struct EditorContext {
      * M3.7 — `api/rendering`-typed resource cache vending `Mesh / Material / Texture2D /
      * Shader` by `AssetId`. Parallel to the legacy `EditorGPUResourceCache` plugged into
      * `assetRegistry->SetGPUResolver` (which keeps vending legacy resources for the
-     * legacy pipelines). Stays null through M3 dual-stack; populated alongside the
-     * `*New` pipelines at the M3.9 closeout flip. `EditorSceneBuilderNew` consults it
-     * to fill real `meshHandle` / `materialId` tokens once non-null. Lifetime owned by
-     * `EditorApp`.
+     * legacy pipelines). Lifetime owned by `EditorApp`. The cache itself is a passive
+     * cache of GPU-resident resources — descriptor→POD→`CreateMesh/CreateTexture/
+     * CreateMaterial` translation runs through `gpuResolverNew` (below).
      */
     eyelib::api::rendering::ResourceCache* resourceCacheNew = nullptr;
+    /**
+     * M3.7 — runtime-shared resource resolver fronting `resourceCacheNew`. On miss, fetches
+     * the legacy descriptor from `AssetRegistry`, translates it to a public POD, and uploads
+     * via `ResourceCache::Create*`. Same class the player uses; the editor borrows it from
+     * `OpenEyeGameRuntime`. Lifetime owned by `EditorApp`.
+     */
+    openeye::player::RendererGPUResourceCacheNew* gpuResolverNew = nullptr;
+    /**
+     * M3.7 — runtime-shared builtin-primitive vendor (`builtin://Cube`, `builtin://Sphere`,
+     * …) on top of `resourceCacheNew`. Also vends the shared default material used as a
+     * fallback for entities that don't reference one. Lifetime owned by `EditorApp`.
+     */
+    openeye::player::BuiltinResourceManagerNew* builtinManagerNew = nullptr;
     /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
     ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;

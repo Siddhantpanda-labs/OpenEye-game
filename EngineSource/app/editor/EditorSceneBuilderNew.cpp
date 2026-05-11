@@ -1,16 +1,20 @@
 #include "EditorSceneBuilderNew.h"
 
+#include "BuiltinResourceManagerNew.h"
+#include "RendererGPUResourceCacheNew.h"
+
 #include "api/asset/AssetRegistry.h"
-#include "api/core/Log.h"
+#include "api/geometry/BuiltinMeshIds.h"
 #include "api/rendering/Material.h"
 #include "api/rendering/Mesh.h"
-#include "api/rendering/ResourceCache.h"
 
 #include "eyelib/math/AABB.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/math/TransformUtils.h"
 
-#include <atomic>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/glm.hpp>
+
 #include <cmath>
 
 namespace openeye::editor {
@@ -18,6 +22,16 @@ namespace openeye::editor {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
+
+inline float DegreesToRadians(float degrees) { return degrees * (kPi / 180.0f); }
+
+/** Rotate the canonical forward (0,0,-1) by a quaternion. Matches the player's
+ *  `WorldRenderBridge::ForwardFromRotation` so light direction conventions match across
+ *  editor + player. */
+inline eyelib::math::Vec3 ForwardFromRotation(const eyelib::math::Quat& rotation) {
+    const eyelib::math::Vec3 forward(0.0f, 0.0f, -1.0f);
+    return rotation * forward;
+}
 
 /**
  * Self-contained free-fly camera math. Inlined here (rather than reusing the legacy
@@ -62,21 +76,6 @@ eyelib::math::Mat4 TransformToMatrix(const ::eyelib::world::components::Transfor
     return eyelib::math::Compose(t.position, t.rotation, t.scale);
 }
 
-/**
- * Emit a one-shot warning the first time the new editor scene builder runs without a real
- * GPU resource cache backing the new façade. Lets devs see in logs when this code path is
- * exercised before M3.7 lands; never fires more than once per process.
- */
-void LogResourceResolutionGapOnce() {
-    static std::atomic<bool> warned{false};
-    bool expected = false;
-    if (warned.compare_exchange_strong(expected, true)) {
-        eyelib::api::Log::Warn(
-            "EditorSceneBuilderNew: scene built with placeholder mesh/material handles; "
-            "real handles wire in when EditorGPUResourceCache moves to api/rendering.");
-    }
-}
-
 } // namespace
 
 void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
@@ -88,11 +87,15 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
                                   eyelib::api::AssetRegistry* assetRegistry,
                                   std::vector<::eyelib::world::EntityId>* outDrawableToEntity,
                                   std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity,
-                                  eyelib::api::rendering::ResourceCache* resourceCacheNew) {
+                                  openeye::player::RendererGPUResourceCacheNew* gpuResolverNew,
+                                  openeye::player::BuiltinResourceManagerNew*   builtinManagerNew) {
     (void)assetRoots; // Reserved: M3.9 may need asset-root-relative path resolution.
 
     scene.opaque.clear();
     scene.transparent.clear();
+    scene.pointLights.clear();
+    scene.spotLights.clear();
+    scene.directionalLightActive = false;
     if (outDrawableToEntity)
         outDrawableToEntity->clear();
     if (outTransparentDrawableToEntity)
@@ -104,6 +107,33 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
         return snapshot.GetTransform(id);
     };
 
+    // Mesh/material resolution mirrors `WorldRenderBridge` exactly so editor + player share
+    // one path (single source of truth). Built-in primitives via the builtin manager;
+    // file assets via the resolver (uploads on miss); default material fallback when the
+    // entity has no material set or it failed to resolve.
+    auto resolveHandles = [&](const std::string& meshKey, const std::string& materialAssetId,
+                              uint32_t& meshHandleOut, uint32_t& materialIdOut) {
+        meshHandleOut = 0;
+        materialIdOut = 0;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshKey) && builtinManagerNew) {
+            auto entry = builtinManagerNew->GetPrimitiveEntry(meshKey);
+            meshHandleOut = entry.mesh.GetMeshHandle();
+            materialIdOut = entry.material.GetMaterialId();
+        } else if (gpuResolverNew && assetRegistry && !meshKey.empty()) {
+            const eyelib::api::AssetId mid = assetRegistry->GetId(meshKey);
+            if (mid.IsValid())
+                meshHandleOut = gpuResolverNew->GetMesh(mid).GetMeshHandle();
+        }
+        if (!materialAssetId.empty() && gpuResolverNew && assetRegistry) {
+            const eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetId);
+            if (matId.IsValid())
+                materialIdOut = gpuResolverNew->GetMaterial(matId).GetMaterialId();
+        }
+        if (materialIdOut == 0 && builtinManagerNew) {
+            materialIdOut = builtinManagerNew->GetDefaultMaterial().GetMaterialId();
+        }
+    };
+
     auto emitDrawable = [&](::eyelib::world::EntityId entity,
                             const std::string& meshAssetId,
                             const std::string& materialAssetId,
@@ -112,27 +142,7 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
         if (!transform) return;
 
         eyelib::api::rendering::DrawableInstance instance{};
-
-        // M3.7 — when the new-API resource cache is wired (M3.9 closeout flip),
-        // resolve asset ids → opaque GPU tokens. Until then, the cache returns
-        // invalid handles (one-shot warning) and the placeholder zero tokens are
-        // preserved, matching the M2 / M3 cold-path intent.
-        if (resourceCacheNew && assetRegistry) {
-            if (!meshAssetId.empty()) {
-                eyelib::api::AssetId mid = assetRegistry->GetId(meshAssetId);
-                if (mid.IsValid()) {
-                    eyelib::api::rendering::Mesh mesh = resourceCacheNew->GetMesh(mid);
-                    instance.meshHandle = mesh.GetMeshHandle();
-                }
-            }
-            if (!materialAssetId.empty()) {
-                eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetId);
-                if (matId.IsValid()) {
-                    eyelib::api::rendering::Material mat = resourceCacheNew->GetMaterial(matId);
-                    instance.materialId = mat.GetMaterialId();
-                }
-            }
-        }
+        resolveHandles(meshAssetId, materialAssetId, instance.meshHandle, instance.materialId);
 
         instance.worldTransform = TransformToMatrix(*transform);
         instance.localBounds = eyelib::math::AABB{};
@@ -164,8 +174,50 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
         emitDrawable(entry.entity, renderer.meshAssetId, renderer.materialAssetId, renderer.submeshIndex);
     }
 
-    if (!scene.opaque.empty() || !scene.transparent.empty())
-        LogResourceResolutionGapOnce();
+    // Lights — mirror the player's `WorldRenderBridge` directional/point/spot conversion so
+    // scene-view + player share one convention. First directional wins (matches legacy
+    // single-slot semantics); point + spot accumulate (capped downstream by SceneLighting).
+    bool directionalSet = false;
+    for (const auto& entry : snapshot.lights) {
+        const auto& light = entry.component;
+        const auto transform = getTransform(entry.entity);
+
+        if (light.type == ::eyelib::world::components::Light::Type::Directional && !directionalSet) {
+            eyelib::math::Vec3 direction(0.5f, -1.0f, 0.2f);
+            if (transform)
+                direction = ForwardFromRotation(transform->rotation);
+            const auto nd = glm::normalize(glm::vec3(direction.x, direction.y, direction.z));
+            scene.directionalLight.direction = eyelib::math::Vec3(nd.x, nd.y, nd.z);
+            scene.directionalLight.color = light.color;
+            scene.directionalLight.intensity = light.intensity;
+            scene.directionalLight.castShadows = light.castShadows;
+            scene.directionalLightActive = true;
+            directionalSet = true;
+        } else if (light.type == ::eyelib::world::components::Light::Type::Point) {
+            eyelib::api::rendering::PointLight point{};
+            if (transform)
+                point.position = transform->position;
+            point.color = light.color;
+            point.intensity = light.intensity;
+            point.range = light.range;
+            point.castShadows = light.castShadows;
+            scene.pointLights.push_back(point);
+        } else if (light.type == ::eyelib::world::components::Light::Type::Spot) {
+            eyelib::api::rendering::SpotLight spot{};
+            if (transform) {
+                spot.position = transform->position;
+                const auto gd = glm::normalize(ForwardFromRotation(transform->rotation));
+                spot.direction = eyelib::math::Vec3(gd.x, gd.y, gd.z);
+            }
+            spot.color = light.color;
+            spot.intensity = light.intensity;
+            spot.range = light.range;
+            spot.innerConeCos = std::cos(DegreesToRadians(light.innerConeAngle));
+            spot.outerConeCos = std::cos(DegreesToRadians(light.outerConeAngle));
+            spot.castShadows = light.castShadows;
+            scene.spotLights.push_back(spot);
+        }
+    }
 }
 
 } // namespace openeye::editor
