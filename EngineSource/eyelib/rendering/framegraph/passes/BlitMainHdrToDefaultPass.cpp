@@ -14,9 +14,9 @@ void BlitMainHdrToDefaultPass::CollectTextureBarriers(const FrameGraphBlackboard
 }
 
 void BlitMainHdrToDefaultPass::Execute(rhi::ICommandList* cmd) {
-    (void)cmd;
-    if (!m_device || !m_blackboard)
+    if (!m_device || !m_blackboard || !cmd)
         return;
+    cmd->EndDynamicRendering();
     rhi::IRenderTarget* rt = m_blackboard->TryGetRenderTarget(m_slot);
     if (!rt)
         return;

@@ -1,5 +1,7 @@
 {
   "files": {
+    "rendering/vulkan/debug/debug_lines.frag": 1778523981947379100,
+    "rendering/vulkan/debug/debug_lines.vert": 1778523975947134200,
     "rendering/vulkan/passes/ibl/irradiance_convolution.frag": 1778005620576619400,
     "rendering/vulkan/passes/ibl/irradiance_convolution.vert": 1778005620577619700,
     "rendering/vulkan/passes/ibl/prefilter.frag": 1778005620577619700,

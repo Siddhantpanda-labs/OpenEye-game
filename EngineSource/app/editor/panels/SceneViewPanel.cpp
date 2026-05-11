@@ -294,6 +294,29 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             // ImGui compose buffer), exactly mirroring the legacy editor's slicing model.
             eyelib::api::rendering::RenderSliceScope sliceN(ctx->sceneViewPipelineNew->GetDevice());
             ctx->sceneViewPipelineNew->Resize(w, h);
+
+            // Editor debug-line overlay: grid + axes + collider helpers. Goes through the
+            // public `SetPendingDebugLinesColored` parity surface; the new module's
+            // `EditorFeature` consumes them on the next `Render` and clears (single-frame
+            // contract). The view/proj args are ignored by the new pipeline (it uses
+            // `RenderScene::camera` to drive `PerView`), but we pass them for legacy parity.
+            {
+                Mat4 viewN, projN;
+                BuildViewProjection(ctx->editorCamera, size.x, size.y,
+                    ::eyelib::render::RenderBackend::Vulkan, viewN, projN);
+                ColoredLines coloredN;
+                CollectGridAndAxisLinesColored(ctx->editorCamera, coloredN);
+                if (!newSnapshot.colliders.empty()) {
+                    std::vector<std::pair<Vec3, Vec3>> colliderLines;
+                    colliderLines.reserve(newSnapshot.colliders.size() * 64u);
+                    CollectColliderDebugLines(newSnapshot, colliderLines);
+                    const Vec4 green(0.f, 1.f, 0.f, 1.f);
+                    for (const auto& line : colliderLines)
+                        coloredN.push_back({ line, green });
+                }
+                ctx->sceneViewPipelineNew->SetPendingDebugLinesColored(viewN, projN, coloredN);
+            }
+
             eyelib::api::debug::Profiler::BeginSample("SceneView Render (new)");
             ctx->sceneViewPipelineNew->Render(newScene);
             eyelib::api::debug::Profiler::EndSample();
@@ -304,7 +327,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 texId = ctx->resolveImGuiTextureId(texId);
             if (texId && ctx->sceneViewPipelineNew->HasValidOutput()) {
                 ImGui::GetWindowDrawList()->AddImage(texId, pos, ImVec2(pos.x + size.x, pos.y + size.y),
-                    ImVec2(0, 1), ImVec2(1, 0));
+                    ImVec2(0, 0), ImVec2(1, 1));
             } else {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 draw->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(40, 42, 54, 255));
@@ -389,7 +412,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 texId = ctx->resolveImGuiTextureId(texId);
             if (texId && ctx->sceneViewPipeline->HasValidOutput()) {
                 ImGui::GetWindowDrawList()->AddImage(texId, pos, ImVec2(pos.x + size.x, pos.y + size.y),
-                    ImVec2(0, 1), ImVec2(1, 0));
+                    ImVec2(0, 0), ImVec2(1, 1));
             } else {
                 ImDrawList* draw = ImGui::GetWindowDrawList();
                 draw->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(40, 42, 54, 255));

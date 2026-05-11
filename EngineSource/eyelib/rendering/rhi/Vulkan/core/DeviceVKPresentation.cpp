@@ -99,6 +99,8 @@ void DeviceVK::Present() {
 
 void DeviceVK::OnWindowResized(uint32_t width, uint32_t height) {
     if (!m_device || !m_swapchain.surface) return;
+    if (width == 0 || height == 0)
+        return;
     m_swapchain.Resize(width, height, false, this, m_swapchainPresentMode);
 }
 
@@ -157,6 +159,8 @@ void DeviceVK::BlitToDefaultFramebuffer(IRenderTarget* src) {
         }
         return;
     }
+    if (m_swapchain.GetWidth() == 0 || m_swapchain.GetHeight() == 0)
+        return;
     if (!m_pendingPresent) return;  // No swapchain image this frame (Acquire in BeginFrame); only record when we have one.
     FrameContextVK& frame = m_frameContexts[m_currentFrameIndex];
     const uint32_t imageIndex = frame.swapchainImageIndex;

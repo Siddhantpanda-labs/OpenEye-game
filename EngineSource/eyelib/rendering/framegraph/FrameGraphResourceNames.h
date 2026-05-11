@@ -51,6 +51,9 @@ inline constexpr const char* kRasterFeature   = "Raster";
 inline constexpr const char* kLightingIbl = "LightingIbl";
 /** Shadow feature-owned resources (`features/shadows`). */
 inline constexpr const char* kShadowFeature = "ShadowFeature";
+/** Editor-only feature (`features/editor`): debug-line overlay, future entity-ID pass. Consumes
+ *  only — does not own any blackboard slot today (line vertex buffer is feature-private). */
+inline constexpr const char* kEditorFeature = "EditorFeature";
 
 }  // namespace writer_names
 

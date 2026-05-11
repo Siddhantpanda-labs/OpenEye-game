@@ -62,6 +62,7 @@ struct CommandListVK : ICommandList {
     void SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentIndex) override;
     void ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) override;
     void ClearRenderTargetColorOnly(IRenderTarget* rt, const ClearValue& clear) override;
+    void EndDynamicRendering() override;
     void ClearDefaultFramebuffer(const ClearValue& clear) override;
     void SetViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;
     void SetViewportIndexed(uint32_t index, uint32_t x, uint32_t y, uint32_t width, uint32_t height) override;

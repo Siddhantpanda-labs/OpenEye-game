@@ -19,6 +19,8 @@ struct ShaderPermutationKey {
         RasterGBufferOpaque = 2,
         /** Deferred rendering: Deferred lighting/resolve pass. */
         RasterDeferredLighting = 3,
+        /** Editor debug-line overlay (line list, depth-tested, no depth write). */
+        EditorDebugLines = 4,
     };
 
     ProgramId program = ProgramId::RasterComposeBootstrap;

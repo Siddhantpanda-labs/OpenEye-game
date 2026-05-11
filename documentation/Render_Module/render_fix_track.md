@@ -101,3 +101,51 @@ Run after a fix: editor binary at `Engine/bin/Debug/OpenEyeEditor.exe`, player a
 - `app/editor/EditorSceneBuilderNew.h` — signature: drop `ResourceCache*`, take `RendererGPUResourceCacheNew*` + `BuiltinResourceManagerNew*`.
 - `app/editor/EditorSceneBuilderNew.cpp` — new `resolveHandles` lambda mirroring the player; drop `LogResourceResolutionGapOnce`.
 - `app/editor/panels/SceneViewPanel.cpp` + `panels/GameViewPanel.cpp` — pass `ctx->gpuResolverNew` + `ctx->builtinManagerNew` instead of `ctx->resourceCacheNew`.
+
+---
+
+## 2026-05-12 · `EditorDebugLines` + offscreen tail: `vkCmdEndQuery` + layout `09600` (dynamic rendering left open)
+
+**Symptom:** `VUID-vkCmdEndQuery-None-07007` (query started outside pass, end inside / mis-nested), `VUID-vkCmdDraw-None-09600` (HDR `RT_Color0` still `COLOR_ATTACHMENT` while a draw expects `SHADER_READ_ONLY_OPTIMAL`), plus debug `FrameGraph::Compile: attachment-ops contract mismatch` between `GBuffer`/`DeferredLighting` and `EditorDebugLines`.
+
+**Cause:** `vkCmdBeginRendering` from `SetRenderTarget` stayed active through the last geometry pass (`DeferredLighting`, then optional `EditorDebugLines`). `PublishOffscreenOutputPass` replayed barriers **before** its `Execute`, so `vkCmdPipelineBarrier` transitioned HDR colour while it was still bound as a colour attachment; `GpuProfiler::EndFrame` → `vkCmdEndQuery` ran while dynamic rendering was still active relative to validation ordering.
+
+**Fix:** `ICommandList::EndDynamicRendering()` → Vulkan `EndRenderingIfActive`. `FrameGraph::Execute` calls it **after every pass** so the next pass’s barriers never run inside an open dynamic-rendering scope; `BlitMainHdrToDefaultPass::Execute` also ends rendering before the swapchain blit. Removed the overly strict per-texture attachment-op SameOps debug check (shared depth + sequential Clear→Load on HDR produced false positives).
+
+**Files:** `rhi/RHI.h`, `rhi/Vulkan/commands/CommandListVK.{h,cpp}`, `framegraph/FrameGraph.cpp`, `framegraph/passes/BlitMainHdrToDefaultPass.cpp`, `framegraph/passes/PublishOffscreenOutputPass.h` (doc only).
+
+### Follow-up hardening (same incident)
+
+- Reinforced offscreen contract at API boundary: after `RenderWorld::RunFrame`, offscreen `RenderPipeline::Render` now forces `MainHdrRenderTarget.color0 -> ShaderResource` and flushes tracker on the active command list (safety net if tail pass ordering ever changes).
+- Guarded Vulkan resize/compose zero-size paths: `DeviceVK::OnWindowResized` ignores `0x0`, and `DeviceVK::BlitToDefaultFramebuffer` returns early when swapchain extent is zero (prevents `vkCreateSwapchainKHR(imageExtent=0)` / zero-width framebuffer/renderpass validation spam during minimize/restore races).
+- Files: `api/rendering/RenderPipeline.cpp`, `rhi/Vulkan/core/DeviceVKPresentation.cpp`.
+
+---
+
+## 2026-05-11 · Editor debug-line overlay (grid / axes / colliders) lands on the new pipeline
+
+**Symptom:** new-pipeline editor branch (`useNewPipeline`) had no scene grid, no XYZ axes, no collider helpers — `SetPendingDebugLinesColored` was a paused stub on `api/rendering`, so the call was silently dropped. ImGuizmo / selection still worked (pure ImGui-overlay) but the world looked floating.
+
+**Cause:** `eyelib/rendering/features/editor/{EditorFeature,DebugDrawPass}.{h,cpp}` were one-line scaffolds. The api/rendering façade kept three paused stubs (`RenderDebugLines`, `SetPendingDebugLines`, `SetPendingDebugLinesColored`) — each just logged a one-time warning and returned.
+
+**Fix:** First real consumer of the `features/editor/` slot (P9 "editor as a feature"). Module-side:
+
+- `features/editor/DebugLine.h` — POD `{Vec3 a, Vec3 b, Vec4 color}` (frame-local; copied into the feature on `SetLines`).
+- `features/editor/DebugDrawPass.{h,cpp}` — owns 3-slot host-visible vertex ring (`BufferUsage::Vertex` + `BufferMemoryHint::HostVisible`); maps + fills via `IBuffer::Map/Unmap`; binds `Frame` descriptor set (PerView UBO at `set=0,binding=1`); reads existing depth (`MainDepth → DepthRead`) for depth-tested overlay; writes `MainHdrRenderTarget` with `loadOp=Load`; `LineList` topology; depth test enabled but no depth write; cull disabled.
+- `features/editor/EditorFeature.{h,cpp}` — `IRenderFeature` with `SchedulingOrder = 100` so it runs strictly after `RasterFeature` (overlay on top of deferred-lit HDR). Registers shader permutation `EditorDebugLines` in `OnRegister`; `OnSchedulePasses` short-circuits when `m_pendingLines.empty()` so unused frames carry zero pass cost.
+- `framegraph/FrameGraphPassNames.h` — `kEditorDebugLines`.
+- `framegraph/FrameGraphResourceNames.h` — `writer_names::kEditorFeature` (debug name only; feature is consume-only).
+- `shaders/ShaderPermutationKey.h` — add `ProgramId::EditorDebugLines`.
+- `assets/shaders/rendering/vulkan/debug/debug_lines.{vert,frag}` — new pair (vert reads `uPerView.uViewProjection`, frag passes interpolated `vColor`).
+
+Public surface:
+
+- `api/rendering/RenderPipeline.cpp` — activate all three previously-paused stubs (`RenderDebugLines`, `SetPendingDebugLines`, `SetPendingDebugLinesColored`); converts the legacy pair shape into `eyelib::rendering::DebugLine[]` and pushes via `EditorFeature::SetLines`. Lines auto-clear after each `Render(scene)` so callers that stop feeding the surface do not see stale geometry (single-frame contract preserved). `Impl::warnedDebugLinesPaused` removed.
+- `Impl` owns `std::unique_ptr<EditorFeature> editor`, subscribed unconditionally after raster + shadow.
+
+Editor wiring:
+
+- `app/editor/panels/SceneViewPanel.cpp` — `useNewPipeline` branch now builds the same `ColoredLines` the legacy branch builds (`CollectGridAndAxisLinesColored` + `CollectColliderDebugLines`) and calls `sceneViewPipelineNew->SetPendingDebugLinesColored` right before `Render(newScene)`.
+
+ImGuizmo: no code change. It already worked on the new pipeline (purely ImGui draw-list overlay — `ImGuizmo::BeginFrame` already runs in the new-pipeline branch at `EditorApp.cpp:622` and `ImGuizmo::Manipulate` calls `ImGui::GetWindowDrawList()`).
+

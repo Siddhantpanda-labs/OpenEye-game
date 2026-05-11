@@ -452,6 +452,10 @@ void CommandListVK::SetRenderTarget(IRenderTarget* rt, uint32_t colorAttachmentI
     SetRenderTarget(rt);
 }
 
+void CommandListVK::EndDynamicRendering() {
+    EndRenderingIfActive();
+}
+
 void CommandListVK::ClearRenderTarget(IRenderTarget* rt, const ClearValue& clear) {
     m_hasGraphicsWork = true;
     m_computeQueueEligible = false;

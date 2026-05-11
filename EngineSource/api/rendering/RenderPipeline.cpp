@@ -10,6 +10,8 @@
 
 #include "eyelib/rendering/core/RenderResources.h"
 #include "eyelib/rendering/core/RenderWorld.h"
+#include "eyelib/rendering/features/editor/DebugLine.h"
+#include "eyelib/rendering/features/editor/EditorFeature.h"
 #include "eyelib/rendering/features/raster/RasterFeature.h"
 #include "eyelib/rendering/features/shadows/ShadowFeature.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
@@ -226,6 +228,10 @@ public:
     std::unique_ptr<eyelib::rendering::RenderWorld> world;
     std::unique_ptr<eyelib::rendering::RasterFeature> raster;
     std::unique_ptr<eyelib::rendering::ShadowFeature> shadow;
+    // Editor overlay feature (debug-line drawing today; entity-ID pass future). Always subscribed
+    // so the SetPendingDebugLines* / RenderDebugLines surfaces work without a re-subscribe handshake;
+    // truly zero per-frame cost when no caller has supplied lines (`OnSchedulePasses` skips the pass).
+    std::unique_ptr<eyelib::rendering::EditorFeature> editor;
 
     // Resource cache attachment (M3.7b). The cache plays two roles for the pipeline:
     //   1. Mesh resolver: the cache supplies the `IMeshHandleResolver*` consumed by the
@@ -258,7 +264,6 @@ public:
     bool warnedNonVulkanBackend = false;
     // M1.7 paused-feature latches (one warn per pipeline instance per feature).
     bool warnedGpuPickingPaused = false;
-    bool warnedDebugLinesPaused = false;
     // M1.8 paused-feature latches.
     bool warnedReadbackPaused = false;
     bool warnedPboPaused = false;
@@ -289,6 +294,7 @@ public:
             Log::Warn("RenderPipeline: Mode::ForwardPlus is not yet implemented; falling back to Forward.");
         }
         shadow = std::make_unique<eyelib::rendering::ShadowFeature>();
+        editor = std::make_unique<eyelib::rendering::EditorFeature>();
 
         if (!world->TrySubscribeFeature(raster.get())) {
             Log::Error("RenderPipeline::Initialize: failed to subscribe RasterFeature.");
@@ -298,15 +304,21 @@ public:
             Log::Error("RenderPipeline::Initialize: failed to subscribe ShadowFeature.");
             return false;
         }
+        if (!world->TrySubscribeFeature(editor.get())) {
+            Log::Error("RenderPipeline::Initialize: failed to subscribe EditorFeature.");
+            return false;
+        }
 
         world->Initialize();
         return world->IsInitialized();
     }
 
     void TeardownWorldAndFeatures() {
+        if (world && editor) world->TryUnsubscribeFeature(editor.get());
         if (world && raster) world->TryUnsubscribeFeature(raster.get());
         if (world && shadow) world->TryUnsubscribeFeature(shadow.get());
         if (world) world->Shutdown();
+        editor.reset();
         raster.reset();
         shadow.reset();
         world.reset();
@@ -532,6 +544,23 @@ void RenderPipeline::Render(const RenderScene& scene) {
     auto* cmd = m_impl->device->GetActiveRecordingCommandList();
     m_impl->world->RunFrame(0.0f, cmd);
 
+    // Offscreen pipelines are sampled by an external compositor (editor ImGui viewports). Keep
+    // the end-of-frame contract explicit at the API boundary as a safety net.
+    if (cmd && m_impl->presentationMode == PresentationMode::Offscreen) {
+        if (auto* rt = m_impl->world->Blackboard().TryGetRenderTarget(eyelib::rendering::BlackboardSlot::MainHdrRenderTarget)) {
+            if (auto* color0 = rt->GetColorTexture(0)) {
+                cmd->EndDynamicRendering();
+                m_impl->device->TransitionTextureToState(color0, eyelib::rendering::rhi::ResourceState::ShaderResource);
+                m_impl->device->FlushBarrierTracker(cmd);
+            }
+        }
+    }
+
+    // Legacy single-frame contract: debug lines are consumed by exactly one Render call.
+    // Clear here (after RunFrame has both scheduled and executed) so a caller that stops
+    // feeding lines next frame does not see stale geometry.
+    if (m_impl->editor) m_impl->editor->ClearLines();
+
     m_impl->hasRenderedAtLeastOnce = true;
 }
 
@@ -643,34 +672,67 @@ void RenderPipeline::RenderOutlineFromIdBuffer(uint32_t /*selectedPackedId*/,
     }
 }
 
+// =====================================================================================
+// Debug-line surface (live; legacy parity).
+//
+// The legacy `eyelib::api::RenderPipeline` exposed three entry points (immediate
+// `RenderDebugLines` + two `SetPending*` variants). They all share a single internal
+// destination: the next `Render(scene)` consumes them. The `view`/`proj` arguments are
+// ignored because the new module builds the camera transform from `RenderScene::camera`
+// and uploads it as `PerView`; the vertex shader reads `uPerView.uViewProjection`.
+//
+// Lines clear after each `Render(scene)` (see `Render`) so a caller that stops feeding
+// the surface does not see stale geometry — preserving the legacy single-frame contract.
+// =====================================================================================
+
+namespace {
+
+void FillDebugLineSpan(std::vector<eyelib::rendering::DebugLine>& out,
+                      const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines,
+                      const eyelib::math::Vec4& color) {
+    out.clear();
+    out.reserve(lines.size());
+    for (const auto& seg : lines)
+        out.push_back({seg.first, seg.second, color});
+}
+
+void FillDebugLineSpanColored(std::vector<eyelib::rendering::DebugLine>& out,
+                             const std::vector<std::pair<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>, eyelib::math::Vec4>>& linesWithColors) {
+    out.clear();
+    out.reserve(linesWithColors.size());
+    for (const auto& entry : linesWithColors)
+        out.push_back({entry.first.first, entry.first.second, entry.second});
+}
+
+}  // namespace
+
 void RenderPipeline::RenderDebugLines(
     const eyelib::math::Mat4& /*view*/, const eyelib::math::Mat4& /*proj*/,
-    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& /*lines*/,
-    float /*r*/, float /*g*/, float /*b*/) {
-    if (m_impl && !m_impl->warnedDebugLinesPaused) {
-        m_impl->warnedDebugLinesPaused = true;
-        Log::Warn("RenderPipeline::RenderDebugLines: debug-line drawing is not implemented on this API; call ignored.");
-    }
+    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines,
+    float r, float g, float b) {
+    if (!m_impl || !m_impl->editor) return;
+    std::vector<eyelib::rendering::DebugLine> internal;
+    FillDebugLineSpan(internal, lines, {r, g, b, 1.0f});
+    m_impl->editor->SetLines(internal);
 }
 
 void RenderPipeline::SetPendingDebugLines(
     const eyelib::math::Mat4& /*view*/, const eyelib::math::Mat4& /*proj*/,
-    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& /*lines*/,
-    float /*r*/, float /*g*/, float /*b*/) {
-    if (m_impl && !m_impl->warnedDebugLinesPaused) {
-        m_impl->warnedDebugLinesPaused = true;
-        Log::Warn("RenderPipeline::SetPendingDebugLines: debug-line drawing is not implemented on this API; call ignored.");
-    }
+    const std::vector<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>>& lines,
+    float r, float g, float b) {
+    if (!m_impl || !m_impl->editor) return;
+    std::vector<eyelib::rendering::DebugLine> internal;
+    FillDebugLineSpan(internal, lines, {r, g, b, 1.0f});
+    m_impl->editor->SetLines(internal);
 }
 
 void RenderPipeline::SetPendingDebugLinesColored(
     const eyelib::math::Mat4& /*view*/, const eyelib::math::Mat4& /*proj*/,
-    const std::vector<std::pair<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>, eyelib::math::Vec4>>& /*linesWithColors*/) {
-    if (m_impl && !m_impl->warnedDebugLinesPaused) {
-        m_impl->warnedDebugLinesPaused = true;
-        Log::Warn("RenderPipeline::SetPendingDebugLinesColored: debug-line drawing is not implemented on this API; "
-                  "call ignored.");
-    }
+    const std::vector<std::pair<std::pair<eyelib::math::Vec3, eyelib::math::Vec3>, eyelib::math::Vec4>>& linesWithColors) {
+    if (!m_impl || !m_impl->editor) return;
+    std::vector<eyelib::rendering::DebugLine> internal;
+    FillDebugLineSpanColored(internal, linesWithColors);
+    m_impl->editor->SetLines(internal);
 }
 
 // =====================================================================================

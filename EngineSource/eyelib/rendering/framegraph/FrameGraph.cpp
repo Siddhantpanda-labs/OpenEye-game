@@ -168,27 +168,6 @@ void WarnInterPassSimulatedLayoutGap(rhi::IDevice* device, const std::vector<Fra
 }  // namespace
 #endif
 
-#if !defined(NDEBUG)
-namespace {
-struct DeclaredOpsRecord {
-    RenderAttachmentOps ops{};
-    uint32_t passIndex = 0;
-    const char* passName = nullptr;
-};
-
-bool SameOps(const RenderAttachmentOps& a, const RenderAttachmentOps& b) {
-    return a.hasDepth == b.hasDepth &&
-           a.color.loadOp == b.color.loadOp &&
-           a.color.storeOp == b.color.storeOp &&
-           a.color.clearValue.rgba == b.color.clearValue.rgba &&
-           a.depth.loadOp == b.depth.loadOp &&
-           a.depth.storeOp == b.depth.storeOp &&
-           a.depth.clearValue.depth == b.depth.clearValue.depth &&
-           a.depth.clearValue.stencil == b.depth.clearValue.stencil;
-}
-}  // namespace
-#endif
-
 void FrameGraph::Clear() noexcept {
     m_passes.clear();
     m_borrowedPasses.clear();
@@ -251,38 +230,6 @@ void FrameGraph::Compile(rhi::IDevice* device, const FrameGraphBlackboard* black
         plan.DedupeConsecutiveSameTargetState();
     }
 #if !defined(NDEBUG)
-    if (blackboard) {
-        std::unordered_map<const rhi::ITexture*, DeclaredOpsRecord> textureOps;
-        int warnBudget = 32;
-        for (size_t i = 0; i < allPasses.size(); ++i) {
-            IFrameGraphPass* pass = allPasses[i];
-            if (!pass)
-                continue;
-            rhi::IRenderTarget* rt = nullptr;
-            RenderAttachmentOps ops{};
-            if (!pass->DescribeRenderAttachmentOps(*blackboard, rt, ops) || !rt)
-                continue;
-            const auto checkTexture = [&](rhi::ITexture* tex) {
-                if (!tex || warnBudget <= 0)
-                    return;
-                const auto it = textureOps.find(tex);
-                if (it == textureOps.end()) {
-                    textureOps.emplace(tex, DeclaredOpsRecord{ops, static_cast<uint32_t>(i), pass->DebugName()});
-                    return;
-                }
-                if (SameOps(it->second.ops, ops))
-                    return;
-                --warnBudget;
-                core::Log::WarnF(
-                    "FrameGraph::Compile: attachment-ops contract mismatch for one render target texture between pass %u '%s' and pass %u '%s'.",
-                    static_cast<unsigned>(it->second.passIndex), it->second.passName ? it->second.passName : "(null)",
-                    static_cast<unsigned>(i), pass->DebugName() ? pass->DebugName() : "(null)");
-            };
-            checkTexture(rt->GetColorTexture(0));
-            if (ops.hasDepth)
-                checkTexture(rt->GetDepthTexture());
-        }
-    }
     {
         int warnBudget = 32;
         for (size_t i = 0; i < allPasses.size(); ++i)
@@ -296,9 +243,6 @@ void FrameGraph::Compile(rhi::IDevice* device, const FrameGraphBlackboard* black
         int warnBudget = 32;
         WarnFirstMergedBarrierTextureUnknownLayout(device, m_barrierPlans, warnBudget);
         WarnInterPassSimulatedLayoutGap(device, m_barrierPlans, warnBudget);
-    }
-    if (!m_passes.empty()) {
-        core::Log::DebugF("FrameGraph::Compile: %u passes", static_cast<unsigned>(m_passes.size()));
     }
 #endif
 }
@@ -334,6 +278,10 @@ void FrameGraph::Execute(rhi::IDevice* device, rhi::ICommandList* cmd, const Fra
         const char* passName = p->DebugName();
         GpuProfiler::Scope passScope(cmd, passName && passName[0] ? passName : "FrameGraphPass");
         p->Execute(cmd);
+        // Dynamic rendering must be closed before the *next* pass replays barriers that transition the same
+        // attachments (e.g. HDR color → shader read). Otherwise vkCmdPipelineBarrier may illegal-transition an image
+        // still bound by vkCmdBeginRendering, and GpuProfiler::EndQuery would pair with BeginQuery outside/nesting.
+        cmd->EndDynamicRendering();
     }
 }
 

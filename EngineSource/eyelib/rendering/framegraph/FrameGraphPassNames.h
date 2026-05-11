@@ -20,6 +20,9 @@ inline constexpr const char* kDepthPrepass                = "DepthPrepass";
 inline constexpr const char* kForwardOpaque               = "ForwardOpaque";
 inline constexpr const char* kDirectionalShadow           = "DirectionalShadow";
 
+/** Editor / debug overlay passes (only scheduled when `EditorFeature` is registered). */
+inline constexpr const char* kEditorDebugLines            = "EditorDebugLines";
+
 }  // namespace pass_names
 
 }  // namespace rendering

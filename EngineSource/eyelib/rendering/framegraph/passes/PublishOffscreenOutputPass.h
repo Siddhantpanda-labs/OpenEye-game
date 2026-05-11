@@ -24,6 +24,8 @@ namespace rendering {
  *
  * `Execute` is a no-op — the work this pass does happens purely through `CollectTextureBarriers`,
  * which the framegraph compiler folds into the final merged barrier for the texture.
+ * (`FrameGraph::Execute` ends dynamic rendering after each pass so barriers never run while an
+ * attachment is still bound by `vkCmdBeginRendering`.)
  */
 class PublishOffscreenOutputPass final : public IFrameGraphPass {
 public:
