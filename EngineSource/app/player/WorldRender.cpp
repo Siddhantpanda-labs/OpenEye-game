@@ -6,6 +6,7 @@
 #include "api/asset/AssetRegistry.h"
 #include "api/animation/Skeleton.h"
 #include "api/core/All.h"
+#include "api/core/Log.h"
 #include "api/geometry/BuiltinMeshIds.h"
 #include "api/math/TransformUtils.h"
 #include "api/platform/All.h"
@@ -14,6 +15,9 @@
 #include "api/render/CameraConventions.h"
 #include "api/render/RenderScene.h"
 #include "api/render/RenderTarget.h"
+#include "api/rendering/Material.h"
+#include "api/rendering/Mesh.h"
+#include "api/rendering/RenderScene.h"
 #include "WorldAnimation.h"
 #include "api/asset/AssetManager.h"
 #include "eyelib/vr/XRViewHelpers.h"
@@ -21,6 +25,7 @@
 #include "eyelib/render/rhi/RHI.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -32,6 +37,16 @@ namespace openeye::player {
 
 void WorldRenderBridge::BlitToScreenIfOwner() {
     assert(m_ownsPresentation && "WorldRenderBridge: BlitToScreen only when owning swapchain/present (standalone). Embedded editor shared device must not present from runtime.");
+    if (m_usingNewPipeline) {
+        // New pipeline blits inside `Render` (RasterFeature's BlitMainHdrToDefaultPass). The
+        // frame boundary + swapchain Present are explicit on the new façade (M3.9). Legacy
+        // `BlitToScreen` bundled blit + EndFrame + present together; we mirror that bundle on
+        // the new path so standalone-player callers stay one-liner.
+        m_pipelineNew.BlitToScreen();
+        m_pipelineNew.EndPresentFrame();
+        m_pipelineNew.Present();
+        return;
+    }
     m_pipeline.BlitToScreen();
 }
 
@@ -48,6 +63,12 @@ static eyelib::api::RenderPipeline::Mode SceneModeToPipelineMode(const std::stri
     if (mode == "Hybrid" || mode == "Deferred") return eyelib::api::RenderPipeline::Mode::Hybrid;
     if (mode == "ForwardPlus") return eyelib::api::RenderPipeline::Mode::ForwardPlus;
     return eyelib::api::RenderPipeline::Mode::Forward;
+}
+
+static eyelib::api::rendering::RenderPipeline::Mode SceneModeToPipelineModeNew(const std::string& mode) {
+    if (mode == "Hybrid" || mode == "Deferred") return eyelib::api::rendering::RenderPipeline::Mode::Hybrid;
+    if (mode == "ForwardPlus") return eyelib::api::rendering::RenderPipeline::Mode::ForwardPlus;
+    return eyelib::api::rendering::RenderPipeline::Mode::Forward;
 }
 
 static std::string ResolveAssetPath(const std::string& id, const std::vector<std::string>& roots,
@@ -125,11 +146,83 @@ eyelib::math::Vec3 ForwardFromRotation(const eyelib::math::Quat& rotation) {
     return rotation * forward;
 }
 
+void LogParallelPlayerSceneFillOnce() {
+    static std::atomic<bool> warned{false};
+    bool expected = false;
+    if (warned.compare_exchange_strong(expected, true)) {
+        eyelib::api::Log::Warn(
+            "WorldRenderBridge (M4.2): parallel api::rendering::RenderScene fill runs — mesh/material tokens "
+            "stay 0 until ResourceCache is wired to the live device (M4.3).");
+    }
+}
+
+// M4.5 — collapsed one-shot warn for the streaming feature pause on the api/rendering player.
+// Called by every streaming entry point (`PrepareStreamingFrame`, `Read*Pixels`, `Get*FromPreviousFrame`,
+// `IssueStreamingReadback`). All of them collapse to this single warn so the per-frame call cadence
+// from `GameRuntime` does not spam the log. v2 plan: parking-lot entry "Player streaming + readback
+// on api/rendering" in `Render_steps_todo.md` Section C (RT-create + PBO ring + NV12 compute pass +
+// sync RGBA8 readback all need to land on the new module before this pause is lifted).
+void LogPlayerStreamingPausedOnNewPathOnce() {
+    static std::atomic<bool> warned{false};
+    bool expected = false;
+    if (warned.compare_exchange_strong(expected, true)) {
+        eyelib::api::Log::Warn(
+            "WorldRenderBridge: player streaming/readback paused on api/rendering path "
+            "(M4.5 / A.4). VR streaming + sync readback + NV12 compute pass return safe "
+            "no-ops; legacy player exe retains the feature until the new module lands a "
+            "RenderTarget + PBO + NV12 stack (see Render_steps_todo.md Section C).");
+    }
+}
+
+// M4.6 — collapsed one-shot warn for the XR stereo pause on the api/rendering player. The
+// `Render` path falls through to mono `RenderSceneOnlyNew` whenever an XR session is active +
+// the snapshot has at least one XR camera. v2 plan: parking-lot entry "Player XR stereo on
+// api/rendering" in `Render_steps_todo.md` Section C (per-eye RenderTarget + RenderStereo
+// adapter need to land on the new module's RasterFeature stereo permutation first).
+void LogPlayerXRPausedOnNewPathOnce() {
+    static std::atomic<bool> warned{false};
+    bool expected = false;
+    if (warned.compare_exchange_strong(expected, true)) {
+        eyelib::api::Log::Warn(
+            "WorldRenderBridge: player XR stereo paused on api/rendering path "
+            "(M4.6 / A.4). XR session can still bind via SetXRProvider but the "
+            "rendered output is mono (primary camera only); legacy player exe "
+            "retains stereo + per-eye blit until the new module ships per-eye "
+            "RenderTarget + stereo permutation (see Render_steps_todo.md Section C).");
+    }
+}
+
 } // namespace
 
 bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, uint32_t height,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::render::RenderBackend backend) {
+    if constexpr (kUseNewRenderPipeline) {
+        // M4.4 single-device flip — initialize ONLY the new pipeline. Legacy `m_renderer /
+        // m_pipeline / m_builtinManager / m_gpuResourceCache` stay default-constructed; the
+        // legacy registry resolver hooks are skipped (the new path resolves through
+        // `m_gpuResourceCacheNew`). Two devices on the same GLFW window/HWND would race for
+        // a swapchain; the legacy stack must not initialize when the new one does.
+        (void)backend;  // new module is Vulkan-only
+        if (!m_pipelineNew.Initialize(window, width, height, eyelib::api::rendering::RenderBackend::Vulkan)) {
+            return false;
+        }
+        const auto newDev = m_pipelineNew.GetDevice();
+        (void)m_rendererNew.Initialize();
+        m_rendererNew.SetDevice(newDev);
+        m_pipelineNew.SetMode(eyelib::api::rendering::RenderPipeline::Mode::Hybrid);
+        m_resourceCacheNew = std::make_unique<eyelib::api::rendering::ResourceCache>(newDev);
+        m_pipelineNew.AttachResourceCache(*m_resourceCacheNew);
+        m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
+        m_builtinManagerNew   = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+        m_ownsPresentation = true;
+        m_width = width;
+        m_height = height;
+        m_usingNewPipeline = true;
+        m_ready = true;
+        return true;
+    }
+
     if (!m_renderer.Initialize()) {
         return false;
     }
@@ -148,6 +241,44 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
         m_assetRegistryForResolver = assetRegistry;
         m_gpuResourceCache = std::make_unique<RendererGPUResourceCache>(m_pipeline.GetDevice().Get(), assetRegistry);
         assetRegistry->SetGPUResolver(m_gpuResourceCache.get());
+    }
+    m_ready = true;
+
+    // M4.1 — cold scaffolding for `api/rendering`: link-time validation + inert cache.
+    // Do NOT call `m_pipelineNew.Initialize(Window&, …)` here — same GLFW window already
+    // owns the legacy Vulkan swapchain/device; a second Initialize would create a
+    // competing device/swapchain until M4.4 single-device flip.
+    (void)m_rendererNew.Initialize();
+    m_resourceCacheNew = std::make_unique<eyelib::api::rendering::ResourceCache>(
+        eyelib::api::rendering::RenderDevice{});
+    // M4.3 — parallel resolver + builtin manager (cold while cache is cold).
+    m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
+    m_builtinManagerNew   = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+
+    return true;
+}
+
+bool WorldRenderBridge::Initialize(eyelib::api::rendering::RenderDevice sharedDevice, uint32_t width, uint32_t height,
+                                   eyelib::api::AssetRegistry* assetRegistry) {
+    if (!sharedDevice) {
+        return false;
+    }
+    if (!m_pipelineNew.InitializeWithSharedDevice(sharedDevice, width, height)) {
+        return false;
+    }
+    (void)m_rendererNew.Initialize();
+    m_rendererNew.SetDevice(sharedDevice);
+    m_pipelineNew.SetMode(eyelib::api::rendering::RenderPipeline::Mode::Hybrid);
+    m_resourceCacheNew = std::make_unique<eyelib::api::rendering::ResourceCache>(sharedDevice);
+    m_pipelineNew.AttachResourceCache(*m_resourceCacheNew);
+    m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
+    m_builtinManagerNew = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+    m_ownsPresentation = false;
+    m_width = width;
+    m_height = height;
+    m_usingNewPipeline = true;
+    if (assetRegistry) {
+        m_assetRegistryForResolver = assetRegistry;
     }
     m_ready = true;
     return true;
@@ -178,6 +309,15 @@ bool WorldRenderBridge::Initialize(void* sharedDevice, uint32_t width, uint32_t 
         assetRegistry->SetGPUResolver(m_gpuResourceCache.get());
     }
     m_ready = true;
+
+    // M4.1 — same cold scaffolding as standalone `Initialize(Window&, …)` (see comment there).
+    (void)m_rendererNew.Initialize();
+    m_resourceCacheNew = std::make_unique<eyelib::api::rendering::ResourceCache>(
+        eyelib::api::rendering::RenderDevice{});
+    // M4.3 — parallel resolver + builtin manager (cold while cache is cold).
+    m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
+    m_builtinManagerNew   = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+
     return true;
 }
 
@@ -185,9 +325,11 @@ void WorldRenderBridge::Shutdown() {
     if (!m_ready) {
         return;
     }
-    for (int i = 0; i < kStreamingPBOCount; ++i) {
-        if (m_streamingPBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingPBO[i]); m_streamingPBO[i] = nullptr; }
-        if (m_streamingNV12PBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingNV12PBO[i]); m_streamingNV12PBO[i] = nullptr; }
+    if (!m_usingNewPipeline) {
+        for (int i = 0; i < kStreamingPBOCount; ++i) {
+            if (m_streamingPBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingPBO[i]); m_streamingPBO[i] = nullptr; }
+            if (m_streamingNV12PBO[i]) { m_pipeline.DestroyPixelPackBuffer(m_streamingNV12PBO[i]); m_streamingNV12PBO[i] = nullptr; }
+        }
     }
     for (int i = 0; i < kStreamingRTCount; ++i)
         m_streamingTargets[i].reset();
@@ -209,8 +351,23 @@ void WorldRenderBridge::Shutdown() {
     m_defaultMaterial.reset();
     m_defaultShader.reset();
     m_skinnedShader.reset();
-    m_pipeline.Shutdown();
-    m_renderer.Shutdown();
+
+    // M4.1 / M4.3 — tear down cold `api/rendering` scaffolding before legacy pipeline (which owns the VkDevice).
+    // M4.4 — same teardown order on the new path; the new pipeline owns the device this time.
+    m_builtinManagerNew.reset();
+    m_gpuResourceCacheNew.reset();
+    if (m_resourceCacheNew) {
+        m_pipelineNew.DetachResourceCache(*m_resourceCacheNew);
+    }
+    m_resourceCacheNew.reset();
+    m_pipelineNew.Shutdown();
+    m_rendererNew.Shutdown();
+
+    if (!m_usingNewPipeline) {
+        m_pipeline.Shutdown();
+        m_renderer.Shutdown();
+    }
+    m_usingNewPipeline = false;
     m_ready = false;
 }
 
@@ -237,17 +394,27 @@ void WorldRenderBridge::CaptureRenderSnapshotNow(eyelib::api::world::World& worl
 }
 
 void* WorldRenderBridge::GetOutputColorTextureNativeHandle() const {
-    return m_ready ? m_pipeline.GetOutputColorTextureNativeHandle() : nullptr;
+    if (!m_ready) return nullptr;
+    return m_usingNewPipeline ? m_pipelineNew.GetOutputColorTextureNativeHandle()
+                              : m_pipeline.GetOutputColorTextureNativeHandle();
 }
 
 bool WorldRenderBridge::ReadOutputPixels(uint32_t width, uint32_t height, uint8_t* outRGBA) {
     if (!m_ready || !outRGBA || width == 0 || height == 0) return false;
+    if (m_usingNewPipeline) {
+        LogPlayerStreamingPausedOnNewPathOnce();
+        return false;  // do not call into the new pipeline; its own M1.8 stub also no-ops + warns.
+    }
     m_pipeline.Finish();
     return m_pipeline.ReadOutputPixels(width, height, outRGBA);
 }
 
 void WorldRenderBridge::PrepareStreamingFrame() {
     if (!m_ready) return;
+    if (m_usingNewPipeline) {
+        LogPlayerStreamingPausedOnNewPathOnce();
+        return;
+    }
     if (!m_streamingTargets[0]) {
         bool ok = true;
         for (int i = 0; i < kStreamingRTCount; ++i) {
@@ -304,6 +471,7 @@ void WorldRenderBridge::PrepareStreamingFrame() {
 }
 
 bool WorldRenderBridge::ReadStreamingPixels(uint8_t* outRGBA) {
+    if (m_usingNewPipeline) { LogPlayerStreamingPausedOnNewPathOnce(); return false; }
     if (!m_ready || !outRGBA || !m_streamingTargets[0]) return false;
     const int latestIdx = (m_streamingRTWriteIndex + kStreamingRTCount - 1) % kStreamingRTCount;
     if (!m_streamingTargets[latestIdx]) return false;
@@ -312,6 +480,7 @@ bool WorldRenderBridge::ReadStreamingPixels(uint8_t* outRGBA) {
 }
 
 bool WorldRenderBridge::GetStreamingPixelsFromPreviousFrame(uint8_t* outRGBA) {
+    if (m_usingNewPipeline) { LogPlayerStreamingPausedOnNewPathOnce(); return false; }
     if (!m_ready || !outRGBA || !m_streamingPBO[0]) return false;
     if (m_streamingReadbackCount < 2) return false;
     const int prevIdx = (m_streamingPBOIndex + 2) % kStreamingPBOCount;
@@ -321,6 +490,7 @@ bool WorldRenderBridge::GetStreamingPixelsFromPreviousFrame(uint8_t* outRGBA) {
 }
 
 bool WorldRenderBridge::GetStreamingNV12FromPreviousFrame(uint8_t* outBuffer, size_t outSizeBytes) {
+    if (m_usingNewPipeline) { LogPlayerStreamingPausedOnNewPathOnce(); return false; }
     if (!m_ready || !outBuffer || !m_streamingNV12PBO[0]) return false;
     if (outSizeBytes < kStreamingNV12Size) return false;
     if (m_streamingNV12ReadbackCount < 2) return false;
@@ -330,6 +500,7 @@ bool WorldRenderBridge::GetStreamingNV12FromPreviousFrame(uint8_t* outBuffer, si
 }
 
 void WorldRenderBridge::IssueStreamingReadback() {
+    if (m_usingNewPipeline) { LogPlayerStreamingPausedOnNewPathOnce(); return; }
     if (!m_streamingTargets[0]) return;
     if (m_streamingPBO[0] && m_streamingRTFrameCount >= 2) {
         const int readRTIdx = (m_streamingRTWriteIndex + kStreamingRTCount - 1) % kStreamingRTCount;
@@ -342,12 +513,31 @@ void WorldRenderBridge::IssueStreamingReadback() {
     m_streamingRTWriteIndex = (m_streamingRTWriteIndex + 1) % kStreamingRTCount;
 }
 
+eyelib::api::rendering::RenderPipeline* WorldRenderBridge::GetRenderPipelineNew() {
+    return m_usingNewPipeline ? &m_pipelineNew : nullptr;
+}
+
 eyelib::api::RenderDevice WorldRenderBridge::GetDevice() const {
+    if (m_usingNewPipeline) {
+        // Returning the new device through the legacy `RenderDevice` wrapper would let
+        // callers `static_cast` it to `eyelib::render::rhi::IDevice*` and crash. Force null
+        // until consumers (GameRuntime, Overlay, AssetRegistry resolver) migrate to the new
+        // device type — that handshake belongs to M4.7 / M4.8.
+        return eyelib::api::RenderDevice{};
+    }
     return m_pipeline.GetDevice();
 }
 
 void WorldRenderBridge::BeginPresentFrame() {
     if (!m_ready || !m_ownsPresentation) {
+        return;
+    }
+    if (m_usingNewPipeline) {
+        // M3.9 — façade now exposes explicit frame-boundary methods (required so editor can
+        // stack multiple pipelines into one device frame). Standalone player drives them
+        // symmetrically with the legacy path: BeginPresentFrame here, EndPresentFrame +
+        // Present bundled into `BlitToScreenIfOwner`.
+        m_pipelineNew.BeginPresentFrame();
         return;
     }
     void* dev = m_pipeline.GetDevice().Get();
@@ -358,6 +548,10 @@ void WorldRenderBridge::BeginPresentFrame() {
 }
 
 void WorldRenderBridge::InitializeDefaultResources() {
+    if (m_usingNewPipeline) {
+        if (m_builtinManagerNew) (void)m_builtinManagerNew->GetDefaultMaterial();
+        return;
+    }
     if (!m_pipeline.GetDevice()) return;
     if (m_builtinManager) m_builtinManager->InitializeDefaultResources();
     EnsureDefaultMaterial();
@@ -365,10 +559,18 @@ void WorldRenderBridge::InitializeDefaultResources() {
 }
 
 void WorldRenderBridge::ReloadShaders() {
+    if (m_usingNewPipeline) {
+        m_pipelineNew.ReloadShaders();
+        return;
+    }
     m_pipeline.ReloadShaders();
 }
 
 void WorldRenderBridge::ApplySceneRenderPipelineMode(const std::string& mode) {
+    if (m_usingNewPipeline) {
+        m_pipelineNew.SetMode(SceneModeToPipelineModeNew(mode));
+        return;
+    }
     m_pipeline.SetMode(SceneModeToPipelineMode(mode));
 }
 
@@ -503,9 +705,10 @@ void WorldRenderBridge::BuildScene(eyelib::api::world::World& world,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
-                                   api::FrameAllocator* frameAlloc) {
+                                   api::FrameAllocator* frameAlloc,
+                                   eyelib::api::rendering::RenderScene* parallelSceneOut) {
     (void)world;
-    BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc);
+    BuildScene(m_frameSnapshot, options, animationBridge, assetRegistry, scene, frameAlloc, parallelSceneOut);
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
@@ -513,14 +716,15 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::Observation& obs,
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
-                                   api::FrameAllocator* frameAlloc) {
+                                   api::FrameAllocator* frameAlloc,
+                                   eyelib::api::rendering::RenderScene* parallelSceneOut) {
     const auto renderables = obs.GetRenderablesView();
     const auto meshRenderers = obs.GetMeshRenderersView();
     const auto cameras = obs.GetCamerasView();
     const auto xrCameras = obs.GetXRCamerasView();
     const auto lights = obs.GetLightsView();
     auto getTransform = [&](eyelib::world::EntityId id) { return obs.GetTransform(id); };
-    BuildSceneFromViews(renderables, meshRenderers, cameras, xrCameras, lights, getTransform, options, animationBridge, assetRegistry, scene, frameAlloc);
+    BuildSceneFromViews(renderables, meshRenderers, cameras, xrCameras, lights, getTransform, options, animationBridge, assetRegistry, scene, frameAlloc, parallelSceneOut);
 }
 
 void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapshot& snapshot,
@@ -528,10 +732,11 @@ void WorldRenderBridge::BuildScene(const eyelib::api::world::World::RenderSnapsh
                                    const WorldAnimationBridge* animationBridge,
                                    eyelib::api::AssetRegistry* assetRegistry,
                                    eyelib::api::RenderScene& scene,
-                                   api::FrameAllocator* frameAlloc) {
+                                   api::FrameAllocator* frameAlloc,
+                                   eyelib::api::rendering::RenderScene* parallelSceneOut) {
     BuildSceneFromViews(snapshot.renderables, snapshot.meshRenderers, snapshot.cameras, snapshot.xrCameras, snapshot.lights,
                         [&](eyelib::world::EntityId id) { return snapshot.GetTransform(id); },
-                        options, animationBridge, assetRegistry, scene, frameAlloc);
+                        options, animationBridge, assetRegistry, scene, frameAlloc, parallelSceneOut);
 
     if (eyelib::world::skybox::IsProceduralSkyboxId(snapshot.skyboxAssetId)) {
         scene.skybox.reset();
@@ -551,7 +756,8 @@ void WorldRenderBridge::BuildSceneFromViews(
     const WorldAnimationBridge* animationBridge,
     eyelib::api::AssetRegistry* assetRegistry,
     eyelib::api::RenderScene& scene,
-    api::FrameAllocator* frameAlloc) {
+    api::FrameAllocator* frameAlloc,
+    eyelib::api::rendering::RenderScene* parallelSceneOut) {
     (void)options;
     std::vector<eyelib::api::Drawable> opaqueBuild;
     std::vector<eyelib::api::Drawable> transparentBuild;
@@ -858,6 +1064,297 @@ void WorldRenderBridge::BuildSceneFromViews(
         scene.spotLights = scene.spotLightsStorage.empty() ? nullptr : scene.spotLightsStorage.data();
         scene.spotLightCount = scene.spotLightsStorage.size();
     }
+
+    if (parallelSceneOut) {
+        BuildParallelRenderSceneFromViews(renderables, meshRenderers, cameras, xrCameras, lights, getTransform, options,
+                                          animationBridge, assetRegistry, *parallelSceneOut);
+    } else if constexpr (kValidateParallelRenderSceneBuild) {
+        eyelib::api::rendering::RenderScene parallel;
+        BuildParallelRenderSceneFromViews(renderables, meshRenderers, cameras, xrCameras, lights, getTransform, options,
+                                          animationBridge, assetRegistry, parallel);
+        (void)parallel;
+    }
+}
+
+void WorldRenderBridge::BuildParallelRenderSceneFromViews(
+    std::span<const eyelib::api::world::World::RenderableEntry> renderables,
+    std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
+    std::span<const eyelib::api::world::World::CameraEntry> cameras,
+    std::span<const eyelib::api::world::World::XRCameraEntry> xrCameras,
+    std::span<const eyelib::api::world::World::LightEntry> lights,
+    std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
+    const RuntimeOptions& options,
+    const WorldAnimationBridge* animationBridge,
+    eyelib::api::AssetRegistry* assetRegistry,
+    eyelib::api::rendering::RenderScene& outNew) {
+    (void)animationBridge;
+
+    outNew.opaque.clear();
+    outNew.transparent.clear();
+    outNew.pointLights.clear();
+    outNew.spotLights.clear();
+    outNew.directionalLightActive = false;
+
+    auto resolveHandles = [&](const std::string& meshRegistryKey, const std::string& materialAssetIdStr,
+                              uint32_t& meshHandleOut, uint32_t& materialIdOut) {
+        meshHandleOut = 0;
+        materialIdOut = 0;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshRegistryKey) && m_builtinManagerNew) {
+            auto entry = m_builtinManagerNew->GetPrimitiveEntry(meshRegistryKey);
+            meshHandleOut = entry.mesh.GetMeshHandle();
+            materialIdOut = entry.material.GetMaterialId();
+            // Per-instance material override below if the entity supplies one.
+        } else if (m_gpuResourceCacheNew && assetRegistry && !meshRegistryKey.empty()) {
+            const eyelib::api::AssetId mid = assetRegistry->GetId(meshRegistryKey);
+            if (mid.IsValid())
+                meshHandleOut = m_gpuResourceCacheNew->GetMesh(mid).GetMeshHandle();
+        }
+        if (!materialAssetIdStr.empty() && m_gpuResourceCacheNew && assetRegistry) {
+            const eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetIdStr);
+            if (matId.IsValid())
+                materialIdOut = m_gpuResourceCacheNew->GetMaterial(matId).GetMaterialId();
+        }
+        if (materialIdOut == 0 && m_builtinManagerNew) {
+            materialIdOut = m_builtinManagerNew->GetDefaultMaterial().GetMaterialId();
+        }
+    };
+
+    auto emitParallelDrawable = [&](eyelib::api::Drawable& drawable, const std::string& meshRegistryKey,
+                                    const std::string& materialAssetIdStr) {
+        if (drawable.material) {
+            eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
+        }
+        eyelib::api::rendering::DrawableInstance inst{};
+        resolveHandles(meshRegistryKey, materialAssetIdStr, inst.meshHandle, inst.materialId);
+        inst.worldTransform = drawable.transform;
+        inst.localBounds = {};
+        inst.layer = eyelib::api::DrawableRoutesToTransparentPass(drawable)
+                         ? eyelib::api::rendering::DrawLayer::Transparent
+                         : eyelib::api::rendering::DrawLayer::Opaque;
+        inst.flags = eyelib::api::rendering::draw_instance_flags::kCastShadow;
+        if (inst.layer == eyelib::api::rendering::DrawLayer::Transparent)
+            outNew.transparent.push_back(inst);
+        else
+            outNew.opaque.push_back(inst);
+    };
+
+    for (const auto& entry : renderables) {
+        const auto& renderable = entry.component;
+        if (!renderable.visible)
+            continue;
+        std::string meshId = renderable.meshAssetId;
+        if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
+            meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
+        }
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
+            if (meshResolved.empty())
+                continue;
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
+        }
+        if (!modelEntry.mesh)
+            continue;
+
+        eyelib::api::Drawable drawable;
+        drawable.mesh = modelEntry.mesh;
+        drawable.material = modelEntry.material;
+        drawable.submeshIndex = renderable.submeshIndex;
+        if (!renderable.materialAssetId.empty() && assetRegistry) {
+            if (auto material = ResolveMaterial(renderable.materialAssetId, assetRegistry))
+                drawable.material = material;
+        }
+        if (const auto transform = getTransform(entry.entity)) {
+            drawable.transform = TransformToMatrix(*transform);
+        }
+        if (drawable.material) {
+            const std::vector<eyelib::math::Mat4>* bones = nullptr;
+            if (animationBridge) {
+                bones = animationBridge->GetBoneMatrices(entry.entity);
+                if (bones && bones->empty())
+                    bones = nullptr;
+            }
+            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
+                bones = &modelEntry.bindPoseMatrices;
+            }
+            if (bones) {
+                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
+                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
+            }
+        }
+        emitParallelDrawable(drawable, meshId, renderable.materialAssetId);
+    }
+
+    for (const auto& entry : meshRenderers) {
+        const auto& renderer = entry.component;
+        if (!renderer.visible || renderer.meshAssetId.empty())
+            continue;
+        const std::string& meshId = renderer.meshAssetId;
+        ModelEntry modelEntry;
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
+            modelEntry = GetPrimitiveEntry(meshId);
+        } else {
+            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
+            if (meshResolved.empty())
+                continue;
+            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
+        }
+        if (!modelEntry.mesh)
+            continue;
+
+        eyelib::api::Drawable drawable;
+        drawable.mesh = modelEntry.mesh;
+        drawable.material = modelEntry.material;
+        drawable.submeshIndex = renderer.submeshIndex;
+        if (!renderer.materialAssetId.empty() && assetRegistry) {
+            if (auto material = ResolveMaterial(renderer.materialAssetId, assetRegistry))
+                drawable.material = material;
+        }
+        if (const auto transform = getTransform(entry.entity)) {
+            drawable.transform = TransformToMatrix(*transform);
+        }
+        if (drawable.material) {
+            const std::vector<eyelib::math::Mat4>* bones = nullptr;
+            if (animationBridge) {
+                bones = animationBridge->GetBoneMatrices(entry.entity);
+                if (bones && bones->empty())
+                    bones = nullptr;
+            }
+            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
+                bones = &modelEntry.bindPoseMatrices;
+            }
+            if (bones) {
+                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
+                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
+            }
+        }
+        emitParallelDrawable(drawable, meshId, renderer.materialAssetId);
+    }
+
+    if (!outNew.opaque.empty() || !outNew.transparent.empty())
+        LogParallelPlayerSceneFillOnce();
+
+    // Camera — match legacy `BuildSceneFromViews` (Vulkan projection convention unchanged here;
+    // `RenderPipeline` applies backend adjustment when rendering).
+    bool cameraFound = false;
+    eyelib::world::components::Camera cameraComponent{};
+    eyelib::world::components::Transform cameraTransform{};
+
+    if (!xrCameras.empty()) {
+        size_t xrIdx = 0;
+        for (size_t i = 0; i < xrCameras.size(); ++i) {
+            if (xrCameras[i].component.isPrimary) {
+                xrIdx = i;
+                break;
+            }
+        }
+        const auto& xrEntry = xrCameras[xrIdx];
+        const auto xrTransform = getTransform(xrEntry.entity);
+        if (xrTransform) {
+            eyelib::vr::XRViewData leftData, rightData;
+            eyelib::vr::StereoViewDataFromCenterPose(xrTransform->position, xrTransform->rotation, eyelib::vr::kDefaultStereoIPD,
+                                                     eyelib::vr::kDefaultStereoFovHalfX, eyelib::vr::kDefaultStereoFovHalfY,
+                                                     leftData, rightData);
+            eyelib::vr::XRViewProjection xrProj =
+                eyelib::vr::ViewProjectionFromXRView(leftData, xrEntry.component.nearPlane, xrEntry.component.farPlane);
+            outNew.camera.view = xrProj.view;
+            outNew.camera.projection = xrProj.projection;
+            outNew.camera.viewPos = xrProj.viewPos;
+            outNew.camera.nearPlane = xrProj.nearPlane;
+            outNew.camera.farPlane = xrProj.farPlane;
+            cameraFound = true;
+        }
+    }
+
+    if (!cameraFound) {
+        for (const auto& entry : cameras) {
+            if (!cameraFound || entry.component.isPrimary) {
+                cameraFound = true;
+                cameraComponent = entry.component;
+                if (const auto transform = getTransform(entry.entity)) {
+                    cameraTransform = *transform;
+                }
+                if (entry.component.isPrimary) {
+                    break;
+                }
+            }
+        }
+
+        if (cameraFound) {
+            const float aspect = (cameraComponent.aspect > 0.0f)
+                                     ? cameraComponent.aspect
+                                     : (m_height > 0 ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f);
+            if (cameraComponent.isPerspective) {
+                outNew.camera.projection = eyelib::api::camera::BuildPerspectiveProjectionDegrees(
+                    cameraComponent.fov, aspect, cameraComponent.nearPlane, cameraComponent.farPlane);
+            } else {
+                outNew.camera.projection = eyelib::api::camera::BuildOrthographicProjection(
+                    cameraComponent.orthoSize, aspect, cameraComponent.nearPlane, cameraComponent.farPlane);
+            }
+
+            outNew.camera.view = eyelib::api::camera::BuildViewFromWorldTransform(
+                cameraTransform.position, cameraTransform.rotation, cameraTransform.scale);
+            outNew.camera.viewPos = cameraTransform.position;
+            outNew.camera.nearPlane = cameraComponent.nearPlane;
+            outNew.camera.farPlane = cameraComponent.farPlane;
+        }
+    }
+
+    if (!cameraFound) {
+        const float aspect =
+            (m_height > 0) ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f;
+        outNew.camera.projection =
+            eyelib::api::camera::BuildPerspectiveProjectionDegrees(60.0f, aspect, 0.1f, 1000.0f);
+        outNew.camera.view =
+            eyelib::api::camera::BuildLookAtView({0.0f, 2.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+        outNew.camera.viewPos = {0.0f, 2.0f, 5.0f};
+    }
+
+    bool directionalSet = false;
+    for (const auto& entry : lights) {
+        const auto& light = entry.component;
+        const auto transform = getTransform(entry.entity);
+
+        if (light.type == eyelib::world::components::Light::Type::Directional && !directionalSet) {
+            auto direction = eyelib::math::Vec3(0.5f, -1.0f, 0.2f);
+            if (transform) {
+                direction = ForwardFromRotation(transform->rotation);
+            }
+            const auto nd = glm::normalize(glm::vec3(direction.x, direction.y, direction.z));
+            outNew.directionalLight.direction = eyelib::math::Vec3(nd.x, nd.y, nd.z);
+            outNew.directionalLight.color = light.color;
+            outNew.directionalLight.intensity = light.intensity;
+            outNew.directionalLight.castShadows = light.castShadows;
+            outNew.directionalLightActive = true;
+            directionalSet = true;
+        } else if (light.type == eyelib::world::components::Light::Type::Point) {
+            eyelib::api::rendering::PointLight point{};
+            if (transform) {
+                point.position = transform->position;
+            }
+            point.color = light.color;
+            point.intensity = light.intensity;
+            point.range = light.range;
+            point.castShadows = light.castShadows;
+            outNew.pointLights.push_back(point);
+        } else if (light.type == eyelib::world::components::Light::Type::Spot) {
+            eyelib::api::rendering::SpotLight spot{};
+            if (transform) {
+                spot.position = transform->position;
+                const auto gd = glm::normalize(ForwardFromRotation(transform->rotation));
+                spot.direction = eyelib::math::Vec3(gd.x, gd.y, gd.z);
+            }
+            spot.color = light.color;
+            spot.intensity = light.intensity;
+            spot.range = light.range;
+            spot.innerConeCos = std::cos(DegreesToRadians(light.innerConeAngle));
+            spot.outerConeCos = std::cos(DegreesToRadians(light.outerConeAngle));
+            spot.castShadows = light.castShadows;
+            outNew.spotLights.push_back(spot);
+        }
+    }
 }
 
 void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world::World& world,
@@ -865,6 +1362,23 @@ void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world
                                eyelib::api::AssetRegistry* assetRegistry,
                                uint32_t width, uint32_t height) {
     if (!m_ready) {
+        return;
+    }
+    if (m_usingNewPipeline) {
+        // M4.4 — only fill the new `RenderScene`; legacy scene + Drawable arrays are not
+        // built (the legacy device is not initialized so `LoadModelEntry` / `ResolveMaterial`
+        // cannot run). XR + stereo paths are paused on the new path (M4.6) and fall through
+        // to a mono `RenderSceneOnlyNew`.
+        m_pipelineNew.SetMode(SceneModeToPipelineModeNew(world.GetRenderPipelineMode()));
+        eyelib::api::rendering::RenderScene sceneNew;
+        BuildParallelRenderSceneFromViews(m_frameSnapshot.renderables, m_frameSnapshot.meshRenderers,
+                                          m_frameSnapshot.cameras, m_frameSnapshot.xrCameras, m_frameSnapshot.lights,
+                                          [&](eyelib::world::EntityId id) { return m_frameSnapshot.GetTransform(id); },
+                                          options, animationBridge, assetRegistry, sceneNew);
+        if (m_xrProvider && m_xrProvider->IsSessionActive() && !m_frameSnapshot.xrCameras.empty()) {
+            LogPlayerXRPausedOnNewPathOnce();
+        }
+        RenderSceneOnlyNew(sceneNew, width, height);
         return;
     }
     m_pipeline.SetMode(SceneModeToPipelineMode(world.GetRenderPipelineMode()));
@@ -966,6 +1480,10 @@ void WorldRenderBridge::ApplyResize(uint32_t width, uint32_t height) {
     if (!m_ready || width == 0 || height == 0) return;
     m_width = width;
     m_height = height;
+    if (m_usingNewPipeline) {
+        m_pipelineNew.Resize(width, height);
+        return;
+    }
     m_pipeline.Resize(width, height);
 }
 
@@ -974,6 +1492,19 @@ bool WorldRenderBridge::RenderSceneOnly(const eyelib::api::RenderScene& scene, u
         return false;
     }
     if (width == 0 || height == 0) {
+        return false;
+    }
+    if (m_usingNewPipeline) {
+        // Legacy-typed scene; we cannot translate `eyelib::api::Drawable` (shared_ptr-based)
+        // back to the new `RenderScene` here without rebuilding from snapshot. Callers on the
+        // new path must use `RenderSceneOnlyNew`. Warn once so RenderFrameSync (M4.7)
+        // surfaces in logs if it still drives this overload after the flip.
+        static std::atomic<bool> warned{false};
+        bool expected = false;
+        if (warned.compare_exchange_strong(expected, true)) {
+            eyelib::api::Log::Warn("WorldRenderBridge::RenderSceneOnly(legacy scene) called on api/rendering player; "
+                                   "skip and use RenderSceneOnlyNew (M4.7 RenderFrameSync migration).");
+        }
         return false;
     }
     if (width != m_width || height != m_height) {
@@ -989,19 +1520,48 @@ bool WorldRenderBridge::RenderSceneOnly(const eyelib::api::RenderScene& scene, u
     return true;
 }
 
+bool WorldRenderBridge::RenderSceneOnlyNew(const eyelib::api::rendering::RenderScene& sceneNew, uint32_t width, uint32_t height) {
+    if (!m_ready || !m_usingNewPipeline) {
+        return false;
+    }
+    if (width == 0 || height == 0) {
+        return false;
+    }
+    if (width != m_width || height != m_height) {
+        ApplyResize(width, height);
+    }
+    if (!m_pipelineNew.HasValidOutput()) {
+        return false;
+    }
+    // M3.9 — `Render` is record-only on the new façade; frame open/close + present are driven
+    // by `BeginPresentFrame()` (called before by the bridge) + `BlitToScreenIfOwner()` (after).
+    m_pipelineNew.Render(sceneNew);
+    if (m_ownsPresentation) {
+        BlitToScreenIfOwner();  // also closes the frame + presents on the new path.
+    }
+    return true;
+}
+
 void WorldRenderBridge::Finish() {
+    if (m_usingNewPipeline) {
+        m_pipelineNew.Finish();
+        return;
+    }
     m_pipeline.Finish();
 }
 
 void* WorldRenderBridge::InsertFrameFence() {
+    if (m_usingNewPipeline) return m_pipelineNew.InsertFrameFence();  // paused per M1.8 (returns null)
     return m_pipeline.InsertFrameFence();
 }
 
 void WorldRenderBridge::WaitFence(void* fence) {
+    if (m_usingNewPipeline) { m_pipelineNew.WaitFence(fence); return; }
     m_pipeline.WaitFence(fence);
 }
 
 void WorldRenderBridge::WaitAndDestroyFence(void* fence) {
+    if (m_usingNewPipeline) { m_pipelineNew.WaitAndDestroyFence(fence); return; }
     m_pipeline.WaitAndDestroyFence(fence);
 }
 

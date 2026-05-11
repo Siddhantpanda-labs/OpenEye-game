@@ -54,6 +54,24 @@ static std::string AbsoluteMaterialPath(const EditorContext* ctx) {
     return fs::NormalizePath(root + rel);
 }
 
+// M3.2 — author-time material editing posture during the dual-stack window:
+//
+// `MaterialDescriptor` is an editor-side authoring data model (loaded from `.mat`,
+// mutated in the inspector, serialized back to disk). It is intentionally renderer-
+// agnostic — there is no parallel `eyelib::api::rendering::MaterialDescriptor` because
+// the new module's `MaterialInstance` is a *runtime* token, not an authoring record.
+//
+// Edits flow legacy → registry → legacy `Material` GPU object (this function). The new-
+// path `MaterialPreview` cold branch (M3.1) currently renders with placeholder material
+// tokens, so live preview reflects the legacy GPU state; that becomes "live new-side
+// preview" automatically when M3.7 lands `EditorGPUResourceCacheNew::ApplyMaterialEdit`,
+// which will call this function *and* mirror the descriptor onto the new-side material
+// token (the only place an authoring → renderer translation can live without dragging
+// the entire `.mat` schema into `api/rendering`).
+//
+// Until M3.7, this function intentionally remains the single mutation point — splitting
+// it now would force the inspector to know about both pipelines and would require the
+// new façade to expose an authoring surface it does not have.
 static void ApplyDescriptorToGpu(EditorContext* ctx, const eyelib::api::AssetId& id,
                                  const eyelib::render::MaterialDescriptor& desc) {
     if (!ctx || !ctx->assetRegistry || !id.IsValid()) return;

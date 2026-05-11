@@ -14,6 +14,31 @@ namespace openeye::player {
  */
 constexpr bool kUseRenderThread = false;
 
+/**
+ * When true, `WorldRenderBridge::BuildScene` also constructs and fills a parallel
+ * `eyelib::api::rendering::RenderScene` so the dual-stack snapshot stays compile-checked.
+ * Default off — enable locally when validating M4.2+ dual fills.
+ */
+constexpr bool kValidateParallelRenderSceneBuild = false;
+
+/**
+ * M4.4 — when true, `WorldRenderBridge` initializes the new `api/rendering` pipeline
+ * against the standalone player window and routes Render / RenderSceneOnly / Finish /
+ * Blit / fence / Resize / output APIs to it instead of the legacy stack. Implications
+ * when enabled (single-device flip):
+ *   - Legacy `m_renderer / m_pipeline / m_builtinManager / m_gpuResourceCache` are NOT
+ *     constructed; legacy `assetRegistry->SetGPUResolver` / `SetRenderDevice` are skipped.
+ *   - `GetDevice()` returns null (the new device is only safe to consume through
+ *     `eyelib::api::rendering::RenderDevice`, not the legacy `eyelib::api::RenderDevice`).
+ *   - Streaming + XR call sites become one-shot warn-and-skip (M4.5 / M4.6).
+ *   - Editor "Embedded" mode (`Initialize(void* sharedDevice, ...)`) ignores this flag
+ *     and stays on legacy until M3.9 lands the editor-side device flip.
+ *
+ * Default off; enable to dogfood the new path on standalone player. Overlay (ImGui) is
+ * not yet wired to the new device — gaining UI / streaming back lands at M4.7+.
+ */
+constexpr bool kUseNewRenderPipeline = false;
+
 enum class TimeMode {
     Realtime,
     Fixed,

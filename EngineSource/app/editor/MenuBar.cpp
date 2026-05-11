@@ -9,6 +9,7 @@
 #include "api/core/All.h"
 #include "api/render/RenderDevice.h"
 #include "api/render/RenderBackend.h"
+#include "api/rendering/RenderDevice.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -168,9 +169,20 @@ void ShowMenuBar(EditorContext& ctx) {
             } else {
                 ctx.playSnapshotPath = snapshotPath;
                 ctx.gameRuntime = std::make_unique<openeye::player::GameRuntime>();
-                eyelib::api::RenderDevice editorDevice = ctx.sceneViewPipeline ? ctx.sceneViewPipeline->GetDevice() : eyelib::api::RenderDevice();
-                if (ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots,
-                                               ctx.window, 256, 256, eyelib::render::RenderBackend::Vulkan, editorDevice, nullptr)) {
+                eyelib::api::rendering::RenderDevice newShared{};
+                if (ctx.sceneViewPipelineNew)
+                    newShared = ctx.sceneViewPipelineNew->GetDevice();
+                bool okInit = false;
+                if (newShared) {
+                    okInit = ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots, ctx.window, 256, 256,
+                        eyelib::render::RenderBackend::Vulkan, eyelib::api::RenderDevice{}, nullptr, newShared);
+                } else {
+                    eyelib::api::RenderDevice editorDevice =
+                        ctx.sceneViewPipeline ? ctx.sceneViewPipeline->GetDevice() : eyelib::api::RenderDevice();
+                    okInit = ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots, ctx.window, 256, 256,
+                        eyelib::render::RenderBackend::Vulkan, editorDevice, nullptr);
+                }
+                if (okInit) {
                     ctx.isPlaying = true;
                 } else {
                     ctx.gameRuntime.reset();

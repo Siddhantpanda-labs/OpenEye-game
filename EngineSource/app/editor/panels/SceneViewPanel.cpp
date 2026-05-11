@@ -2,6 +2,7 @@
 #include "../EditorVulkanRenderSlice.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "EditorSceneBuilderNew.h"
 #include "ui/LightGizmoIcons.h"
 #include "PanelCommon.h"
 
@@ -9,6 +10,9 @@
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
 #include "api/render/CameraConventions.h"
+#include "api/rendering/RenderPipeline.h"
+#include "api/rendering/RenderScene.h"
+#include "api/rendering/RenderSliceScope.h"
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/debug/Profiler.h"
@@ -263,6 +267,69 @@ void ShowSceneViewPanel(EditorContext* ctx) {
 
         const uint32_t w = static_cast<uint32_t>(size.x);
         const uint32_t h = static_cast<uint32_t>(size.y);
+        // M2.4 — new-API render path. Cold during the M2/M3 dual-stack window per the
+        // M2.1 device-strategy decision (`ctx->sceneViewPipelineNew` stays nullptr until
+        // the M3 closeout flips ImGui-Vulkan + game view + material preview to the new
+        // RHI device together). When it does become active, this branch takes over for
+        // the scene-view render only; surrounding UI (camera input, light gizmos,
+        // ImGuizmo, status bar) keeps reading from `ctx->world` directly and is
+        // pipeline-agnostic. Picking + outline + debug lines are paused here per the
+        // M2.5 / M2.6 decisions (façade safe-stubs already documented in M1.7).
+        const bool useNewPipeline = (ctx->sceneViewPipelineNew != nullptr) && w > 0 && h > 0;
+        if (useNewPipeline) {
+            eyelib::api::world::World::RenderSnapshot newSnapshot;
+            ctx->world.FlushTransforms();
+            ctx->world.CaptureRenderSnapshot(newSnapshot);
+
+            static EditorSceneBuilderNew s_newBuilder;
+            eyelib::api::rendering::RenderScene newScene;
+            eyelib::api::debug::Profiler::BeginSample("SceneView Build (new)");
+            s_newBuilder.Build(newScene, newSnapshot, ctx->editorCamera, w, h, ctx->assetRoots,
+                ctx->assetRegistry, nullptr, nullptr, ctx->resourceCacheNew);
+            eyelib::api::debug::Profiler::EndSample();
+
+            // M3.6 — bracket new-pipeline recording in the api/rendering slice scope so
+            // editor scene-view work submits on its own primary command buffer (before the
+            // ImGui compose buffer), exactly mirroring the legacy editor's slicing model.
+            eyelib::api::rendering::RenderSliceScope sliceN(ctx->sceneViewPipelineNew->GetDevice());
+            ctx->sceneViewPipelineNew->Resize(w, h);
+            eyelib::api::debug::Profiler::BeginSample("SceneView Render (new)");
+            ctx->sceneViewPipelineNew->Render(newScene);
+            eyelib::api::debug::Profiler::EndSample();
+
+            void* rawTexId = ctx->sceneViewPipelineNew->GetOutputColorTextureNativeHandle();
+            void* texId = rawTexId;
+            if (ctx->resolveImGuiTextureId)
+                texId = ctx->resolveImGuiTextureId(texId);
+            if (texId && ctx->sceneViewPipelineNew->HasValidOutput()) {
+                ImGui::GetWindowDrawList()->AddImage(texId, pos, ImVec2(pos.x + size.x, pos.y + size.y),
+                    ImVec2(0, 1), ImVec2(1, 0));
+            } else {
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                draw->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(40, 42, 54, 255));
+                const char* label = "Scene view (new pipeline, no output yet)";
+                ImVec2 textSize = ImGui::CalcTextSize(label);
+                draw->AddText(ImVec2(pos.x + (size.x - textSize.x) * 0.5f, pos.y + (size.y - textSize.y) * 0.5f),
+                    IM_COL32(180, 180, 180, 255), label);
+            }
+
+            ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + size.y + ImGui::GetStyle().ItemSpacing.y));
+            ImGui::Text("Drawables: %zu (api/rendering)", newScene.opaque.size() + newScene.transparent.size());
+            if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+                EditorCamera& cam = ctx->editorCamera;
+                ImGui::DragFloat3("Position", cam.position, 0.02f);
+                ImGui::DragFloat("Yaw", &cam.yaw, 0.01f);
+                if (ImGui::DragFloat("Pitch", &cam.pitch, 0.01f, kPitchMin, kPitchMax)) {
+                    if (cam.pitch > kPitchMax) cam.pitch = kPitchMax;
+                    if (cam.pitch < kPitchMin) cam.pitch = kPitchMin;
+                }
+                ImGui::DragFloat("Move speed", &cam.moveSpeed, 0.1f, 0.5f, 50.0f);
+                ImGui::DragFloat("Mouse sensitivity", &cam.mouseSensitivity, 0.0001f, 0.0005f, 0.02f, "%.4f");
+            }
+            ImGui::End();
+            return;
+        }
+
         const bool canRender = ctx->sceneViewPipeline && ctx->assetRegistry && w > 0 && h > 0;
         const ::eyelib::render::RenderBackend backend = ctx->sceneViewPipeline
             ? ctx->sceneViewPipeline->GetBackend()

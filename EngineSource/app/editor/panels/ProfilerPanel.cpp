@@ -4,6 +4,7 @@
 
 #include "api/debug/All.h"
 #include "api/render/RenderPipeline.h"
+#include "api/rendering/RenderPipeline.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -104,9 +105,46 @@ void ShowProfilerPanel(EditorContext* ctx) {
 
     ImGui::Separator();
     ImGui::TextUnformatted("GPU (frame graph)");
+    // M3.4 cold-path branch: source pass list from `sceneViewPipelineNew` when set; the new
+    // façade currently returns an empty list (per-pass timestamp collection is a tracked
+    // upstream gap — `Render_steps_todo.md` Section C "profiler per-pass timestamps") which
+    // simply falls into the "(no passes)" rendering below. No legacy mode is broken.
+    eyelib::api::rendering::RenderPipeline* pipelineNew = ctx ? ctx->sceneViewPipelineNew : nullptr;
     eyelib::api::RenderPipeline* pipeline = ctx ? ctx->sceneViewPipeline : nullptr;
-    if (!pipeline) {
+    if (!pipeline && !pipelineNew) {
         ImGui::TextUnformatted("(no scene view pipeline)");
+    } else if (pipelineNew) {
+        std::vector<eyelib::api::rendering::RenderPipeline::FrameGraphPassInfo> gpuPasses =
+            pipelineNew->GetFrameGraphPasses();
+        ImGui::BeginChild("GPU", ImVec2(-1, 140), true, ImGuiWindowFlags_None);
+        if (gpuPasses.empty()) {
+            ImGui::TextUnformatted("(no passes - api/rendering profiler timestamps not yet wired)");
+        } else {
+            if (ImGui::BeginTable("GPU", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Ms", ImGuiTableColumnFlags_WidthFixed, 60.f);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 30.f);
+                ImGui::TableHeadersRow();
+                double totalGpu = 0.0;
+                for (const auto& p : gpuPasses) {
+                    if (p.culled) continue;
+                    totalGpu += p.gpuMs;
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(p.name.c_str());
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%.3f", p.gpuMs);
+                    ImGui::TableSetColumnIndex(2);
+                }
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted("Total (GPU)");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%.3f", totalGpu);
+                ImGui::EndTable();
+            }
+        }
+        ImGui::EndChild();
     } else {
         std::vector<eyelib::api::RenderPipeline::FrameGraphPassInfo> gpuPasses = pipeline->GetFrameGraphPasses();
         ImGui::BeginChild("GPU", ImVec2(-1, 140), true, ImGuiWindowFlags_None);

@@ -9,8 +9,12 @@
 #include "api/render/Mesh.h"
 #include "api/render/RenderPipeline.h"
 #include "api/render/RenderScene.h"
+#include "api/rendering/RenderPipeline.h"
+#include "api/rendering/RenderScene.h"
+#include "api/rendering/RenderSliceScope.h"
 
 #include "eyelib/math/Types.h"
+#include "eyelib/math/TransformUtils.h"
 #include "eyelib/render/rhi/RHI.h"
 
 #include <imgui.h>
@@ -34,8 +38,67 @@ void* ResolvePreviewImGuiTexture(EditorContext* ctx, void* native) {
 } // namespace
 
 void DrawMaterialEditorPreview(EditorContext* ctx, const ::eyelib::api::AssetId& matId) {
-    if (!ctx || !ctx->materialPreviewPipeline || !ctx->assetRegistry || !matId.IsValid()) {
-        if (ctx && !ctx->materialPreviewPipeline)
+    if (!ctx || !matId.IsValid()) return;
+
+    // M3.1 cold-path branch: when the new-API material preview pipeline is wired (M3.9
+    // device flip), drive it instead of the legacy one. Mesh / material handles route
+    // through the new GPU cache (M3.7); until that lands the rendered sphere will be a
+    // placeholder (zero tokens — façade tolerates this without crashing). Camera + light
+    // values are inlined here using `eyelib::math` directly so this branch never includes
+    // legacy `api/render/CameraConventions.h`.
+    if (ctx->materialPreviewPipelineNew) {
+        const ImVec2 availNew = ImGui::GetContentRegionAvail();
+        const float sideNew = std::max(160.f, std::min(availNew.x - 4.f, 340.f));
+        const uint32_t wn = static_cast<uint32_t>(std::max(64.f, sideNew));
+        const uint32_t hn = wn;
+
+        ctx->materialPreviewPipelineNew->SetMode(eyelib::api::rendering::RenderPipeline::Mode::Forward);
+
+        eyelib::api::rendering::RenderScene sceneNew;
+        const float aspectN = (hn > 0) ? static_cast<float>(wn) / static_cast<float>(hn) : 1.f;
+        const float tn = static_cast<float>(ImGui::GetTime()) * 0.22f;
+        const eyelib::math::Vec3 eyeN(std::sin(tn) * 2.35f, 0.42f, std::cos(tn) * 2.35f);
+        const eyelib::math::Vec3 targetN(0.f);
+        const eyelib::math::Vec3 upN(0.f, 1.f, 0.f);
+
+        sceneNew.camera.viewPos = eyeN;
+        sceneNew.camera.view = eyelib::math::LookAt(eyeN, targetN, upN);
+        sceneNew.camera.nearPlane = 0.05f;
+        sceneNew.camera.farPlane = 80.f;
+        sceneNew.camera.projection =
+            eyelib::math::Perspective(36.f * 3.14159265358979323846f / 180.0f, aspectN,
+                                      sceneNew.camera.nearPlane, sceneNew.camera.farPlane);
+        // Vulkan clip-space Y flip (matches new module's backend policy).
+        sceneNew.camera.projection[1][1] = -sceneNew.camera.projection[1][1];
+
+        // Placeholder drawable: the inspector preview becomes meaningful only once M3.7
+        // resolves the inspected `matId` to a real `api::rendering::MaterialInstance` and
+        // the sphere mesh to a real `api::rendering::Mesh` token.
+        eyelib::api::rendering::DrawableInstance instanceN{};
+        const float spinN = static_cast<float>(ImGui::GetTime()) * 0.38f;
+        instanceN.worldTransform = eyelib::math::Compose(
+            eyelib::math::Vec3(0.f),
+            eyelib::math::Quat(eyelib::math::Vec3(0.f, spinN, 0.f)),
+            eyelib::math::Vec3(1.f));
+        instanceN.layer = eyelib::api::rendering::DrawLayer::Opaque;
+        sceneNew.opaque.push_back(instanceN);
+
+        eyelib::api::rendering::RenderSliceScope sliceN(ctx->materialPreviewPipelineNew->GetDevice());
+        ctx->materialPreviewPipelineNew->Resize(wn, hn);
+        ctx->materialPreviewPipelineNew->Render(sceneNew);
+
+        void* rawN = ctx->materialPreviewPipelineNew->GetOutputColorTextureNativeHandle();
+        void* texN = ResolvePreviewImGuiTexture(ctx, rawN);
+        if (texN && ctx->materialPreviewPipelineNew->HasValidOutput()) {
+            ImGui::Image(texN, ImVec2(static_cast<float>(wn), static_cast<float>(hn)), ImVec2(0, 1), ImVec2(1, 0));
+        } else {
+            ImGui::TextDisabled("No preview output (api/rendering).");
+        }
+        return;
+    }
+
+    if (!ctx->materialPreviewPipeline || !ctx->assetRegistry) {
+        if (!ctx->materialPreviewPipeline)
             ImGui::TextDisabled("Preview pipeline not initialized.");
         return;
     }

@@ -9,6 +9,7 @@
 #include "api/platform/All.h"
 #include "api/world/All.h"
 #include "api/render/RenderBackend.h"
+#include "api/rendering/RenderPipeline.h"  // M4.7 — RuntimeOverlay::Initialize(window, pipeline) overload.
 
 #ifdef OPENEYE_BUILD_STREAMING
 #include "app/streaming/VRStreamingServer.h"
@@ -283,7 +284,14 @@ int RunPlayer(int argc, char** argv) {
     }
 
     if (!options.headless && options.overlay) {
-        overlay.Initialize(window, options.renderBackend, gameRuntime.GetDevice().Get());
+        // M4.7 — pick the new-API path when GameRuntime is on the new pipeline; fall back to
+        // the legacy void*-device path otherwise. The legacy path itself routes to
+        // OpenGL / legacy-Vulkan internally based on `options.renderBackend`.
+        if (auto* pipelineNew = gameRuntime.GetRenderPipelineNew()) {
+            overlay.Initialize(window, *pipelineNew);
+        } else {
+            overlay.Initialize(window, options.renderBackend, gameRuntime.GetDevice().Get());
+        }
     }
     ScopedOverlay overlayGuard(overlay);
 

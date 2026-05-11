@@ -223,6 +223,7 @@ if(OPENEYE_BUILD_EYELIB)
     add_subdirectory(eyelib/render)
     add_subdirectory(eyelib/rendering)
     add_subdirectory(api/render)
+    add_subdirectory(api/rendering)
     add_subdirectory(eyelib/geometry)
     add_subdirectory(api/geometry)
     add_subdirectory(eyelib/scripting)
@@ -250,7 +251,6 @@ add_custom_target(CopyEngineAssets
 # --------------------------------------
 if(OPENEYE_BUILD_EDITOR)
     add_subdirectory(app/editor)
-    add_dependencies(OpenEyeEditor CopyEngineAssets)
 endif()
 
 # --------------------------------------
@@ -281,9 +281,6 @@ endif()
 
 if(OPENEYE_BUILD_PLAYER OR OPENEYE_BUILD_EDITOR OR OPENEYE_BUILD_AI_PLAYGROUND)
     add_subdirectory(app/player)
-    if(OPENEYE_BUILD_PLAYER)
-        add_dependencies(OpenEyePlayer CopyEngineAssets)
-    endif()
 endif()
 
 if(OPENEYE_BUILD_AI_PLAYGROUND)

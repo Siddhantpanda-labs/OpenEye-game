@@ -2,13 +2,20 @@
 #include "../EditorVulkanRenderSlice.h"
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
+#include "EditorSceneBuilderNew.h"
 #include "GameRuntime.h"
 
 #include "api/math/TransformUtils.h"
 #include "api/render/CameraConventions.h"
+#include "api/render/RenderPipeline.h"  // M4.8 — explicit include after GameRuntime.h diet (was transitive via api/render/All.h).
 #include "api/render/RenderScene.h"
+#include "api/rendering/RenderPipeline.h"
+#include "api/rendering/RenderScene.h"
+#include "api/rendering/RenderSliceScope.h"
 #include "api/world/All.h"
 #include "api/debug/Profiler.h"
+#include "eyelib/math/TransformUtils.h"
+#include "eyelib/math/Types.h"
 #include "eyelib/vr/XRViewHelpers.h"
 
 #include <imgui.h>
@@ -65,11 +72,15 @@ void ShowGameViewPanel(EditorContext* ctx) {
         ImVec2 region = ImGui::GetContentRegionAvail();
         uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
         uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
-        eyelib::render::rhi::IDevice* rhiDev =
-            static_cast<eyelib::render::rhi::IDevice*>(ctx->gameRuntime->GetDevice().Get());
-        ::openeye::editor::VulkanRenderSliceScope vulkanSlice(rhiDev);
-        // Render before Tick so the first frame shows bodies at their initial position (no jump on Play).
-        (void)ctx->gameRuntime->Render(w, h);
+        if (auto* pipeNew = ctx->gameRuntime->GetRenderPipelineNew()) {
+            eyelib::api::rendering::RenderSliceScope slice(pipeNew->GetDevice());
+            (void)ctx->gameRuntime->Render(w, h);
+        } else {
+            eyelib::render::rhi::IDevice* rhiDev =
+                static_cast<eyelib::render::rhi::IDevice*>(ctx->gameRuntime->GetDevice().Get());
+            ::openeye::editor::VulkanRenderSliceScope vulkanSlice(rhiDev);
+            (void)ctx->gameRuntime->Render(w, h);
+        }
         float deltaSeconds = ImGui::GetIO().DeltaTime;
         if (deltaSeconds <= 0.f) deltaSeconds = 1.f / 60.f;
         ctx->gameRuntime->Tick(deltaSeconds);
@@ -116,6 +127,66 @@ void ShowGameViewPanel(EditorContext* ctx) {
 
         const bool hasDebugCamera = ctx->gameViewDebugCamera != ::eyelib::world::InvalidEntity &&
                                    ctx->world.IsAlive(ctx->gameViewDebugCamera);
+        // M3.5 cold-path: prefer `gameViewPipelineNew` when set (M3.9 device flip). The new
+        // façade stubs `RenderStereo` (M1.8 XR pause), so non-playing XR camera preview falls
+        // back to a one-line "not yet supported" message on the new path.
+        if (ctx->gameViewPipelineNew && hasDebugCamera) {
+            ImVec2 region = ImGui::GetContentRegionAvail();
+            const uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
+            const uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
+
+            ctx->world.FlushTransforms();
+            eyelib::api::world::World::RenderSnapshot snapshot;
+            ctx->world.CaptureRenderSnapshot(snapshot);
+
+            ::eyelib::world::components::Transform camTransform;
+            ::eyelib::world::components::Camera camComp;
+            const bool isRegularCamera =
+                ctx->world.GetWorldTransform(ctx->gameViewDebugCamera, camTransform) &&
+                ctx->world.GetCamera(ctx->gameViewDebugCamera, camComp);
+
+            if (!isRegularCamera) {
+                ImGui::TextDisabled("XR debug preview unsupported on api/rendering (stereo paused).");
+            } else {
+                static EditorSceneBuilderNew s_builderNew;
+                eyelib::api::rendering::RenderScene sceneNew;
+                eyelib::api::debug::Profiler::BeginSample("GameView Build (new)");
+                s_builderNew.Build(sceneNew, snapshot, ctx->editorCamera, w, h, ctx->assetRoots,
+                    ctx->assetRegistry, nullptr, nullptr, ctx->resourceCacheNew);
+                eyelib::api::debug::Profiler::EndSample();
+
+                // Override editor-camera view with the scene-camera transform + projection,
+                // matching the legacy SceneCameraToView() behavior. Vulkan clip-Y flip baked
+                // in here (no legacy `api/render/CameraConventions.h` include in this branch).
+                const float aspect = (h > 0u) ? static_cast<float>(w) / static_cast<float>(h) : (16.f / 9.f);
+                const float fovRad = camComp.fov * 3.14159265358979323846f / 180.0f;
+                sceneNew.camera.nearPlane = camComp.nearPlane;
+                sceneNew.camera.farPlane = camComp.farPlane;
+                sceneNew.camera.projection = eyelib::math::Perspective(fovRad, aspect,
+                    sceneNew.camera.nearPlane, sceneNew.camera.farPlane);
+                sceneNew.camera.projection[1][1] = -sceneNew.camera.projection[1][1];
+                const eyelib::math::Mat4 worldM = eyelib::math::Compose(
+                    camTransform.position, camTransform.rotation, camTransform.scale);
+                sceneNew.camera.view = eyelib::math::Inverse(worldM);
+                sceneNew.camera.viewPos = camTransform.position;
+
+                eyelib::api::rendering::RenderSliceScope sliceN(ctx->gameViewPipelineNew->GetDevice());
+                ctx->gameViewPipelineNew->Resize(w, h);
+                eyelib::api::debug::Profiler::BeginSample("GameView Render (new)");
+                ctx->gameViewPipelineNew->Render(sceneNew);
+                eyelib::api::debug::Profiler::EndSample();
+
+                void* texId = ResolveGamePanelTextureId(ctx, ctx->gameViewPipelineNew->GetOutputColorTextureNativeHandle());
+                if (texId && ctx->gameViewPipelineNew->HasValidOutput()) {
+                    ImGui::Image(texId, ImVec2(static_cast<float>(w), static_cast<float>(h)), ImVec2(0, 1), ImVec2(1, 0));
+                } else {
+                    ImGui::TextUnformatted("No preview output (api/rendering)");
+                }
+            }
+            ImGui::End();
+            return;
+        }
+
         const bool canPreview = !ctx->isPlaying && hasDebugCamera && ctx->gameViewPipeline && ctx->assetRegistry;
 
         if (canPreview) {

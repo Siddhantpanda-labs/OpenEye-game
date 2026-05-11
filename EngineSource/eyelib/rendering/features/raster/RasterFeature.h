@@ -45,12 +45,27 @@ public:
     void SetMeshResolver(const IMeshHandleResolver* resolver) noexcept;
     void SetRenderMode(RenderMode mode) noexcept { m_mode = mode; }
 
+    /**
+     * Gate the final `BlitMainHdrToDefaultPass` (swapchain blit + post-blit overlay invocation).
+     * When `false`, the pass is **not** appended to the frame graph — used by editor-style
+     * pipelines created via `InitializeWithSharedDevice` where 3 pipelines render to offscreen
+     * RTs per frame and a single, caller-driven swapchain compose runs after all of them.
+     * When `true` (default), the blit pass runs every frame — the standalone-player one-pipeline
+     * shape that owns the swapchain. Must be set before `OnSchedulePasses` runs (i.e. before
+     * the first `RenderWorld::RunFrame`); changes mid-frame are ignored for that frame.
+     */
+    void SetPresentationBlitEnabled(bool enabled) noexcept { m_presentationBlitEnabled = enabled; }
+    bool IsPresentationBlitEnabled() const noexcept { return m_presentationBlitEnabled; }
+
 private:
     static rhi::ShaderGraphicsPipelineCreateInfo makeForwardOpaqueBaselineSpec();
     static rhi::ShaderGraphicsPipelineCreateInfo makeGBufferOpaqueBaselineSpec();
     static rhi::ShaderGraphicsPipelineCreateInfo makeDeferredLightingSpec();
 
     RenderMode m_mode = RenderMode::Deferred;
+    // True when this feature instance owns the swapchain blit (standalone player / window-owning
+    // pipeline). False for editor shared-device offscreen pipelines — see SetPresentationBlitEnabled.
+    bool m_presentationBlitEnabled = true;
     shaders::ShaderLibrary m_shaderLibrary;
     rhi::IDevice* m_pipelineDevice = nullptr;
     rhi::IDevice* m_iblDevice = nullptr;

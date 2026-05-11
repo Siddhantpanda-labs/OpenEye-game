@@ -25,6 +25,9 @@
 #include "api/platform/GraphicsDevice.h"
 #include "api/render/RenderBackend.h"
 #include "api/render/StaticResources.h"
+#include "api/rendering/ImGuiVulkanInitInfo.h"  // M3.9 — new-API ScopedImGui overload.
+#include "api/rendering/RenderPipeline.h"
+#include "api/rendering/ResourceCache.h"
 #include "api/debug/All.h"
 
 #include <imgui.h>
@@ -34,6 +37,7 @@
 #include <vulkan/vulkan.h>
 #include <backends/imgui_impl_vulkan.h>
 #include "eyelib/render/rhi/Vulkan/core/DeviceVK.h"
+#include "eyelib/rendering/rhi/RHI.h"
 #endif
 #include "eyelib/render/rhi/RHI.h"
 #include <ImGuizmo.h>
@@ -45,6 +49,8 @@
 #include <vector>
 
 namespace openeye::editor {
+
+constexpr bool kUseNewEditorPipeline = true;
 
 namespace {
 
@@ -177,6 +183,61 @@ private:
 
 class ScopedImGui {
 public:
+    /** ImGui Vulkan via `api/rendering::RenderPipeline` (opaque device). */
+    bool Initialize(eyelib::api::Window& window, eyelib::api::rendering::RenderPipeline& pipeline) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        ImGui::StyleColorsDark();
+        auto* glfwWindow = static_cast<GLFWwindow*>(window.GetNativeHandle());
+
+        eyelib::api::rendering::ImGuiVulkanInitInfo info{};
+        if (!pipeline.GetImGuiVulkanInitInfo(&info)) {
+            ImGui::DestroyContext();
+            return false;
+        }
+        ImGui_ImplGlfw_InitForVulkan(glfwWindow, true);
+        ImGui_ImplVulkan_InitInfo vkInfo{};
+        vkInfo.ApiVersion      = VK_API_VERSION_1_0;
+        vkInfo.Instance        = static_cast<VkInstance>(info.instance);
+        vkInfo.PhysicalDevice  = static_cast<VkPhysicalDevice>(info.physical_device);
+        vkInfo.Device          = static_cast<VkDevice>(info.device);
+        vkInfo.QueueFamily     = info.queue_family;
+        vkInfo.Queue           = static_cast<VkQueue>(info.queue);
+        vkInfo.DescriptorPool  = static_cast<VkDescriptorPool>(info.descriptor_pool);
+        vkInfo.RenderPass      = static_cast<VkRenderPass>(info.render_pass);
+        vkInfo.MinImageCount   = info.min_image_count;
+        vkInfo.ImageCount      = info.image_count;
+        vkInfo.PipelineCache   = static_cast<VkPipelineCache>(info.pipeline_cache);
+        if (!ImGui_ImplVulkan_Init(&vkInfo)) {
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            return false;
+        }
+        m_vkDevice = static_cast<VkDevice>(info.device);
+        m_vulkanSampler = static_cast<VkSampler>(pipeline.GetDefaultVulkanSampler());
+        if (m_vulkanSampler == VK_NULL_HANDLE || !CreateViewportDescriptorSets()) {
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImGui::DestroyContext();
+            return false;
+        }
+        pipeline.SetPostBlitCallback([](void* cmd) {
+            ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd));
+        });
+        m_vulkan = true;
+        m_ready = true;
+        return true;
+#else
+        (void)window;
+        (void)pipeline;
+        return false;
+#endif
+    }
+
     bool Initialize(eyelib::api::Window& window, void* device) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -253,6 +314,16 @@ public:
 #ifdef OPENEYE_IMGUI_VULKAN
         if (!m_vulkan) return;
         if (rhiDevice) m_currentFrameIndex = rhiDevice->GetCurrentFrameIndex() % kViewportFramesInFlight;
+        m_resolveCallIndex = 0;
+#endif
+    }
+    void PruneForRenderingDevice(void* renderingDevice) {
+#ifdef OPENEYE_IMGUI_VULKAN
+        if (!m_vulkan) return;
+        if (renderingDevice) {
+            auto* d = static_cast<eyelib::rendering::rhi::IDevice*>(renderingDevice);
+            m_currentFrameIndex = d->GetCurrentFrameIndex() % kViewportFramesInFlight;
+        }
         m_resolveCallIndex = 0;
 #endif
     }
@@ -404,6 +475,170 @@ int RunEditor(int argc, char** argv) {
     if (!engineRoot.empty()) {
         engineAssets = eyelib::api::platform::filesystem::NormalizePath(engineRoot + "/assets");
         eyelib::api::platform::filesystem::SetWorkingDirectory(engineRoot);
+    }
+
+    if constexpr (kUseNewEditorPipeline) {
+        const uint32_t deviceInitWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+        const uint32_t deviceInitHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+
+        eyelib::api::rendering::RenderPipeline sceneVN;
+        eyelib::api::rendering::RenderPipeline gameVN;
+        eyelib::api::rendering::RenderPipeline matVN;
+        if (!sceneVN.Initialize(window, deviceInitWidth, deviceInitHeight,
+                                eyelib::api::rendering::RenderBackend::Vulkan)) {
+            std::fprintf(stderr, "Editor: api/rendering pipeline init failed.\n");
+            return 3;
+        }
+        const eyelib::api::rendering::RenderDevice rd = sceneVN.GetDevice();
+        const bool gameOk = gameVN.InitializeWithSharedDevice(rd, 256, 256);
+        const bool matOk = matVN.InitializeWithSharedDevice(rd, 384, 384, &sceneVN);
+        if (!gameOk)
+            std::fprintf(stderr, "Editor: game-view (new) init failed.\n");
+        if (!matOk)
+            std::fprintf(stderr, "Editor: material preview (new) init failed.\n");
+
+        auto resourceCache = std::make_unique<eyelib::api::rendering::ResourceCache>(rd);
+        sceneVN.AttachResourceCache(*resourceCache);
+        gameVN.AttachResourceCache(*resourceCache);
+        matVN.AttachResourceCache(*resourceCache);
+
+        {
+            ScopedImGui imgui;
+            if (!imgui.Initialize(window, sceneVN)) {
+                std::fprintf(stderr, "Editor: ImGui init failed.\n");
+                return 3;
+            }
+
+            eyelib::api::AssetRegistry assetRegistry;
+            assetRegistry.SetAssetRoot(engineAssets);
+            assetRegistry.Scan();
+
+            openeye::editor::EditorContext ctx;
+            ctx.sceneViewPipeline = nullptr;
+            ctx.gameViewPipeline = nullptr;
+            ctx.materialPreviewPipeline = nullptr;
+            ctx.sceneViewPipelineNew = &sceneVN;
+            ctx.gameViewPipelineNew = gameOk ? &gameVN : nullptr;
+            ctx.materialPreviewPipelineNew = matOk ? &matVN : nullptr;
+            ctx.resourceCacheNew = resourceCache.get();
+            ctx.assetRegistry = &assetRegistry;
+            ctx.assetRoots = { engineAssets };
+            ctx.engineAssetsPath = engineAssets;
+            ctx.window = &window;
+            ctx.resolveImGuiTextureId = [&imgui](void* nativeTexture) -> void* {
+                return imgui.ResolveTextureId(nativeTexture);
+            };
+            openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
+            if (matOk)
+                matVN.SetMode(eyelib::api::rendering::RenderPipeline::Mode::Forward);
+
+            if (projectPathArg && openeye::editor::OpenProject(ctx, projectPathArg)) {
+                eyelib::api::core::Log::InfoF("Editor: opened project '%s' at %s", ctx.projectName.c_str(),
+                                              ctx.projectPath.c_str());
+                if (matOk)
+                    matVN.SetMode(eyelib::api::rendering::RenderPipeline::Mode::Forward);
+            }
+
+            uint32_t lastFramebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+            uint32_t lastFramebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+            eyelib::api::core::Log::Info("Editor: entering main loop (api/rendering)");
+
+            while (!window.ShouldClose()) {
+                window.PollEvents();
+                window.MakeContextCurrent();
+                window.RefreshFramebufferSize();
+                const uint32_t framebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
+                const uint32_t framebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+                if (framebufferWidth != lastFramebufferWidth || framebufferHeight != lastFramebufferHeight) {
+                    sceneVN.OnWindowResized(framebufferWidth, framebufferHeight);
+                    sceneVN.Resize(framebufferWidth, framebufferHeight);
+                    lastFramebufferWidth = framebufferWidth;
+                    lastFramebufferHeight = framebufferHeight;
+                }
+
+                if (ctx.gameRuntimeStopRequested && ctx.gameRuntime) {
+                    try {
+                        ctx.gameRuntime.reset();
+                    } catch (...) {}
+                    ctx.world.SetFrameSnapshot(nullptr);
+                    ctx.gameRuntimeStopRequested = false;
+                    if (!ctx.playSnapshotPath.empty()) {
+                        (void)ctx.world.LoadScene(ctx.playSnapshotPath);
+                        (void)eyelib::api::platform::filesystem::DeleteFile(ctx.playSnapshotPath);
+                        ctx.playSnapshotPath.clear();
+                    }
+                    if (ctx.assetRegistry) {
+                        if (!ctx.projectAssetsRoot.empty())
+                            ctx.assetRegistry->SetAssetRoot(ctx.projectAssetsRoot);
+                        else
+                            ctx.assetRegistry->SetAssetRoot(ctx.engineAssetsPath);
+                        ctx.assetRegistry->Scan();
+                        EditorSceneBuilder::BindSceneAssets(ctx.world, ctx.assetRoots, *ctx.assetRegistry);
+                    }
+                    openeye::editor::RequestApplyScenePipelineModeToEditorPipelines(ctx);
+                    ctx.selectedEntity = ::eyelib::world::InvalidEntity;
+                    ctx.sceneSelected = false;
+                    eyelib::api::core::Log::Info("Game runtime stopped; editor asset registry restored.");
+                }
+
+                window.Clear(0.2f, 0.2f, 0.25f, 1.0f);
+
+                eyelib::api::debug::Profiler::BeginFrame();
+
+                ctx.DrainGpuSafeWork();
+
+                if (imgui.IsVulkan()) {
+#ifdef OPENEYE_IMGUI_VULKAN
+                    sceneVN.BeginPresentFrame();
+                    imgui.PruneForRenderingDevice(sceneVN.GetDevice().Get());
+                    ImGui_ImplVulkan_NewFrame();
+#endif
+                } else {
+                    ImGui_ImplOpenGL3_NewFrame();
+                }
+                ImGui_ImplGlfw_NewFrame();
+                ImGui::NewFrame();
+                ImGuizmo::BeginFrame();
+
+                sceneVN.UpdateUploads();
+                if (matOk)
+                    matVN.UpdateUploads();
+
+                openeye::editor::ShowMenuBar(ctx);
+
+                ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+                openeye::editor::panels::ShowStatusPanel(&ctx);
+                openeye::editor::panels::ShowHierarchyPanel(&ctx);
+                openeye::editor::panels::ShowInspectorPanel(&ctx);
+                openeye::editor::panels::ShowAssetPanel(&ctx);
+                openeye::editor::panels::ShowSceneViewPanel(&ctx);
+                openeye::editor::panels::ShowGameViewPanel(&ctx);
+                openeye::editor::panels::ShowProfilerPanel(&ctx);
+                openeye::editor::panels::ShowShadowDebugPanel(&ctx);
+
+                ImGui::Render();
+                if (imgui.IsVulkan()) {
+#ifdef OPENEYE_IMGUI_VULKAN
+                    sceneVN.ComposeSwapchain();
+                    sceneVN.EndPresentFrame();
+                    sceneVN.Present();
+#endif
+                } else {
+                    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+                    window.SwapBuffers();
+                }
+
+                eyelib::api::debug::Profiler::EndFrame();
+            }
+        }
+
+        sceneVN.Finish();
+        matVN.Shutdown();
+        gameVN.Shutdown();
+        sceneVN.Shutdown();
+        resourceCache.reset();
+        return 0;
     }
 
     // One RHI device per window; pipelines are view configs only (no pipeline-owned device).

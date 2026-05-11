@@ -82,7 +82,9 @@ void PointShadowPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
     cmd->SetCullFace(true);
-    cmd->SetDepthBias(0.35f, 1.0f);
+    // Point-light contact tuning: slightly lower hardware caster bias to reduce
+    // contact detachment on near receiver surfaces.
+    cmd->SetDepthBias(0.25f, 0.8f);
     cmd->BindPipeline(m_shadowPipeline);
 
     const uint32_t layerCount = static_cast<uint32_t>(m_pointFaceViewProjs.size());

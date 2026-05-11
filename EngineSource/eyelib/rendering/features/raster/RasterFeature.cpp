@@ -259,11 +259,17 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
         }
     }
 
-    if (!m_blitPass)
-        m_blitPass = std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard);
-    else
-        m_blitPass->Reconfigure(render.device, &blackboard);
-    graph.AddPassBorrowed(m_blitPass.get());
+    // Presentation blit + post-blit overlay invocation is the swapchain owner's responsibility.
+    // Editor-style shared-device pipelines opt out (see SetPresentationBlitEnabled) so the
+    // editor can run multiple offscreen pipelines per device frame and drive its own
+    // swapchain compose afterwards.
+    if (m_presentationBlitEnabled) {
+        if (!m_blitPass)
+            m_blitPass = std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard);
+        else
+            m_blitPass->Reconfigure(render.device, &blackboard);
+        graph.AddPassBorrowed(m_blitPass.get());
+    }
 }
 
 }  // namespace rendering

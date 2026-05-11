@@ -1,6 +1,8 @@
 #include "Overlay.h"
 
 #include "api/core/All.h"
+#include "api/rendering/ImGuiVulkanInitInfo.h"
+#include "api/rendering/RenderPipeline.h"
 #include "eyelib/render/rhi/RHI.h"
 
 #ifdef OPENEYE_BUILD_STREAMING
@@ -72,6 +74,58 @@ bool RuntimeOverlay::Initialize(eyelib::api::Window& window, eyelib::render::Ren
     ImGui_ImplOpenGL3_Init("#version 450");
     m_ready = true;
     return true;
+}
+
+bool RuntimeOverlay::Initialize(eyelib::api::Window& window, eyelib::api::rendering::RenderPipeline& pipeline) {
+    // M4.7 — new-API path. Mirrors the legacy Vulkan branch above but pulls the ImGui-Vulkan
+    // init struct + post-blit callback through the public façade instead of a raw RHI cast.
+    // Vulkan is the only backend the new module supports (RenderBackend::Vulkan == Default),
+    // so there is no OpenGL fallback here — if the public init-info pull fails, the overlay
+    // is unavailable on this path. The legacy Initialize overload remains for the OpenGL +
+    // legacy-Vulkan paths used when `kUseNewRenderPipeline == false`.
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+
+#ifdef OPENEYE_IMGUI_VULKAN
+    eyelib::api::rendering::ImGuiVulkanInitInfo info{};
+    if (!pipeline.GetImGuiVulkanInitInfo(&info)) {
+        ImGui::DestroyContext();
+        return false;
+    }
+    ImGui_ImplGlfw_InitForVulkan(static_cast<GLFWwindow*>(window.GetNativeHandle()), true);
+    ImGui_ImplVulkan_InitInfo vkInfo{};
+    vkInfo.ApiVersion      = VK_API_VERSION_1_0;
+    vkInfo.Instance        = static_cast<VkInstance>(info.instance);
+    vkInfo.PhysicalDevice  = static_cast<VkPhysicalDevice>(info.physical_device);
+    vkInfo.Device          = static_cast<VkDevice>(info.device);
+    vkInfo.QueueFamily     = info.queue_family;
+    vkInfo.Queue           = static_cast<VkQueue>(info.queue);
+    vkInfo.DescriptorPool  = static_cast<VkDescriptorPool>(info.descriptor_pool);
+    vkInfo.RenderPass      = static_cast<VkRenderPass>(info.render_pass);
+    vkInfo.MinImageCount   = info.min_image_count;
+    vkInfo.ImageCount      = info.image_count;
+    vkInfo.PipelineCache   = static_cast<VkPipelineCache>(info.pipeline_cache);
+    if (!ImGui_ImplVulkan_Init(&vkInfo)) {
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
+    pipeline.SetPostBlitCallback([](void* cmd) {
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(cmd));
+    });
+    m_vulkan = true;
+    m_ready = true;
+    return true;
+#else
+    (void)window;
+    (void)pipeline;
+    eyelib::api::Log::Warn("RuntimeOverlay::Initialize(api/rendering): build not configured with OPENEYE_IMGUI_VULKAN.");
+    ImGui::DestroyContext();
+    return false;
+#endif
 }
 
 void RuntimeOverlay::Render(const OverlaySnapshot& snapshot) {

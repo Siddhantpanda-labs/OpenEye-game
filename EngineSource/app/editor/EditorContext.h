@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace eyelib { namespace api { class AssetRegistry; class Material; class RenderPipeline; class Window; } }
+namespace eyelib { namespace api { namespace rendering { class RenderPipeline; class ResourceCache; } } }
 namespace openeye { namespace player { class GameRuntime; } }
 
 namespace openeye::editor {
@@ -53,10 +54,42 @@ struct EditorContext {
 
     /** Phase 4b: scene view render. Set by EditorApp; null if not available. */
     eyelib::api::RenderPipeline* sceneViewPipeline = nullptr;
+    /**
+     * Parallel scene-view pipeline on the new render module (`api/rendering`). Coexists with
+     * `sceneViewPipeline` during the editor migration. When non-null, `SceneViewPanel` drives
+     * this instead of the legacy `sceneViewPipeline`. Stays null through the M2/M3 dual-stack
+     * window — the runtime flip (legacy → new) lands as a single edit at M3 closeout once
+     * ImGui-Vulkan + game view + material preview can move to the new RHI device together.
+     * Lifetime owned by `EditorApp`.
+     */
+    eyelib::api::rendering::RenderPipeline* sceneViewPipelineNew = nullptr;
     /** Game panel debug preview (when not playing). Set by EditorApp; null if not available. */
     eyelib::api::RenderPipeline* gameViewPipeline = nullptr;
+    /**
+     * Parallel game-view debug preview pipeline on `api/rendering`. Same lifetime / activation
+     * model as `sceneViewPipelineNew`: stays null through M2/M3 dual-stack, becomes non-null at
+     * the M3.9 device flip. When set, `GameViewPanel` non-playing branch uses it; the
+     * playing-mode branch still routes through `OpenEyeGameRuntime` (closed in M4).
+     */
+    eyelib::api::rendering::RenderPipeline* gameViewPipelineNew = nullptr;
     /** Material Inspector sphere preview (shared device with scene view). */
     eyelib::api::RenderPipeline* materialPreviewPipeline = nullptr;
+    /**
+     * Parallel material preview pipeline on `api/rendering`. Same lifetime / activation model
+     * as `sceneViewPipelineNew`: stays null through M2/M3 dual-stack, becomes non-null at the
+     * M3.9 device flip. Drives the inspector sphere preview when non-null.
+     */
+    eyelib::api::rendering::RenderPipeline* materialPreviewPipelineNew = nullptr;
+    /**
+     * M3.7 — `api/rendering`-typed resource cache vending `Mesh / Material / Texture2D /
+     * Shader` by `AssetId`. Parallel to the legacy `EditorGPUResourceCache` plugged into
+     * `assetRegistry->SetGPUResolver` (which keeps vending legacy resources for the
+     * legacy pipelines). Stays null through M3 dual-stack; populated alongside the
+     * `*New` pipelines at the M3.9 closeout flip. `EditorSceneBuilderNew` consults it
+     * to fill real `meshHandle` / `materialId` tokens once non-null. Lifetime owned by
+     * `EditorApp`.
+     */
+    eyelib::api::rendering::ResourceCache* resourceCacheNew = nullptr;
     /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
     ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;

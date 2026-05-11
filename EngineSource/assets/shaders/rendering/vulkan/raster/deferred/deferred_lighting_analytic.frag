@@ -234,7 +234,9 @@ float SamplePointShadowPCF(vec3 worldPos, vec3 biasN, vec3 lightPos, int baseLay
     }
     vec3 dirFromLight = normalize(worldPos - lightPos);
     vec3 wToL = -dirFromLight;
-    float normalBias = 0.0020 * max(1.0 - dot(biasN, wToL), 0.05);
+    // Point-light contact tuning: keep a small normal offset so near-contact
+    // shadows remain attached while still suppressing acne.
+    float normalBias = 0.0012 * max(1.0 - dot(biasN, wToL), 0.05);
     vec3 biasedPos = worldPos + biasN * normalBias;
     int face = PointShadowSelectFace(dirFromLight);
     mat4 VP = pl.faceViewProj[face];
@@ -244,7 +246,7 @@ float SamplePointShadowPCF(vec3 worldPos, vec3 biasN, vec3 lightPos, int baseLay
     }
     vec3 lightNdc = lightClip.xyz / lightClip.w;
     vec2 shadowUv = lightNdc.xy * 0.5 + 0.5;
-    float shadowDepth = ComputeStableReceiverDepth(lightNdc.z, biasN, wToL, 0.00004, 0.22, 0.30);
+    float shadowDepth = ComputeStableReceiverDepth(lightNdc.z, biasN, wToL, 0.000025, 0.16, 0.20);
     if (shadowUv.x <= 0.0 || shadowUv.x >= 1.0 || shadowUv.y <= 0.0 || shadowUv.y >= 1.0 || shadowDepth <= 0.0 || shadowDepth >= 1.0) {
         return 1.0;
     }

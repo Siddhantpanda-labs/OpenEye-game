@@ -2,11 +2,16 @@
 
 #include "PlayerConfig.h"
 #include "BuiltinResourceManager.h"
+#include "BuiltinResourceManagerNew.h"
 #include "RendererGPUResourceCache.h"
+#include "RendererGPUResourceCacheNew.h"
 
 #include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
 #include "api/render/All.h"
+#include "api/rendering/Renderer.h"
+#include "api/rendering/RenderPipeline.h"
+#include "api/rendering/ResourceCache.h"
 #include "api/world/All.h"
 #include "eyelib/vr/IXRProvider.h"
 #include "eyelib/vr/XRViewHelpers.h"
@@ -17,6 +22,10 @@
 #include <span>
 #include <string>
 #include <vector>
+
+namespace eyelib::api::rendering {
+struct RenderScene;
+}
 
 namespace openeye::player {
 
@@ -36,6 +45,9 @@ public:
                     eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default);
     /** Editor Model A: use shared device (same as editor). Pass registry so GPU resolver is set. */
     bool Initialize(void* sharedDevice, uint32_t width, uint32_t height, eyelib::api::AssetRegistry* assetRegistry);
+    /** Editor: shared `api/rendering` device (embedded Play). Legacy stacks stay default-constructed. */
+    bool Initialize(eyelib::api::rendering::RenderDevice sharedDevice, uint32_t width, uint32_t height,
+                    eyelib::api::AssetRegistry* assetRegistry);
     void Shutdown();
 
     /**
@@ -61,8 +73,14 @@ public:
     /** Render-thread only: apply a Resize (Phase 5). Must be called at frame boundary, before RenderSceneOnly for this frame. */
     void ApplyResize(uint32_t width, uint32_t height);
 
-    /** Render-thread only: Resize (if needed), Render(scene); when this bridge owns presentation it also blits/presents. */
+    /** Render-thread only: Resize (if needed), Render(scene); when this bridge owns presentation it also blits/presents.
+     *  Legacy-typed scene; when `kUseNewRenderPipeline` is on, this path warns once and is skipped — use
+     *  `RenderSceneOnlyNew` (the new-API typed overload) instead. */
     bool RenderSceneOnly(const eyelib::api::RenderScene& scene, uint32_t width, uint32_t height);
+
+    /** Render-thread only: Resize (if needed), Render(sceneNew); when this bridge owns presentation, blits/presents.
+     *  M4.4 — only valid when `kUseNewRenderPipeline` is on (legacy path warns + no-ops). */
+    bool RenderSceneOnlyNew(const eyelib::api::rendering::RenderScene& sceneNew, uint32_t width, uint32_t height);
 
     /** Render-thread only: wait for GPU to finish. Call before SwapBuffers to reduce flicker (test fix 1). */
     void Finish();
@@ -79,21 +97,24 @@ public:
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
-                    api::FrameAllocator* frameAlloc = nullptr);
+                    api::FrameAllocator* frameAlloc = nullptr,
+                    eyelib::api::rendering::RenderScene* parallelSceneOut = nullptr);
 
     /** Game-thread only: fill scene from a snapshot (observation). Observation may be a view over a frame snapshot. */
     void BuildScene(const eyelib::api::world::Observation& obs, const RuntimeOptions& options,
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
-                    api::FrameAllocator* frameAlloc = nullptr);
+                    api::FrameAllocator* frameAlloc = nullptr,
+                    eyelib::api::rendering::RenderScene* parallelSceneOut = nullptr);
 
     /** Game-thread only: fill scene from the frame snapshot. One capture per frame (World::CaptureRenderSnapshot), then call this. */
     void BuildScene(const eyelib::api::world::World::RenderSnapshot& snapshot, const RuntimeOptions& options,
                     const WorldAnimationBridge* animationBridge,
                     eyelib::api::AssetRegistry* assetRegistry,
                     eyelib::api::RenderScene& scene,
-                    api::FrameAllocator* frameAlloc = nullptr);
+                    api::FrameAllocator* frameAlloc = nullptr,
+                    eyelib::api::rendering::RenderScene* parallelSceneOut = nullptr);
 
     /** Native texture handle of pipeline output (after RenderSceneOnly). For ImGui use as ImTextureID; null if not ready. */
     void* GetOutputColorTextureNativeHandle() const;
@@ -125,6 +146,11 @@ public:
 
     /** Device for asset loading / SetRenderDevice. Null if not initialized. */
     eyelib::api::RenderDevice GetDevice() const;
+
+    /** M4.7 — non-null when the new pipeline is active (`kUseNewRenderPipeline == true`).
+     *  Used by `RuntimeOverlay::Initialize(window, pipeline)` to bring up ImGui-Vulkan on
+     *  the new device without crossing the legacy RHI seam. Null on the legacy path. */
+    eyelib::api::rendering::RenderPipeline* GetRenderPipelineNew();
 
     /**
      * Standalone (owns swapchain): RHI BeginFrame before host records Vulkan UI and before RenderSceneOnly / BlitToScreen.
@@ -183,10 +209,38 @@ private:
         const WorldAnimationBridge* animationBridge,
         eyelib::api::AssetRegistry* assetRegistry,
         eyelib::api::RenderScene& scene,
-        api::FrameAllocator* frameAlloc);
+        api::FrameAllocator* frameAlloc,
+        eyelib::api::rendering::RenderScene* parallelSceneOut = nullptr);
+
+    void BuildParallelRenderSceneFromViews(
+        std::span<const eyelib::api::world::World::RenderableEntry> renderables,
+        std::span<const eyelib::api::world::World::MeshRendererEntry> meshRenderers,
+        std::span<const eyelib::api::world::World::CameraEntry> cameras,
+        std::span<const eyelib::api::world::World::XRCameraEntry> xrCameras,
+        std::span<const eyelib::api::world::World::LightEntry> lights,
+        std::function<std::optional<::eyelib::world::components::Transform>(::eyelib::world::EntityId)> getTransform,
+        const RuntimeOptions& options,
+        const WorldAnimationBridge* animationBridge,
+        eyelib::api::AssetRegistry* assetRegistry,
+        eyelib::api::rendering::RenderScene& outNew);
 
     eyelib::api::Renderer m_renderer;
     eyelib::api::RenderPipeline m_pipeline;
+    /** M4.1 — parallel `api/rendering` stack (cold until M4.4 flip). Not Initialized as a
+     *  second VkDevice/swapchain on the same `Window` — that would fight the legacy stack.
+     *  `ResourceCache` is constructed with a null device so the type links + stays inert. */
+    eyelib::api::rendering::Renderer       m_rendererNew;
+    eyelib::api::rendering::RenderPipeline m_pipelineNew;
+    std::unique_ptr<eyelib::api::rendering::ResourceCache> m_resourceCacheNew;
+    /** M4.3 — parallel resource resolver + builtin manager built atop `m_resourceCacheNew`.
+     *  Inert while the cache is cold; the M4.4 flip rebuilds the cache against a real
+     *  device and these adapters become live in lock-step. */
+    std::unique_ptr<RendererGPUResourceCacheNew> m_gpuResourceCacheNew;
+    std::unique_ptr<BuiltinResourceManagerNew>   m_builtinManagerNew;
+    /** M4.4 — runtime flag mirroring `kUseNewRenderPipeline` for the active `Initialize`
+     *  call (standalone only; embedded mode forces it false). All hot-path methods branch
+     *  on this so the legacy stack stays the source of truth when off. */
+    bool m_usingNewPipeline = false;
     bool m_ready = false;
     bool m_ownsPresentation = true;
     uint32_t m_width = 0;

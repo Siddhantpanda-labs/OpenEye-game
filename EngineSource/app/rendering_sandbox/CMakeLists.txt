@@ -1,5 +1,13 @@
 # Sandbox executable for the next-gen rendering module (EyelibRendering only).
 
+# M0.6 firewall: sandbox is the reference consumer of EyelibRendering and must never
+# include legacy api/render or eyelib/render headers.
+include(${OPENEYE_ENGINE_SOURCE}/cmake/LegacyRenderFirewall.cmake)
+openeye_enforce_no_legacy_render_includes(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    LABEL     "OpenEyeRenderingSandbox"
+)
+
 add_executable(OpenEyeRenderingSandbox
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
 )

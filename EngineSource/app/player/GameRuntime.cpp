@@ -35,6 +35,12 @@ void GameRuntime::ResetScene() {
     m_frameAlloc.Reset();
 }
 
+// Out-of-line default ctor so unique_ptr<WorldXxxBridge> member type completion happens
+// here (where all Bridge headers are included), not at every consumer TU. Required for
+// the M4.8 header diet — `GameRuntime.h` only forward-declares the bridges so editor
+// TUs don't drag in `WorldRender.h` (and through it, `api/render/All.h`).
+GameRuntime::GameRuntime() = default;
+
 GameRuntime::~GameRuntime() {
 #ifdef OPENEYE_BUILD_STREAMING
     StopStreaming();
@@ -49,7 +55,8 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
                              uint32_t width, uint32_t height,
                              eyelib::render::RenderBackend backend,
                              eyelib::api::RenderDevice sharedDevice,
-                             const RuntimeOptions* options) {
+                             const RuntimeOptions* options,
+                             eyelib::api::rendering::RenderDevice sharedRenderingDevice) {
     if (m_ready) {
         Shutdown();
     }
@@ -77,9 +84,14 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
     m_assetBindStats = BindAssets(world, assetRoots, assetRegistry, allowGpuAssets);
 
     if (!headless) {
-        // Lifetime domain: use sharedDevice (editor) when valid; otherwise create device from window.
+        // Lifetime domain: shared rendering device (editor new stack) > legacy shared device > window-owned device.
         m_render = std::make_unique<WorldRenderBridge>();
-        if (sharedDevice) {
+        if (sharedRenderingDevice) {
+            if (!m_render->Initialize(sharedRenderingDevice, width, height, &assetRegistry)) {
+                m_render.reset();
+                return false;
+            }
+        } else if (sharedDevice) {
             if (!m_render->Initialize(sharedDevice.Get(), width, height, &assetRegistry)) {
                 m_render.reset();
                 return false;
@@ -204,6 +216,11 @@ void* GameRuntime::Render(uint32_t width, uint32_t height) {
     }
     if (m_width == 0 || m_height == 0) return m_render->GetOutputColorTextureNativeHandle();
 
+    if (m_render->GetRenderPipelineNew()) {
+        m_render->Render(m_options, *m_world, m_animation.get(), m_assetRegistry, m_width, m_height);
+        return m_render->GetOutputColorTextureNativeHandle();
+    }
+
     ResetScene();
     m_render->BuildScene(*m_world, m_options, m_animation.get(), m_assetRegistry, m_scene, &m_frameAlloc);
     if (m_frameCameraOverrideActive) {
@@ -267,6 +284,10 @@ void* GameRuntime::GetOutputColorTextureNativeHandle() const {
 
 eyelib::api::RenderDevice GameRuntime::GetDevice() const {
     return m_render ? m_render->GetDevice() : eyelib::api::RenderDevice();
+}
+
+eyelib::api::rendering::RenderPipeline* GameRuntime::GetRenderPipelineNew() {
+    return m_render ? m_render->GetRenderPipelineNew() : nullptr;
 }
 
 void GameRuntime::ReloadShaders() {

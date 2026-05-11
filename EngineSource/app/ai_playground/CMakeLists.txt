@@ -35,4 +35,9 @@ endif()
 
 if(MSVC)
     target_compile_options(OpenEyeAIPlayground PRIVATE /wd4100)
+    # M4.8 — same dual-stack stb_image / VMA dedup window as OpenEyePlayer + OpenEyeEditor.
+    # AIPlayground links OpenEyeGameRuntime which still pulls EyelibRenderAPI (legacy) +
+    # EyelibRenderingAPI (new) for the dual-stack window. Static-lib link propagation puts
+    # both Texture2D.obj copies on the link line. Drop with M5 / legacy decommission.
+    target_link_options(OpenEyeAIPlayground PRIVATE /FORCE:MULTIPLE)
 endif()

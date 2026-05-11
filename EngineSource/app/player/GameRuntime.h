@@ -1,17 +1,21 @@
 #pragma once
 
+// M4.8 — header diet for editor cutoff. `GameRuntime.h` is the primary surface the editor
+// includes (via `EditorContext.h`). Pulling `api/render/All.h` here would re-export the
+// legacy 30-header aggregator into every editor TU that touches GameRuntime. We narrow to
+// the exact four legacy types the public API exposes (RenderDevice / CameraView /
+// RenderScene / RenderBackend) plus forward decls for the rest. `WorldRender.h` (with its
+// own legacy includes) moves entirely to `GameRuntime.cpp` (PIMPL-lite via destructor seam).
+
 #include "AssetBinding.h"
 #include "PlayerConfig.h"
-#include "WorldRender.h"
-#include "WorldPhysics.h"
-#include "WorldAnimation.h"
-#include "WorldScripting.h"
-#include "WorldAudio.h"
 
 #include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
-#include "api/render/All.h"
-#include "api/render/RenderBackend.h"
+#include "api/render/CameraConventions.h"  // eyelib::api::CameraView (return + member type)
+#include "api/render/RenderBackend.h"      // eyelib::render::RenderBackend (param)
+#include "api/render/RenderDevice.h"       // eyelib::api::RenderDevice (return + param)
+#include "api/render/RenderScene.h"        // eyelib::api::RenderScene m_scene (member)
 #include "api/world/All.h"
 
 #include <array>
@@ -20,18 +24,31 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
 #include <vector>
 
 namespace eyelib { namespace api { class Window; } }
+namespace eyelib { namespace api { namespace rendering { class RenderPipeline; } } }
+
+#include "api/rendering/RenderDevice.h"
 
 #ifdef OPENEYE_BUILD_STREAMING
 #include "app/streaming/VRStreamingServer.h"
 #endif
 
 namespace openeye::player {
+
+// Forward declarations for unique_ptr members (definitions live in WorldRender.h /
+// WorldPhysics.h / etc., included only from GameRuntime.cpp). Sized inside
+// `~GameRuntime()` which is user-declared and defined out-of-line.
+class WorldRenderBridge;
+class WorldPhysicsBridge;
+class WorldAnimationBridge;
+class WorldScriptingBridge;
+class WorldAudioBridge;
 
 /**
  * Single-threaded game runtime for embedding (e.g. editor Game view) and standalone player.
@@ -46,7 +63,7 @@ namespace openeye::player {
  */
 class GameRuntime {
 public:
-    GameRuntime() = default;
+    GameRuntime();
     ~GameRuntime();
 
     GameRuntime(const GameRuntime&) = delete;
@@ -63,7 +80,8 @@ public:
                     uint32_t width, uint32_t height,
                     eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default,
                     eyelib::api::RenderDevice sharedDevice = eyelib::api::RenderDevice(),
-                    const RuntimeOptions* options = nullptr);
+                    const RuntimeOptions* options = nullptr,
+                    eyelib::api::rendering::RenderDevice sharedRenderingDevice = {});
 
     void Shutdown();
 
@@ -94,8 +112,14 @@ public:
     /** Pipeline output texture handle (ImTextureID). Valid after Render(); null when headless or not ready. */
     void* GetOutputColorTextureNativeHandle() const;
 
-    /** RHI device (for overlay Vulkan init). Valid when not headless after Initialize(). */
+    /** RHI device (for overlay Vulkan init). Valid when not headless after Initialize().
+     *  Returns the legacy `eyelib::api::RenderDevice` wrapper. On the new path
+     *  (`kUseNewRenderPipeline == true`), this is null — use `GetRenderPipelineNew()` instead. */
     eyelib::api::RenderDevice GetDevice() const;
+
+    /** M4.7 — new pipeline accessor (forwards to `WorldRenderBridge::GetRenderPipelineNew`).
+     *  Non-null when the player started in single-device-flip mode; null otherwise. */
+    eyelib::api::rendering::RenderPipeline* GetRenderPipelineNew();
 
     /** Reload shaders (e.g. after ShaderWatcher copy). No-op when headless. */
     void ReloadShaders();
