@@ -489,6 +489,12 @@ int RunEditor(int argc, char** argv) {
             std::fprintf(stderr, "Editor: api/rendering pipeline init failed.\n");
             return 3;
         }
+        // The editor is the swapchain compositor (panels sample pipeline HDR via ImGui;
+        // a single ComposeSwapchain() at end-of-frame writes the swapchain). The
+        // window-owning sceneVN must not compose to swapchain inside its frame graph —
+        // doing so would fire the post-blit callback mid-frame (before ImGui::Render()
+        // built draw data) and double-write the swapchain.
+        sceneVN.SetPresentationMode(eyelib::api::rendering::RenderPipeline::PresentationMode::Offscreen);
         const eyelib::api::rendering::RenderDevice rd = sceneVN.GetDevice();
         const bool gameOk = gameVN.InitializeWithSharedDevice(rd, 256, 256);
         const bool matOk = matVN.InitializeWithSharedDevice(rd, 384, 384, &sceneVN);
@@ -815,7 +821,7 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowProfilerPanel(&ctx);
         openeye::editor::panels::ShowShadowDebugPanel(&ctx);
 
-        ImGui::Render();
+        eyelib::api::core::Log::Info("Before ImGui::Render"); ImGui::Render(); eyelib::api::core::Log::Info("After ImGui::Render");
         if (imgui.IsVulkan() && editorDevice) {
             auto* rhiDevice = static_cast<eyelib::render::rhi::IDevice*>(editorDevice.get());
             rhiDevice->BlitToDefaultFramebuffer(nullptr);

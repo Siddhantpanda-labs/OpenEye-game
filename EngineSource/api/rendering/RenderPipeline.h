@@ -79,6 +79,29 @@ public:
      *  to Forward with a warning). */
     enum class Mode { Hybrid, Forward, ForwardPlus };
 
+    /** Where a pipeline writes its final color.
+     *
+     *  - `Direct`   — the pipeline composes its main HDR target to the swapchain inside its
+     *                 own frame graph (`BlitMainHdrToDefaultPass`). This is the single-pipeline
+     *                 player shape: `Render(scene)` produces a presentable swapchain image.
+     *  - `Offscreen` — the pipeline produces an HDR offscreen target only; the caller is the
+     *                 swapchain compositor and drives swapchain composition explicitly (see
+     *                 `ComposeSwapchain()`). This is the editor multi-pipeline shape, where
+     *                 scene-view / game-view / material-preview each render into their own
+     *                 HDR texture, sampled by ImGui as viewport contents, and a single editor
+     *                 compose step at end-of-frame writes the swapchain.
+     *
+     *  Defaults:
+     *   - `Initialize(window, ...)`         → `Direct`   (single-pipeline player default).
+     *   - `InitializeWithSharedDevice(...)` → `Offscreen` (multi-pipeline producer default).
+     *
+     *  The editor flips its window-owning pipeline to `Offscreen` explicitly because device
+     *  ownership and compositor role are orthogonal: the editor pipeline owns the device but
+     *  is **not** the compositor (the editor app is). Callers may call `SetPresentationMode`
+     *  any time after `Initialize` / `InitializeWithSharedDevice`; the change takes effect on
+     *  the next `Render`. */
+    enum class PresentationMode { Direct, Offscreen };
+
     RenderPipeline();
     ~RenderPipeline();
 
@@ -99,11 +122,22 @@ public:
     bool InitializeWithSharedDevice(RenderDevice device, uint32_t width, uint32_t height,
                                     RenderPipeline* shareFrom);
 
+    /** Resize the pipeline's *render output* (offscreen HDR + downstream RTs) to `width x height`.
+     *  Does NOT touch the window swapchain — that has its own contract via `OnWindowResized`.
+     *  Safe to call every frame with viewport-panel dimensions; the implementation only stores
+     *  the new size and the features' RTs reallocate lazily on mismatch at the next `Render`. */
     void Resize(uint32_t width, uint32_t height);
     void Shutdown();
 
     void SetMode(Mode mode);
     Mode GetMode() const;
+
+    /** Set whether this pipeline composes to the swapchain (`Direct`) or only produces an
+     *  offscreen HDR target for caller-driven compose (`Offscreen`). Safe to call any time
+     *  after `Initialize` / `InitializeWithSharedDevice`; the change takes effect on the
+     *  next `Render`. See `PresentationMode` for the contract + defaults. */
+    void SetPresentationMode(PresentationMode mode);
+    PresentationMode GetPresentationMode() const;
 
     /** Cubemap sky HDR multiplier (default 1; clamped non-negative). Stored as parity slot;
      *  plumbing into the new module's IBL probes lands when the editor sky panel migrates

@@ -14,6 +14,7 @@ namespace pass_names {
 inline constexpr const char* kClearBlackboardRenderTarget = "ClearBlackboardRenderTarget";
 inline constexpr const char* kFullscreenHdrCompose        = "FullscreenHdrCompose";
 inline constexpr const char* kBlitMainHdrToDefault        = "BlitMainHdrToDefault";
+inline constexpr const char* kPublishOffscreenOutput      = "PublishOffscreenOutput";
 
 inline constexpr const char* kDepthPrepass                = "DepthPrepass";
 inline constexpr const char* kForwardOpaque               = "ForwardOpaque";

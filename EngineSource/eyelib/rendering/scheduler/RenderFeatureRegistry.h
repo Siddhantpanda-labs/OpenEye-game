@@ -12,7 +12,10 @@ class RenderFeatureRegistry {
 public:
     RenderFeatureRegistry() = default;
 
-    /** @return false if null or already registered (stable subscription order: first successful add wins). */
+    /**
+     * @return false if null or already registered.
+     * Registry order is stable by `IRenderFeature::SchedulingOrder()` (ascending), then insertion order.
+     */
     bool TryAdd(IRenderFeature* feature);
     /** @return false if not found or null. Preserves relative order of remaining features. */
     bool TryRemove(IRenderFeature* feature) noexcept;

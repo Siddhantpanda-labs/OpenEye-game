@@ -227,6 +227,9 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
   if (!render.device)
     return;
   m_device = render.device;
+  if (render.recordingCommandList) {
+    render.device->EnsureSharedShadowMapArrayDummyForShaderSampling(render.recordingCommandList);
+  }
   if (!m_ownedShadowCasterList) {
     m_ownedShadowCasterList = std::make_unique<ShadowCasterList>();
     m_shadowCasterList = m_ownedShadowCasterList.get();
@@ -321,13 +324,21 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
           ++shadowCastingSpotCount;
   }
 
-  const uint32_t requiredLayers = std::max(1u, shadowCastingSpotCount);
-  if (!m_spotShadowRt || m_spotShadowLayerCount != requiredLayers) {
-      if (m_spotShadowRt)
+  if (shadowCastingSpotCount > 0u) {
+      const uint32_t requiredLayers = shadowCastingSpotCount;
+      if (!m_spotShadowRt || m_spotShadowLayerCount != requiredLayers) {
+          if (m_spotShadowRt)
+              render.device->DestroyRenderTarget(m_spotShadowRt);
+          m_spotShadowRt = nullptr;
+          m_spotShadowRt = render.device->CreateDepthOnlyRenderTargetArray(512u, 512u, requiredLayers);
+          m_spotShadowLayerCount = requiredLayers;
+      }
+  } else {
+      if (m_spotShadowRt) {
           render.device->DestroyRenderTarget(m_spotShadowRt);
-      m_spotShadowRt = nullptr;
-      m_spotShadowRt = render.device->CreateDepthOnlyRenderTargetArray(512u, 512u, requiredLayers);
-      m_spotShadowLayerCount = requiredLayers;
+          m_spotShadowRt = nullptr;
+      }
+      m_spotShadowLayerCount = 0u;
   }
 
   if (!m_spotShadowPipeline) {
@@ -486,24 +497,29 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
     graph.AddPassBorrowed(m_directionalShadowPass.get());
   }
 
-  if (m_spotShadowRt) {
-      if (rhi::ITexture* depth = m_spotShadowRt->GetDepthTexture()) {
-          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature, depth);
-      }
-  }
   if (m_spotLightUniformBuffer) {
       blackboard.PublishBuffer(BlackboardSlot::SpotLightUniformBuffer, writer_names::kShadowFeature, m_spotLightUniformBuffer);
   }
 
-  if (m_spotShadowRt && m_spotShadowPipeline && m_meshResolver && m_shadowCasterList) {
-      if (!m_spotShadowViewProjs.empty()) {
-          if (!m_spotShadowPass) m_spotShadowPass = std::make_unique<SpotShadowPass>();
-          
-          m_spotShadowPass->Setup(m_spotShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList, m_spotShadowViewProjs);
-          graph.AddPassBorrowed(m_spotShadowPass.get());
-          
-          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature,
-                                    m_spotShadowRt->GetDepthTexture());
+  const bool hasSpotShadowPass =
+      m_spotShadowRt && m_spotShadowPipeline && m_meshResolver && m_shadowCasterList && !m_spotShadowViewProjs.empty();
+
+  if (hasSpotShadowPass) {
+      if (!m_spotShadowPass) m_spotShadowPass = std::make_unique<SpotShadowPass>();
+      m_spotShadowPass->Setup(m_spotShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList, m_spotShadowViewProjs);
+      graph.AddPassBorrowed(m_spotShadowPass.get());
+  }
+
+  {
+      rhi::ITexture* spotDepth = nullptr;
+      if (hasSpotShadowPass && m_spotShadowRt)
+          spotDepth = m_spotShadowRt->GetDepthTexture();
+      if (!spotDepth && render.device) {
+          if (rhi::IRenderTarget* dummy = render.device->GetSharedShadowMapArrayDummyRenderTarget())
+              spotDepth = dummy->GetDepthTexture();
+      }
+      if (spotDepth) {
+          blackboard.PublishTexture(BlackboardSlot::SpotShadowMapAtlas, writer_names::kShadowFeature, spotDepth);
       }
   }
 
@@ -525,8 +541,13 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
     rhi::ITexture* pointDepth = nullptr;
     if (m_pointShadowRt)
       pointDepth = m_pointShadowRt->GetDepthTexture();
-    if (!pointDepth && render.device)
-      pointDepth = render.device->GetSharedShadowMapArrayDummyRenderTarget()->GetDepthTexture();
+    if (!pointDepth && render.device) {
+      // Safe: GetSharedShadowMapArrayDummyRenderTarget guarantees a valid, GPU-initialized RT
+      // via its own dedicated VkCommandPool — never returns null on a live device.
+      rhi::IRenderTarget* dummyRt = render.device->GetSharedShadowMapArrayDummyRenderTarget();
+      if (dummyRt)
+        pointDepth = dummyRt->GetDepthTexture();
+    }
     if (pointDepth) {
       blackboard.PublishTexture(BlackboardSlot::PointShadowCubemapArray, writer_names::kShadowFeature,
                                 pointDepth);

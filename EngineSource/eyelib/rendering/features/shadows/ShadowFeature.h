@@ -36,6 +36,7 @@ public:
     void SetMeshResolver(const IMeshHandleResolver* resolver) noexcept { m_meshResolver = resolver; }
 
     const char* FeatureDebugName() const noexcept override { return writer_names::kShadowFeature; }
+    int SchedulingOrder() const noexcept override { return -100; }
     void OnRegisterBlackboardWriters(BlackboardWriterRegistry& registry, const RenderCapabilities& caps) override;
     void OnUnregisterBlackboardWriters(BlackboardWriterRegistry& registry) override;
     void OnUpload(FrameContext& frame, const RenderContext& render) override;

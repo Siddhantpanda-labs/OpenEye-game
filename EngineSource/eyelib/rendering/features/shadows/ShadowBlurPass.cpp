@@ -94,7 +94,8 @@ void ShadowBlurPass::Execute(rhi::ICommandList* cmd) {
         
         // Manual barrier to read from scratch
         cmd->BarrierTexture(m_scratchRt->GetColorTexture(0), rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
-        m_device->TransitionTextureToState(m_scratchRt->GetColorTexture(0), rhi::ResourceState::ShaderResource);
+        // NOTE: BarrierTexture already calls TransitionTextureToState + FlushBarrierTracker internally.
+        // Do NOT call TransitionTextureToState again here — that would double-transition the CPU state.
 
         // --- Vertical Pass: Scratch -> Source ---
         m_sourceRt->SetDepthLayer(i);
@@ -108,7 +109,7 @@ void ShadowBlurPass::Execute(rhi::ICommandList* cmd) {
         
         // Manual barrier to read from source for next passes
         cmd->BarrierTexture(m_sourceRt->GetColorTexture(0), rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
-        m_device->TransitionTextureToState(m_sourceRt->GetColorTexture(0), rhi::ResourceState::ShaderResource);
+        // NOTE: BarrierTexture already calls TransitionTextureToState + FlushBarrierTracker internally.
     }
 }
 

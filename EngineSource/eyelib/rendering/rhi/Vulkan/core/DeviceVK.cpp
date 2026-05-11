@@ -3421,22 +3421,98 @@ IRenderTarget* DeviceVK::CreateDepthOnlyRenderTargetArray(uint32_t width, uint32
 IRenderTarget* DeviceVK::GetSharedShadowMapArrayDummyRenderTarget() {
     if (!m_sharedShadowMapArrayDummyRt) {
         m_sharedShadowMapArrayDummyRt = CreateDepthOnlyRenderTargetArray(1u, 1u, 1u);
-        m_sharedShadowMapArrayDummyBarrierDone = false;
+
+        // Industry-standard one-shot initialization: create a DEDICATED, self-contained
+        // VkCommandPool+VkCommandBuffer that does not touch the per-frame pool (which is
+        // reset every BeginFrame and may not even be open yet when this is first called).
+        // This mirrors how Unreal Engine and other AAA engines initialize persistent
+        // "fallback" resources — fully synchronous, GPU-flushed, pool destroyed after use.
+        if (m_sharedShadowMapArrayDummyRt) {
+            if (ITexture* depth = m_sharedShadowMapArrayDummyRt->GetDepthTexture()) {
+                VkDevice vkDevice = static_cast<VkDevice>(m_device);
+                VkQueue  vkQueue  = static_cast<VkQueue>(m_queues.GetGraphicsQueue());
+                if (vkDevice != VK_NULL_HANDLE && vkQueue != VK_NULL_HANDLE) {
+                    // 1. Create a dedicated one-time-submit command pool.
+                    VkCommandPoolCreateInfo poolInfo = {};
+                    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+                    poolInfo.queueFamilyIndex = m_queues.GetGraphicsQueueFamily();
+                    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+                    VkCommandPool initPool = VK_NULL_HANDLE;
+                    if (vkCreateCommandPool(vkDevice, &poolInfo, nullptr, &initPool) == VK_SUCCESS) {
+                        // 2. Allocate one command buffer from the dedicated pool.
+                        VkCommandBufferAllocateInfo allocInfo = {};
+                        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                        allocInfo.commandPool = initPool;
+                        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                        allocInfo.commandBufferCount = 1;
+                        VkCommandBuffer initBuf = VK_NULL_HANDLE;
+                        if (vkAllocateCommandBuffers(vkDevice, &allocInfo, &initBuf) == VK_SUCCESS) {
+                            // 3. Record the UNDEFINED -> SHADER_READ_ONLY barrier.
+                            VkCommandBufferBeginInfo beginInfo = {};
+                            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                            if (vkBeginCommandBuffer(initBuf, &beginInfo) == VK_SUCCESS) {
+                                TextureVK* texVK = static_cast<TextureVK*>(depth);
+                                VkImageMemoryBarrier2 barrier = {};
+                                barrier.sType           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                                barrier.srcStageMask    = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+                                barrier.srcAccessMask   = 0;
+                                barrier.dstStageMask    = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+                                barrier.dstAccessMask   = VK_ACCESS_2_SHADER_READ_BIT;
+                                barrier.oldLayout       = VK_IMAGE_LAYOUT_UNDEFINED;
+                                barrier.newLayout       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                barrier.image           = static_cast<VkImage>(texVK->m_image);
+                                barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_DEPTH_BIT;
+                                barrier.subresourceRange.baseMipLevel   = 0;
+                                barrier.subresourceRange.levelCount     = VK_REMAINING_MIP_LEVELS;
+                                barrier.subresourceRange.baseArrayLayer = 0;
+                                barrier.subresourceRange.layerCount     = VK_REMAINING_ARRAY_LAYERS;
+                                VkDependencyInfo dep = {};
+                                dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                                dep.imageMemoryBarrierCount = 1;
+                                dep.pImageMemoryBarriers = &barrier;
+                                vkCmdPipelineBarrier2(initBuf, &dep);
+                                vkEndCommandBuffer(initBuf);
+                                // 4. Submit and wait — GPU guaranteed to be in ShaderResource before return.
+                                VkSubmitInfo submitInfo = {};
+                                submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+                                submitInfo.commandBufferCount = 1;
+                                submitInfo.pCommandBuffers = &initBuf;
+                                VkFence initFence = VK_NULL_HANDLE;
+                                VkFenceCreateInfo fenceInfo = {};
+                                fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+                                if (vkCreateFence(vkDevice, &fenceInfo, nullptr, &initFence) == VK_SUCCESS) {
+                                    vkQueueSubmit(vkQueue, 1, &submitInfo, initFence);
+                                    vkWaitForFences(vkDevice, 1, &initFence, VK_TRUE, UINT64_MAX);
+                                    vkDestroyFence(vkDevice, initFence, nullptr);
+                                } else {
+                                    // Fence creation failed — fallback: wait idle (always safe).
+                                    vkQueueSubmit(vkQueue, 1, &submitInfo, VK_NULL_HANDLE);
+                                    vkQueueWaitIdle(vkQueue);
+                                }
+                                // 5. Update BarrierTracker so the CPU-side state matches GPU reality.
+                                BarrierTrackerVK::SetImageState(&m_barrierTracker, texVK->m_image, ResourceState::ShaderResource);
+                            }
+                        }
+                        // 6. Destroy the dedicated pool (frees the command buffer too).
+                        vkDestroyCommandPool(vkDevice, initPool, nullptr);
+                    }
+                }
+            }
+        }
+        m_sharedShadowMapArrayDummyBarrierDone = true;
     }
     return m_sharedShadowMapArrayDummyRt;
 }
 
 void DeviceVK::EnsureSharedShadowMapArrayDummyForShaderSampling(ICommandList* cmd) {
-    if (!cmd || m_sharedShadowMapArrayDummyBarrierDone)
-        return;
-    IRenderTarget* rt = GetSharedShadowMapArrayDummyRenderTarget();
-    if (!rt)
-        return;
-    ITexture* depth = rt->GetDepthTexture();
-    if (!depth)
-        return;
-    cmd->BarrierTexture(depth, ResourceState::Undefined, ResourceState::ShaderResource);
-    m_sharedShadowMapArrayDummyBarrierDone = true;
+    (void)cmd;
+    // Delegate to the robust getter which handles one-time synchronous initialization.
+    // The getter now uses its own dedicated VkCommandPool, making it safe to call at
+    // any point in the frame lifecycle (before or after BeginFrame).
+    GetSharedShadowMapArrayDummyRenderTarget();
 }
 
 IRenderTarget* DeviceVK::CreateRenderTargetWithSharedDepth(uint32_t width, uint32_t height,

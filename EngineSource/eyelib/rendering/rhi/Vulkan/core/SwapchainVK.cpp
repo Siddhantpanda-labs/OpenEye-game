@@ -33,8 +33,12 @@ VkSurfaceFormatKHR SelectSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& fo
 
     if (!csExt || mode == SwapchainOutputMode::SdrSrgb) {
         const VkSurfaceFormatKHR sdr = SelectSdrSurfaceFormat(formats);
-        core::Log::InfoF("SwapchainVK: SDR surface format 0x%x colorSpace 0x%x.",
-                         static_cast<unsigned>(sdr.format), static_cast<unsigned>(sdr.colorSpace));
+        static bool loggedSdrFormat = false;
+        if (!loggedSdrFormat) {
+            loggedSdrFormat = true;
+            core::Log::InfoF("SwapchainVK: SDR surface format 0x%x colorSpace 0x%x.",
+                             static_cast<unsigned>(sdr.format), static_cast<unsigned>(sdr.colorSpace));
+        }
         return sdr;
     }
 
@@ -476,17 +480,29 @@ void SwapchainVK::Resize(uint32_t w, uint32_t h, bool forceRecreate, DeviceVK* d
     const VkPresentModeKHR presentMode = SelectVkPresentMode(presentModes, presentPreference);
     const VkPresentModeKHR preferredMode = PreferredVkPresentMode(presentPreference);
     if (presentMode != preferredMode) {
-        core::Log::WarnF("SwapchainVK::Resize: preferred present mode %s unavailable; selected %s fallback.",
-                         PresentModeName(preferredMode), PresentModeName(presentMode));
+        static bool loggedFallback = false;
+        if (!loggedFallback) {
+            loggedFallback = true;
+            core::Log::WarnF("SwapchainVK::Resize: preferred present mode %s unavailable; selected %s fallback.",
+                             PresentModeName(preferredMode), PresentModeName(presentMode));
+        }
     } else {
-        core::Log::InfoF("SwapchainVK::Resize: selected present mode %s.", PresentModeName(presentMode));
+        static bool loggedPresentMode = false;
+        if (!loggedPresentMode) {
+            loggedPresentMode = true;
+            core::Log::InfoF("SwapchainVK::Resize: selected present mode %s.", PresentModeName(presentMode));
+        }
     }
     VkExtent2D extent = {};
     extent.width = std::clamp(w, caps.minImageExtent.width, caps.maxImageExtent.width);
     extent.height = std::clamp(h, caps.minImageExtent.height, caps.maxImageExtent.height);
     uint32_t imageCount = SelectSwapchainImageCount(caps, presentMode);
-    core::Log::InfoF("SwapchainVK::Resize: imageCount=%u (caps min=%u max=%u).",
-                     imageCount, caps.minImageCount, caps.maxImageCount);
+    static bool loggedImageCount = false;
+    if (!loggedImageCount) {
+        loggedImageCount = true;
+        core::Log::InfoF("SwapchainVK::Resize: imageCount=%u (caps min=%u max=%u).",
+                         imageCount, caps.minImageCount, caps.maxImageCount);
+    }
 
     VkSwapchainCreateInfoKHR swapInfo = {};
     swapInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;

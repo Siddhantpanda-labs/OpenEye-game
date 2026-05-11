@@ -45,6 +45,7 @@ RasterFeature::~RasterFeature() {
     m_deferredLightingPass.reset();
     m_forwardOpaquePass.reset();
     m_blitPass.reset();
+    m_publishOffscreenPass.reset();
     m_shaderLibrary.DestroyPipelines(m_pipelineDevice);
     m_shaderLibrary.ClearRegistrations();
     m_iblDefaultProbes.Shutdown(m_iblDevice);
@@ -262,13 +263,22 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
     // Presentation blit + post-blit overlay invocation is the swapchain owner's responsibility.
     // Editor-style shared-device pipelines opt out (see SetPresentationBlitEnabled) so the
     // editor can run multiple offscreen pipelines per device frame and drive its own
-    // swapchain compose afterwards.
+    // swapchain compose afterwards. In that offscreen shape the pipeline must still leave its
+    // main HDR color in ShaderResource state at end-of-frame so the host compositor (ImGui
+    // viewport sampling) can bind it as a sampled image without extra synchronisation — that
+    // contract is materialised by PublishOffscreenOutputPass appended below.
     if (m_presentationBlitEnabled) {
         if (!m_blitPass)
             m_blitPass = std::make_unique<BlitMainHdrToDefaultPass>(render.device, &blackboard);
         else
             m_blitPass->Reconfigure(render.device, &blackboard);
         graph.AddPassBorrowed(m_blitPass.get());
+    } else {
+        if (!m_publishOffscreenPass)
+            m_publishOffscreenPass = std::make_unique<PublishOffscreenOutputPass>(BlackboardSlot::MainHdrRenderTarget);
+        else
+            m_publishOffscreenPass->Reconfigure(BlackboardSlot::MainHdrRenderTarget);
+        graph.AddPassBorrowed(m_publishOffscreenPass.get());
     }
 }
 

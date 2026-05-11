@@ -11,7 +11,18 @@ bool RenderFeatureRegistry::TryAdd(IRenderFeature* feature) {
         if (f == feature)
             return false;
     }
-    m_features.push_back(feature);
+    const int newOrder = feature->SchedulingOrder();
+    auto insertIt = m_features.end();
+    for (auto it = m_features.begin(); it != m_features.end(); ++it) {
+        IRenderFeature* existing = *it;
+        if (!existing)
+            continue;
+        if (newOrder < existing->SchedulingOrder()) {
+            insertIt = it;
+            break;
+        }
+    }
+    m_features.insert(insertIt, feature);
     return true;
 }
 

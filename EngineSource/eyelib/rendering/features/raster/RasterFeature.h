@@ -2,6 +2,7 @@
 
 #include "eyelib/rendering/framegraph/FrameGraphResourceNames.h"
 #include "eyelib/rendering/framegraph/passes/BlitMainHdrToDefaultPass.h"
+#include "eyelib/rendering/framegraph/passes/PublishOffscreenOutputPass.h"
 #include "eyelib/rendering/features/raster/DeferredLightingPass.h"
 #include "eyelib/rendering/features/raster/ForwardOpaquePass.h"
 #include "eyelib/rendering/features/raster/GBufferPass.h"
@@ -34,6 +35,7 @@ public:
     ~RasterFeature() override;
 
     const char* FeatureDebugName() const noexcept override { return writer_names::kRasterFeature; }
+    int SchedulingOrder() const noexcept override { return 0; }
 
     void OnRegister(const RenderCapabilities& caps) override;
     void OnRegisterBlackboardWriters(BlackboardWriterRegistry& registry, const RenderCapabilities& caps) override;
@@ -77,6 +79,10 @@ private:
     std::unique_ptr<DeferredLightingPass>   m_deferredLightingPass;
     std::unique_ptr<ForwardOpaquePass>      m_forwardOpaquePass;
     std::unique_ptr<BlitMainHdrToDefaultPass> m_blitPass;
+    // Finalising barrier-only pass scheduled when m_presentationBlitEnabled == false. Materialises
+    // the offscreen-output layout contract (main HDR color0 → ShaderResource at end-of-frame) so
+    // host compositors (e.g. editor ImGui viewports) can sample the output without extra sync.
+    std::unique_ptr<PublishOffscreenOutputPass> m_publishOffscreenPass;
 };
 
 }  // namespace rendering

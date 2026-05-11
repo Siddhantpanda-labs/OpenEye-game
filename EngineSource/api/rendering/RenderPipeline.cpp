@@ -242,6 +242,10 @@ public:
 
     // Public-surface state (kept here so move semantics on RenderPipeline are trivial).
     Mode mode = Mode::Hybrid;
+    // Default Direct = single-pipeline player shape (compose to swapchain inside the frame
+    // graph). The shared-device init flips this to Offscreen before BuildWorldAndFeatures
+    // runs (editor multi-pipeline shape; editor app is the compositor).
+    PresentationMode presentationMode = PresentationMode::Direct;
     float skyboxBrightness = 1.0f;
     uint32_t outputWidth = 0;
     uint32_t outputHeight = 0;
@@ -274,10 +278,12 @@ public:
         raster = std::make_unique<eyelib::rendering::RasterFeature>();
         bool warnFwd = false;
         raster->SetRenderMode(ToInternalMode(mode, warnFwd));
-        // M3.9 — editor shared-device pipelines (offscreen-only) opt out of the swapchain blit
-        // pass; the editor frame loop drives a single, caller-driven swapchain compose after
-        // all pipelines have recorded. Standalone-player one-pipeline shape keeps the default.
-        raster->SetPresentationBlitEnabled(ownsDevice);
+        // Explicit contract (see RenderPipeline::PresentationMode): Direct schedules the
+        // in-graph swapchain blit (single-pipeline player); Offscreen omits it (caller is
+        // the compositor — multi-pipeline editor). Device ownership and compositor role
+        // are orthogonal; this replaces an earlier ownsDevice heuristic that wrongly
+        // forced the editor's window-owning pipeline to double-write the swapchain.
+        raster->SetPresentationBlitEnabled(presentationMode == PresentationMode::Direct);
         if (warnFwd && !warnedForwardPlusFallback) {
             warnedForwardPlusFallback = true;
             Log::Warn("RenderPipeline: Mode::ForwardPlus is not yet implemented; falling back to Forward.");
@@ -366,6 +372,10 @@ bool RenderPipeline::InitializeWithSharedDevice(RenderDevice device, uint32_t wi
     }
     m_impl->device = static_cast<eyelib::rendering::rhi::IDevice*>(device.Get());
     m_impl->ownsDevice = false;
+    // Shared-device pipelines are offscreen producers by default; the caller (editor) is
+    // the swapchain compositor. Callers may flip back to Direct via SetPresentationMode
+    // before the first Render if a different shape is desired.
+    m_impl->presentationMode = PresentationMode::Offscreen;
 
     if (!m_impl->BuildWorldAndFeatures(width, height)) {
         Log::Error("RenderPipeline::InitializeWithSharedDevice: world/feature setup failed.");
@@ -389,11 +399,14 @@ bool RenderPipeline::InitializeWithSharedDevice(RenderDevice device, uint32_t wi
 
 void RenderPipeline::Resize(uint32_t width, uint32_t height) {
     if (!m_impl || !m_impl->device) return;
+    // Resize the pipeline's *render output* only (offscreen HDR + downstream pass RTs reallocate
+    // lazily on `outputSize` mismatch). The window swapchain has its own separate contract
+    // (`OnWindowResized`) — callers drive that explicitly when the actual window framebuffer
+    // changes. Conflating the two would let editor panel-size changes (which call this every
+    // frame with viewport-area dimensions) recreate the GLFW/Vulkan swapchain mid-frame and
+    // break the acquire/present pairing.
     m_impl->outputWidth = width;
     m_impl->outputHeight = height;
-    if (m_impl->ownsDevice) {
-        m_impl->device->OnWindowResized(width, height);
-    }
     if (m_impl->world) {
         m_impl->world->SetOutputSize(width, height);
     }
@@ -433,6 +446,18 @@ void RenderPipeline::SetMode(Mode mode) {
 
 RenderPipeline::Mode RenderPipeline::GetMode() const {
     return m_impl ? m_impl->mode : Mode::Hybrid;
+}
+
+void RenderPipeline::SetPresentationMode(PresentationMode mode) {
+    if (!m_impl) return;
+    m_impl->presentationMode = mode;
+    if (m_impl->raster) {
+        m_impl->raster->SetPresentationBlitEnabled(mode == PresentationMode::Direct);
+    }
+}
+
+RenderPipeline::PresentationMode RenderPipeline::GetPresentationMode() const {
+    return m_impl ? m_impl->presentationMode : PresentationMode::Direct;
 }
 
 void RenderPipeline::SetSkyboxBrightness(float multiplier) {

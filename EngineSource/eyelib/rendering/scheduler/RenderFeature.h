@@ -21,6 +21,11 @@ public:
 
     /** Override for logs, asserts, and tooling (stable per type). */
     virtual const char* FeatureDebugName() const noexcept { return "RenderFeature"; }
+    /**
+     * Lower value schedules earlier across upload/prepare/pass scheduling.
+     * Keep feature order explicit in the module instead of relying on subscription order.
+     */
+    virtual int SchedulingOrder() const noexcept { return 0; }
 
     virtual void OnRegister(const RenderCapabilities& caps) { (void)caps; }
 
