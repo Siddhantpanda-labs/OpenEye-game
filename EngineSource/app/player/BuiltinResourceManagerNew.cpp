@@ -66,8 +66,27 @@ bool BuildEditablePrimitive(const std::string& meshId, eyelib::geometry::Editabl
 
 /** Stable synthetic AssetId namespace for builtin primitives + default material so the
  *  cache treats them like any other asset (deduped, mutated through the same fan-out). */
+uint64_t Fnv1a64(const std::string& s) {
+    constexpr uint64_t kOffset = 14695981039346656037ull;
+    constexpr uint64_t kPrime = 1099511628211ull;
+    uint64_t h = kOffset;
+    for (unsigned char c : s) {
+        h ^= static_cast<uint64_t>(c);
+        h *= kPrime;
+    }
+    return h;
+}
+
 eyelib::api::AssetId BuiltinAssetId(const std::string& key) {
-    return eyelib::api::AssetId::FromString(std::string("builtin-rendering://") + key);
+    // AssetId::FromString only accepts GUID strings. Builtin keys (builtin://Cube, etc.) would
+    // parse as Invalid(0,0), causing every primitive/material to alias the same cache slot.
+    // Build a deterministic synthetic AssetId directly from a stable hash pair.
+    const std::string ns = std::string("builtin-rendering://") + key;
+    uint64_t hi = Fnv1a64(ns);
+    uint64_t lo = Fnv1a64(std::string("builtin-rendering://salt/") + key);
+    if (hi == 0 && lo == 0)
+        lo = 1;  // keep id valid
+    return eyelib::api::AssetId{hi, lo};
 }
 
 void LogColdPathOnce() {

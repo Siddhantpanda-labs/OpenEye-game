@@ -350,6 +350,39 @@ void ShowSceneViewPanel(EditorContext* ctx) {
                 ImGui::DragFloat("Move speed", &cam.moveSpeed, 0.1f, 0.5f, 50.0f);
                 ImGui::DragFloat("Mouse sensitivity", &cam.mouseSensitivity, 0.0001f, 0.0005f, 0.02f, "%.4f");
             }
+
+            // Gizmo in the new-pipeline branch (same behavior as legacy path).
+            EntityId sel = ctx->selectedEntity;
+            if (sel != ::eyelib::world::InvalidEntity && ctx->world.IsAlive(sel)) {
+                std::optional<::eyelib::world::components::Transform> worldOpt = newSnapshot.GetTransform(sel);
+                if (!worldOpt) {
+                    ::eyelib::world::components::Transform worldTrTemp;
+                    if (ctx->world.GetWorldTransform(sel, worldTrTemp))
+                        worldOpt = worldTrTemp;
+                }
+                if (worldOpt) {
+                    Mat4 view, proj;
+                    BuildViewProjection(ctx->editorCamera, size.x, size.y, ::eyelib::render::RenderBackend::Vulkan, view, proj);
+                    Mat4 model = eyelib::math::Compose(worldOpt->position, worldOpt->rotation, worldOpt->scale);
+                    float modelMatrix[16];
+                    std::memcpy(modelMatrix, &model[0][0], sizeof(modelMatrix));
+
+                    ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+                    ImGuizmo::SetRect(pos.x, pos.y, size.x, size.y);
+                    const ImGuizmo::OPERATION op = ImGuizmo::OPERATION::UNIVERSAL;
+                    const ImGuizmo::MODE mode = ctx->sceneGizmoLocal ? ImGuizmo::MODE::LOCAL : ImGuizmo::MODE::WORLD;
+                    if (ImGuizmo::Manipulate(&view[0][0], &proj[0][0], op, mode, modelMatrix)) {
+                        Vec3 posOut, scaleOut;
+                        Quat rotOut;
+                        eyelib::math::Decompose(*reinterpret_cast<Mat4*>(modelMatrix), posOut, rotOut, scaleOut);
+                        ::eyelib::world::components::Transform newWorld;
+                        newWorld.position = posOut;
+                        newWorld.rotation = rotOut;
+                        newWorld.scale = scaleOut;
+                        ctx->world.SetWorldTransform(sel, newWorld);
+                    }
+                }
+            }
             ImGui::End();
             return;
         }
