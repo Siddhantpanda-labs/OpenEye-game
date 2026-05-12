@@ -305,6 +305,12 @@ public:
         sky    = std::make_unique<eyelib::rendering::SkyboxFeature>();
         editor = std::make_unique<eyelib::rendering::EditorFeature>();
 
+        // Per-scene IBL probe swap: `SkyboxFeature` consults `RasterFeature` for the
+        // bootstrap-env fallback when no cubemap is bound (procedural / none). Wiring the
+        // pointer here keeps the dependency one-way (sky → raster) and avoids any
+        // feature-to-feature lookup at frame time.
+        sky->SetDefaultEnvProvider(raster.get());
+
         if (!world->TrySubscribeFeature(raster.get())) {
             Log::Error("RenderPipeline::Initialize: failed to subscribe RasterFeature.");
             return false;

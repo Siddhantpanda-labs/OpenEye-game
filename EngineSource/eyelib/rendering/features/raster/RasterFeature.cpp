@@ -125,14 +125,14 @@ void RasterFeature::OnRegister(const RenderCapabilities& caps) {
 
 void RasterFeature::OnRegisterBlackboardWriters(BlackboardWriterRegistry& registry, const RenderCapabilities& caps) {
     (void)caps;
-    (void)registry.TryReserve(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl);
-    (void)registry.TryReserve(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl);
+    // IblIrradianceCubemap + IblPrefilterCubemap are now owned by `SkyboxFeature` so it can
+    // publish per-scene baked probes when a `Kind::Cubemap` sky is set (and fall back to this
+    // feature's default env otherwise — see `RasterFeature::GetDefaultEnvCubemap`). Only the
+    // BRDF LUT is invariant per scene and stays with raster.
     (void)registry.TryReserve(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl);
 }
 
 void RasterFeature::OnUnregisterBlackboardWriters(BlackboardWriterRegistry& registry) {
-    (void)registry.TryRelease(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl);
-    (void)registry.TryRelease(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl);
     (void)registry.TryRelease(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl);
 }
 
@@ -219,10 +219,10 @@ void RasterFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
         m_pipelineDevice = render.device;
         if (!m_iblDevice) m_iblDevice = render.device;
     }
-    if (rhi::ITexture* iblEnv = m_iblDefaultProbes.EnvCubemap()) {
-        blackboard.PublishTexture(BlackboardSlot::IblIrradianceCubemap, writer_names::kLightingIbl, iblEnv);
-        blackboard.PublishTexture(BlackboardSlot::IblPrefilterCubemap, writer_names::kLightingIbl, iblEnv);
-    }
+    // Irradiance + prefilter publishes moved to `SkyboxFeature::OnSchedulePasses`; that feature
+    // either publishes per-scene baked probes (`Kind::Cubemap`) or falls back to the env returned
+    // by `GetDefaultEnvCubemap()` above (procedural / none). Keep BRDF LUT here — it never changes
+    // across scenes and the LUT loader lives in `IblDefaultProbes` next to its bootstrap.
     if (rhi::ITexture* iblLut = m_iblDefaultProbes.BrdfLut())
         blackboard.PublishTexture(BlackboardSlot::IblBrdfLut, writer_names::kLightingIbl, iblLut);
 

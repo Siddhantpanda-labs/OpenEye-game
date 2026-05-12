@@ -35,10 +35,14 @@ namespace rendering {
  * Thread safety: not thread-safe. Construct + load on the render thread (same thread that
  * owns `RenderDevice`). Read-only access from `RenderScene::skybox` is safe per frame.
  *
- * **IBL probe swap is intentionally NOT part of v1.** Loading a cubemap here makes the sky
- * visually correct in the HDR buffer but does NOT re-bake `IblIrradianceCubemap` /
- * `IblPrefilterCubemap` from it — those continue to use the bootstrap defaults from
- * `IblDefaultProbes`. Tracked in `documentation/Render_Module/Render_steps_todo.md`.
+ * **IBL probe coverage:** `Kind::Cubemap` drives both the visual sky **and** the lighting
+ * pass's IBL term. The internal `SkyboxFeature::OnUpload` invokes
+ * `IBL::GenerateIrradianceAndPrefilter` once per unique source cubemap pointer (re-baked
+ * automatically when the asset id changes), then publishes the baked textures onto the
+ * `IblIrradianceCubemap` / `IblPrefilterCubemap` blackboard slots. `Kind::Procedural` /
+ * `Kind::None` fall back to `RasterFeature::GetDefaultEnvCubemap()` (the bootstrap neutral
+ * env) so deferred lighting always has a valid sample. The BRDF LUT slot is invariant per
+ * scene and continues to be published by `RasterFeature` (`IblDefaultProbes`).
  */
 class Skybox {
 public:

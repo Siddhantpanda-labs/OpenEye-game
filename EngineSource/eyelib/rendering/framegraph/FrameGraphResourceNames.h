@@ -55,9 +55,10 @@ inline constexpr const char* kShadowFeature = "ShadowFeature";
  *  only — does not own any blackboard slot today (line vertex buffer is feature-private). */
 inline constexpr const char* kEditorFeature = "EditorFeature";
 /** Sky feature (`features/raster/SkyboxFeature`): cubemap + procedural sky overlay onto
- *  `MainHdrRenderTarget`. Consumes the (caller-supplied) `samplerCube` only — does not own
- *  any blackboard slot. The IBL probe-swap follow-up (`IblIrradiance/Prefilter` slots taken
- *  over by a baked version of the user-supplied cubemap) is tracked in `Render_steps_todo.md`. */
+ *  `MainHdrRenderTarget`, plus the per-scene IBL probe pair. Owns `IblIrradianceCubemap`
+ *  + `IblPrefilterCubemap` (baked from the user-supplied cubemap when `Kind::Cubemap`,
+ *  fallback to `RasterFeature::GetDefaultEnvCubemap()` for procedural / none). The
+ *  invariant-per-scene `IblBrdfLut` stays under `kLightingIbl` (`RasterFeature`). */
 inline constexpr const char* kSkyboxFeature = "SkyboxFeature";
 
 }  // namespace writer_names

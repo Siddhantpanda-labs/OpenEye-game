@@ -47,6 +47,13 @@ public:
     void SetMeshResolver(const IMeshHandleResolver* resolver) noexcept;
     void SetRenderMode(RenderMode mode) noexcept { m_mode = mode; }
 
+    /** Bootstrap default environment cubemap (neutral / blue-ish). Owned by the internal
+     *  `IblDefaultProbes` and valid from the first `OnSchedulePasses` until `OnShutdown`.
+     *  Returns nullptr before the device is bound. Consumed by `SkyboxFeature` as the
+     *  fallback IBL source when no per-scene cubemap is set (procedural sky or `Kind::None`).
+     *  BRDF LUT publication stays inside this feature; see `OnSchedulePasses`. */
+    rhi::ITexture* GetDefaultEnvCubemap() noexcept { return m_iblDefaultProbes.EnvCubemap(); }
+
     /**
      * Gate the final `BlitMainHdrToDefaultPass` (swapchain blit + post-blit overlay invocation).
      * When `false`, the pass is **not** appended to the frame graph — used by editor-style

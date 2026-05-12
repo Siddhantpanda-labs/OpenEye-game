@@ -9,6 +9,7 @@
 #include "eyelib/core/Log.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+#include <cstring>
 #include <optional>
 
 namespace eyelib {
@@ -445,7 +446,42 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
     }
 
     rhi::ICommandList* cmd = device->GetActiveRecordingCommandList();
-    if (!cmd) return false;
+    if (!cmd) {
+        device->DestroyTexture(outIrradiance);
+        outIrradiance = nullptr;
+        device->DestroyTexture(outPrefilter);
+        outPrefilter = nullptr;
+        return false;
+    }
+
+    // Vulkan: `CommandListVK::BindTexture` only records a legacy slot — it does not call
+    // `vkCmdBindDescriptorSets`. The irradiance / prefilter pipelines use `PipelineLayoutKind::IBL`
+    // (set 0 = samplerCube), same as `IBL::Initialize` above — bind a real IBL descriptor set
+    // or validation fires VUID-vkCmdDrawIndexed-None-08600 on every face draw.
+    const char* backendName = device->GetShaderBackendName();
+    const bool requireDescriptorSetBind = backendName && std::strcmp(backendName, "vulkan") == 0;
+    rhi::IPipelineLayout* iblPassLayout = device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::IBLPass);
+    rhi::IDescriptorSet*  envIblSet     = nullptr;
+    if (iblPassLayout) {
+        envIblSet = device->CreateDescriptorSet(iblPassLayout);
+        if (!envIblSet) {
+            core::Log::Warn("IBL::GenerateIrradianceAndPrefilter: CreateDescriptorSet(IBLPass) failed.");
+            device->DestroyTexture(outIrradiance);
+            outIrradiance = nullptr;
+            device->DestroyTexture(outPrefilter);
+            outPrefilter = nullptr;
+            return false;
+        }
+        envIblSet->UpdateTexture(0, environmentCubemap);
+    }
+    if (requireDescriptorSetBind && !envIblSet) {
+        core::Log::Warn("IBL::GenerateIrradianceAndPrefilter: Vulkan requires IBL descriptor set binding; aborting bake.");
+        device->DestroyTexture(outIrradiance);
+        outIrradiance = nullptr;
+        device->DestroyTexture(outPrefilter);
+        outPrefilter = nullptr;
+        return false;
+    }
 
     const math::Mat4 captureProjection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 10.0f);
     const math::Mat4 captureViews[] = {
@@ -468,6 +504,12 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
         cmd->SetDepthWrite(false);
         cmd->SetCullFace(false);
         irradianceShader->Bind(device);
+        if (envIblSet) {
+            rhi::IDescriptorSet* sets[1] = { envIblSet };
+            cmd->BindDescriptorSets(0, 1, sets);
+        } else {
+            cmd->BindTexture(environmentCubemap, 0);
+        }
         irradianceShader->SetInt("u_EnvironmentMap", 0);
         if (backend::UseTypedPushConstants(device))
             abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
@@ -475,7 +517,6 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             irradianceShader->SetMat4("u_View", captureViews[face]);
             irradianceShader->SetMat4("u_Projection", captureProjection);
         }
-        cmd->BindTexture(environmentCubemap, 0);
         cubeMesh->Draw(device);
         irradianceShader->Unbind();
         cmd->SetRenderTarget(nullptr);
@@ -497,6 +538,12 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
             cmd->SetDepthWrite(false);
             cmd->SetCullFace(false);
             prefilterShader->Bind(device);
+            if (envIblSet) {
+                rhi::IDescriptorSet* sets[1] = { envIblSet };
+                cmd->BindDescriptorSets(0, 1, sets);
+            } else {
+                cmd->BindTexture(environmentCubemap, 0);
+            }
             prefilterShader->SetInt("u_EnvironmentMap", 0);
             if (backend::UseTypedPushConstants(device)) {
                 abi::WriteIblVertexPushConstants(cmd, captureProjection, captureViews[face]);
@@ -506,7 +553,6 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
                 prefilterShader->SetMat4("u_View", captureViews[face]);
                 prefilterShader->SetMat4("u_Projection", captureProjection);
             }
-            cmd->BindTexture(environmentCubemap, 0);
             cubeMesh->Draw(device);
             prefilterShader->Unbind();
             cmd->SetRenderTarget(nullptr);
@@ -517,6 +563,8 @@ bool IBL::GenerateIrradianceAndPrefilter(rhi::IDevice* device, rhi::ITexture* en
     // Generated as render targets; make them shader-readable for downstream frame-graph consumers.
     cmd->BarrierTexture(outIrradiance, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
     cmd->BarrierTexture(outPrefilter, rhi::ResourceState::RenderTarget, rhi::ResourceState::ShaderResource);
+
+    if (envIblSet) device->DestroyDescriptorSet(envIblSet);
 
     return true;
 }
