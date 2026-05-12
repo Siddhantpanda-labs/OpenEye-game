@@ -253,7 +253,7 @@ void SkyboxFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     }
 
     // Skip the rebake when the source pointer is unchanged. A new cubemap (different asset
-    // or hot-swap) shows up as a different `ITexture*` from `EditorSkyboxCache::GetOrLoad`;
+    // or hot-swap) shows up as a different `ITexture*` from `SkyboxCacheNew::GetOrLoad`;
     // the procedural capture cubemap is a stable feature-owned pointer until shutdown, so it
     // bakes exactly once on the first procedural-sky frame.
     if (src == m_bakedSource && m_bakedIrradiance && m_bakedPrefilter) return;

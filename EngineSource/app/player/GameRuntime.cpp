@@ -56,7 +56,8 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
                              eyelib::render::RenderBackend backend,
                              eyelib::api::RenderDevice sharedDevice,
                              const RuntimeOptions* options,
-                             eyelib::api::rendering::RenderDevice sharedRenderingDevice) {
+                             eyelib::api::rendering::RenderDevice sharedRenderingDevice,
+                             const WorldRenderBridgeExternalsNew* externalsNew) {
     if (m_ready) {
         Shutdown();
     }
@@ -87,7 +88,12 @@ bool GameRuntime::Initialize(eyelib::api::world::World& world,
         // Lifetime domain: shared rendering device (editor new stack) > legacy shared device > window-owned device.
         m_render = std::make_unique<WorldRenderBridge>();
         if (sharedRenderingDevice) {
-            if (!m_render->Initialize(sharedRenderingDevice, width, height, &assetRegistry)) {
+            // Embedded Play can borrow editor-owned rendering caches.
+            const bool ok =
+                externalsNew
+                    ? m_render->Initialize(sharedRenderingDevice, width, height, &assetRegistry, *externalsNew)
+                    : m_render->Initialize(sharedRenderingDevice, width, height, &assetRegistry);
+            if (!ok) {
                 m_render.reset();
                 return false;
             }

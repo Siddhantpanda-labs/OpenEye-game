@@ -54,10 +54,10 @@ set(EDITOR_SOURCES
     # Cold path during the M2/M3 dual-stack window per the M2.1 device-strategy decision;
     # exercised once `EditorContext::sceneViewPipelineNew` is set at the M3 closeout flip.
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilderNew.cpp
-    # Per-scene skybox cache (procedural / cross / six-face) over `api::rendering::Skybox`.
-    # Lifetime owned by `EditorApp` inside the same scope as the new pipelines so cubemap
-    # GPU textures are released before the RHI device is destroyed.
-    ${CMAKE_CURRENT_SOURCE_DIR}/EditorSkyboxCache.cpp
+    # Per-scene skybox cache moved to `app/player/SkyboxCacheNew.{h,cpp}` (2026-05-12) so
+    # editor preview and editor-embedded Play share a single cache instance — the editor
+    # passes its `EditorContext::skyboxCacheNew` straight into `GameRuntime` on Play start,
+    # avoiding a second cubemap upload pass against the same shared RHI device.
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorVulkanRenderSlice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstantiateOmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp
@@ -128,5 +128,5 @@ endif()
 # LNK2005 unless one definition wins. This is inherent to the M2–M4 dual-stack window;
 # remove when OpenEyeEditor stops linking EyelibRenderAPI (M5 / legacy decommission).
 if(MSVC)
-    target_link_options(OpenEyeEditor PRIVATE /FORCE:MULTIPLE)
+    target_link_options(OpenEyeEditor PRIVATE /FORCE:MULTIPLE /IGNORE:4006 /IGNORE:4075 /IGNORE:4088 /IGNORE:4099)
 endif()

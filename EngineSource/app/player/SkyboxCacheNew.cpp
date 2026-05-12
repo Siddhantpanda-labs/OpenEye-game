@@ -1,15 +1,15 @@
-#include "EditorSkyboxCache.h"
+#include "SkyboxCacheNew.h"
 
 #include "api/asset/AssetId.h"
 #include "api/asset/AssetRegistry.h"
 #include "api/core/Log.h"
-#include "api/platform/FileSystem.h"
+#include "api/platform/All.h"  // pulls FileSystem + the `eyelib::api::platform::filesystem` alias.
 
 #include "eyelib/world/SkyboxAssetId.h"
 
 #include <array>
 
-namespace openeye::editor {
+namespace openeye::player {
 
 namespace {
 
@@ -23,11 +23,12 @@ std::string JoinPath(const std::string& base, const std::string& leaf) {
 std::string ResolveAssetPath(const std::string& id,
                              const std::vector<std::string>& roots,
                              eyelib::api::AssetRegistry* registry) {
+    namespace fs = eyelib::api::platform::filesystem;
     if (id.empty()) return {};
-    if (api::platform::filesystem::FileExists(id)) return id;
+    if (fs::FileExists(id)) return id;
     for (const auto& root : roots) {
         const std::string candidate = JoinPath(root, id);
-        if (api::platform::filesystem::FileExists(candidate)) return candidate;
+        if (fs::FileExists(candidate)) return candidate;
     }
     if (registry) {
         eyelib::api::AssetId assetId = eyelib::api::AssetId::FromString(id);
@@ -41,7 +42,7 @@ std::string ResolveAssetPath(const std::string& id,
 
 } // namespace
 
-eyelib::api::rendering::Skybox* EditorSkyboxCache::GetOrLoad(
+eyelib::api::rendering::Skybox* SkyboxCacheNew::GetOrLoad(
     eyelib::api::rendering::RenderDevice device, const std::string& assetId,
     const std::vector<std::string>& assetRoots, eyelib::api::AssetRegistry* assetRegistry,
     uint32_t crossFaceSize) {
@@ -64,14 +65,15 @@ eyelib::api::rendering::Skybox* EditorSkyboxCache::GetOrLoad(
     const std::string resolved = ResolveAssetPath(normalizedId, assetRoots, assetRegistry);
     bool loaded = false;
     if (!resolved.empty()) {
-        if (api::platform::filesystem::IsDirectory(resolved)) {
+        namespace fs = eyelib::api::platform::filesystem;
+        if (fs::IsDirectory(resolved)) {
             static const char* kFaces[6] = {"posx.jpg", "negx.jpg", "posy.jpg", "negy.jpg", "posz.jpg", "negz.jpg"};
             std::array<std::string, 6> facePaths;
             bool allFound = true;
             for (int i = 0; i < 6; ++i) {
                 facePaths[i] = ResolveAssetPath(normalizedId + "/" + kFaces[i], assetRoots, assetRegistry);
                 if (facePaths[i].empty()) {
-                    eyelib::api::Log::WarnF("EditorSkyboxCache: missing face %s/%s",
+                    eyelib::api::Log::WarnF("SkyboxCacheNew: missing face %s/%s",
                                             normalizedId.c_str(), kFaces[i]);
                     allFound = false;
                     break;
@@ -86,9 +88,9 @@ eyelib::api::rendering::Skybox* EditorSkyboxCache::GetOrLoad(
     }
 
     if (!loaded) {
-        // Cache the failure as a "no sky" sentinel so we don't keep retrying the same broken
-        // asset each frame. Switching to a procedural fallback would mask the configuration
-        // mistake; mirror the legacy behaviour of "no skybox if asset failed".
+        // Cache the failure as a "no sky" sentinel so we don't keep retrying the same
+        // broken asset every frame. Falling back to procedural would mask configuration
+        // mistakes; mirror the legacy behaviour of "no skybox if asset failed".
         entry->Reset();
     }
 
@@ -97,4 +99,4 @@ eyelib::api::rendering::Skybox* EditorSkyboxCache::GetOrLoad(
     return raw;
 }
 
-} // namespace openeye::editor
+} // namespace openeye::player

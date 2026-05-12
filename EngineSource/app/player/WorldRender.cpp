@@ -2,6 +2,7 @@
 
 #include "BuiltinResourceManager.h"
 #include "RendererGPUResourceCache.h"
+#include "SkyboxCacheNew.h"
 #include "api/asset/AssetId.h"
 #include "api/asset/AssetRegistry.h"
 #include "api/animation/Skeleton.h"
@@ -215,6 +216,9 @@ bool WorldRenderBridge::Initialize(eyelib::api::Window& window, uint32_t width, 
         m_pipelineNew.AttachResourceCache(*m_resourceCacheNew);
         m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
         m_builtinManagerNew   = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+        // Standalone player owns its skybox cache (procedural / cross / six-face cubemaps
+        // resolved from `m_frameSnapshot.skyboxAssetId` and pinned in `RenderScene::skybox`).
+        m_skyboxCacheNewOwned = std::make_unique<SkyboxCacheNew>();
         m_ownsPresentation = true;
         m_width = width;
         m_height = height;
@@ -273,6 +277,61 @@ bool WorldRenderBridge::Initialize(eyelib::api::rendering::RenderDevice sharedDe
     m_pipelineNew.AttachResourceCache(*m_resourceCacheNew);
     m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(m_resourceCacheNew.get(), assetRegistry);
     m_builtinManagerNew = std::make_unique<BuiltinResourceManagerNew>(m_resourceCacheNew.get());
+    // Owned fallback for no-externals shared-device path.
+    m_skyboxCacheNewOwned = std::make_unique<SkyboxCacheNew>();
+    m_ownsPresentation = false;
+    m_width = width;
+    m_height = height;
+    m_usingNewPipeline = true;
+    if (assetRegistry) {
+        m_assetRegistryForResolver = assetRegistry;
+    }
+    m_ready = true;
+    return true;
+}
+
+bool WorldRenderBridge::Initialize(eyelib::api::rendering::RenderDevice sharedDevice, uint32_t width, uint32_t height,
+                                   eyelib::api::AssetRegistry* assetRegistry,
+                                   const WorldRenderBridgeExternalsNew& externals) {
+    if (!sharedDevice) {
+        return false;
+    }
+    if (!m_pipelineNew.InitializeWithSharedDevice(sharedDevice, width, height)) {
+        return false;
+    }
+    (void)m_rendererNew.Initialize();
+    m_rendererNew.SetDevice(sharedDevice);
+    m_pipelineNew.SetMode(eyelib::api::rendering::RenderPipeline::Mode::Hybrid);
+
+    // Record externals before attaching cache.
+    m_externalResourceCacheNew    = externals.resourceCache;
+    m_externalGpuResourceCacheNew = externals.gpuResolver;
+    m_externalBuiltinManagerNew   = externals.builtinManager;
+    m_externalSkyboxCacheNew      = externals.skyboxCache;
+
+    // Prefer external cache when provided.
+    if (m_externalResourceCacheNew) {
+        m_pipelineNew.AttachResourceCache(*m_externalResourceCacheNew);
+    } else {
+        m_resourceCacheNew = std::make_unique<eyelib::api::rendering::ResourceCache>(sharedDevice);
+        m_pipelineNew.AttachResourceCache(*m_resourceCacheNew);
+    }
+
+    // Prefer external resolver/builtin manager; otherwise create owned ones.
+    if (!m_externalGpuResourceCacheNew) {
+        eyelib::api::rendering::ResourceCache* effectiveCache =
+            m_externalResourceCacheNew ? m_externalResourceCacheNew : m_resourceCacheNew.get();
+        m_gpuResourceCacheNew = std::make_unique<RendererGPUResourceCacheNew>(effectiveCache, assetRegistry);
+    }
+    if (!m_externalBuiltinManagerNew) {
+        eyelib::api::rendering::ResourceCache* effectiveCache =
+            m_externalResourceCacheNew ? m_externalResourceCacheNew : m_resourceCacheNew.get();
+        m_builtinManagerNew = std::make_unique<BuiltinResourceManagerNew>(effectiveCache);
+    }
+    if (!m_externalSkyboxCacheNew) {
+        m_skyboxCacheNewOwned = std::make_unique<SkyboxCacheNew>();
+    }
+
     m_ownsPresentation = false;
     m_width = width;
     m_height = height;
@@ -352,14 +411,20 @@ void WorldRenderBridge::Shutdown() {
     m_defaultShader.reset();
     m_skinnedShader.reset();
 
-    // M4.1 / M4.3 — tear down cold `api/rendering` scaffolding before legacy pipeline (which owns the VkDevice).
-    // M4.4 — same teardown order on the new path; the new pipeline owns the device this time.
+    // External caches are detached only; owned caches are destroyed here.
+    m_skyboxCacheNewOwned.reset();
     m_builtinManagerNew.reset();
     m_gpuResourceCacheNew.reset();
-    if (m_resourceCacheNew) {
+    if (m_externalResourceCacheNew) {
+        m_pipelineNew.DetachResourceCache(*m_externalResourceCacheNew);
+    } else if (m_resourceCacheNew) {
         m_pipelineNew.DetachResourceCache(*m_resourceCacheNew);
     }
     m_resourceCacheNew.reset();
+    m_externalResourceCacheNew    = nullptr;
+    m_externalGpuResourceCacheNew = nullptr;
+    m_externalBuiltinManagerNew   = nullptr;
+    m_externalSkyboxCacheNew      = nullptr;
     m_pipelineNew.Shutdown();
     m_rendererNew.Shutdown();
 
@@ -1095,42 +1160,49 @@ void WorldRenderBridge::BuildParallelRenderSceneFromViews(
     outNew.spotLights.clear();
     outNew.directionalLightActive = false;
 
+    // Prefer external caches in embedded Play; otherwise use owned caches.
+    RendererGPUResourceCacheNew* effGpu =
+        m_externalGpuResourceCacheNew ? m_externalGpuResourceCacheNew : m_gpuResourceCacheNew.get();
+    BuiltinResourceManagerNew*   effBuiltin =
+        m_externalBuiltinManagerNew ? m_externalBuiltinManagerNew : m_builtinManagerNew.get();
+
     auto resolveHandles = [&](const std::string& meshRegistryKey, const std::string& materialAssetIdStr,
                               uint32_t& meshHandleOut, uint32_t& materialIdOut) {
         meshHandleOut = 0;
         materialIdOut = 0;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshRegistryKey) && m_builtinManagerNew) {
-            auto entry = m_builtinManagerNew->GetPrimitiveEntry(meshRegistryKey);
+        if (eyelib::api::geometry::IsBuiltinMeshId(meshRegistryKey) && effBuiltin) {
+            auto entry = effBuiltin->GetPrimitiveEntry(meshRegistryKey);
             meshHandleOut = entry.mesh.GetMeshHandle();
             materialIdOut = entry.material.GetMaterialId();
             // Per-instance material override below if the entity supplies one.
-        } else if (m_gpuResourceCacheNew && assetRegistry && !meshRegistryKey.empty()) {
+        } else if (effGpu && assetRegistry && !meshRegistryKey.empty()) {
             const eyelib::api::AssetId mid = assetRegistry->GetId(meshRegistryKey);
             if (mid.IsValid())
-                meshHandleOut = m_gpuResourceCacheNew->GetMesh(mid).GetMeshHandle();
+                meshHandleOut = effGpu->GetMesh(mid).GetMeshHandle();
         }
-        if (!materialAssetIdStr.empty() && m_gpuResourceCacheNew && assetRegistry) {
+        if (!materialAssetIdStr.empty() && effGpu && assetRegistry) {
             const eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetIdStr);
             if (matId.IsValid())
-                materialIdOut = m_gpuResourceCacheNew->GetMaterial(matId).GetMaterialId();
+                materialIdOut = effGpu->GetMaterial(matId).GetMaterialId();
         }
-        if (materialIdOut == 0 && m_builtinManagerNew) {
-            materialIdOut = m_builtinManagerNew->GetDefaultMaterial().GetMaterialId();
+        if (materialIdOut == 0 && effBuiltin) {
+            materialIdOut = effBuiltin->GetDefaultMaterial().GetMaterialId();
         }
     };
 
-    auto emitParallelDrawable = [&](eyelib::api::Drawable& drawable, const std::string& meshRegistryKey,
-                                    const std::string& materialAssetIdStr) {
-        if (drawable.material) {
-            eyelib::api::FillDrawableRenderParams(drawable.params, drawable.material, drawable.materialInstance);
-        }
+    auto emitParallelDrawable = [&](const std::string& meshRegistryKey,
+                                    const std::string& materialAssetIdStr,
+                                    const std::optional<::eyelib::world::components::Transform>& transform) {
         eyelib::api::rendering::DrawableInstance inst{};
         resolveHandles(meshRegistryKey, materialAssetIdStr, inst.meshHandle, inst.materialId);
-        inst.worldTransform = drawable.transform;
+        if (inst.meshHandle == 0) {
+            return;
+        }
+        if (transform) {
+            inst.worldTransform = TransformToMatrix(*transform);
+        }
         inst.localBounds = {};
-        inst.layer = eyelib::api::DrawableRoutesToTransparentPass(drawable)
-                         ? eyelib::api::rendering::DrawLayer::Transparent
-                         : eyelib::api::rendering::DrawLayer::Opaque;
+        inst.layer = eyelib::api::rendering::DrawLayer::Opaque;
         inst.flags = eyelib::api::rendering::draw_instance_flags::kCastShadow;
         if (inst.layer == eyelib::api::rendering::DrawLayer::Transparent)
             outNew.transparent.push_back(inst);
@@ -1146,91 +1218,14 @@ void WorldRenderBridge::BuildParallelRenderSceneFromViews(
         if (!renderable.lodMeshAssetIds.empty() && renderable.activeLOD < renderable.lodMeshAssetIds.size()) {
             meshId = renderable.lodMeshAssetIds[renderable.activeLOD];
         }
-        ModelEntry modelEntry;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            modelEntry = GetPrimitiveEntry(meshId);
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
-            if (meshResolved.empty())
-                continue;
-            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
-        }
-        if (!modelEntry.mesh)
-            continue;
-
-        eyelib::api::Drawable drawable;
-        drawable.mesh = modelEntry.mesh;
-        drawable.material = modelEntry.material;
-        drawable.submeshIndex = renderable.submeshIndex;
-        if (!renderable.materialAssetId.empty() && assetRegistry) {
-            if (auto material = ResolveMaterial(renderable.materialAssetId, assetRegistry))
-                drawable.material = material;
-        }
-        if (const auto transform = getTransform(entry.entity)) {
-            drawable.transform = TransformToMatrix(*transform);
-        }
-        if (drawable.material) {
-            const std::vector<eyelib::math::Mat4>* bones = nullptr;
-            if (animationBridge) {
-                bones = animationBridge->GetBoneMatrices(entry.entity);
-                if (bones && bones->empty())
-                    bones = nullptr;
-            }
-            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
-                bones = &modelEntry.bindPoseMatrices;
-            }
-            if (bones) {
-                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
-                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
-            }
-        }
-        emitParallelDrawable(drawable, meshId, renderable.materialAssetId);
+        emitParallelDrawable(meshId, renderable.materialAssetId, getTransform(entry.entity));
     }
 
     for (const auto& entry : meshRenderers) {
         const auto& renderer = entry.component;
         if (!renderer.visible || renderer.meshAssetId.empty())
             continue;
-        const std::string& meshId = renderer.meshAssetId;
-        ModelEntry modelEntry;
-        if (eyelib::api::geometry::IsBuiltinMeshId(meshId)) {
-            modelEntry = GetPrimitiveEntry(meshId);
-        } else {
-            const std::string meshResolved = ResolveAssetPath(meshId, options.assetRoots, assetRegistry);
-            if (meshResolved.empty())
-                continue;
-            modelEntry = LoadModelEntry(assetRegistry, meshResolved);
-        }
-        if (!modelEntry.mesh)
-            continue;
-
-        eyelib::api::Drawable drawable;
-        drawable.mesh = modelEntry.mesh;
-        drawable.material = modelEntry.material;
-        drawable.submeshIndex = renderer.submeshIndex;
-        if (!renderer.materialAssetId.empty() && assetRegistry) {
-            if (auto material = ResolveMaterial(renderer.materialAssetId, assetRegistry))
-                drawable.material = material;
-        }
-        if (const auto transform = getTransform(entry.entity)) {
-            drawable.transform = TransformToMatrix(*transform);
-        }
-        if (drawable.material) {
-            const std::vector<eyelib::math::Mat4>* bones = nullptr;
-            if (animationBridge) {
-                bones = animationBridge->GetBoneMatrices(entry.entity);
-                if (bones && bones->empty())
-                    bones = nullptr;
-            }
-            if (!bones && !modelEntry.bindPoseMatrices.empty()) {
-                bones = &modelEntry.bindPoseMatrices;
-            }
-            if (bones) {
-                drawable.materialInstance = GetSkinnedMaterialInstance(entry.entity, drawable.material);
-                drawable.materialInstance->SetMat4ArrayOverride("u_Bones", *bones);
-            }
-        }
-        emitParallelDrawable(drawable, meshId, renderer.materialAssetId);
+        emitParallelDrawable(renderer.meshAssetId, renderer.materialAssetId, getTransform(entry.entity));
     }
 
     if (!outNew.opaque.empty() || !outNew.transparent.empty())
@@ -1293,6 +1288,7 @@ void WorldRenderBridge::BuildParallelRenderSceneFromViews(
                 outNew.camera.projection = eyelib::api::camera::BuildOrthographicProjection(
                     cameraComponent.orthoSize, aspect, cameraComponent.nearPlane, cameraComponent.farPlane);
             }
+            outNew.camera.projection[1][1] = -outNew.camera.projection[1][1];
 
             outNew.camera.view = eyelib::api::camera::BuildViewFromWorldTransform(
                 cameraTransform.position, cameraTransform.rotation, cameraTransform.scale);
@@ -1307,6 +1303,7 @@ void WorldRenderBridge::BuildParallelRenderSceneFromViews(
             (m_height > 0) ? static_cast<float>(m_width) / static_cast<float>(m_height) : 1.0f;
         outNew.camera.projection =
             eyelib::api::camera::BuildPerspectiveProjectionDegrees(60.0f, aspect, 0.1f, 1000.0f);
+        outNew.camera.projection[1][1] = -outNew.camera.projection[1][1];
         outNew.camera.view =
             eyelib::api::camera::BuildLookAtView({0.0f, 2.0f, 5.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
         outNew.camera.viewPos = {0.0f, 2.0f, 5.0f};
@@ -1355,6 +1352,16 @@ void WorldRenderBridge::BuildParallelRenderSceneFromViews(
             outNew.spotLights.push_back(spot);
         }
     }
+
+    // Resolve per-scene skybox through active cache.
+    SkyboxCacheNew* effSky =
+        m_externalSkyboxCacheNew ? m_externalSkyboxCacheNew : m_skyboxCacheNewOwned.get();
+    if (effSky) {
+        outNew.skybox = effSky->GetOrLoad(m_pipelineNew.GetDevice(), m_frameSnapshot.skyboxAssetId,
+                                          options.assetRoots, assetRegistry,
+                                          eyelib::world::skybox::kDefaultCrossFaceSize);
+    }
+    outNew.skyboxBrightness = 1.0f;
 }
 
 void WorldRenderBridge::Render(const RuntimeOptions& options, eyelib::api::world::World& world,
@@ -1530,9 +1537,7 @@ bool WorldRenderBridge::RenderSceneOnlyNew(const eyelib::api::rendering::RenderS
     if (width != m_width || height != m_height) {
         ApplyResize(width, height);
     }
-    if (!m_pipelineNew.HasValidOutput()) {
-        return false;
-    }
+    // Render first; `HasValidOutput()` becomes true only after first successful render.
     // M3.9 — `Render` is record-only on the new façade; frame open/close + present are driven
     // by `BeginPresentFrame()` (called before by the bridge) + `BlitToScreenIfOwner()` (after).
     m_pipelineNew.Render(sceneNew);

@@ -448,6 +448,11 @@ void RenderPipeline::Resize(uint32_t width, uint32_t height) {
 void RenderPipeline::Shutdown() {
     if (!m_impl) return;
 
+    // Ensure no in-flight work references resources destroyed below.
+    if (m_impl->device) {
+        m_impl->device->Finish();
+    }
+
     // Drop the cache attachment first so the cache stops pushing material updates into a
     // pipeline whose features / world are about to be torn down.
     if (m_impl->attachedCache) {

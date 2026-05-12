@@ -5,6 +5,7 @@
 #include "BuiltinResourceManagerNew.h"
 #include "RendererGPUResourceCache.h"
 #include "RendererGPUResourceCacheNew.h"
+#include "SkyboxCacheNew.h"
 
 #include "api/asset/All.h"
 #include "api/core/FrameAllocator.h"
@@ -31,6 +32,14 @@ namespace openeye::player {
 
 class WorldAnimationBridge;
 
+/** Borrowed editor-owned caches for embedded Play on shared `api/rendering` device. */
+struct WorldRenderBridgeExternalsNew {
+    eyelib::api::rendering::ResourceCache* resourceCache = nullptr;
+    RendererGPUResourceCacheNew*           gpuResolver = nullptr;
+    BuiltinResourceManagerNew*             builtinManager = nullptr;
+    SkyboxCacheNew*                        skyboxCache = nullptr;
+};
+
 /**
  * Per-frame render snapshot wiring:
  * - Call BindWorldSnapshotCapture(world) once after Initialize() when this bridge owns presentation with that world.
@@ -48,6 +57,10 @@ public:
     /** Editor: shared `api/rendering` device (embedded Play). Legacy stacks stay default-constructed. */
     bool Initialize(eyelib::api::rendering::RenderDevice sharedDevice, uint32_t width, uint32_t height,
                     eyelib::api::AssetRegistry* assetRegistry);
+    /** Shared-device init that borrows editor-owned caches where provided. */
+    bool Initialize(eyelib::api::rendering::RenderDevice sharedDevice, uint32_t width, uint32_t height,
+                    eyelib::api::AssetRegistry* assetRegistry,
+                    const WorldRenderBridgeExternalsNew& externals);
     void Shutdown();
 
     /**
@@ -237,6 +250,13 @@ private:
      *  device and these adapters become live in lock-step. */
     std::unique_ptr<RendererGPUResourceCacheNew> m_gpuResourceCacheNew;
     std::unique_ptr<BuiltinResourceManagerNew>   m_builtinManagerNew;
+    /** Owned skybox cache used when no external skybox cache is provided. */
+    std::unique_ptr<SkyboxCacheNew> m_skyboxCacheNewOwned;
+    /** Borrowed editor-owned caches (non-owning). */
+    eyelib::api::rendering::ResourceCache* m_externalResourceCacheNew = nullptr;
+    RendererGPUResourceCacheNew*           m_externalGpuResourceCacheNew = nullptr;
+    BuiltinResourceManagerNew*             m_externalBuiltinManagerNew = nullptr;
+    SkyboxCacheNew*                        m_externalSkyboxCacheNew = nullptr;
     /** M4.4 — runtime flag mirroring `kUseNewRenderPipeline` for the active `Initialize`
      *  call (standalone only; embedded mode forces it false). All hot-path methods branch
      *  on this so the legacy stack stays the source of truth when off. */

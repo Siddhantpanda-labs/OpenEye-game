@@ -54,6 +54,12 @@ set(GAME_RUNTIME_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/RendererGPUResourceCacheNew.h
     ${CMAKE_CURRENT_SOURCE_DIR}/BuiltinResourceManagerNew.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/BuiltinResourceManagerNew.h
+    # Per-scene skybox cache (procedural / cross / six-face) over `api::rendering::Skybox`.
+    # Shared between the standalone player and editor-embedded play so the live Play
+    # session reuses cubemap textures the editor scene-view preview already uploaded
+    # (no double allocation on the same RHI device).
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxCacheNew.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/SkyboxCacheNew.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldPhysics.h
     ${CMAKE_CURRENT_SOURCE_DIR}/WorldAnimation.cpp

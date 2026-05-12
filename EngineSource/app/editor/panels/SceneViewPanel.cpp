@@ -3,7 +3,7 @@
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "EditorSceneBuilderNew.h"
-#include "EditorSkyboxCache.h"
+#include "SkyboxCacheNew.h"
 #include "ui/LightGizmoIcons.h"
 #include "PanelCommon.h"
 

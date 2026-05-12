@@ -5,6 +5,7 @@
 #include "EditorSceneBuilder.h"
 #include "ScenePipelineMode.h"
 #include "GameRuntime.h"
+#include "WorldRender.h"  // WorldRenderBridgeExternalsNew (embedded-Play borrowed caches)
 #include "api/platform/All.h"
 #include "api/core/All.h"
 #include "api/render/RenderDevice.h"
@@ -174,8 +175,15 @@ void ShowMenuBar(EditorContext& ctx) {
                     newShared = ctx.sceneViewPipelineNew->GetDevice();
                 bool okInit = false;
                 if (newShared) {
+                    // Reuse editor caches in embedded Play to avoid cold-start resources.
+                    openeye::player::WorldRenderBridgeExternalsNew externals{};
+                    externals.resourceCache  = ctx.resourceCacheNew;
+                    externals.gpuResolver    = ctx.gpuResolverNew;
+                    externals.builtinManager = ctx.builtinManagerNew;
+                    externals.skyboxCache    = ctx.skyboxCacheNew;
                     okInit = ctx.gameRuntime->Initialize(ctx.world, *ctx.assetRegistry, ctx.assetRoots, ctx.window, 256, 256,
-                        eyelib::render::RenderBackend::Vulkan, eyelib::api::RenderDevice{}, nullptr, newShared);
+                        eyelib::render::RenderBackend::Vulkan, eyelib::api::RenderDevice{}, nullptr, newShared,
+                        &externals);
                 } else {
                     eyelib::api::RenderDevice editorDevice =
                         ctx.sceneViewPipeline ? ctx.sceneViewPipeline->GetDevice() : eyelib::api::RenderDevice();

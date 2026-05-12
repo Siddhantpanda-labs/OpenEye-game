@@ -3,7 +3,7 @@
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "EditorSceneBuilderNew.h"
-#include "EditorSkyboxCache.h"
+#include "SkyboxCacheNew.h"
 #include "GameRuntime.h"
 
 #include "api/math/TransformUtils.h"
@@ -91,7 +91,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
         void* texId = ResolveGamePanelTextureId(ctx, ctx->gameRuntime->GetOutputColorTextureNativeHandle());
         if (texId) {
             ImVec2 size(static_cast<float>(w), static_cast<float>(h));
-            ImGui::Image(texId, size, ImVec2(0, 1), ImVec2(1, 0));
+            ImGui::Image(texId, size, ImVec2(0, 0), ImVec2(1, 1));
         } else {
             ImGui::TextUnformatted("No output");
         }
@@ -176,7 +176,6 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 sceneNew.camera.farPlane = camComp.farPlane;
                 sceneNew.camera.projection = eyelib::math::Perspective(fovRad, aspect,
                     sceneNew.camera.nearPlane, sceneNew.camera.farPlane);
-                sceneNew.camera.projection[1][1] = -sceneNew.camera.projection[1][1];
                 const eyelib::math::Mat4 worldM = eyelib::math::Compose(
                     camTransform.position, camTransform.rotation, camTransform.scale);
                 sceneNew.camera.view = eyelib::math::Inverse(worldM);

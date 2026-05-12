@@ -49,6 +49,7 @@ class WorldPhysicsBridge;
 class WorldAnimationBridge;
 class WorldScriptingBridge;
 class WorldAudioBridge;
+struct WorldRenderBridgeExternalsNew;  // see WorldRender.h — borrowed editor caches for embedded Play.
 
 /**
  * Single-threaded game runtime for embedding (e.g. editor Game view) and standalone player.
@@ -72,7 +73,10 @@ public:
     /** Initialize physics, animation, scripting, audio; optionally render when window is non-null.
      * When window is null (headless), only Tick() is valid; Render() is a no-op.
      * When sharedDevice is valid (e.g. editor), render uses that device; otherwise creates from window.
-     * options: when non-null, fixedTimestep/maxSubsteps etc. are applied (standalone player). */
+     * options: when non-null, fixedTimestep/maxSubsteps etc. are applied (standalone player).
+     *
+     * \a externalsNew (optional): in embedded Play with \a sharedRenderingDevice, borrow
+     * editor-owned rendering caches instead of creating local ones. */
     bool Initialize(eyelib::api::world::World& world,
                     eyelib::api::AssetRegistry& assetRegistry,
                     const std::vector<std::string>& assetRoots,
@@ -81,7 +85,8 @@ public:
                     eyelib::render::RenderBackend backend = eyelib::render::RenderBackend::Default,
                     eyelib::api::RenderDevice sharedDevice = eyelib::api::RenderDevice(),
                     const RuntimeOptions* options = nullptr,
-                    eyelib::api::rendering::RenderDevice sharedRenderingDevice = {});
+                    eyelib::api::rendering::RenderDevice sharedRenderingDevice = {},
+                    const WorldRenderBridgeExternalsNew* externalsNew = nullptr);
 
     void Shutdown();
 

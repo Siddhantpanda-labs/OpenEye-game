@@ -13,11 +13,10 @@ namespace openeye { namespace player {
 class GameRuntime;
 class RendererGPUResourceCacheNew;   // runtime-shared resource resolver (api/rendering)
 class BuiltinResourceManagerNew;     // runtime-shared builtin primitive vendor (api/rendering)
+class SkyboxCacheNew;                // runtime-shared per-scene skybox cache (api/rendering)
 } }
 
 namespace openeye::editor {
-
-class EditorSkyboxCache;  // see EditorSkyboxCache.h — per-scene cubemap cache.
 
 /** Editor camera for scene view (free-fly). WASD + Q/E move, right-drag rotates. */
 struct EditorCamera {
@@ -109,14 +108,19 @@ struct EditorContext {
      */
     openeye::player::BuiltinResourceManagerNew* builtinManagerNew = nullptr;
     /**
-     * Editor skybox cache: resolves the world's `skyboxAssetId` to a public
+     * Per-scene skybox cache: resolves the world's `skyboxAssetId` to a public
      * `api::rendering::Skybox` (procedural / cross / six-face) once and reuses it across
      * frames. Wired into `RenderScene::skybox` by the scene + game view panels so the
      * new `SkyboxFeature` overlay runs without leaking sky-loader logic into the panels.
+     * Same cache is also handed to `GameRuntime` on Play so the live session reuses the
+     * cubemap textures the editor preview already uploaded against this RHI device.
      * Lifetime owned by `EditorApp` inside the same scope as `gpuResolverNew` so cubemap
      * GPU textures are destroyed before the RHI device is torn down.
+     *
+     * Type lives in the `openeye::player` namespace because both editor preview and
+     * editor-embedded Play need the same cache semantics — see SkyboxCacheNew.h.
      */
-    openeye::editor::EditorSkyboxCache* skyboxCacheNew = nullptr;
+    openeye::player::SkyboxCacheNew* skyboxCacheNew = nullptr;
     /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
     ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;
