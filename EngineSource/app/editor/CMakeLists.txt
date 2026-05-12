@@ -54,6 +54,10 @@ set(EDITOR_SOURCES
     # Cold path during the M2/M3 dual-stack window per the M2.1 device-strategy decision;
     # exercised once `EditorContext::sceneViewPipelineNew` is set at the M3 closeout flip.
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilderNew.cpp
+    # Per-scene skybox cache (procedural / cross / six-face) over `api::rendering::Skybox`.
+    # Lifetime owned by `EditorApp` inside the same scope as the new pipelines so cubemap
+    # GPU textures are released before the RHI device is destroyed.
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorSkyboxCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorVulkanRenderSlice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/InstantiateOmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/MenuBar.cpp

@@ -16,32 +16,11 @@
               1.0,
               1.0
             ],
-            "type": 1
+            "type": 0
           },
           "entity": {
             "generation": 0,
-            "index": 4
-          }
-        },
-        {
-          "data": {
-            "center": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "height": 1.0,
-            "radius": 0.5,
-            "size": [
-              1.0,
-              1.0,
-              1.0
-            ],
-            "type": 1
-          },
-          "entity": {
-            "generation": 0,
-            "index": 3
+            "index": 0
           }
         },
         {
@@ -79,11 +58,32 @@
               1.0,
               1.0
             ],
-            "type": 0
+            "type": 1
           },
           "entity": {
             "generation": 0,
-            "index": 0
+            "index": 3
+          }
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "height": 1.0,
+            "radius": 0.5,
+            "size": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "type": 1
+          },
+          "entity": {
+            "generation": 0,
+            "index": 4
           }
         }
       ],
@@ -91,6 +91,44 @@
     },
     "Light": {
       "items": [
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 1.0,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 2
+          },
+          "entity": {
+            "generation": 0,
+            "index": 7
+          }
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerCone": 15.0,
+            "intensity": 5.0,
+            "outerCone": 30.0,
+            "range": 10.0,
+            "type": 0
+          },
+          "entity": {
+            "generation": 0,
+            "index": 6
+          }
+        },
         {
           "data": {
             "castShadows": true,
@@ -109,25 +147,6 @@
             "generation": 0,
             "index": 5
           }
-        },
-        {
-          "data": {
-            "castShadows": true,
-            "color": [
-              1.0,
-              1.0,
-              1.0
-            ],
-            "innerCone": 15.0,
-            "intensity": 1.0,
-            "outerCone": 30.0,
-            "range": 10.0,
-            "type": 0
-          },
-          "entity": {
-            "generation": 0,
-            "index": 6
-          }
         }
       ],
       "version": 1
@@ -138,14 +157,14 @@
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "NewMaterial.mat",
-            "meshAssetId": "builtin://Sphere",
+            "materialAssetId": "",
+            "meshAssetId": "builtin://Cube",
             "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 4
+            "index": 0
           }
         },
         {
@@ -153,13 +172,13 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
-            "meshAssetId": "builtin://Sphere",
+            "meshAssetId": "builtin://Cone",
             "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 3
+            "index": 1
           }
         },
         {
@@ -181,27 +200,27 @@
             "activeLOD": 0,
             "lodMeshAssetIds": [],
             "materialAssetId": "",
-            "meshAssetId": "builtin://Cone",
+            "meshAssetId": "builtin://Sphere",
             "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 1
+            "index": 3
           }
         },
         {
           "data": {
             "activeLOD": 0,
             "lodMeshAssetIds": [],
-            "materialAssetId": "",
-            "meshAssetId": "builtin://Cube",
+            "materialAssetId": "NewMaterial.mat",
+            "meshAssetId": "builtin://Sphere",
             "submeshIndex": -1,
             "visible": true
           },
           "entity": {
             "generation": 0,
-            "index": 0
+            "index": 4
           }
         }
       ],
@@ -394,20 +413,44 @@
               0.0
             ],
             "rotation": [
-              1.0,
-              0.0,
-              0.0,
-              0.0
+              0.5559570789337158,
+              -0.7957578301429749,
+              0.19687050580978394,
+              0.13756217062473297
             ],
             "scale": [
-              1.0,
-              1.0,
-              1.0
+              0.9999971985816956,
+              1.0000730752944946,
+              1.0000572204589844
             ]
           },
           "entity": {
             "generation": 0,
             "index": 6
+          }
+        },
+        {
+          "data": {
+            "position": [
+              0.20493322610855103,
+              10.185701370239258,
+              11.473713874816895
+            ],
+            "rotation": [
+              0.6109607219696045,
+              0.0608861930668354,
+              -0.78542560338974,
+              -0.07827213406562805
+            ],
+            "scale": [
+              1.0000346899032593,
+              1.0000067949295044,
+              1.000028371810913
+            ]
+          },
+          "entity": {
+            "generation": 0,
+            "index": 7
           }
         }
       ],
@@ -420,42 +463,18 @@
       {
         "entity": {
           "generation": 0,
-          "index": 4
+          "index": 7
         },
         "flags": 0,
-        "name": "Sphere1"
+        "name": "Spot Light"
       },
       {
         "entity": {
           "generation": 0,
-          "index": 3
+          "index": 6
         },
         "flags": 0,
-        "name": "Sphere"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 2
-        },
-        "flags": 0,
-        "name": "Torus"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 1
-        },
-        "flags": 0,
-        "name": "Cone"
-      },
-      {
-        "entity": {
-          "generation": 0,
-          "index": 0
-        },
-        "flags": 0,
-        "name": "Cube"
+        "name": "Directional Light"
       },
       {
         "entity": {
@@ -468,10 +487,42 @@
       {
         "entity": {
           "generation": 0,
-          "index": 6
+          "index": 0
         },
         "flags": 0,
-        "name": "Directional Light"
+        "name": "Cube"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 1
+        },
+        "flags": 0,
+        "name": "Cone"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 2
+        },
+        "flags": 0,
+        "name": "Torus"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 3
+        },
+        "flags": 0,
+        "name": "Sphere"
+      },
+      {
+        "entity": {
+          "generation": 0,
+          "index": 4
+        },
+        "flags": 0,
+        "name": "Sphere1"
       }
     ],
     "tags": []
@@ -479,6 +530,7 @@
   "registry": {
     "freeList": [],
     "generations": [
+      0,
       0,
       0,
       0,

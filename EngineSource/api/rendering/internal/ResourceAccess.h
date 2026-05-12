@@ -26,6 +26,7 @@
 #include "api/rendering/MaterialRecord.h"
 #include "api/rendering/Mesh.h"
 #include "api/rendering/Shader.h"
+#include "api/rendering/Skybox.h"
 #include "api/rendering/Texture2D.h"
 #include "api/rendering/Texture3D.h"
 #include "api/rendering/TextureArray.h"
@@ -48,6 +49,8 @@ class TextureCube;
 class Shader;
 
 class IMeshHandleResolver;  // M3.7b — implemented privately by `ResourceCache::Impl`
+
+namespace rhi { struct ITexture; }
 }}
 
 namespace eyelib {
@@ -103,6 +106,25 @@ public:
 class TextureCubeAccess {
 public:
     static TextureCube Wrap(std::shared_ptr<eyelib::rendering::TextureCube> internalTexture);
+};
+
+/**
+ * @brief Friend-only access seam for `Skybox`.
+ *
+ * Used by `RenderPipeline.cpp` to translate a public `Skybox` handle into the per-frame
+ * `SkyboxRequest` the new module's `SkyboxFeature` consumes. Outside `EyelibRenderingAPI`
+ * this remains private (same invariant as the rest of this header).
+ */
+class SkyboxAccess {
+public:
+    /** Resolved internal-side request payload (no façade types). `cubemap` is null when
+     *  the skybox is procedural / none / has not loaded successfully. */
+    struct Request {
+        Skybox::Kind                       kind    = Skybox::Kind::None;
+        eyelib::rendering::rhi::ITexture*  cubemap = nullptr;
+    };
+
+    static Request Resolve(const Skybox& publicSkybox) noexcept;
 };
 
 class Texture3DAccess {

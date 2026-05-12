@@ -61,6 +61,11 @@ set(API_RENDERING_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Textures.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Shader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/Shader.cpp
+    # Per-scene sky source (cubemap + procedural + none). Implemented as a PIMPL wrapper
+    # around the internal `eyelib::rendering::TextureCube`; consumed by `SkyboxFeature`
+    # through the friend-only `SkyboxAccess` seam.
+    ${CMAKE_CURRENT_SOURCE_DIR}/Skybox.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Skybox.cpp
     # Internal seam — friend-only construction helpers. NEVER include from outside this lib.
     ${CMAKE_CURRENT_SOURCE_DIR}/internal/ResourceAccess.h
     ${CMAKE_CURRENT_SOURCE_DIR}/RenderingApi.cpp

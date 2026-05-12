@@ -3,6 +3,7 @@
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "EditorSceneBuilderNew.h"
+#include "EditorSkyboxCache.h"
 #include "ui/LightGizmoIcons.h"
 #include "PanelCommon.h"
 
@@ -13,10 +14,12 @@
 #include "api/rendering/RenderPipeline.h"
 #include "api/rendering/RenderScene.h"
 #include "api/rendering/RenderSliceScope.h"
+#include "api/rendering/Skybox.h"
 #include "api/world/All.h"
 #include "api/math/TransformUtils.h"
 #include "api/debug/Profiler.h"
 #include "eyelib/render/rhi/RHI.h"
+#include "eyelib/world/SkyboxAssetId.h"
 
 #include "ImGuizmo.h"
 
@@ -287,6 +290,15 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             s_newBuilder.Build(newScene, newSnapshot, ctx->editorCamera, w, h, ctx->assetRoots,
                 ctx->assetRegistry, nullptr, nullptr,
                 ctx->gpuResolverNew, ctx->builtinManagerNew);
+            // Resolve the world's skybox asset id once per frame and attach to the public
+            // scene POD. The cache owns the `Skybox` lifetime; we just borrow a pointer
+            // until the next `Render` returns.
+            if (ctx->skyboxCacheNew) {
+                const std::string skyId = ctx->world.GetSkyboxAssetId();
+                newScene.skybox = ctx->skyboxCacheNew->GetOrLoad(
+                    ctx->sceneViewPipelineNew->GetDevice(), skyId, ctx->assetRoots,
+                    ctx->assetRegistry, eyelib::world::skybox::kDefaultCrossFaceSize);
+            }
             eyelib::api::debug::Profiler::EndSample();
 
             // M3.6 — bracket new-pipeline recording in the api/rendering slice scope so

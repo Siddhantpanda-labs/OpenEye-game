@@ -21,6 +21,10 @@ struct ShaderPermutationKey {
         RasterDeferredLighting = 3,
         /** Editor debug-line overlay (line list, depth-tested, no depth write). */
         EditorDebugLines = 4,
+        /** Sky pass: samples a `samplerCube` at the far-plane direction (per-scene env cubemap). */
+        SkyboxCubemap = 5,
+        /** Sky pass: analytic gradient sky shader (no cubemap input). */
+        SkyboxProcedural = 6,
     };
 
     ProgramId program = ProgramId::RasterComposeBootstrap;

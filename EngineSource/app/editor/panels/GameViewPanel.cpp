@@ -3,6 +3,7 @@
 #include "EditorContext.h"
 #include "EditorSceneBuilder.h"
 #include "EditorSceneBuilderNew.h"
+#include "EditorSkyboxCache.h"
 #include "GameRuntime.h"
 
 #include "api/math/TransformUtils.h"
@@ -12,11 +13,13 @@
 #include "api/rendering/RenderPipeline.h"
 #include "api/rendering/RenderScene.h"
 #include "api/rendering/RenderSliceScope.h"
+#include "api/rendering/Skybox.h"
 #include "api/world/All.h"
 #include "api/debug/Profiler.h"
 #include "eyelib/math/TransformUtils.h"
 #include "eyelib/math/Types.h"
 #include "eyelib/vr/XRViewHelpers.h"
+#include "eyelib/world/SkyboxAssetId.h"
 
 #include <imgui.h>
 #include <cmath>
@@ -154,6 +157,14 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 s_builderNew.Build(sceneNew, snapshot, ctx->editorCamera, w, h, ctx->assetRoots,
                     ctx->assetRegistry, nullptr, nullptr,
                     ctx->gpuResolverNew, ctx->builtinManagerNew);
+                // Match SceneViewPanel: attach the world's resolved skybox so the new
+                // `SkyboxFeature` overlays the procedural / cubemap sky onto the game view.
+                if (ctx->skyboxCacheNew) {
+                    sceneNew.skybox = ctx->skyboxCacheNew->GetOrLoad(
+                        ctx->gameViewPipelineNew->GetDevice(),
+                        snapshot.skyboxAssetId, ctx->assetRoots,
+                        ctx->assetRegistry, eyelib::world::skybox::kDefaultCrossFaceSize);
+                }
                 eyelib::api::debug::Profiler::EndSample();
 
                 // Override editor-camera view with the scene-camera transform + projection,

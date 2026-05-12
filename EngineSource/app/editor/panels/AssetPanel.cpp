@@ -60,9 +60,15 @@ struct MaterialDragPayload {
 };
 static constexpr const char* kMaterialPayloadType = "OpenEyeMaterial";
 
-/** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty). */
+/** Minimal empty scene JSON (version 1; loader accepts this and keeps state empty).
+ *  `skybox":"evening"` resolves through `eyelib::world::skybox::NormalizeSkyboxAssetId` to
+ *  `Skybox/SkyMap/Cubemap_Sky_512x512.png` (bundled 512 px horizontal-cross cubemap) so a
+ *  freshly-created editor scene comes up with a visible sky instead of an empty procedural
+ *  gradient. Mirrors `PlaygroundProject::kMinimalEmptySceneJson` and matches the loader's
+ *  fallback contract (key missing → procedural) so legacy scenes that omit the key keep their
+ *  current behaviour. */
 static const char* GetEmptySceneJson() {
-    return "{\"version\":1,\"renderPipelineMode\":\"Hybrid\"}";
+    return "{\"version\":1,\"renderPipelineMode\":\"Hybrid\",\"skybox\":\"evening\"}";
 }
 
 /** Close the current window. Docked panels are child windows and must use EndChild(). */

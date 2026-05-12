@@ -1,6 +1,7 @@
 #include "EditorApp.h"
 
 #include "EditorContext.h"
+#include "EditorSkyboxCache.h"
 #include "EditorProject.h"
 #include "EditorSceneBuilder.h"
 #include "ScenePipelineMode.h"
@@ -531,6 +532,9 @@ int RunEditor(int argc, char** argv) {
                 resourceCache.get(), &assetRegistry);
             auto builtinManagerNew = std::make_unique<openeye::player::BuiltinResourceManagerNew>(
                 resourceCache.get());
+            // Per-scene skybox cache. Lifetime ends with this scope so cubemap textures are
+            // released before the editor pipelines (and the underlying RHI device) tear down.
+            auto skyboxCacheNew = std::make_unique<openeye::editor::EditorSkyboxCache>();
 
             openeye::editor::EditorContext ctx;
             ctx.sceneViewPipeline = nullptr;
@@ -542,6 +546,7 @@ int RunEditor(int argc, char** argv) {
             ctx.resourceCacheNew = resourceCache.get();
             ctx.gpuResolverNew = gpuResolverNew.get();
             ctx.builtinManagerNew = builtinManagerNew.get();
+            ctx.skyboxCacheNew = skyboxCacheNew.get();
             ctx.assetRegistry = &assetRegistry;
             ctx.assetRoots = { engineAssets };
             ctx.engineAssetsPath = engineAssets;

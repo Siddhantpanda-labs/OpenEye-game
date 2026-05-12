@@ -6,6 +6,7 @@
 #include "api/rendering/MaterialRecord.h"
 #include "api/rendering/RenderScene.h"
 #include "api/rendering/ResourceCache.h"
+#include "api/rendering/Skybox.h"
 #include "api/rendering/internal/ResourceAccess.h"
 
 #include "eyelib/rendering/core/RenderResources.h"
@@ -13,6 +14,8 @@
 #include "eyelib/rendering/features/editor/DebugLine.h"
 #include "eyelib/rendering/features/editor/EditorFeature.h"
 #include "eyelib/rendering/features/raster/RasterFeature.h"
+#include "eyelib/rendering/features/raster/SkyboxFeature.h"
+#include "eyelib/rendering/features/raster/SkyboxRequest.h"
 #include "eyelib/rendering/features/shadows/ShadowFeature.h"
 #include "eyelib/rendering/framegraph/BlackboardSlot.h"
 #include "eyelib/rendering/framegraph/FrameGraphBlackboard.h"
@@ -228,6 +231,11 @@ public:
     std::unique_ptr<eyelib::rendering::RenderWorld> world;
     std::unique_ptr<eyelib::rendering::RasterFeature> raster;
     std::unique_ptr<eyelib::rendering::ShadowFeature> shadow;
+    // Optional sky feature (cubemap + procedural). Always subscribed so the per-frame
+    // `RenderScene::skybox` push lights it up without a re-subscribe handshake; truly
+    // zero per-frame cost when no caller supplies a skybox (`OnSchedulePasses` no-ops
+    // when the request kind is `None`).
+    std::unique_ptr<eyelib::rendering::SkyboxFeature> sky;
     // Editor overlay feature (debug-line drawing today; entity-ID pass future). Always subscribed
     // so the SetPendingDebugLines* / RenderDebugLines surfaces work without a re-subscribe handshake;
     // truly zero per-frame cost when no caller has supplied lines (`OnSchedulePasses` skips the pass).
@@ -294,6 +302,7 @@ public:
             Log::Warn("RenderPipeline: Mode::ForwardPlus is not yet implemented; falling back to Forward.");
         }
         shadow = std::make_unique<eyelib::rendering::ShadowFeature>();
+        sky    = std::make_unique<eyelib::rendering::SkyboxFeature>();
         editor = std::make_unique<eyelib::rendering::EditorFeature>();
 
         if (!world->TrySubscribeFeature(raster.get())) {
@@ -302,6 +311,10 @@ public:
         }
         if (!world->TrySubscribeFeature(shadow.get())) {
             Log::Error("RenderPipeline::Initialize: failed to subscribe ShadowFeature.");
+            return false;
+        }
+        if (!world->TrySubscribeFeature(sky.get())) {
+            Log::Error("RenderPipeline::Initialize: failed to subscribe SkyboxFeature.");
             return false;
         }
         if (!world->TrySubscribeFeature(editor.get())) {
@@ -315,10 +328,12 @@ public:
 
     void TeardownWorldAndFeatures() {
         if (world && editor) world->TryUnsubscribeFeature(editor.get());
+        if (world && sky)    world->TryUnsubscribeFeature(sky.get());
         if (world && raster) world->TryUnsubscribeFeature(raster.get());
         if (world && shadow) world->TryUnsubscribeFeature(shadow.get());
         if (world) world->Shutdown();
         editor.reset();
+        sky.reset();
         raster.reset();
         shadow.reset();
         world.reset();
@@ -532,6 +547,24 @@ void RenderPipeline::Render(const RenderScene& scene) {
     // pass execution. M4.0a: directional + point + spot. Skybox/IBL still uses the
     // RasterFeature defaults until per-scene IBL probe swap lands upstream.
     PublishLightsToSceneLighting(scene);
+
+    // Push per-scene sky source into the SkyboxFeature. Resolved through the friend-only
+    // SkyboxAccess seam so this TU stays the only place that names the internal
+    // `SkyboxRequest`. A null `scene.skybox` clears the feature back to `Kind::None`.
+    if (m_impl->sky) {
+        eyelib::rendering::SkyboxRequest req{};
+        if (scene.skybox) {
+            const auto resolved = SkyboxAccess::Resolve(*scene.skybox);
+            switch (resolved.kind) {
+                case Skybox::Kind::None:       req.kind = eyelib::rendering::SkyboxRequest::Kind::None;       break;
+                case Skybox::Kind::Procedural: req.kind = eyelib::rendering::SkyboxRequest::Kind::Procedural; break;
+                case Skybox::Kind::Cubemap:    req.kind = eyelib::rendering::SkyboxRequest::Kind::Cubemap;    break;
+            }
+            req.cubemap = resolved.cubemap;
+        }
+        req.brightness = (scene.skyboxBrightness < 0.0f) ? 0.0f : scene.skyboxBrightness;
+        m_impl->sky->SetRequest(req);
+    }
 
     // Repopulate the internal adapter from the public scene POD (camera + flat draw list).
     // The adapter buffers persist across frames (`vector::clear` keeps capacity).

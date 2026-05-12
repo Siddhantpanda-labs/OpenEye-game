@@ -11,6 +11,14 @@
 namespace eyelib {
 namespace api {
 namespace rendering {
+class Skybox;  // see api/rendering/Skybox.h
+}
+}
+}
+
+namespace eyelib {
+namespace api {
+namespace rendering {
 
 /**
  * @brief Draw bucket / pass selection (mirrors `eyelib::rendering::DrawLayer` 1:1).
@@ -81,11 +89,18 @@ struct DrawableInstance {
  *    default directional state from `SceneLighting` is left untouched (NOT cleared) —
  *    matches legacy behaviour where missing directional kept the previous frame's value.
  *
- * **Skybox / IBL is intentionally NOT in v1.** The new module's `RasterFeature` consumes
- * `IblDefaultProbes` as the only IBL source today; per-scene skybox swap requires an
- * upstream architectural change in `eyelib/rendering/` (filed in `Render_steps_todo.md`
- * Section C — "per-scene skybox / IBL probe swap"). Editor sky panel + player skybox
- * loader remain on the legacy stack until that lands. See M4 audit table.
+ * **Skybox** (visual sky overlay) lands here as a borrowed pointer to a caller-owned
+ * `Skybox` handle. `nullptr` (the default) means "no sky overlay" — the new module
+ * renders against the default `IblDefaultProbes` neutral environment only. When set,
+ * the public façade routes the handle into the internal `SkyboxFeature` which appends a
+ * fullscreen pass after deferred lighting and before editor debug overlays. The
+ * `Skybox` instance MUST outlive any `Render` call that references it; editor / player
+ * typically keep one alive for the lifetime of the active scene.
+ *
+ * **IBL probe swap (re-baking irradiance + prefilter from the user-supplied cubemap and
+ * republishing on `IblIrradiance / Prefilter` blackboard slots) is the documented
+ * follow-up** in `documentation/Render_Module/Render_steps_todo.md`. Today the IBL
+ * source remains the bootstrap default; only the visual sky is per-scene.
  *
  * **Per-instance bones (skinning) is intentionally NOT in v1.** The new module's
  * `SceneDrawInstance` has no bones field, so per-draw skinning matrices cannot cross
@@ -106,6 +121,12 @@ struct RenderScene {
     std::vector<PointLight>       pointLights;
     /** Spot lights this frame (capped to 16 by the new module's internal limit). */
     std::vector<SpotLight>        spotLights;
+
+    /** Optional sky source for this frame (borrowed; caller owns the `Skybox`). `nullptr`
+     *  = no sky overlay (lighting result alone fills the framebuffer). See class docstring. */
+    const Skybox*                 skybox = nullptr;
+    /** HDR multiplier for the sky (clamped non-negative inside the feature). 1.0 = unchanged. */
+    float                         skyboxBrightness = 1.0f;
 };
 
 } // namespace rendering

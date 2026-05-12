@@ -20,6 +20,11 @@ inline constexpr const char* kDepthPrepass                = "DepthPrepass";
 inline constexpr const char* kForwardOpaque               = "ForwardOpaque";
 inline constexpr const char* kDirectionalShadow           = "DirectionalShadow";
 
+/** Sky pass (only scheduled when `SkyboxFeature` has an active state from `RenderScene::skybox`).
+ *  Single pass name covers both the cubemap and the procedural variant — the pipeline used at
+ *  Execute time is selected per-frame from the `Kind` in `SkyboxRequest`. */
+inline constexpr const char* kSkybox                      = "Skybox";
+
 /** Editor / debug overlay passes (only scheduled when `EditorFeature` is registered). */
 inline constexpr const char* kEditorDebugLines            = "EditorDebugLines";
 
