@@ -34,9 +34,13 @@ class RasterFeature;  // see RasterFeature.h — supplies the default env cubema
  *  - When `Kind::Cubemap` is set, `OnUpload` invokes `IBL::GenerateIrradianceAndPrefilter`
  *    once per unique source-cubemap pointer to bake diffuse + GGX-prefiltered specular
  *    cubemaps; `OnSchedulePasses` publishes those baked textures.
- *  - When `Kind::Procedural` or `Kind::None`, the publishes use the bootstrap env cubemap
- *    returned by `RasterFeature::GetDefaultEnvCubemap()` (wired via `SetDefaultEnvProvider`
- *    by the pipeline at subscription time) so the lighting pass always has a valid sample.
+ *  - When `Kind::Procedural` is set, the analytic sky shader is first captured into a
+ *    feature-owned environment cubemap (`m_proceduralEnvCube`) once via per-face draws
+ *    of the procedural pipeline; that cubemap is then fed into the same IBL bake helper
+ *    as the cubemap path, so procedural sky drives the lighting IBL term identically.
+ *    The capture cubemap is built once per device (analytic sky has no params) and reused.
+ *  - When `Kind::None`, the publishes fall back to `RasterFeature::GetDefaultEnvCubemap()`
+ *    (wired via `SetDefaultEnvProvider`) so the lighting pass always has a valid sample.
  *  - Baked textures are owned by this feature and destroyed on shutdown or when a fresh
  *    source cubemap arrives.
  *
@@ -84,10 +88,25 @@ private:
     static rhi::ShaderGraphicsPipelineCreateInfo MakeCubemapSpec();
     static rhi::ShaderGraphicsPipelineCreateInfo MakeProceduralSpec();
 
+    /** Standalone procedural-sky cubemap capture pipeline. Identical shader as the
+     *  `Kind::Procedural` overlay (logical asset `passes/sky/skybox_procedural`) but with
+     *  depth test/write disabled and no depth attachment so it can render into the bare
+     *  RGBA16F cubemap faces created for `m_proceduralEnvCube`. */
+    static rhi::ShaderGraphicsPipelineCreateInfo MakeProceduralCaptureSpec();
+
     /** Destroy `m_bakedIrradiance` / `m_bakedPrefilter` on the supplied device (no-op when
      *  either is null). Called from the destructor / `OnShutdown` and when the source
      *  cubemap pointer changes between frames. */
     void DestroyBakedProbes(rhi::IDevice* device) noexcept;
+
+    /** Destroy the procedural environment cubemap + its capture pipeline. Called from the
+     *  destructor / `OnShutdown` only; the capture is kept across procedural ↔ cubemap
+     *  switches since the analytic sky never changes. */
+    void DestroyProceduralCapture(rhi::IDevice* device) noexcept;
+
+    /** Lazily render the procedural sky into all six faces of `m_proceduralEnvCube` once.
+     *  Returns the capture cubemap (or nullptr on failure). Idempotent after first success. */
+    rhi::ITexture* EnsureProceduralEnvCube(rhi::IDevice* device, rhi::ICommandList* cmd);
 
     shaders::ShaderLibrary       m_shaderLibrary;
     rhi::IDevice*                m_pipelineDevice = nullptr;
@@ -101,6 +120,12 @@ private:
     rhi::ITexture*               m_bakedSource     = nullptr;
     rhi::ITexture*               m_bakedIrradiance = nullptr;
     rhi::ITexture*               m_bakedPrefilter  = nullptr;
+
+    /** Procedural sky captured into a feature-owned cubemap so it can drive IBL the same
+     *  way a user-supplied cubemap does. Created on first `Kind::Procedural` upload and
+     *  reused afterwards (analytic sky has no time-varying parameters). */
+    rhi::ITexture*               m_proceduralEnvCube         = nullptr;
+    rhi::IPipeline*              m_proceduralCapturePipeline = nullptr;
 };
 
 }  // namespace rendering
