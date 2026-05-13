@@ -101,27 +101,22 @@ eyelib::api::rendering::MaterialRecord ToPublicMaterialRecord(const eyelib::rend
     }
     out.doubleSided = src.twoSided;
 
-    // Texture slot tokens stay as `kInvalidTextureHandle` for now: the public
-    // `Texture2D` handle does not expose its cache token (only the friend-only
-    // `Texture2DAccess::GetCacheToken` does, which is private to `api/rendering/*.cpp`).
-    // The new module's MaterialTable consumes these slots only once its texture
-    // binding-table feature lands (filed in `Render_steps_todo.md` Section C). We still
-    // *prefetch* the textures into the cache so the asset GUID round-trip is paid here
-    // and not at first-draw time.
-    auto prefetchTexture = [&](const std::string& uniformName) {
-        if (!registry || !cache) return;
-        auto it = src.texturePaths.find(uniformName);
-        if (it == src.texturePaths.end() || it->second.empty()) return;
-        eyelib::api::AssetId tid = eyelib::api::AssetId::FromString(it->second);
-        if (!tid.IsValid()) return;
-        (void)self.GetTexture(tid);
-    };
+    // Read canonical properties from the legacy descriptor maps
+    auto itVec4 = src.vec4s.find("u_UVTransform");
+    if (itVec4 != src.vec4s.end()) out.uvTransform = itVec4->second;
 
-    prefetchTexture("u_AlbedoTexture");
-    prefetchTexture("u_NormalTexture");
-    prefetchTexture("u_MetallicRoughnessTexture");
-    prefetchTexture("u_EmissiveTexture");
-    prefetchTexture("u_AOTexture");
+    auto itRot = src.floats.find("u_UVRotation");
+    if (itRot != src.floats.end()) out.uvRotation = itRot->second;
+
+    auto itTexIdx = src.floats.find("u_TexCoordIndex");
+    if (itTexIdx != src.floats.end()) out.texCoordIndex = itTexIdx->second;
+
+    auto itFlip = src.floats.find("u_FlipV");
+    if (itFlip != src.floats.end()) out.flipV = itFlip->second;
+
+    // Note: Texture slot tokens default to `kInvalidTextureHandle` in the record; 
+    // they are populated right after handle creation in `GetMaterial` via the public
+    // `Material::Set*Texture` setter API to ensure the cache tokens map correctly.
     return out;
 }
 
@@ -182,9 +177,39 @@ eyelib::api::rendering::Material RendererGPUResourceCacheNew::GetMaterial(const 
     if (!m_registry) return {};
     const auto* desc = m_registry->GetMaterialDescriptor(id);
     if (!desc) return {};
+
+    // 1. Author initial CPU record (scalar PBR properties)
     auto record = ToPublicMaterialRecord(*desc, m_registry, m_cache, *this);
     auto handle = m_cache->CreateMaterial(id, record);
-    if (handle.IsValid()) m_materialsResolved.insert(id);
+
+    // 2. Bind canonical texture assets to update backend MaterialTable binding tokens
+    if (handle.IsValid()) {
+        auto getTex = [&](const std::string& key) -> eyelib::api::rendering::Texture2D {
+            auto it = desc->texturePaths.find(key);
+            if (it == desc->texturePaths.end() || it->second.empty()) return {};
+            eyelib::api::AssetId tid = eyelib::api::AssetId::FromString(it->second);
+            return tid.IsValid() ? this->GetTexture(tid) : eyelib::api::rendering::Texture2D{};
+        };
+
+        auto albedo = getTex("u_AlbedoTexture");
+        auto normal = getTex("u_NormalTexture");
+        auto mr     = getTex("u_MetallicRoughnessTexture");
+        auto emissive = getTex("u_EmissiveTexture");
+        auto ao     = getTex("u_AOTexture");
+        auto metallic = getTex("u_MetallicTexture");
+        auto roughness = getTex("u_RoughnessTexture");
+
+        if (albedo.IsValid())   handle.SetAlbedoTexture(albedo);
+        if (normal.IsValid())   handle.SetNormalTexture(normal);
+        if (mr.IsValid())       handle.SetMetallicRoughnessTexture(mr);
+        if (emissive.IsValid()) handle.SetEmissiveTexture(emissive);
+        if (ao.IsValid())       handle.SetAOTexture(ao);
+        if (metallic.IsValid()) handle.SetMetallicTexture(metallic);
+        if (roughness.IsValid()) handle.SetRoughnessTexture(roughness);
+
+        m_materialsResolved.insert(id);
+    }
+
     return handle;
 }
 

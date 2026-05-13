@@ -288,9 +288,24 @@ Texture2D ResourceCache::CreateTexture(const ::eyelib::api::AssetId& id, const T
     }
     if (id.IsValid()) internalTex->SetAssetId(id);
 
+    // Register the GPU texture in the device-global bindless heap.
+    // The returned BindlessHandle IS the shader-visible index: the GBuffer shader reads
+    // `uBindlessTextures[handle - 1]`. This must match what is stored in MaterialRecord::*Texture.
+    // The ResourceCache's sequential nextTextureToken counter is NOT shader-visible — it is
+    // only an internal cache-lookup key and has no connection to the bindless descriptor array.
+    const ::eyelib::rendering::rhi::BindlessHandle bindlessHandle =
+        m_impl->rhiDevice->GetOrAllocateSharedBindlessTextureHandle(internalTex->GetTextureRHI());
+
     auto& entry = m_impl->textures[id];
-    if (entry.cacheToken == 0u) {
-        entry.cacheToken = m_impl->nextTextureToken++;
+    if (bindlessHandle != ::eyelib::rendering::rhi::kInvalidBindlessHandle) {
+        // Bindless slot is the token — directly shader-addressable.
+        entry.cacheToken = static_cast<uint32_t>(bindlessHandle);
+    } else {
+        // Bindless allocation failed (unsupported device or heap exhausted).
+        // Fall back to sequential counter so the CPU handle is still valid (texture won't sample).
+        eyelib::api::Log::Warn("ResourceCache::CreateTexture: GetOrAllocateSharedBindlessTextureHandle failed — texture will render as factor-only fallback.");
+        if (entry.cacheToken == 0u)
+            entry.cacheToken = m_impl->nextTextureToken++;
     }
     entry.internal = std::move(internalTex);
     return Texture2DAccess::Wrap(entry.internal, entry.cacheToken);

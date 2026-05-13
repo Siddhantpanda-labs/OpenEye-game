@@ -29,6 +29,7 @@ inline constexpr uint32_t kCastShadow = 1u << 1;
 struct DrawItem {
     uint32_t meshHandle = 0;
     uint32_t materialId = 0;
+    int32_t submeshIndex = -1;
     uint32_t transformIndex = 0;
     /** World transform copied from `SceneDrawInstance` when the item is emitted (PerObject SSBO, B.4). */
     math::Mat4 worldMatrix{1.0f};

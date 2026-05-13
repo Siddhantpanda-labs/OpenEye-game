@@ -55,11 +55,17 @@ struct MaterialRecord {
     float      alphaCutoff         = 0.5f;
     MaterialAlphaMode alphaMode    = MaterialAlphaMode::Opaque;
     bool       doubleSided         = false;
+    math::Vec4 uvTransform{0.0f, 0.0f, 1.0f, 1.0f};
+    float      uvRotation          = 0.0f;
+    float      texCoordIndex       = 0.0f;
+    float      flipV               = 1.0f;
     uint32_t   baseColorTexture         = kInvalidTextureHandle;
     uint32_t   normalTexture            = kInvalidTextureHandle;
     uint32_t   metallicRoughnessTexture = kInvalidTextureHandle;
     uint32_t   emissiveTexture          = kInvalidTextureHandle;
     uint32_t   occlusionTexture         = kInvalidTextureHandle;
+    uint32_t   metallicTexture          = kInvalidTextureHandle;
+    uint32_t   roughnessTexture         = kInvalidTextureHandle;
 };
 
 }  // namespace rendering

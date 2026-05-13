@@ -11,6 +11,7 @@ namespace rendering {
 struct SceneDrawInstance {
     uint32_t meshHandle = 0;
     uint32_t materialId = 0;
+    int32_t submeshIndex = -1;
     uint32_t transformIndex = 0;
     math::Mat4 worldTransform{1.0f};
     /** Model-space bounds; transformed to world each frame for culling. */

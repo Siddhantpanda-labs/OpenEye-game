@@ -39,6 +39,11 @@ struct MaterialRow {
     uint alphaMode;
     uint doubleSided;
     uint _pad0;
+    vec4 uvTransform;
+    float uvRotation;
+    float texCoordIndex;
+    float flipV;
+    uint _pad1;
     uvec4 textureHandles01;
     uvec4 textureHandles23;
 };
@@ -71,7 +76,19 @@ void main() {
     mat3 nMat = mat3(transpose(inverse(row.model)));
     vWorldPos = worldPos.xyz;
     vWorldN = normalize(nMat * inNormal);
-    vUv = inUv;
+    
+    vec2 baseUv = inUv; // Note: texCoordIndex support would require inUv1
+    vec2 uv = baseUv * mat.uvTransform.zw;
+    if (mat.uvRotation != 0.0) {
+        float s = sin(mat.uvRotation);
+        float c = cos(mat.uvRotation);
+        uv = mat2(c, -s, s, c) * uv;
+    }
+    uv += mat.uvTransform.xy;
+    if (mat.flipV > 0.5) {
+        uv.y = 1.0 - uv.y;
+    }
+    vUv = uv;
     vMaterialId = matId;
     vBaseColor = mat.baseColorFactor;
     vMrao = vec3(mat.metallicFactor, mat.roughnessFactor, mat.occlusionStrength);

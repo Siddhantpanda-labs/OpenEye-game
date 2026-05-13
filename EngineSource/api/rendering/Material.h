@@ -60,6 +60,17 @@ public:
     float GetAO() const;
     float GetAlpha() const;
 
+    // Canonical / Legacy mapping properties
+    void SetUVTransform(const math::Vec4& transform);
+    void SetUVRotation(float rotation);
+    void SetTexCoordIndex(float index);
+    void SetFlipV(float flip);
+
+    math::Vec4 GetUVTransform() const;
+    float GetUVRotation() const;
+    float GetTexCoordIndex() const;
+    float GetFlipV() const;
+
     // Common PBR texture slots (each takes a public `Texture2D` handle; passing an
     // invalid handle clears the slot).
     void SetAlbedoTexture(const Texture2D& texture);

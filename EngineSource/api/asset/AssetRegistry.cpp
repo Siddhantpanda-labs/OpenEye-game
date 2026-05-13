@@ -7,6 +7,7 @@
 #include "asset/readers/material_reader.h"
 #include "asset/readers/texture_reader.h"
 #include "asset/core/import_mesh.h"
+#include "asset/meta/meta_file.h"
 #include "eyelib/render/materials/MaterialDescriptor.h"
 #include "eyelib/render/materials/MaterialShader.h"
 #include "eyelib/render/MeshDescriptor.h"
@@ -20,6 +21,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <mutex>
 #include <unordered_map>
 
 namespace eyelib {
@@ -146,6 +149,86 @@ std::string NormalizePathForDb(std::string path) {
     return path;
 }
 
+// ---------------------------------------------------------------------------
+// Meta-file GUID scan — fallback when the asset DB doesn't know a GUID yet.
+// Mirrors canonical_viewer::FindAssetPathByGuid; results are cached per
+// (assetRoot + guidKey) so the traversal only runs once per session.
+// ---------------------------------------------------------------------------
+
+/** Normalize a GUID string to lowercase, no extra whitespace (canonical key). */
+std::string GuidKeyNormalize(const std::string& s) {
+    std::string t;
+    t.reserve(s.size());
+    for (char c : s) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue;
+        t += (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    return t;
+}
+
+struct MetaScanCache {
+    std::mutex              mu;
+    // key = assetRoot + "\x1e" + normalizedGuid  →  absolute asset path (or empty = not found)
+    std::unordered_map<std::string, std::string> results;
+};
+
+MetaScanCache& GetMetaScanCache() {
+    static MetaScanCache cache;
+    return cache;
+}
+
+/**
+ * Recursively scan `root` for *.meta files whose `guid` field matches
+ * `normalizedGuid`. Returns the path of the asset (meta path stripped of .meta
+ * extension) on the first match, or empty string if not found.
+ *
+ * Results are cached: subsequent calls for the same (root, guid) are O(1).
+ */
+std::string FindAssetPathByMetaScan(const std::string& assetRoot,
+                                    const std::string& guidStr) {
+    if (assetRoot.empty() || guidStr.empty()) return {};
+    const std::string normalizedGuid = GuidKeyNormalize(guidStr);
+    if (normalizedGuid.empty()) return {};
+
+    MetaScanCache& cache = GetMetaScanCache();
+    const std::string cacheKey = assetRoot + "\x1e" + normalizedGuid;
+
+    {
+        std::lock_guard<std::mutex> lk(cache.mu);
+        auto it = cache.results.find(cacheKey);
+        if (it != cache.results.end()) return it->second;
+    }
+
+    // Walk the asset root looking for a matching .meta file.
+    namespace fs = std::filesystem;
+    std::string found;
+    std::error_code ec;
+    const fs::path rootPath = fs::absolute(fs::path(assetRoot), ec);
+    if (!ec && fs::is_directory(rootPath, ec)) {
+        fs::recursive_directory_iterator dirIt(rootPath,
+            fs::directory_options::skip_permission_denied, ec);
+        for (; !ec && dirIt != fs::recursive_directory_iterator(); dirIt.increment(ec)) {
+            const fs::path& p = dirIt->path();
+            if (p.extension() != ".meta") continue;
+            asset::MetaFile meta;
+            if (!asset::ReadMetaFile(p.string(), meta)) continue;
+            if (GuidKeyNormalize(meta.guid) == normalizedGuid) {
+                // Strip .meta to get the asset path.
+                fs::path assetPath = p;
+                assetPath.replace_extension("");
+                found = assetPath.string();
+                break;
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(cache.mu);
+        cache.results.emplace(cacheKey, found);
+    }
+    return found;
+}
+
 /** If path is absolute and starts with assetRoot, return path relative to assetRoot for DB lookup. */
 std::string ToRelativeIfUnder(std::string path, const std::string& assetRoot) {
     if (assetRoot.empty() || path.empty()) return path;
@@ -170,6 +253,10 @@ public:
     void* renderDevice = nullptr;
     bool readyForResolution = false;
     IGPUResourceResolver* resolver = nullptr;
+
+    // Default to Meta: matches proven old-render-module behavior; no DB scan required.
+    AssetRegistry::TextureResolutionMode textureResolutionMode =
+        AssetRegistry::TextureResolutionMode::Meta;
 
     mutable std::unordered_map<AssetId, eyelib::render::MaterialDescriptor, AssetIdHash> materialDescriptors;
     mutable std::unordered_map<AssetId, eyelib::render::MeshDescriptor, AssetIdHash> meshDescriptors;
@@ -442,12 +529,64 @@ const eyelib::render::MeshDescriptor* AssetRegistry::GetMeshDescriptor(const Ass
     return &m_impl->meshDescriptors[id];
 }
 
+void AssetRegistry::SetTextureResolutionMode(TextureResolutionMode mode) {
+    if (m_impl) m_impl->textureResolutionMode = mode;
+}
+
+AssetRegistry::TextureResolutionMode AssetRegistry::GetTextureResolutionMode() const {
+    return m_impl ? m_impl->textureResolutionMode : TextureResolutionMode::Meta;
+}
+
 const eyelib::render::TextureDescriptor* AssetRegistry::GetTextureDescriptor(const AssetId& id) const {
     if (!id.IsValid()) return nullptr;
+
+    // Fast path: already resolved regardless of mode.
     auto it = m_impl->textureDescriptors.find(id);
     if (it != m_impl->textureDescriptors.end()) return &it->second;
+
+    // ----------------------------------------------------------------
+    // Meta mode (default): mirrors old render module's proven path.
+    // Bypasses the DB entirely; scans .meta files under assetRoot to
+    // resolve GUID → disk path, then caches the result.
+    // ----------------------------------------------------------------
+    if (m_impl->textureResolutionMode == TextureResolutionMode::Meta) {
+        if (m_impl->assetRoot.empty()) return nullptr;
+        const asset::Guid assetGuid = ToGuid(id);
+        const std::string guidStr   = assetGuid.ToString();
+        const std::string foundPath = FindAssetPathByMetaScan(m_impl->assetRoot, guidStr);
+        if (foundPath.empty()) return nullptr;
+        eyelib::render::TextureDescriptor& d = m_impl->textureDescriptors[id];
+        d.filePath = fs::NormalizePath(foundPath);
+        // Back-populate DB so repeated lookups skip the scan.
+        std::string relForDb = NormalizePathForDb(
+            ToRelativeIfUnder(foundPath, m_impl->assetRoot));
+        if (!relForDb.empty())
+            m_impl->database.AddRuntimeAsset(relForDb, "texture", assetGuid);
+        return &m_impl->textureDescriptors[id];
+    }
+
+    // ----------------------------------------------------------------
+    // DB mode: asset database lookup first; falls back to meta-scan
+    // only when the DB has no entry (graceful degradation).
+    // ----------------------------------------------------------------
     std::string rel = m_impl->database.GetPath(ToGuid(id));
+    if (rel.empty() && !m_impl->assetRoot.empty()) {
+        const asset::Guid assetGuid = ToGuid(id);
+        const std::string guidStr   = assetGuid.ToString();
+        const std::string foundPath = FindAssetPathByMetaScan(m_impl->assetRoot, guidStr);
+        if (!foundPath.empty()) {
+            eyelib::render::TextureDescriptor& d = m_impl->textureDescriptors[id];
+            d.filePath = fs::NormalizePath(foundPath);
+            std::string relForDb = NormalizePathForDb(
+                ToRelativeIfUnder(foundPath, m_impl->assetRoot));
+            if (!relForDb.empty())
+                m_impl->database.AddRuntimeAsset(relForDb, "texture", assetGuid);
+            return &m_impl->textureDescriptors[id];
+        }
+        return nullptr;
+    }
     if (rel.empty()) return nullptr;
+
     eyelib::render::TextureDescriptor& d = m_impl->textureDescriptors[id];
     if (!m_impl->assetRoot.empty() && !IsAbsolutePath(rel))
         d.filePath = fs::NormalizePath(m_impl->assetRoot + "/" + rel);

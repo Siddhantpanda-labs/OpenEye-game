@@ -137,12 +137,13 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
     auto emitDrawable = [&](::eyelib::world::EntityId entity,
                             const std::string& meshAssetId,
                             const std::string& materialAssetId,
-                            int32_t /*submeshIndex*/) {
+                            int32_t submeshIndex) {
         const auto transform = getTransform(entity);
         if (!transform) return;
 
         eyelib::api::rendering::DrawableInstance instance{};
         resolveHandles(meshAssetId, materialAssetId, instance.meshHandle, instance.materialId);
+        instance.submeshIndex = submeshIndex;
 
         instance.worldTransform = TransformToMatrix(*transform);
         instance.localBounds = eyelib::math::AABB{};

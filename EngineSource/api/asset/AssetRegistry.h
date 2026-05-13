@@ -97,7 +97,22 @@ public:
     /** Full scan of asset root (reads .meta files). Call after SetAssetRoot. */
     void Scan();
 
+    /**
+     * @brief Controls how texture GUIDs are resolved in GetTextureDescriptor.
+     *
+     * `DB`   — use the asset database only (new path; requires Scan() or explicit
+     *           RegisterAsset calls to have populated the DB first).
+     * `Meta` — bypass the DB and resolve GUIDs by scanning .meta files under
+     *           assetRoot directly (same proven path as the old render module).
+     *           Results are cached per-session so the traversal cost is paid once
+     *           per unique GUID. This is the default.
+     */
+    enum class TextureResolutionMode { DB, Meta };
+    void SetTextureResolutionMode(TextureResolutionMode mode);
+    TextureResolutionMode GetTextureResolutionMode() const;
+
     void Clear();
+
 
 private:
     class Impl;

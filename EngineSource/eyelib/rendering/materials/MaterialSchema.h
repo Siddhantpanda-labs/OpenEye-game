@@ -33,11 +33,17 @@ struct MaterialRecord {
     float alphaCutoff = 0.5f;
     MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
     bool doubleSided = false;
+    math::Vec4 uvTransform{0.0f, 0.0f, 1.0f, 1.0f};
+    float uvRotation = 0.0f;
+    float texCoordIndex = 0.0f;
+    float flipV = 1.0f;
     uint32_t baseColorTexture = kInvalidMaterialTextureHandle;
     uint32_t normalTexture = kInvalidMaterialTextureHandle;
     uint32_t metallicRoughnessTexture = kInvalidMaterialTextureHandle;
     uint32_t emissiveTexture = kInvalidMaterialTextureHandle;
     uint32_t occlusionTexture = kInvalidMaterialTextureHandle;
+    uint32_t metallicTexture = kInvalidMaterialTextureHandle;
+    uint32_t roughnessTexture = kInvalidMaterialTextureHandle;
 };
 
 /**
@@ -55,9 +61,14 @@ struct MaterialGpuStd430 {
     uint32_t alphaMode = 0u;
     uint32_t doubleSided = 0u;
     uint32_t _pad0 = 0u;
+    float uvTransform[4]{};
+    float uvRotation = 0.0f;
+    float texCoordIndex = 0.0f;
+    float flipV = 1.0f;
+    uint32_t _pad1 = 0u;
     uint32_t textureHandles[8]{};
 };
-static_assert(sizeof(MaterialGpuStd430) == 96u, "MaterialGpuStd430 packing must stay stable");
+static_assert(sizeof(MaterialGpuStd430) == 128u, "MaterialGpuStd430 packing must stay stable");
 
 inline MaterialRecord MakeDefaultMaterialRecord() noexcept {
     MaterialRecord out{};
@@ -74,14 +85,21 @@ inline void FillMaterialGpuRow(const MaterialRecord& src, MaterialGpuStd430& out
     out.alphaCutoff = (std::clamp)(src.alphaCutoff, 0.0f, 1.0f);
     out.alphaMode = (std::min)(static_cast<uint32_t>(src.alphaMode), 2u);
     out.doubleSided = src.doubleSided ? 1u : 0u;
-    out._pad0 = 0u;
+    out.uvTransform[0] = src.uvTransform.x;
+    out.uvTransform[1] = src.uvTransform.y;
+    out.uvTransform[2] = src.uvTransform.z;
+    out.uvTransform[3] = src.uvTransform.w;
+    out.uvRotation = src.uvRotation;
+    out.texCoordIndex = src.texCoordIndex;
+    out.flipV = src.flipV;
+    out._pad1 = 0u;
     out.textureHandles[0] = src.baseColorTexture;
     out.textureHandles[1] = src.normalTexture;
     out.textureHandles[2] = src.metallicRoughnessTexture;
     out.textureHandles[3] = src.emissiveTexture;
     out.textureHandles[4] = src.occlusionTexture;
-    out.textureHandles[5] = kInvalidMaterialTextureHandle;
-    out.textureHandles[6] = kInvalidMaterialTextureHandle;
+    out.textureHandles[5] = src.metallicTexture;
+    out.textureHandles[6] = src.roughnessTexture;
     out.textureHandles[7] = kInvalidMaterialTextureHandle;
 }
 

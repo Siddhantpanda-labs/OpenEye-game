@@ -130,6 +130,34 @@ void Material::SetAlpha(float value) {
         [&](MaterialRecord& r) { r.baseColorFactor.w = value; });
 }
 
+void Material::SetUVTransform(const math::Vec4& transform) {
+    if (!IsValid()) return;
+    ResourceCacheAccess::MutateMaterial(
+        *m_impl->cache, m_impl->assetId,
+        [&](MaterialRecord& r) { r.uvTransform = transform; });
+}
+
+void Material::SetUVRotation(float rotation) {
+    if (!IsValid()) return;
+    ResourceCacheAccess::MutateMaterial(
+        *m_impl->cache, m_impl->assetId,
+        [&](MaterialRecord& r) { r.uvRotation = rotation; });
+}
+
+void Material::SetTexCoordIndex(float index) {
+    if (!IsValid()) return;
+    ResourceCacheAccess::MutateMaterial(
+        *m_impl->cache, m_impl->assetId,
+        [&](MaterialRecord& r) { r.texCoordIndex = index; });
+}
+
+void Material::SetFlipV(float flip) {
+    if (!IsValid()) return;
+    ResourceCacheAccess::MutateMaterial(
+        *m_impl->cache, m_impl->assetId,
+        [&](MaterialRecord& r) { r.flipV = flip; });
+}
+
 math::Vec3 Material::GetAlbedo() const {
     const MaterialRecord r = Impl::ReadRecord(m_impl.get());
     return {r.baseColorFactor.x, r.baseColorFactor.y, r.baseColorFactor.z};
@@ -146,10 +174,15 @@ math::Vec3 Material::GetEmission() const {
 float Material::GetAO() const    { return Impl::ReadRecord(m_impl.get()).occlusionStrength; }
 float Material::GetAlpha() const { return Impl::ReadRecord(m_impl.get()).baseColorFactor.w; }
 
+math::Vec4 Material::GetUVTransform() const { return Impl::ReadRecord(m_impl.get()).uvTransform; }
+float Material::GetUVRotation() const       { return Impl::ReadRecord(m_impl.get()).uvRotation; }
+float Material::GetTexCoordIndex() const    { return Impl::ReadRecord(m_impl.get()).texCoordIndex; }
+float Material::GetFlipV() const            { return Impl::ReadRecord(m_impl.get()).flipV; }
+
 void Material::SetAlbedoTexture(const Texture2D& texture)            { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::baseColorTexture); }
 void Material::SetNormalTexture(const Texture2D& texture)            { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::normalTexture); }
-void Material::SetMetallicTexture(const Texture2D& texture)          { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::metallicRoughnessTexture); }
-void Material::SetRoughnessTexture(const Texture2D& texture)         { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::metallicRoughnessTexture); }
+void Material::SetMetallicTexture(const Texture2D& texture)          { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::metallicTexture); }
+void Material::SetRoughnessTexture(const Texture2D& texture)         { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::roughnessTexture); }
 void Material::SetMetallicRoughnessTexture(const Texture2D& texture) { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::metallicRoughnessTexture); }
 void Material::SetAOTexture(const Texture2D& texture)                { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::occlusionTexture); }
 void Material::SetEmissiveTexture(const Texture2D& texture)          { Impl::SetTextureSlot(m_impl.get(), texture, &MaterialRecord::emissiveTexture); }

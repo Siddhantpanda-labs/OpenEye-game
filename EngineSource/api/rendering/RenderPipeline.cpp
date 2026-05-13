@@ -81,6 +81,12 @@ eyelib::rendering::materials::MaterialRecord ToInternalRecord(const MaterialReco
     out.metallicRoughnessTexture = src.metallicRoughnessTexture;
     out.emissiveTexture       = src.emissiveTexture;
     out.occlusionTexture      = src.occlusionTexture;
+    out.metallicTexture       = src.metallicTexture;
+    out.roughnessTexture      = src.roughnessTexture;
+    out.uvTransform           = src.uvTransform;
+    out.uvRotation            = src.uvRotation;
+    out.texCoordIndex         = src.texCoordIndex;
+    out.flipV                 = src.flipV;
     return out;
 }
 
@@ -182,6 +188,7 @@ public:
             eyelib::rendering::SceneDrawInstance s{};
             s.meshHandle     = d.meshHandle;
             s.materialId     = d.materialId;
+            s.submeshIndex   = d.submeshIndex;
             s.transformIndex = transformIndex++;
             s.worldTransform = d.worldTransform;
             s.localBounds    = d.localBounds;
@@ -196,6 +203,7 @@ public:
             eyelib::rendering::SceneDrawInstance s{};
             s.meshHandle     = d.meshHandle;
             s.materialId     = d.materialId;
+            s.submeshIndex   = d.submeshIndex;
             s.transformIndex = transformIndex++;
             s.worldTransform = d.worldTransform;
             s.localBounds    = d.localBounds;

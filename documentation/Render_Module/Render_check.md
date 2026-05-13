@@ -256,3 +256,9 @@ Final closeout across D1/D2/D3/D5/D6/D7/D10 after P6.8-P6.11 validation.
 - **D10 (Observability):** **pass** — framegraph pass scopes + sandbox matrix/mode-toggle evidence available.
 
 **Closeout status:** **P6 complete** for current deferred scope.
+
+### Editor migration follow-up status (2026-05-12)
+
+- `SkyboxFeature` landed in `eyelib/rendering` and is active on the new path (cubemap + procedural sky, with IBL probe publication).
+- Debug-line rendering is active on the new path through `EditorFeature` (scene grid/helper lines now render via `api/rendering` viewports).
+- Remaining editor migration rendering gap: GPU picking (`EntityIDPass` + façade readback).

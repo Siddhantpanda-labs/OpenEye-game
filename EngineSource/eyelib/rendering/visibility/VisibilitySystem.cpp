@@ -77,6 +77,7 @@ void VisibilitySystem::BuildCpuDrawList(const IRenderSceneView* scene, DrawList&
         DrawItem item{};
         item.meshHandle = src.meshHandle;
         item.materialId = src.materialId;
+        item.submeshIndex = src.submeshIndex;
         item.transformIndex = src.transformIndex;
         item.worldMatrix = src.worldTransform;
         item.flags = src.flags;

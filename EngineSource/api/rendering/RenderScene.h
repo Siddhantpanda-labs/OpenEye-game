@@ -63,6 +63,7 @@ inline constexpr uint32_t kCastShadow  = 1u << 1;
 struct DrawableInstance {
     uint32_t       meshHandle   = 0;
     uint32_t       materialId   = 0;
+    int32_t        submeshIndex = -1;
     math::Mat4     worldTransform{1.0f};
     math::AABB     localBounds{};
     DrawLayer      layer        = DrawLayer::Opaque;

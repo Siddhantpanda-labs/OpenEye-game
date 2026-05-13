@@ -42,13 +42,26 @@ void main() {
     const uint metallicRoughnessHandle = vTextureHandles01.z;
     const uint emissiveHandle = vTextureHandles01.w;
     const uint occlusionHandle = vTextureHandles23.x;
+    const uint metallicHandle = vTextureHandles23.y;
+    const uint roughnessHandle = vTextureHandles23.z;
 
     vec4 baseTex = SampleBindless2D(baseColorHandle, vUv, vec4(1.0));
     albedo *= baseTex.rgb;
 
-    vec4 mrTex = SampleBindless2D(metallicRoughnessHandle, vUv, vec4(1.0));
-    metallic *= clamp(mrTex.b, 0.0, 1.0);
-    roughness *= clamp(mrTex.g, 0.04, 1.0);
+    if (metallicRoughnessHandle != kInvalidHandle && metallicRoughnessHandle != 0u) {
+        vec4 mrTex = SampleBindless2D(metallicRoughnessHandle, vUv, vec4(1.0));
+        metallic *= clamp(mrTex.b, 0.0, 1.0);
+        roughness *= clamp(mrTex.g, 0.04, 1.0);
+    } else {
+        if (metallicHandle != kInvalidHandle && metallicHandle != 0u) {
+            vec4 mTex = SampleBindless2D(metallicHandle, vUv, vec4(1.0));
+            metallic *= clamp(mTex.r, 0.0, 1.0);
+        }
+        if (roughnessHandle != kInvalidHandle && roughnessHandle != 0u) {
+            vec4 rTex = SampleBindless2D(roughnessHandle, vUv, vec4(1.0));
+            roughness *= clamp(rTex.r, 0.04, 1.0);
+        }
+    }
 
     vec4 aoTex = SampleBindless2D(occlusionHandle, vUv, vec4(1.0));
     ao *= clamp(aoTex.r, 0.0, 1.0);

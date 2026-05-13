@@ -149,18 +149,24 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
         cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
 
-        if (!h.submeshes.empty()) {
+        auto drawSubmesh = [&](const Submesh& sm) {
+            GBufferPushConstants pc{};
+            pc.objectIndex = i;
+            pc.materialIdOverride = it.materialId;
+            cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
+            cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
+        };
+
+        if (it.submeshIndex >= 0 && it.submeshIndex < static_cast<int32_t>(h.submeshes.size())) {
+            drawSubmesh(h.submeshes[it.submeshIndex]);
+        } else if (!h.submeshes.empty()) {
             for (const Submesh& sm : h.submeshes) {
-                GBufferPushConstants pc{};
-                pc.objectIndex = i;
-                pc.materialIdOverride = sm.materialIndex; // Override material ID for this submesh
-                cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
-                cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
+                drawSubmesh(sm);
             }
         } else {
             GBufferPushConstants pc{};
             pc.objectIndex = i;
-            pc.materialIdOverride = it.materialId; // Use item's material ID if no submeshes
+            pc.materialIdOverride = it.materialId;
             cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
             cmd->DrawIndexed(h.totalIndexCount, 0, 0);
         }
