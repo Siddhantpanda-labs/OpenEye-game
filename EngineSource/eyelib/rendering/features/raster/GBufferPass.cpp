@@ -138,6 +138,9 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     rhi::IDescriptorSet* sets[3] = {m_frameSets[frameIdx], m_passSets[frameIdx], bindlessSet};
     cmd->BindDescriptorSets(0, 3, sets);
 
+    rhi::IBuffer* lastVB = nullptr;
+    rhi::IBuffer* lastIB = nullptr;
+
     for (uint32_t i = 0; i < n; ++i) {
         const DrawItem& it = m_drawList->items[i];
         if (it.layer != DrawLayer::Opaque) continue; // Only draw opaque in GBuffer
@@ -146,8 +149,14 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
         if (!h.IsValid())
             continue;
 
-        cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
-        cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
+        if (lastVB != h.vertexBuffer) {
+            cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
+            lastVB = h.vertexBuffer;
+        }
+        if (lastIB != h.indexBuffer) {
+            cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
+            lastIB = h.indexBuffer;
+        }
 
         auto drawSubmesh = [&](const Submesh& sm) {
             GBufferPushConstants pc{};

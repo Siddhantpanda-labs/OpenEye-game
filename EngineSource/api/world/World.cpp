@@ -1191,6 +1191,17 @@ bool World::SetRenderPipelineMode(const std::string& mode) {
     return ApplyCommandSync(eyelib::api::world::SetRenderPipelineMode(mode)).success;
 }
 
+float World::GetIblIntensity() const {
+    if (!m_impl) return 1.0f;
+    return m_impl->world.GetState().GetIblIntensity();
+}
+
+bool World::SetIblIntensity(float intensity) {
+    if (!m_impl) return false;
+    m_impl->world.GetState().SetIblIntensity(intensity);
+    return true;
+}
+
 void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.renderables.clear();
     out.meshRenderers.clear();
@@ -1206,6 +1217,7 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
     out.transformRotations.clear();
     out.transformScales.clear();
     out.skyboxAssetId.clear();
+    out.iblIntensity = 1.0f;
     if (!m_impl) return;
     // Architectural contract: snapshots always observe latest world transforms, independent of scheduler timing.
     m_impl->world.FlushTransforms();
@@ -1235,6 +1247,7 @@ void World::CaptureRenderSnapshot(RenderSnapshot& out) const {
         out.colliders.push_back({ entity, comp });
 
     out.skyboxAssetId = GetSkyboxAssetId();
+    out.iblIntensity = GetIblIntensity();
 }
 
 void World::SetFrameSnapshot(const RenderSnapshot* snapshot) {

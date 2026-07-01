@@ -85,6 +85,9 @@ public:
     /** Scene-level: render pipeline mode. Values: Forward | Deferred | ForwardPlus. Serialized in scene file. */
     const std::string& GetRenderPipelineMode() const { return m_renderPipelineMode; }
     void SetRenderPipelineMode(std::string mode) { m_renderPipelineMode = std::move(mode); }
+ 
+    float GetIblIntensity() const { return m_iblIntensity; }
+    void SetIblIntensity(float intensity) { m_iblIntensity = intensity; }
 
     /** Internal only: EnTT registry for component storage. Only Command::Apply and world internals may use this. Never expose in api::world. */
     entt::registry& GetRegistry() { return m_registry; }
@@ -110,6 +113,7 @@ private:
     std::unordered_map<size_t, std::unique_ptr<IComponentStore>> m_componentStores;
     std::string m_skyboxAssetId;
     std::string m_renderPipelineMode = "Hybrid";
+    float m_iblIntensity = 1.0f;
     entt::registry m_registry;
     std::unordered_map<EntityId, entt::entity, EntityIdHash> m_entityToEnTT;
     std::unordered_map<entt::entity, EntityId> m_enttToEntity;

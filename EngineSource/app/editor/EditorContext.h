@@ -15,6 +15,9 @@ class RendererGPUResourceCacheNew;   // runtime-shared resource resolver (api/re
 class BuiltinResourceManagerNew;     // runtime-shared builtin primitive vendor (api/rendering)
 class SkyboxCacheNew;                // runtime-shared per-scene skybox cache (api/rendering)
 } }
+namespace openeye::editor { class EditorPersistentSceneCache; }
+namespace openeye::editor { class EditorSceneDirtyTracker; }
+namespace openeye::editor { class EditorVisibilitySystem; }
 
 namespace openeye::editor {
 
@@ -53,6 +56,15 @@ struct EditorContext {
 
     /** Camera for scene view (viewport). Independent of game camera. */
     EditorCamera editorCamera;
+
+    /**
+     * Shared immutable snapshot captured once per editor frame by
+     * `EditorRenderFrameCoordinator`. Panels should read this instead of
+     * calling `CaptureRenderSnapshot` independently.
+     */
+    eyelib::api::world::World::RenderSnapshot frameSnapshot;
+    bool frameSnapshotValid = false;
+    uint64_t frameSnapshotSerial = 0;
 
     /** Scene view: when true, entity gizmo uses local space; when false, world space. */
     bool sceneGizmoLocal = false;
@@ -121,6 +133,12 @@ struct EditorContext {
      * editor-embedded Play need the same cache semantics — see SkyboxCacheNew.h.
      */
     openeye::player::SkyboxCacheNew* skyboxCacheNew = nullptr;
+    /** Step 2: persistent per-drawable handle cache for new scene builder paths. */
+    openeye::editor::EditorPersistentSceneCache* sceneCacheNew = nullptr;
+    /** Step 3: per-frame dirty flags from snapshot diff. */
+    openeye::editor::EditorSceneDirtyTracker* sceneDirtyTracker = nullptr;
+    /** Step 5: two-stage visibility system (frame broadphase + per-camera refine). */
+    openeye::editor::EditorVisibilitySystem* visibilitySystem = nullptr;
     /** When valid and not playing, Game panel shows this camera's view (debug). InvalidEntity = no preview. */
     ::eyelib::world::EntityId gameViewDebugCamera = ::eyelib::world::InvalidEntity;
     eyelib::api::AssetRegistry* assetRegistry = nullptr;

@@ -208,6 +208,8 @@ public:
 
         /** Scene-level skybox id at capture time (same source as `World::GetSkyboxAssetId()` during capture). */
         std::string skyboxAssetId;
+        /** Scene-level IBL intensity at capture time. */
+        float iblIntensity = 1.0f;
 
         std::optional<::eyelib::world::components::Transform> GetTransform(::eyelib::world::EntityId entity) const;
     };
@@ -326,6 +328,9 @@ public:
     std::string GetRenderPipelineMode() const;
     /** Set scene-level render pipeline mode via command (mutation layer). Invalid values normalize to "Hybrid". */
     bool SetRenderPipelineMode(const std::string& mode);
+ 
+    float GetIblIntensity() const;
+    bool SetIblIntensity(float intensity);
 
     Observation GetObservation() const;
 

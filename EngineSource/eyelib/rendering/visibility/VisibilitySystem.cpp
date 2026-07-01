@@ -87,7 +87,14 @@ void VisibilitySystem::BuildCpuDrawList(const IRenderSceneView* scene, DrawList&
     }
 
     std::sort(out.items.begin(), out.items.end(),
-              [](const DrawItem& a, const DrawItem& b) { return a.sortKey < b.sortKey; });
+              [](const DrawItem& a, const DrawItem& b) {
+                  if (a.layer != b.layer) return a.layer < b.layer;
+                  if (a.materialId != b.materialId) return a.materialId < b.materialId;
+                  if (a.layer == DrawLayer::Opaque || a.layer == DrawLayer::AlphaTest) {
+                      if (a.meshHandle != b.meshHandle) return a.meshHandle < b.meshHandle;
+                  }
+                  return a.sortKey < b.sortKey;
+              });
 }
 
 }  // namespace rendering

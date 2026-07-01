@@ -87,6 +87,9 @@ void PointShadowPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthBias(0.25f, 0.8f);
     cmd->BindPipeline(m_shadowPipeline);
 
+    rhi::IBuffer* lastVB = nullptr;
+    rhi::IBuffer* lastIB = nullptr;
+
     const uint32_t layerCount = static_cast<uint32_t>(m_pointFaceViewProjs.size());
     for (uint32_t layer = 0; layer < layerCount; ++layer) {
         m_pointShadowRt->SetDepthLayer(layer);
@@ -111,8 +114,14 @@ void PointShadowPass::Execute(rhi::ICommandList* cmd) {
             if (!hMesh.IsValid())
                 continue;
 
-            cmd->BindVertexBuffer(hMesh.vertexBuffer, 0, 0);
-            cmd->BindIndexBuffer(hMesh.indexBuffer, hMesh.indexType, 0);
+            if (lastVB != hMesh.vertexBuffer) {
+                cmd->BindVertexBuffer(hMesh.vertexBuffer, 0, 0);
+                lastVB = hMesh.vertexBuffer;
+            }
+            if (lastIB != hMesh.indexBuffer) {
+                cmd->BindIndexBuffer(hMesh.indexBuffer, hMesh.indexType, 0);
+                lastIB = hMesh.indexBuffer;
+            }
 
             PointShadowPushConstants pc{};
             pc.lightViewProj = m_pointFaceViewProjs[layer];

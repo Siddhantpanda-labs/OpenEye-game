@@ -199,6 +199,8 @@ public:
             s.flags = d.flags;
             m_instances.push_back(s);
         }
+
+
         for (const auto& d : scene.transparent) {
             eyelib::rendering::SceneDrawInstance s{};
             s.meshHandle     = d.meshHandle;
@@ -584,6 +586,7 @@ void RenderPipeline::Render(const RenderScene& scene) {
         req.brightness = (scene.skyboxBrightness < 0.0f) ? 0.0f : scene.skyboxBrightness;
         m_impl->sky->SetRequest(req);
     }
+    eyelib::rendering::SceneLighting::SetIblIntensity(scene.iblIntensity);
 
     // Repopulate the internal adapter from the public scene POD (camera + flat draw list).
     // The adapter buffers persist across frames (`vector::clear` keeps capacity).

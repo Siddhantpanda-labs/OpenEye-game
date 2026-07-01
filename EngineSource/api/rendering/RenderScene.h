@@ -128,6 +128,8 @@ struct RenderScene {
     const Skybox*                 skybox = nullptr;
     /** HDR multiplier for the sky (clamped non-negative inside the feature). 1.0 = unchanged. */
     float                         skyboxBrightness = 1.0f;
+    /** Global multiplier for the IBL environment lighting (irradiance + prefiltered radiance). 1.0 = full, 0.0 = off. */
+    float                         iblIntensity = 1.0f;
 };
 
 } // namespace rendering

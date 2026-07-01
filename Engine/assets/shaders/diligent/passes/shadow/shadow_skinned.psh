@@ -1,5 +1,0 @@
-// Diligent HLSL: passes/shadow/shadow_skinned (depth only)
-void main(out float4 o_Depth : SV_TARGET0)
-{
-    o_Depth = float4(0, 0, 0, 1);
-}

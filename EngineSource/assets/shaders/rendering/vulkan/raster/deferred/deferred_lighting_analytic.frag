@@ -24,7 +24,8 @@ layout(set = 1, binding = 3) uniform sampler2D tDepth;
 layout(std140, set = 1, binding = 4) uniform DirLightUbo {
     vec4 uLightDir;
     vec4 uLightColorIntensity;
-    vec4 uDlPad[14];
+    vec4 uIblParams; // x = intensity
+    vec4 uDlPad[13];
 } uDirLight;
 
 // IBL split-sum (Karis / UE-style). Missing probes: engine binds neutral fallback cubemap + 2D LUT.
@@ -409,7 +410,7 @@ void main() {
     vec3 prefiltered = textureLod(tPrefilter, R, lod).rgb;
     vec2 envBrdf = texture(tBrdfLut, vec2(NdV, roughness)).rg;
     vec3 iblSpecular = prefiltered * (Fr * envBrdf.x + envBrdf.y);
-    vec3 ibl = (iblDiffuse + iblSpecular) * ao;
+    vec3 ibl = (iblDiffuse + iblSpecular) * ao * uDirLight.uIblParams.x;
 
     vec3 emissive = albedo * emissiveStrength;
     vec3 finalColor = Lo + ibl + emissive;

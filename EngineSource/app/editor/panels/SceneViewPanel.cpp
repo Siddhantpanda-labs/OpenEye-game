@@ -197,6 +197,17 @@ void CollectColliderDebugLines(const eyelib::api::world::World::RenderSnapshot& 
     }
 }
 
+const eyelib::api::world::World::RenderSnapshot& GetFrameSnapshot(EditorContext* ctx) {
+    if (!ctx->frameSnapshotValid) {
+        // Safety fallback for callers outside the normal editor frame loop.
+        ctx->world.FlushTransforms();
+        ctx->world.CaptureRenderSnapshot(ctx->frameSnapshot);
+        ctx->frameSnapshotValid = true;
+        ++ctx->frameSnapshotSerial;
+    }
+    return ctx->frameSnapshot;
+}
+
 } // namespace
 
 void ShowSceneViewPanel(EditorContext* ctx) {
@@ -280,16 +291,14 @@ void ShowSceneViewPanel(EditorContext* ctx) {
         // M2.5 / M2.6 decisions (façade safe-stubs already documented in M1.7).
         const bool useNewPipeline = (ctx->sceneViewPipelineNew != nullptr) && w > 0 && h > 0;
         if (useNewPipeline) {
-            eyelib::api::world::World::RenderSnapshot newSnapshot;
-            ctx->world.FlushTransforms();
-            ctx->world.CaptureRenderSnapshot(newSnapshot);
+            const auto& newSnapshot = GetFrameSnapshot(ctx);
 
             static EditorSceneBuilderNew s_newBuilder;
             eyelib::api::rendering::RenderScene newScene;
             eyelib::api::debug::Profiler::BeginSample("SceneView Build (new)");
             s_newBuilder.Build(newScene, newSnapshot, ctx->editorCamera, w, h, ctx->assetRoots,
                 ctx->assetRegistry, nullptr, nullptr,
-                ctx->gpuResolverNew, ctx->builtinManagerNew);
+                ctx->gpuResolverNew, ctx->builtinManagerNew, ctx->sceneCacheNew, ctx->visibilitySystem);
             // Resolve the world's skybox asset id once per frame and attach to the public
             // scene POD. The cache owns the `Skybox` lifetime; we just borrow a pointer
             // until the next `Render` returns.
@@ -404,11 +413,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             ? ctx->sceneViewPipeline->GetBackend()
             : ::eyelib::render::RenderBackend::Default;
 
-        eyelib::api::world::World::RenderSnapshot snapshot;
-        if (canRender) {
-            ctx->world.FlushTransforms();
-            ctx->world.CaptureRenderSnapshot(snapshot);
-        }
+        const auto& snapshot = GetFrameSnapshot(ctx);
 
         std::vector<EntityId> opaqueEntityIds;
         std::vector<EntityId> transparentEntityIds;
@@ -520,9 +525,7 @@ void ShowSceneViewPanel(EditorContext* ctx) {
             if (canRender)
                 worldOpt = snapshot.GetTransform(sel);
             else {
-                ctx->world.FlushTransforms();
-                ::eyelib::world::components::Transform worldTrTemp;
-                if (ctx->world.GetWorldTransform(sel, worldTrTemp)) worldOpt = worldTrTemp;
+                worldOpt = GetFrameSnapshot(ctx).GetTransform(sel);
             }
             if (worldOpt) {
                 const auto& worldTr = *worldOpt;

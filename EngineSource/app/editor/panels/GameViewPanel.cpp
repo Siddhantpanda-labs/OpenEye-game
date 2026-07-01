@@ -63,6 +63,17 @@ void* ResolveGamePanelTextureId(EditorContext* ctx, void* nativeTexture) {
     return nativeTexture;
 }
 
+const eyelib::api::world::World::RenderSnapshot& GetFrameSnapshot(EditorContext* ctx) {
+    if (!ctx->frameSnapshotValid) {
+        // Safety fallback for callers outside the normal editor frame loop.
+        ctx->world.FlushTransforms();
+        ctx->world.CaptureRenderSnapshot(ctx->frameSnapshot);
+        ctx->frameSnapshotValid = true;
+        ++ctx->frameSnapshotSerial;
+    }
+    return ctx->frameSnapshot;
+}
+
 } // namespace
 
 void ShowGameViewPanel(EditorContext* ctx) {
@@ -101,9 +112,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
             ImGui::OpenPopup("GameViewCamera");
         }
         if (ImGui::BeginPopup("GameViewCamera", ImGuiWindowFlags_AlwaysAutoResize)) {
-            ctx->world.FlushTransforms();
-            eyelib::api::world::World::RenderSnapshot snapshot;
-            ctx->world.CaptureRenderSnapshot(snapshot);
+            const auto& snapshot = GetFrameSnapshot(ctx);
 
             if (snapshot.cameras.empty() && snapshot.xrCameras.empty()) {
                 ImGui::TextUnformatted("No cameras in scene.");
@@ -138,9 +147,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
             const uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
             const uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
 
-            ctx->world.FlushTransforms();
-            eyelib::api::world::World::RenderSnapshot snapshot;
-            ctx->world.CaptureRenderSnapshot(snapshot);
+            const auto& snapshot = GetFrameSnapshot(ctx);
 
             ::eyelib::world::components::Transform camTransform;
             ::eyelib::world::components::Camera camComp;
@@ -156,7 +163,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
                 eyelib::api::debug::Profiler::BeginSample("GameView Build (new)");
                 s_builderNew.Build(sceneNew, snapshot, ctx->editorCamera, w, h, ctx->assetRoots,
                     ctx->assetRegistry, nullptr, nullptr,
-                    ctx->gpuResolverNew, ctx->builtinManagerNew);
+                    ctx->gpuResolverNew, ctx->builtinManagerNew, ctx->sceneCacheNew, ctx->visibilitySystem);
                 // Match SceneViewPanel: attach the world's resolved skybox so the new
                 // `SkyboxFeature` overlays the procedural / cubemap sky onto the game view.
                 if (ctx->skyboxCacheNew) {
@@ -208,9 +215,7 @@ void ShowGameViewPanel(EditorContext* ctx) {
             const uint32_t w = (region.x > 1.f) ? static_cast<uint32_t>(region.x) : 1u;
             const uint32_t h = (region.y > 1.f) ? static_cast<uint32_t>(region.y) : 1u;
 
-            ctx->world.FlushTransforms();
-            eyelib::api::world::World::RenderSnapshot snapshot;
-            ctx->world.CaptureRenderSnapshot(snapshot);
+            const auto& snapshot = GetFrameSnapshot(ctx);
 
             ::eyelib::world::components::Transform camTransform;
             ::eyelib::world::components::Camera camComp;

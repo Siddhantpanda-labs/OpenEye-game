@@ -25,6 +25,10 @@ void SceneLighting::SetDirectionalLight(const math::Vec3& direction, const math:
 DirectionalLightSceneState SceneLighting::GetDirectionalLight() noexcept {
     return g_directionalLight;
 }
+ 
+void SceneLighting::SetIblIntensity(float intensity) noexcept {
+    g_directionalLight.iblIntensity = (std::max)(intensity, 0.0f);
+}
 
 void SceneLighting::ClearSpotLights() noexcept {
     g_SpotLights.clear();

@@ -255,6 +255,10 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
         item.flags = src.flags;
         m_shadowCasterList->items.push_back(item);
       }
+      std::sort(m_shadowCasterList->items.begin(), m_shadowCasterList->items.end(),
+          [](const ShadowCasterItem& a, const ShadowCasterItem& b) {
+              return a.meshHandle < b.meshHandle;
+          });
     }
   }
 

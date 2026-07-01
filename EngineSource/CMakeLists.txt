@@ -256,7 +256,7 @@ endif()
 # --------------------------------------
 # Game Application (Final Runtime)
 # --------------------------------------
-if(OPENEYE_BUILD_GAME)
+if(OPENEYE_BUILD_GAME AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app/openmeta")
     add_subdirectory(app/openmeta)
 endif()
 

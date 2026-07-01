@@ -1,4 +1,6 @@
 #include "EditorSceneBuilderNew.h"
+#include "EditorPersistentSceneCache.h"
+#include "EditorVisibilitySystem.h"
 
 #include "BuiltinResourceManagerNew.h"
 #include "RendererGPUResourceCacheNew.h"
@@ -78,6 +80,32 @@ eyelib::math::Mat4 TransformToMatrix(const ::eyelib::world::components::Transfor
 
 } // namespace
 
+void EditorSceneBuilderNew::BuildTransformLookup(const eyelib::api::world::World::RenderSnapshot& snapshot) {
+    m_touchedTransformSlots.clear();
+    if (snapshot.transforms.empty())
+        return;
+
+    uint32_t maxIndex = 0u;
+    for (const auto& t : snapshot.transforms) {
+        if (t.entity.index > maxIndex)
+            maxIndex = t.entity.index;
+    }
+    const size_t required = static_cast<size_t>(maxIndex) + 1u;
+    if (m_transformSlotGeneration.size() < required) {
+        m_transformSlotGeneration.resize(required, 0u);
+        m_transformSlotIndex.resize(required, 0u);
+    }
+
+    m_touchedTransformSlots.reserve(snapshot.transforms.size());
+    for (uint32_t i = 0; i < static_cast<uint32_t>(snapshot.transforms.size()); ++i) {
+        const auto& t = snapshot.transforms[i];
+        const uint32_t slot = t.entity.index;
+        m_transformSlotGeneration[slot] = t.entity.generation;
+        m_transformSlotIndex[slot] = i;
+        m_touchedTransformSlots.push_back(slot);
+    }
+}
+
 void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
                                   const eyelib::api::world::World::RenderSnapshot& snapshot,
                                   const EditorCamera& editorCamera,
@@ -88,7 +116,9 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
                                   std::vector<::eyelib::world::EntityId>* outDrawableToEntity,
                                   std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity,
                                   openeye::player::RendererGPUResourceCacheNew* gpuResolverNew,
-                                  openeye::player::BuiltinResourceManagerNew*   builtinManagerNew) {
+                                  openeye::player::BuiltinResourceManagerNew*   builtinManagerNew,
+                                  openeye::editor::EditorPersistentSceneCache* sceneCacheNew,
+                                  openeye::editor::EditorVisibilitySystem* visibilitySystem) {
     (void)assetRoots; // Reserved: M3.9 may need asset-root-relative path resolution.
 
     scene.opaque.clear();
@@ -101,10 +131,35 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
     if (outTransparentDrawableToEntity)
         outTransparentDrawableToEntity->clear();
 
-    BuildEditorCameraView(editorCamera, viewportWidth, viewportHeight, scene.camera);
+    // Step 4: reserve by high-water hints so panel-local per-frame clear keeps capacity.
+    const size_t expectedDrawables = snapshot.renderables.size() + snapshot.meshRenderers.size();
+    if (scene.opaque.capacity() < expectedDrawables)
+        scene.opaque.reserve(expectedDrawables);
+    if (scene.pointLights.capacity() < snapshot.lights.size())
+        scene.pointLights.reserve(snapshot.lights.size());
+    if (scene.spotLights.capacity() < snapshot.lights.size())
+        scene.spotLights.reserve(snapshot.lights.size());
+    if (outDrawableToEntity && outDrawableToEntity->capacity() < expectedDrawables)
+        outDrawableToEntity->reserve(expectedDrawables);
+    if (outTransparentDrawableToEntity && outTransparentDrawableToEntity->capacity() < expectedDrawables)
+        outTransparentDrawableToEntity->reserve(expectedDrawables);
 
-    const auto getTransform = [&](::eyelib::world::EntityId id) {
-        return snapshot.GetTransform(id);
+    BuildEditorCameraView(editorCamera, viewportWidth, viewportHeight, scene.camera);
+    scene.iblIntensity = snapshot.iblIntensity;
+    if (visibilitySystem)
+        visibilitySystem->BuildCameraVisibility(scene.camera);
+
+    BuildTransformLookup(snapshot);
+    const auto getTransform = [&](::eyelib::world::EntityId id) -> const ::eyelib::world::components::Transform* {
+        const size_t slot = static_cast<size_t>(id.index);
+        if (slot >= m_transformSlotGeneration.size())
+            return nullptr;
+        if (m_transformSlotGeneration[slot] != id.generation)
+            return nullptr;
+        const uint32_t transformIdx = m_transformSlotIndex[slot];
+        if (transformIdx >= snapshot.transforms.size())
+            return nullptr;
+        return &snapshot.transforms[transformIdx].component;
     };
 
     // Mesh/material resolution mirrors `WorldRenderBridge` exactly so editor + player share
@@ -112,37 +167,50 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
     // file assets via the resolver (uploads on miss); default material fallback when the
     // entity has no material set or it failed to resolve.
     auto resolveHandles = [&](const std::string& meshKey, const std::string& materialAssetId,
+                              int32_t submeshIndex, uint32_t layerFlags,
+                              ::eyelib::world::EntityId entity,
                               uint32_t& meshHandleOut, uint32_t& materialIdOut) {
-        meshHandleOut = 0;
-        materialIdOut = 0;
+        if (sceneCacheNew) {
+            EditorPersistentSceneCache::DrawableKey key{};
+            key.entity = entity;
+            key.submeshIndex = submeshIndex;
+            key.layerFlags = layerFlags;
+            const auto handles = sceneCacheNew->ResolveDrawableHandles(
+                key, meshKey, materialAssetId, assetRegistry, gpuResolverNew, builtinManagerNew);
+            meshHandleOut = handles.meshHandle;
+            materialIdOut = handles.materialId;
+            return;
+        }
+        // Fallback path when persistent cache is not available.
+        meshHandleOut = 0u;
+        materialIdOut = 0u;
         if (eyelib::api::geometry::IsBuiltinMeshId(meshKey) && builtinManagerNew) {
             auto entry = builtinManagerNew->GetPrimitiveEntry(meshKey);
             meshHandleOut = entry.mesh.GetMeshHandle();
             materialIdOut = entry.material.GetMaterialId();
         } else if (gpuResolverNew && assetRegistry && !meshKey.empty()) {
             const eyelib::api::AssetId mid = assetRegistry->GetId(meshKey);
-            if (mid.IsValid())
-                meshHandleOut = gpuResolverNew->GetMesh(mid).GetMeshHandle();
+            if (mid.IsValid()) meshHandleOut = gpuResolverNew->GetMesh(mid).GetMeshHandle();
         }
         if (!materialAssetId.empty() && gpuResolverNew && assetRegistry) {
             const eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetId);
-            if (matId.IsValid())
-                materialIdOut = gpuResolverNew->GetMaterial(matId).GetMaterialId();
+            if (matId.IsValid()) materialIdOut = gpuResolverNew->GetMaterial(matId).GetMaterialId();
         }
-        if (materialIdOut == 0 && builtinManagerNew) {
+        if (materialIdOut == 0u && builtinManagerNew)
             materialIdOut = builtinManagerNew->GetDefaultMaterial().GetMaterialId();
-        }
     };
 
     auto emitDrawable = [&](::eyelib::world::EntityId entity,
                             const std::string& meshAssetId,
                             const std::string& materialAssetId,
                             int32_t submeshIndex) {
+        if (visibilitySystem && !visibilitySystem->IsVisible(entity))
+            return;
         const auto transform = getTransform(entity);
         if (!transform) return;
 
         eyelib::api::rendering::DrawableInstance instance{};
-        resolveHandles(meshAssetId, materialAssetId, instance.meshHandle, instance.materialId);
+        resolveHandles(meshAssetId, materialAssetId, submeshIndex, 0u, entity, instance.meshHandle, instance.materialId);
         instance.submeshIndex = submeshIndex;
 
         instance.worldTransform = TransformToMatrix(*transform);

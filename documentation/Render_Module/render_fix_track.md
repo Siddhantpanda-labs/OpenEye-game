@@ -1,151 +1,162 @@
-# Render module fix track (`render_fix_track.md`)
+Yes. Best way is to do this as a staged refactor with hard checkpoints, not a big-bang rewrite.
 
-**Purpose:** record live investigations + fixes for render-module crashes / regressions discovered during the editor + player migration. Each section is a single concrete problem with: log evidence, root cause, the fix, and the verification.
-Short, precise log of render-module fixes during editor + player migration. One entry per problem: symptom, cause, fix, files.
+## Implementation Order (production-grade)
 
-Companion: `Render_steps_todo.md`, `editor_player_migration_track.md`, `new_render_module.md`.
+1. **Frame Coordinator (editor-wide, single source of truth)**
+- Add `EditorRenderFrameCoordinator` that runs once per editor frame.
+- Responsibilities:
+  - One `FlushTransforms + CaptureRenderSnapshot` per frame.
+  - One global dirty-set update pass.
+  - One shared render cache update.
+  - Per-panel camera render requests only.
+- Remove snapshot/build calls from individual panels.
 
-## Build / verification commands
+2. **Persistent Scene Cache (entity + asset keyed)**
+- Add cache entries keyed by `(EntityId, MeshAssetId, MaterialAssetId, Submesh, LayerFlags)`.
+- Store resolved GPU handles, bounds, transform index, light payload.
+- Keep stable IDs/generation to detect entity recreation safely.
+- Panels read immutable frame cache views.
 
-Repo root: `D:\Project\World3d\OpenEye`. Build directory: `build/` (single multi-config tree). Run from the repo root:
+3. **Dirty-Tracking Pipeline**
+- Introduce dirty flags:
+  - `TransformDirty`, `RenderableDirty`, `MaterialDirty`, `MeshDirty`, `LightDirty`, `VisibilityDirty`.
+- Feed from world command/mutation layer (or diff previous snapshot if event feed unavailable).
+- Update only dirty cache entries; avoid full rebuild.
 
-```
-cd D:\Project\World3d\OpenEye
-cmake --build build --target EyelibRendering         --config Debug
-cmake --build build --target OpenEyeRenderingSandbox --config Debug
-cmake --build build --target EyelibRenderingAPI      --config Debug
-cmake --build build --target OpenEyeEditor           --config Debug
-cmake --build build --target OpenEyePlayer           --config Debug
-```
+4. **SoA Frame Storage + Memory Reuse**
+- Replace per-frame clear/reallocate vectors/maps with persistent SoA buffers:
+  - transforms, draw instances, material handles, mesh handles, bounds, light arrays.
+- Use `reserve` once for high-water marks; reuse capacity every frame.
+- Avoid per-frame `unordered_map` rebuild for transform lookup in hot path (use packed indices table).
 
-Run after a fix: editor binary at `Engine/bin/Debug/OpenEyeEditor.exe`, player at `Engine/bin/Debug/OpenEyePlayer.exe`. A fix is **not done** until everything that should still build, builds (per `editor_player_migration_track.md` Discipline §4).
+5. **Visibility System Split**
+- Build two-stage visibility:
+  - Stage A: global broadphase structure (BVH/grid) updated incrementally from dirty bounds.
+  - Stage B: per-camera frustum/occlusion query against broadphase.
+- Output per-camera visible instance lists only; do not rebuild global scene lists.
 
----
+6. **Panel Render Requests (camera-dependent only)**
+- Scene/Game/Preview panels submit camera + viewport to coordinator.
+- Coordinator returns cached visible list handles.
+- No panel performs world traversal, asset ID resolution, or scene rebuild.
 
-## 2026-05-11 · Editor crash in `BlitMainHdrToDefault` (0xC0000005)
+7. **Resource Resolution Hardening**
+- Move asset-ID → GPU-handle resolution to cache update stage only.
+- Resolve-once + invalidate-on-change policy.
+- Add fallback/material miss handling without branching in inner render loop.
 
-**Symptom:** crash mid-frame at `BlitMainHdrToDefault` execute; ImGui post-blit callback fired before `ImGui::Render()` (null draw data).
+8. **Threading Model Upgrade**
+- Keep game/editor logic on main thread.
+- Move render preparation + submission to render thread with double-buffered frame data.
+- Main thread publishes immutable frame packet; render thread consumes previous packet.
 
-**Cause:** `Impl::BuildWorldAndFeatures` enabled the swapchain blit pass via `ownsDevice` heuristic. Editor's window-owning `sceneVN` therefore composed to swapchain inside its own graph, racing with the editor's own `ComposeSwapchain()` and firing ImGui draw before `ImGui::Render()`.
-
-**Fix:** explicit public contract — `RenderPipeline::PresentationMode { Direct, Offscreen }` + `SetPresentationMode` / `GetPresentationMode`. Default `Direct` for `Initialize(window)`, `Offscreen` for `InitializeWithSharedDevice`. Editor flips `sceneVN` to `Offscreen`.
-
-**Files:**
-- `api/rendering/RenderPipeline.{h,cpp}` — add enum + setters; replace `ownsDevice` with `presentationMode`.
-- `app/editor/EditorApp.cpp` — `sceneVN.SetPresentationMode(Offscreen)` after init.
-
----
-
-## 2026-05-11 · Editor panels render black + `RT_Color0` layout mismatch
-
-**Symptom:** all viewport panels black; validation: `VUID-vkCmdDraw-None-09600` — `RT_Color0` in `COLOR_ATTACHMENT_OPTIMAL`, expected `SHADER_READ_ONLY_OPTIMAL`. Three cascading errors after (`EndQuery` outside renderpass, `pImageIndices-01430`, `acquireNextImageKHR-surface-07783`).
-
-**Cause:** Offscreen pipelines had no end-of-frame layout contract. `Direct` mode transitioned color to `ShaderResource` as a side effect of `BlitMainHdrToDefaultPass`; `Offscreen` mode had no tail pass, so ImGui sampled the texture while still in `ColorAttachment`. First failed draw desynchronised the device → cascade.
-
-**Fix:** new finalising barrier-only pass `PublishOffscreenOutputPass` (declares `MainHdrRenderTarget.color0 → ShaderResource`, `Execute` is no-op). `RasterFeature::OnSchedulePasses` schedules exactly one tail: `BlitMainHdrToDefaultPass` (Direct) or `PublishOffscreenOutputPass` (Offscreen).
-
-**Module contract:** offscreen pipelines guarantee main HDR color is in `ResourceState::ShaderResource` at end-of-frame.
-
-**Files:**
-- `eyelib/rendering/framegraph/passes/PublishOffscreenOutputPass.h` — new.
-- `eyelib/rendering/framegraph/FrameGraphPassNames.h` — add `kPublishOffscreenOutput`.
-- `eyelib/rendering/features/raster/RasterFeature.{h,cpp}` — own + schedule new pass on Offscreen branch.
-- Tracked in `Render_steps_todo.md`.
-
----
-
-## 2026-05-11 · `RenderPipeline::Resize` recreates window swapchain
-
-**Symptom:** every frame: `VUID-VkPresentInfoKHR-pImageIndices-01430` (present image not acquired) + `VUID-vkAcquireNextImageKHR-surface-07783` (acquired count wraps to 4294967295).
-
-**Cause:** `RenderPipeline::Resize(w, h)` called `device->OnWindowResized` when `ownsDevice`. `SceneViewPanel` calls `Resize(panelW, panelH)` every frame with **panel** dimensions, so the swapchain was rebuilt to docked-panel size between `BeginPresentFrame` (which had already done `vkAcquireNextImageKHR`) and `Present`.
-
-**Fix:** `Resize` is render-output-only — updates `outputWidth/Height` + `RenderWorld::SetOutputSize`. Window swapchain stays under the existing `OnWindowResized` entry point (editor main loop drives it explicitly on real framebuffer change).
-
-**Files:**
-- `api/rendering/RenderPipeline.cpp` — drop `device->OnWindowResized` from `Resize`.
-- `api/rendering/RenderPipeline.h` — docstring: render output only.
+9. **Instrumentation + Guardrails**
+- Add timings for:
+  - snapshot, dirty update, cache update, visibility, render submit (per panel).
+- Add invariants:
+  - exactly one snapshot/frame,
+  - zero panel-local scene rebuilds,
+  - no per-frame asset-ID lookups in render hot path.
+- Add regression tests with Sponza-scale scenes.
 
 ---
 
-## 2026-05-11 · Editor lights never reach `SceneLighting` (scene stuck at dark-violet IBL)
+## Suggested concrete rollout in your codebase
 
-**Symptom:** scene view black; after adding a mesh it goes dark-violet (= `IblDefaultProbes` ambient only); adding a `Light::Directional` entity has no visible effect.
-
-**Cause:** `EditorSceneBuilderNew::Build` did not iterate `snapshot.lights`. `RenderScene::directionalLightActive` stayed `false`, so `RenderPipeline::PublishLightsToSceneLighting` left the directional slot untouched and dropped all point + spot entries. The new module's lighting bus only ever saw the default neutral fallback.
-
-**Fix:** Editor adapter now mirrors the player's `WorldRenderBridge` light conversion in one place — walks `snapshot.lights`, fills `scene.directionalLight{.direction/.color/.intensity/.castShadows}` + sets `directionalLightActive = true` for the first directional, and pushes `PointLight` / `SpotLight` PODs (range, cone cosines, castShadows). Direction comes from the entity transform's quaternion via `ForwardFromRotation` (canonical forward = `(0,0,-1)`) — identical convention to the player so editor + player share light shape.
-
-**Files:**
-- `app/editor/EditorSceneBuilderNew.cpp` — add `DegreesToRadians` / `ForwardFromRotation` helpers; clear `scene.pointLights` / `scene.spotLights` / `directionalLightActive` at the top of `Build`; new loop over `snapshot.lights` after drawables.
-- `app/editor/EditorSceneBuilderNew.h` — docstring: lights now populated per-frame; skybox stays on legacy until per-scene IBL probe swap lands.
+1. Land `EditorRenderFrameCoordinator` + move SceneView to coordinator path first.  
+2. Add persistent draw/light cache + dirty update (still single-thread).  
+3. Add visibility broadphase + per-camera lists.  
+4. Migrate GameView/MaterialPreview to same coordinator.  
+5. Then add render-thread buffering.
 
 ---
 
-## 2026-05-11 · Editor drawables have `meshHandle=0` / `materialId=0` (cache never uploads)
-
-**Symptom:** every visible draw row logs `materialId=0 meshHandle=0` plus warn-once `EditorSceneBuilderNew: scene built with placeholder mesh/material handles`. Scene-view + game-view panels stay empty even with mesh + light entities present.
-
-**Cause:** `EditorSceneBuilderNew::Build` was calling `ResourceCache::GetMesh / GetMaterial` directly — those are pure lookups (no upload, no descriptor fetch). The editor never authored any entries into the new cache (only the legacy `EditorGPUResourceCache` was wired, and only into the legacy stack). The player avoids this by routing through two adapters that *upload on miss*: `RendererGPUResourceCacheNew` (legacy `AssetRegistry` descriptor → public POD → `ResourceCache::Create*`) + `BuiltinResourceManagerNew` (primitives + shared default material).
-
-**Fix:** Promote both adapters as runtime-shared (they already live in `OpenEyeGameRuntime`, which the editor links). Docstrings updated to call out the dual client; namespace + file location preserved (single source of truth, zero duplication). Editor now:
-1. Constructs both adapters right after `resourceCache` inside the editor's main scope, borrowing `&assetRegistry`.
-2. Stashes raw pointers on `EditorContext::gpuResolverNew` + `builtinManagerNew`.
-3. `EditorSceneBuilderNew::Build` takes the resolver + builtin instead of the bare cache, and mirrors `WorldRenderBridge::resolveHandles` exactly: built-in mesh ids → builtin manager (mesh + material); file assets → resolver; material miss → `GetDefaultMaterial()` fallback. The placeholder warn-once is gone — the cold path no longer exists.
-
-**Files:**
-- `app/player/RendererGPUResourceCacheNew.h` — docstring: runtime-shared, dual client (player + editor).
-- `app/player/BuiltinResourceManagerNew.h` — docstring: runtime-shared, dual client.
-- `app/editor/EditorContext.h` — forward-declare both adapter classes; add `gpuResolverNew` + `builtinManagerNew` fields.
-- `app/editor/EditorApp.cpp` — include both headers; construct adapters after `resourceCache` (inside the ImGui scope so `assetRegistry` is in scope); stash on `ctx`.
-- `app/editor/EditorSceneBuilderNew.h` — signature: drop `ResourceCache*`, take `RendererGPUResourceCacheNew*` + `BuiltinResourceManagerNew*`.
-- `app/editor/EditorSceneBuilderNew.cpp` — new `resolveHandles` lambda mirroring the player; drop `LogResourceResolutionGapOnce`.
-- `app/editor/panels/SceneViewPanel.cpp` + `panels/GameViewPanel.cpp` — pass `ctx->gpuResolverNew` + `ctx->builtinManagerNew` instead of `ctx->resourceCacheNew`.
+If you want, I can now start implementing **Phase 1** directly in your repo (coordinator + single-snapshot-per-frame + SceneView migration), then we iterate phase by phase.
 
 ---
 
-## 2026-05-12 · `EditorDebugLines` + offscreen tail: `vkCmdEndQuery` + layout `09600` (dynamic rendering left open)
+## Done Checklist (Editor Performance Architecture)
 
-**Symptom:** `VUID-vkCmdEndQuery-None-07007` (query started outside pass, end inside / mis-nested), `VUID-vkCmdDraw-None-09600` (HDR `RT_Color0` still `COLOR_ATTACHMENT` while a draw expects `SHADER_READ_ONLY_OPTIMAL`), plus debug `FrameGraph::Compile: attachment-ops contract mismatch` between `GBuffer`/`DeferredLighting` and `EditorDebugLines`.
+- [x] Step 1 - Frame Coordinator (single snapshot source-of-truth)
+  - Added `EditorRenderFrameCoordinator` and wired `BeginFrame(ctx)` once per editor frame in both editor runtime branches.
+  - Added shared frame snapshot storage in `EditorContext` (`frameSnapshot`, `frameSnapshotValid`, `frameSnapshotSerial`).
+  - Scene/Game panels now read the shared frame snapshot instead of issuing their own per-panel `FlushTransforms + CaptureRenderSnapshot` calls.
+  - Files:
+    - `EngineSource/app/editor/EditorRenderFrameCoordinator.{h,cpp}`
+    - `EngineSource/app/editor/EditorContext.h`
+    - `EngineSource/app/editor/EditorApp.cpp`
+    - `EngineSource/app/editor/panels/SceneViewPanel.cpp`
+    - `EngineSource/app/editor/panels/GameViewPanel.cpp`
+    - `EngineSource/app/editor/CMakeLists.txt`
 
-**Cause:** `vkCmdBeginRendering` from `SetRenderTarget` stayed active through the last geometry pass (`DeferredLighting`, then optional `EditorDebugLines`). `PublishOffscreenOutputPass` replayed barriers **before** its `Execute`, so `vkCmdPipelineBarrier` transitioned HDR colour while it was still bound as a colour attachment; `GpuProfiler::EndFrame` → `vkCmdEndQuery` ran while dynamic rendering was still active relative to validation ordering.
+- [x] Step 2 - Persistent Scene Cache (entity + asset keyed)
+  - Added `EditorPersistentSceneCache` keyed by `(EntityId, meshAssetId, materialAssetId, submeshIndex, layerFlags)`.
+  - Cache stores resolved mesh/material handles and reuses them across frames for the new scene-builder path.
+  - Wired cache lifecycle to frame coordinator cadence:
+    - `BeginFrame(frameSerial)` called from `EditorRenderFrameCoordinator`.
+    - `EndFrame()` called once after editor panel pass each frame (prunes untouched keys).
+  - Integrated cache into `EditorSceneBuilderNew` so Scene/Game new-pipeline builds resolve via cache first.
+  - Files:
+    - `EngineSource/app/editor/EditorPersistentSceneCache.{h,cpp}`
+    - `EngineSource/app/editor/EditorSceneBuilderNew.{h,cpp}`
+    - `EngineSource/app/editor/EditorContext.h`
+    - `EngineSource/app/editor/EditorRenderFrameCoordinator.cpp`
+    - `EngineSource/app/editor/EditorApp.cpp`
+    - `EngineSource/app/editor/panels/SceneViewPanel.cpp`
+    - `EngineSource/app/editor/panels/GameViewPanel.cpp`
+    - `EngineSource/app/editor/CMakeLists.txt`
+- [x] Step 3 - Dirty-Tracking Pipeline
+  - Added `EditorSceneDirtyTracker` with explicit flags:
+    - `TransformDirty`, `RenderableDirty`, `MeshDirty`, `MaterialDirty`, `LightDirty`, `VisibilityDirty`.
+  - Dirty tracking source is frame-to-frame snapshot diff (current vs previous signatures for transforms/renderables/mesh-renderers/lights), including removals.
+  - Wired into frame coordination:
+    - `BeginFrame(snapshot)` runs once per frame after shared snapshot capture.
+    - Cache-affecting dirty entities are emitted and used to invalidate per-entity entries in `EditorPersistentSceneCache`.
+  - Files:
+    - `EngineSource/app/editor/EditorSceneDirtyTracker.{h,cpp}`
+    - `EngineSource/app/editor/EditorRenderFrameCoordinator.cpp`
+    - `EngineSource/app/editor/EditorPersistentSceneCache.{h,cpp}`
+    - `EngineSource/app/editor/EditorContext.h`
+    - `EngineSource/app/editor/EditorApp.cpp`
+    - `EngineSource/app/editor/CMakeLists.txt`
+- [x] Step 4 - SoA Frame Storage + Memory Reuse
+  - `EditorSceneBuilderNew` now uses persistent SoA transform lookup slots keyed by entity index/generation (`m_transformSlotGeneration`, `m_transformSlotIndex`) rebuilt from snapshot transform arrays each frame.
+  - Replaced hot-path `snapshot.GetTransform(...)` map lookups during drawable/light conversion with O(1) slot lookup against the SoA tables.
+  - Added proactive `reserve(...)` high-water reuse for draw/light/output entity arrays to avoid frame-local realloc churn after clear.
+  - Files:
+    - `EngineSource/app/editor/EditorSceneBuilderNew.{h,cpp}`
+- [x] Step 5 - Visibility System Split
+  - Added `EditorVisibilitySystem` with two-stage flow:
+    - Stage A (`BeginFrame`): build frame-global visibility candidates from snapshot renderables/mesh-renderers + transform positions (broadphase set).
+    - Stage B (`BuildCameraVisibility`): per-camera frustum refine to a visible-entity set (sphere-vs-frustum).
+  - Integrated into editor frame architecture:
+    - `EditorRenderFrameCoordinator` now runs visibility Stage A once per frame.
+    - `EditorSceneBuilderNew` runs Stage B per camera and filters draw emission through `IsVisible(entity)`.
+  - Wired through context + app ownership so Scene/Game new-pipeline builds both consume the same visibility subsystem.
+  - Files:
+    - `EngineSource/app/editor/EditorVisibilitySystem.{h,cpp}`
+    - `EngineSource/app/editor/EditorRenderFrameCoordinator.cpp`
+    - `EngineSource/app/editor/EditorSceneBuilderNew.{h,cpp}`
+    - `EngineSource/app/editor/EditorContext.h`
+    - `EngineSource/app/editor/EditorApp.cpp`
+    - `EngineSource/app/editor/panels/SceneViewPanel.cpp`
+    - `EngineSource/app/editor/panels/GameViewPanel.cpp`
+    - `EngineSource/app/editor/CMakeLists.txt`
+- [ ] Step 6 - Panel Render Requests API (camera-dependent only)
+- [ ] Step 7 - Resource Resolution Hardening
+- [ ] Step 8 - Threading Model Upgrade
+    Main/UI thread
+    ImGui, editor input, gizmos, world edits, command submission.
+    Produces frame requests, does not do heavy render prep.
+    Game/Simulation thread (can be same as main in edit mode initially)
+    ECS update, animation, physics, transform solve.
+    Publishes immutable snapshot to render side.
+    Render thread
+    Consumes previous snapshot.
+    Dirty processing, cache updates, visibility, draw list build, command recording/submission/present.
+    Then add worker jobs (thread pool, typically 4–12 workers depending CPU):
 
-**Fix:** `ICommandList::EndDynamicRendering()` → Vulkan `EndRenderingIfActive`. `FrameGraph::Execute` calls it **after every pass** so the next pass’s barriers never run inside an open dynamic-rendering scope; `BlitMainHdrToDefaultPass::Execute` also ends rendering before the swapchain blit. Removed the overly strict per-texture attachment-op SameOps debug check (shared depth + sequential Clear→Load on HDR produced false positives).
-
-**Files:** `rhi/RHI.h`, `rhi/Vulkan/commands/CommandListVK.{h,cpp}`, `framegraph/FrameGraph.cpp`, `framegraph/passes/BlitMainHdrToDefaultPass.cpp`, `framegraph/passes/PublishOffscreenOutputPass.h` (doc only).
-
-### Follow-up hardening (same incident)
-
-- Reinforced offscreen contract at API boundary: after `RenderWorld::RunFrame`, offscreen `RenderPipeline::Render` now forces `MainHdrRenderTarget.color0 -> ShaderResource` and flushes tracker on the active command list (safety net if tail pass ordering ever changes).
-- Guarded Vulkan resize/compose zero-size paths: `DeviceVK::OnWindowResized` ignores `0x0`, and `DeviceVK::BlitToDefaultFramebuffer` returns early when swapchain extent is zero (prevents `vkCreateSwapchainKHR(imageExtent=0)` / zero-width framebuffer/renderpass validation spam during minimize/restore races).
-- Files: `api/rendering/RenderPipeline.cpp`, `rhi/Vulkan/core/DeviceVKPresentation.cpp`.
-
----
-
-## 2026-05-11 · Editor debug-line overlay (grid / axes / colliders) lands on the new pipeline
-
-**Symptom:** new-pipeline editor branch (`useNewPipeline`) had no scene grid, no XYZ axes, no collider helpers — `SetPendingDebugLinesColored` was a paused stub on `api/rendering`, so the call was silently dropped. ImGuizmo / selection still worked (pure ImGui-overlay) but the world looked floating.
-
-**Cause:** `eyelib/rendering/features/editor/{EditorFeature,DebugDrawPass}.{h,cpp}` were one-line scaffolds. The api/rendering façade kept three paused stubs (`RenderDebugLines`, `SetPendingDebugLines`, `SetPendingDebugLinesColored`) — each just logged a one-time warning and returned.
-
-**Fix:** First real consumer of the `features/editor/` slot (P9 "editor as a feature"). Module-side:
-
-- `features/editor/DebugLine.h` — POD `{Vec3 a, Vec3 b, Vec4 color}` (frame-local; copied into the feature on `SetLines`).
-- `features/editor/DebugDrawPass.{h,cpp}` — owns 3-slot host-visible vertex ring (`BufferUsage::Vertex` + `BufferMemoryHint::HostVisible`); maps + fills via `IBuffer::Map/Unmap`; binds `Frame` descriptor set (PerView UBO at `set=0,binding=1`); reads existing depth (`MainDepth → DepthRead`) for depth-tested overlay; writes `MainHdrRenderTarget` with `loadOp=Load`; `LineList` topology; depth test enabled but no depth write; cull disabled.
-- `features/editor/EditorFeature.{h,cpp}` — `IRenderFeature` with `SchedulingOrder = 100` so it runs strictly after `RasterFeature` (overlay on top of deferred-lit HDR). Registers shader permutation `EditorDebugLines` in `OnRegister`; `OnSchedulePasses` short-circuits when `m_pendingLines.empty()` so unused frames carry zero pass cost.
-- `framegraph/FrameGraphPassNames.h` — `kEditorDebugLines`.
-- `framegraph/FrameGraphResourceNames.h` — `writer_names::kEditorFeature` (debug name only; feature is consume-only).
-- `shaders/ShaderPermutationKey.h` — add `ProgramId::EditorDebugLines`.
-- `assets/shaders/rendering/vulkan/debug/debug_lines.{vert,frag}` — new pair (vert reads `uPerView.uViewProjection`, frag passes interpolated `vColor`).
-
-Public surface:
-
-- `api/rendering/RenderPipeline.cpp` — activate all three previously-paused stubs (`RenderDebugLines`, `SetPendingDebugLines`, `SetPendingDebugLinesColored`); converts the legacy pair shape into `eyelib::rendering::DebugLine[]` and pushes via `EditorFeature::SetLines`. Lines auto-clear after each `Render(scene)` so callers that stop feeding the surface do not see stale geometry (single-frame contract preserved). `Impl::warnedDebugLinesPaused` removed.
-- `Impl` owns `std::unique_ptr<EditorFeature> editor`, subscribed unconditionally after raster + shadow.
-
-Editor wiring:
-
-- `app/editor/panels/SceneViewPanel.cpp` — `useNewPipeline` branch now builds the same `ColoredLines` the legacy branch builds (`CollectGridAndAxisLinesColored` + `CollectColliderDebugLines`) and calls `sceneViewPipelineNew->SetPendingDebugLinesColored` right before `Render(newScene)`.
-
-ImGuizmo: no code change. It already worked on the new pipeline (purely ImGui draw-list overlay — `ImGuizmo::BeginFrame` already runs in the new-pipeline branch at `EditorApp.cpp:622` and `ImGuizmo::Manipulate` calls `ImGui::GetWindowDrawList()`).
-
+    Parallel culling jobs (by spatial tiles/chunks).
+    Parallel scene/cache update jobs.
+    Optional async asset decode/upload staging.
+- [ ] Step 9 - Instrumentation + Guardrails

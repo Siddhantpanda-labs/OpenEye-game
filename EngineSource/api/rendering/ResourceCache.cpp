@@ -98,6 +98,7 @@ public:
     std::unordered_map<::eyelib::api::AssetId, MeshEntry,     AssetIdHasher> meshes;
     std::unordered_map<::eyelib::api::AssetId, TextureEntry,  AssetIdHasher> textures;
     std::unordered_map<::eyelib::api::AssetId, MaterialEntry, AssetIdHasher> materials;
+    std::vector<std::shared_ptr<::eyelib::rendering::Mesh>> meshByHandleTokenVector;
 
     // Token allocators. Mesh handle 0 is "invalid" by design (matches the M1.5
     // `DrawableInstance::meshHandle` default); material id 0 is the MaterialTable
@@ -109,22 +110,18 @@ public:
 
     // ----- Mesh resolver -------------------------------------------------------------
 
-    // Implements `IMeshHandleResolver` by scanning the mesh map for the matching token.
-    // Linear in mesh count per call, but draw lists call this once per draw item; for
-    // editor scenes (≤ ~1000 meshes) this is well under the per-frame budget. Promote
-    // to a side-table if a profile demands it.
+    // Implements `IMeshHandleResolver` with O(1) token lookup.
+    // Hot-path contract: draw passes resolve each visible draw item's `meshHandle`, so
+    // this must remain constant-time under large scene counts.
     class CacheMeshResolver final : public ::eyelib::rendering::IMeshHandleResolver {
     public:
         explicit CacheMeshResolver(Impl* o) noexcept : owner(o) {}
 
         ::eyelib::rendering::MeshHandle TryResolveMesh(uint32_t meshHandle) const noexcept override {
-            if (!owner || meshHandle == 0u) return {};
-            for (const auto& kv : owner->meshes) {
-                if (kv.second.handleToken == meshHandle && kv.second.internal) {
-                    return kv.second.internal->GetHandle();
-                }
-            }
-            return {};
+            if (!owner || meshHandle == 0u || meshHandle >= owner->meshByHandleTokenVector.size()) return {};
+            const auto& meshPtr = owner->meshByHandleTokenVector[meshHandle];
+            if (!meshPtr) return {};
+            return meshPtr->GetHandle();
         }
     private:
         Impl* owner = nullptr;
@@ -257,6 +254,10 @@ Mesh ResourceCache::CreateMesh(const ::eyelib::api::AssetId& id, const MeshData&
     // Replace internal pointer (upsert): old GPU buffers freed when the previous
     // shared_ptr drops.
     entry.internal = std::move(internalMesh);
+    if (entry.handleToken >= m_impl->meshByHandleTokenVector.size()) {
+        m_impl->meshByHandleTokenVector.resize(entry.handleToken + 1);
+    }
+    m_impl->meshByHandleTokenVector[entry.handleToken] = entry.internal;
     return MeshAccess::Wrap(entry.internal, entry.handleToken);
 }
 
@@ -353,6 +354,12 @@ bool ResourceCache::HasMaterial(const ::eyelib::api::AssetId& id) const {
 
 void ResourceCache::Remove(const ::eyelib::api::AssetId& id) {
     if (!m_impl) return;
+    const auto itMesh = m_impl->meshes.find(id);
+    if (itMesh != m_impl->meshes.end()) {
+        if (itMesh->second.handleToken < m_impl->meshByHandleTokenVector.size()) {
+            m_impl->meshByHandleTokenVector[itMesh->second.handleToken] = nullptr;
+        }
+    }
     m_impl->meshes.erase(id);
     m_impl->textures.erase(id);
     m_impl->materials.erase(id);
@@ -364,6 +371,7 @@ void ResourceCache::Remove(const ::eyelib::api::AssetId& id) {
 void ResourceCache::OnDeviceLost() {
     if (!m_impl) return;
     m_impl->meshes.clear();
+    m_impl->meshByHandleTokenVector.clear();
     m_impl->textures.clear();
     // Material records stay (they are device-independent CPU rows). Pipelines will re-upload
     // them on the next frame after the device is recreated.

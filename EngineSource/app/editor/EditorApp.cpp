@@ -3,6 +3,10 @@
 #include "EditorContext.h"
 #include "EditorProject.h"
 #include "EditorSceneBuilder.h"
+#include "EditorRenderFrameCoordinator.h"
+#include "EditorPersistentSceneCache.h"
+#include "EditorSceneDirtyTracker.h"
+#include "EditorVisibilitySystem.h"
 #include "ScenePipelineMode.h"
 #include "MenuBar.h"
 #include "panels/StatusPanel.h"
@@ -538,6 +542,9 @@ int RunEditor(int argc, char** argv) {
             // same cache instance can be handed to `GameRuntime` on Play start (shared
             // device → reuse already-uploaded cubemaps; no double allocation).
             auto skyboxCacheNew = std::make_unique<openeye::player::SkyboxCacheNew>();
+            auto sceneCacheNew = std::make_unique<openeye::editor::EditorPersistentSceneCache>();
+            auto sceneDirtyTracker = std::make_unique<openeye::editor::EditorSceneDirtyTracker>();
+            auto visibilitySystem = std::make_unique<openeye::editor::EditorVisibilitySystem>();
 
             openeye::editor::EditorContext ctx;
             ctx.sceneViewPipeline = nullptr;
@@ -550,6 +557,9 @@ int RunEditor(int argc, char** argv) {
             ctx.gpuResolverNew = gpuResolverNew.get();
             ctx.builtinManagerNew = builtinManagerNew.get();
             ctx.skyboxCacheNew = skyboxCacheNew.get();
+            ctx.sceneCacheNew = sceneCacheNew.get();
+            ctx.sceneDirtyTracker = sceneDirtyTracker.get();
+            ctx.visibilitySystem = visibilitySystem.get();
             ctx.assetRegistry = &assetRegistry;
             ctx.assetRoots = { engineAssets };
             ctx.engineAssetsPath = engineAssets;
@@ -570,6 +580,7 @@ int RunEditor(int argc, char** argv) {
 
             uint32_t lastFramebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
             uint32_t lastFramebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+            openeye::editor::EditorRenderFrameCoordinator frameCoordinator;
             eyelib::api::core::Log::Info("Editor: entering main loop (api/rendering)");
 
             while (!window.ShouldClose()) {
@@ -633,6 +644,8 @@ int RunEditor(int argc, char** argv) {
                 if (matOk)
                     matVN.UpdateUploads();
 
+                frameCoordinator.BeginFrame(ctx);
+
                 openeye::editor::ShowMenuBar(ctx);
 
                 ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
@@ -645,6 +658,8 @@ int RunEditor(int argc, char** argv) {
                 openeye::editor::panels::ShowGameViewPanel(&ctx);
                 openeye::editor::panels::ShowProfilerPanel(&ctx);
                 openeye::editor::panels::ShowShadowDebugPanel(&ctx);
+                if (ctx.sceneCacheNew)
+                    ctx.sceneCacheNew->EndFrame();
 
                 ImGui::Render();
                 if (imgui.IsVulkan()) {
@@ -744,6 +759,12 @@ int RunEditor(int argc, char** argv) {
     ctx.resolveImGuiTextureId = [&imgui](void* nativeTexture) -> void* {
         return imgui.ResolveTextureId(nativeTexture);
     };
+    auto sceneCacheNew = std::make_unique<openeye::editor::EditorPersistentSceneCache>();
+    auto sceneDirtyTracker = std::make_unique<openeye::editor::EditorSceneDirtyTracker>();
+    auto visibilitySystem = std::make_unique<openeye::editor::EditorVisibilitySystem>();
+    ctx.sceneCacheNew = sceneCacheNew.get();
+    ctx.sceneDirtyTracker = sceneDirtyTracker.get();
+    ctx.visibilitySystem = visibilitySystem.get();
     openeye::editor::ApplyScenePipelineModeToEditorPipelines(ctx);
     eyelib::api::core::Log::Info("Editor: ApplyScenePipelineModeToEditorPipelines done");
     if (materialPreviewPipeline.GetDevice())
@@ -763,6 +784,7 @@ int RunEditor(int argc, char** argv) {
 
     uint32_t lastFramebufferWidth = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Width()));
     uint32_t lastFramebufferHeight = std::max<uint32_t>(1u, static_cast<uint32_t>(window.Height()));
+    openeye::editor::EditorRenderFrameCoordinator frameCoordinator;
     eyelib::api::core::Log::Info("Editor: init complete, entering main loop");
     while (!window.ShouldClose()) {
         window.PollEvents();
@@ -831,6 +853,8 @@ int RunEditor(int argc, char** argv) {
         if (ctx.materialPreviewPipeline)
             ctx.materialPreviewPipeline->UpdateUploads();
 
+        frameCoordinator.BeginFrame(ctx);
+
         openeye::editor::ShowMenuBar(ctx);
 
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
@@ -843,6 +867,8 @@ int RunEditor(int argc, char** argv) {
         openeye::editor::panels::ShowGameViewPanel(&ctx);
         openeye::editor::panels::ShowProfilerPanel(&ctx);
         openeye::editor::panels::ShowShadowDebugPanel(&ctx);
+        if (ctx.sceneCacheNew)
+            ctx.sceneCacheNew->EndFrame();
 
         eyelib::api::core::Log::Info("Before ImGui::Render"); ImGui::Render(); eyelib::api::core::Log::Info("After ImGui::Render");
         if (imgui.IsVulkan() && editorDevice) {

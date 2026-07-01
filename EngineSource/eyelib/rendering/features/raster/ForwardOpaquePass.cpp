@@ -134,14 +134,24 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
     rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_forwardDataSets[frameIdx]};
     cmd->BindDescriptorSets(0, 2, sets);
 
+    rhi::IBuffer* lastVB = nullptr;
+    rhi::IBuffer* lastIB = nullptr;
+
     for (uint32_t i = 0; i < n; ++i) {
         const DrawItem& it = m_drawList->items[i];
         const MeshHandle h = m_meshResolver->TryResolveMesh(it.meshHandle);
         if (!h.IsValid())
             continue;
         cmd->SetPushConstants(0, sizeof(uint32_t), &i);
-        cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
-        cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
+
+        if (lastVB != h.vertexBuffer) {
+            cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
+            lastVB = h.vertexBuffer;
+        }
+        if (lastIB != h.indexBuffer) {
+            cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
+            lastIB = h.indexBuffer;
+        }
         if (!h.submeshes.empty()) {
             for (const Submesh& sm : h.submeshes)
                 cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);

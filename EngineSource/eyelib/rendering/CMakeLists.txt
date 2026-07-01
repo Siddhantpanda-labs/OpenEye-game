@@ -65,9 +65,15 @@ if(OPENEYE_USE_VULKAN AND Vulkan_FOUND)
     if(WIN32)
         set(_OPENEYE_SHADERC_REL_LIB "${_OPENEYE_VULKAN_SDK_ROOT}/Lib/shaderc_combined.lib")
         set(_OPENEYE_SHADERC_DBG_LIB "${_OPENEYE_VULKAN_SDK_ROOT}/Lib/shaderc_combinedd.lib")
+        set(_OPENEYE_SHADERC_SHARED_LIB "${_OPENEYE_VULKAN_SDK_ROOT}/Lib/shaderc_shared.lib")
         if(EXISTS "${_OPENEYE_SHADERC_DBG_LIB}" AND EXISTS "${_OPENEYE_SHADERC_REL_LIB}")
             target_link_libraries(EyelibRendering PRIVATE
                 "$<$<CONFIG:Debug>:${_OPENEYE_SHADERC_DBG_LIB}>"
+                "$<$<NOT:$<CONFIG:Debug>>:${_OPENEYE_SHADERC_REL_LIB}>")
+            target_compile_definitions(EyelibRendering PRIVATE OPENEYE_VULKAN_SHADERC=1)
+        elseif(EXISTS "${_OPENEYE_SHADERC_SHARED_LIB}" AND EXISTS "${_OPENEYE_SHADERC_REL_LIB}")
+            target_link_libraries(EyelibRendering PRIVATE
+                "$<$<CONFIG:Debug>:${_OPENEYE_SHADERC_SHARED_LIB}>"
                 "$<$<NOT:$<CONFIG:Debug>>:${_OPENEYE_SHADERC_REL_LIB}>")
             target_compile_definitions(EyelibRendering PRIVATE OPENEYE_VULKAN_SHADERC=1)
         elseif(EXISTS "${_OPENEYE_SHADERC_REL_LIB}")

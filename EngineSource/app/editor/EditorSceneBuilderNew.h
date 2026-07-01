@@ -13,6 +13,8 @@ namespace openeye { namespace player {
 class RendererGPUResourceCacheNew;
 class BuiltinResourceManagerNew;
 } }
+namespace openeye::editor { class EditorPersistentSceneCache; }
+namespace openeye::editor { class EditorVisibilitySystem; }
 
 namespace openeye::editor {
 
@@ -50,7 +52,8 @@ public:
      * `EditorSceneBuilder::Build` shape (entity-id passthrough arrays included for M2.5
      * picking parity). Pass the runtime-shared resolver + builtin manager (typically
      * `ctx.gpuResolverNew` / `ctx.builtinManagerNew`) to get real GPU handles; pass null
-     * for the cold path.
+     * for the cold path. When `sceneCacheNew` is provided, handle resolution is cached
+     * per drawable key (entity + asset ids + submesh + layer).
      */
     void Build(eyelib::api::rendering::RenderScene& scene,
                const eyelib::api::world::World::RenderSnapshot& snapshot,
@@ -62,7 +65,17 @@ public:
                std::vector<::eyelib::world::EntityId>* outDrawableToEntity = nullptr,
                std::vector<::eyelib::world::EntityId>* outTransparentDrawableToEntity = nullptr,
                openeye::player::RendererGPUResourceCacheNew* gpuResolverNew = nullptr,
-               openeye::player::BuiltinResourceManagerNew*   builtinManagerNew = nullptr);
+               openeye::player::BuiltinResourceManagerNew*   builtinManagerNew = nullptr,
+               openeye::editor::EditorPersistentSceneCache* sceneCacheNew = nullptr,
+               openeye::editor::EditorVisibilitySystem* visibilitySystem = nullptr);
+
+private:
+    void BuildTransformLookup(const eyelib::api::world::World::RenderSnapshot& snapshot);
+
+    // Step 4: persistent SoA transform lookup storage reused frame-to-frame.
+    std::vector<uint32_t> m_transformSlotGeneration;
+    std::vector<uint32_t> m_transformSlotIndex;
+    std::vector<uint32_t> m_touchedTransformSlots;
 };
 
 } // namespace openeye::editor

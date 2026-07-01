@@ -1,9 +1,0 @@
-#ifndef OE_GBUFFER_PUSH_OFFSETS_GLSL
-#define OE_GBUFFER_PUSH_OFFSETS_GLSL
-
-// Keep Vulkan deferred push-constant offsets aligned with render/PassPushConstants.h.
-const int OE_GBUFFER_FRAG_HAS_ALBEDO_OFFSET = 92;
-const int OE_GBUFFER_INSTANCED_FRAG_HAS_ALBEDO_OFFSET = 28;
-const int OE_GBUFFER_SKINNED_USE_PER_DRAW_TRANSFORM_OFFSET = 96;
-
-#endif // OE_GBUFFER_PUSH_OFFSETS_GLSL

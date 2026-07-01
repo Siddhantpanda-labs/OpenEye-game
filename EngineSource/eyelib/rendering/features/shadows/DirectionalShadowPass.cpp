@@ -95,6 +95,9 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthBias(1.2f, 3.0f);
     cmd->BindPipeline(m_shadowPipeline);
 
+    rhi::IBuffer* lastVB = nullptr;
+    rhi::IBuffer* lastIB = nullptr;
+
     for (uint32_t layer = 0; layer < 3u; ++layer) {
         m_directionalShadowRt->SetDepthLayer(layer);
         cmd->SetRenderTarget(m_directionalShadowRt, ops);
@@ -118,8 +121,14 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
             if (!hMesh.IsValid())
                 continue;
 
-            cmd->BindVertexBuffer(hMesh.vertexBuffer, 0, 0);
-            cmd->BindIndexBuffer(hMesh.indexBuffer, hMesh.indexType, 0);
+            if (lastVB != hMesh.vertexBuffer) {
+                cmd->BindVertexBuffer(hMesh.vertexBuffer, 0, 0);
+                lastVB = hMesh.vertexBuffer;
+            }
+            if (lastIB != hMesh.indexBuffer) {
+                cmd->BindIndexBuffer(hMesh.indexBuffer, hMesh.indexType, 0);
+                lastIB = hMesh.indexBuffer;
+            }
 
             ShadowPushConstants pc{};
             pc.lightViewProj = (*m_lightViewProj)[layer];

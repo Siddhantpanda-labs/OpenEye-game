@@ -611,6 +611,10 @@ void ShowInspectorPanel(EditorContext* ctx) {
             if (ImGui::InputText("Skybox (procedural | evening | path or folder)", skyboxBuf, sizeof(skyboxBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
                 ctx->world.SetSkyboxAssetId(skyboxBuf[0] ? std::string(skyboxBuf) : std::string());
             }
+            float ibl = ctx->world.GetIblIntensity();
+            if (ImGui::SliderFloat("IBL Intensity", &ibl, 0.0f, 2.0f, "%.2f")) {
+                ctx->world.SetIblIntensity(ibl);
+            }
         } else if (ctx->selectedEntity == ::eyelib::world::InvalidEntity || !ctx->world.IsAlive(ctx->selectedEntity)) {
             ImGui::TextUnformatted("Select the scene or an entity in Hierarchy.");
         } else {

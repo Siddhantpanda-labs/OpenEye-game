@@ -47,6 +47,10 @@ set(EDITOR_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorApp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorContext.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorPersistentSceneCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneDirtyTracker.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorVisibilitySystem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/EditorRenderFrameCoordinator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorFolderPicker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorProject.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/EditorSceneBuilder.cpp

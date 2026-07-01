@@ -187,6 +187,7 @@ void RasterFeature::OnUpload(FrameContext& frame, const RenderContext& render) {
     const DirectionalLightSceneState sceneLight = SceneLighting::GetDirectionalLight();
     dir.direction = {sceneLight.direction.x, sceneLight.direction.y, sceneLight.direction.z, 0.0f};
     dir.colorIntensity = {sceneLight.color.x, sceneLight.color.y, sceneLight.color.z, sceneLight.intensity};
+    dir.iblParams.x = sceneLight.iblIntensity;
     const bool uploadedDirLight = res->UploadDirectionalLightUniform(render.recordingCommandList, dir);
 
     bool uploadedPerObject = true;
