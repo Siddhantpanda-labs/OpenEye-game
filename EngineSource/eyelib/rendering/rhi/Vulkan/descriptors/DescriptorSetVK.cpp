@@ -50,6 +50,7 @@ static const char* PipelineLayoutKindName(PipelineLayoutKind kind) {
     case PipelineLayoutKind::RasterForwardMinimal: return "RasterForwardMinimal";
     case PipelineLayoutKind::RasterGBuffer: return "RasterGBuffer";
     case PipelineLayoutKind::RasterDeferredLighting: return "RasterDeferredLighting";
+    case PipelineLayoutKind::RasterShadow: return "RasterShadow";
     default: return "Unknown";
     }
 }

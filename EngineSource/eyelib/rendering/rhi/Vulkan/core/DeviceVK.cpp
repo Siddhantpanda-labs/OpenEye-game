@@ -206,6 +206,10 @@ DeviceVK::~DeviceVK() {
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_composeBootstrapPipelineLayout = nullptr; }
     rscPl = static_cast<VkPipelineLayout>(m_RasterForwardMinimalPipelineLayout);
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_RasterForwardMinimalPipelineLayout = nullptr; }
+
+    rscPl = static_cast<VkPipelineLayout>(m_RasterShadowPipelineLayout);
+    if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_RasterShadowPipelineLayout = nullptr; }
+
     rscPl = static_cast<VkPipelineLayout>(m_RasterGBufferPipelineLayout);
     if (rscPl != VK_NULL_HANDLE && device != VK_NULL_HANDLE) { vkDestroyPipelineLayout(device, rscPl, nullptr); m_RasterGBufferPipelineLayout = nullptr; }
     rscPl = static_cast<VkPipelineLayout>(m_RasterDeferredLightingPipelineLayout);
@@ -1609,9 +1613,11 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkDescriptorSetLayout outlinePostLayout = vkres::CreateOutlinePostSetLayout(device, meshStages);
         VkDescriptorSetLayout rasterForwardDataLayout = vkres::CreateRasterForwardDataSetLayout(device, meshStages);
         VkDescriptorSetLayout rasterGBufferDataLayout = vkres::CreateRasterGBufferDataSetLayout(device, meshStages);
+        VkDescriptorSetLayout rasterShadowDataLayout = vkres::CreateRasterShadowDataSetLayout(device, meshStages);
         VkDescriptorSetLayout emptyLayout = vkres::CreateEmptySetLayout(device);
-        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !rasterForwardDataLayout || !rasterGBufferDataLayout || !emptyLayout) {
+        if (!frameLayout || !forwardPassLayout || !postPassLayout || !shadowPassLayout || !lightCullPassLayout || !deferredLightingPassLayout || !materialLayout || !sceneLayout || !iblPassLayout || !outlinePostLayout || !rasterForwardDataLayout || !rasterGBufferDataLayout || !rasterShadowDataLayout || !emptyLayout) {
             if (emptyLayout) vkDestroyDescriptorSetLayout(device, emptyLayout, nullptr);
+            if (rasterShadowDataLayout) vkDestroyDescriptorSetLayout(device, rasterShadowDataLayout, nullptr);
             if (rasterGBufferDataLayout) vkDestroyDescriptorSetLayout(device, rasterGBufferDataLayout, nullptr);
             if (rasterForwardDataLayout) vkDestroyDescriptorSetLayout(device, rasterForwardDataLayout, nullptr);
             if (outlinePostLayout) vkDestroyDescriptorSetLayout(device, outlinePostLayout, nullptr);
@@ -1671,14 +1677,16 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         VkPipelineLayout outlinePostPl = vkres::CreateOutlinePostPipelineLayout(device, outlinePostLayout, meshStages);
         VkPipelineLayout composeBootstrapPl = vkres::CreateComposeBootstrapPipelineLayout(device, frameLayout, meshStages);
         VkPipelineLayout rasterForwardMinimalPl = vkres::CreateRasterForwardMinimalPipelineLayout(device, frameLayout, rasterForwardDataLayout, meshStages);
+        VkPipelineLayout rasterShadowPl = vkres::CreateRasterShadowPipelineLayout(device, frameLayout, rasterShadowDataLayout, meshStages);
         VkPipelineLayout rasterGBufferPl = vkres::CreateRasterGBufferPipelineLayout(
             device, frameLayout, rasterGBufferDataLayout, bindlessSetLayout, m_supportsDescriptorBuffer, meshStages);
         VkDescriptorSetLayout deferredLightDataLayout = vkres::CreateRasterDeferredLightingDataSetLayout(device, meshStages);
         VkPipelineLayout deferredLightPl = vkres::CreateRasterDeferredLightingPipelineLayout(device, frameLayout, deferredLightDataLayout, meshStages);
         if (!forwardPl || !postPl || !shadowPl || !gbufferPl || !deferredLightingPl || !computeLightCullPl || !computeGpuCullPl || !iblPl || !outlinePostPl ||
-            !composeBootstrapPl || !rasterForwardMinimalPl || !rasterGBufferPl || !deferredLightDataLayout || !deferredLightPl) {
+            !composeBootstrapPl || !rasterForwardMinimalPl || !rasterShadowPl || !rasterGBufferPl || !deferredLightDataLayout || !deferredLightPl) {
             if (deferredLightPl) vkDestroyPipelineLayout(device, deferredLightPl, nullptr);
             if (rasterGBufferPl) vkDestroyPipelineLayout(device, rasterGBufferPl, nullptr);
+            if (rasterShadowPl) vkDestroyPipelineLayout(device, rasterShadowPl, nullptr);
             if (rasterForwardMinimalPl) vkDestroyPipelineLayout(device, rasterForwardMinimalPl, nullptr);
             if (composeBootstrapPl) vkDestroyPipelineLayout(device, composeBootstrapPl, nullptr);
             if (outlinePostPl) vkDestroyPipelineLayout(device, outlinePostPl, nullptr);
@@ -1748,6 +1756,7 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
         m_outlinePostPipelineLayout = outlinePostPl;
         m_composeBootstrapPipelineLayout = composeBootstrapPl;
         m_RasterForwardMinimalPipelineLayout = rasterForwardMinimalPl;
+        m_RasterShadowPipelineLayout = rasterShadowPl;
         m_RasterGBufferPipelineLayout = rasterGBufferPl;
         m_rasterGBufferDataSetLayout = rasterGBufferDataLayout;
         m_RasterDeferredLightingDataSetLayout = deferredLightDataLayout;
@@ -1775,6 +1784,8 @@ bool DeviceVK::Initialize(void* windowHandle, uint32_t width, uint32_t height) {
             CreatePipelineLayoutWrapperVK(this, outlinePostLayout, MakeResourceSetDesc(IDevice::ResourceSetType::OutlinePost));
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::RasterForwardData)] =
             CreatePipelineLayoutWrapperVK(this, rasterForwardDataLayout, MakeResourceSetDesc(IDevice::ResourceSetType::RasterForwardData));
+        m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::RasterShadowData)] =
+            CreatePipelineLayoutWrapperVK(this, rasterShadowDataLayout, MakeResourceSetDesc(IDevice::ResourceSetType::RasterShadowData));
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::RasterGBufferData)] =
             CreatePipelineLayoutWrapperVK(this, rasterGBufferDataLayout, MakeResourceSetDesc(IDevice::ResourceSetType::RasterGBufferData));
         m_resourceSetLayouts[static_cast<size_t>(ResourceSetType::RasterDeferredLightingData)] =
@@ -2072,6 +2083,7 @@ void* DeviceVK::GetPipelineLayoutForKind(PipelineLayoutKind kind) const {
         static_cast<VkPipelineLayout>(m_RasterForwardMinimalPipelineLayout),
         static_cast<VkPipelineLayout>(m_RasterGBufferPipelineLayout),
         static_cast<VkPipelineLayout>(m_RasterDeferredLightingPipelineLayout),
+        static_cast<VkPipelineLayout>(m_RasterShadowPipelineLayout),
         static_cast<VkPipelineLayout>(m_defaultPipelineLayout),
         kind);
 }

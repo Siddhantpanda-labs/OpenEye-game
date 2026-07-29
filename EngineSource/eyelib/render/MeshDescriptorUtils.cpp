@@ -90,10 +90,11 @@ void MeshDescriptorUtils::Optimize(MeshDescriptor& desc) {
 }
 
 math::AABB MeshDescriptorUtils::ComputeAABB(const MeshDescriptor& desc) {
-    math::AABB aabb;
-    if (desc.vertices.empty()) return aabb;
-    for (const auto& v : desc.vertices)
-        aabb.Expand(v.position);
+    if (desc.vertices.empty()) return math::AABB{};
+    math::AABB aabb(desc.vertices[0].position, desc.vertices[0].position);
+    for (size_t i = 1; i < desc.vertices.size(); ++i) {
+        aabb.Expand(desc.vertices[i].position);
+    }
     return aabb;
 }
 

@@ -6,6 +6,8 @@
 #include <string>
 #include <unordered_map>
 
+#include "eyelib/math/AABB.h"
+
 namespace eyelib { namespace api { class AssetRegistry; } }
 namespace openeye { namespace player {
 class RendererGPUResourceCacheNew;
@@ -33,6 +35,7 @@ public:
     struct ResolvedDrawableHandles {
         uint32_t meshHandle = 0;
         uint32_t materialId = 0;
+        eyelib::math::AABB bounds{};
     };
 
     void BeginFrame(uint64_t frameSerial);
@@ -48,17 +51,20 @@ public:
         openeye::player::BuiltinResourceManagerNew* builtinManagerNew);
 
 private:
-    struct Entry {
+    struct SubmeshEntry {
+        int32_t submeshIndex = 0;
+        uint32_t layerFlags = 0;
         ResolvedDrawableHandles handles{};
         uint64_t lastTouchedFrame = 0;
     };
 
-    struct DrawableKeyHash {
-        size_t operator()(const DrawableKey& key) const noexcept;
+    struct EntityCacheSlot {
+        uint32_t generation = 0xFFFFFFFF;
+        std::vector<SubmeshEntry> submeshes;
     };
 
     uint64_t m_frameSerial = 0;
-    std::unordered_map<DrawableKey, Entry, DrawableKeyHash> m_drawableEntries;
+    std::vector<EntityCacheSlot> m_entityCache;
 };
 
 } // namespace openeye::editor

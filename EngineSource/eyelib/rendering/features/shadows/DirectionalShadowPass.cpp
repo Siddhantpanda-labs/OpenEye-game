@@ -12,7 +12,7 @@ namespace rendering {
 namespace {
 struct ShadowPushConstants {
     math::Mat4 lightViewProj{1.0f};
-    math::Mat4 model{1.0f};
+    uint32_t baseObjectIndex = 0;
 };
 } // namespace
 
@@ -20,22 +20,26 @@ DirectionalShadowPass::DirectionalShadowPass(rhi::IRenderTarget* directionalShad
                                              rhi::IPipeline* shadowPipeline,
                                              const IMeshHandleResolver* meshResolver,
                                              const ShadowCasterList* casterList,
+                                             rhi::IDescriptorSet* shadowDataSet,
                                              const std::array<math::Mat4, 3>* lightViewProj) noexcept
     : m_directionalShadowRt(directionalShadowRt),
       m_shadowPipeline(shadowPipeline),
       m_meshResolver(meshResolver),
       m_casterList(casterList),
+      m_shadowDataSet(shadowDataSet),
       m_lightViewProj(lightViewProj) {}
 
 void DirectionalShadowPass::Reconfigure(rhi::IRenderTarget* directionalShadowRt,
                                         rhi::IPipeline* shadowPipeline,
                                         const IMeshHandleResolver* meshResolver,
                                         const ShadowCasterList* casterList,
+                                        rhi::IDescriptorSet* shadowDataSet,
                                         const std::array<math::Mat4, 3>* lightViewProj) noexcept {
     m_directionalShadowRt = directionalShadowRt;
     m_shadowPipeline = shadowPipeline;
     m_meshResolver = meshResolver;
     m_casterList = casterList;
+    m_shadowDataSet = shadowDataSet;
     m_lightViewProj = lightViewProj;
 }
 
@@ -107,19 +111,28 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
         math::Frustum lightFrustum;
         lightFrustum.FromMatrix((*m_lightViewProj)[layer]);
 
+        if (m_shadowDataSet) {
+            cmd->BindDescriptorSets(1, 1, &m_shadowDataSet);
+        }
+
         const uint32_t n = m_casterList->Count();
-        for (uint32_t i = 0; i < n; ++i) {
+        uint32_t i = 0;
+        while (i < n) {
             const ShadowCasterItem& it = m_casterList->items[i];
-            if (it.layer != DrawLayer::Opaque && it.layer != DrawLayer::AlphaTest)
+            if (it.layer != DrawLayer::Opaque && it.layer != DrawLayer::AlphaTest) {
+                ++i;
                 continue;
-            if (!it.worldBounds.IsValid())
+            }
+            if (!it.worldBounds.IsValid() || lightFrustum.Contains(it.worldBounds) == 0) {
+                ++i;
                 continue;
-            if (lightFrustum.Contains(it.worldBounds) == 0)
-                continue;
+            }
 
             const MeshHandle hMesh = m_meshResolver->TryResolveMesh(it.meshHandle);
-            if (!hMesh.IsValid())
+            if (!hMesh.IsValid()) {
+                ++i;
                 continue;
+            }
 
             if (lastVB != hMesh.vertexBuffer) {
                 cmd->BindVertexBuffer(hMesh.vertexBuffer, 0, 0);
@@ -130,18 +143,31 @@ void DirectionalShadowPass::Execute(rhi::ICommandList* cmd) {
                 lastIB = hMesh.indexBuffer;
             }
 
+            uint32_t instanceCount = 1;
+            while (i + instanceCount < n) {
+                const ShadowCasterItem& nextIt = m_casterList->items[i + instanceCount];
+                if (nextIt.meshHandle != it.meshHandle || nextIt.layer != it.layer || !nextIt.worldBounds.IsValid())
+                    break;
+                if (lightFrustum.Contains(nextIt.worldBounds) == 0)
+                    break; // Contiguous elements must pass frustum test to be batched
+                ++instanceCount;
+            }
+
             ShadowPushConstants pc{};
             pc.lightViewProj = (*m_lightViewProj)[layer];
-            pc.model = it.worldMatrix;
+            pc.baseObjectIndex = i;
             cmd->SetPushConstants(0, sizeof(ShadowPushConstants), &pc);
 
             if (!hMesh.submeshes.empty()) {
                 for (const Submesh& sm : hMesh.submeshes)
-                    cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
+                    cmd->DrawIndexedInstanced(sm.indexCount, sm.indexOffset, 0, instanceCount);
             } else {
-                cmd->DrawIndexed(hMesh.totalIndexCount, 0, 0);
+                cmd->DrawIndexedInstanced(hMesh.totalIndexCount, 0, 0, instanceCount);
             }
+
+            i += instanceCount;
         }
+
     }
 }
 

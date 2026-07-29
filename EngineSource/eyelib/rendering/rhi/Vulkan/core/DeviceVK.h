@@ -379,7 +379,10 @@ private:
     void* m_outlinePostSetLayout = nullptr;
     void* m_outlinePostPipelineLayout = nullptr;
     void* m_composeBootstrapPipelineLayout = nullptr;
+    /** Full pipeline layout for `PipelineLayoutKind::RasterForwardMinimal` (set0 Frame, set1 RasterForwardData). */
     void* m_RasterForwardMinimalPipelineLayout = nullptr;
+    /** Full pipeline layout for `PipelineLayoutKind::RasterShadow` (set0 Frame, set1 RasterShadowData). */
+    void* m_RasterShadowPipelineLayout = nullptr;
     /** Full pipeline layout for `PipelineLayoutKind::RasterGBuffer` (set0 Frame, set1 RasterGBufferData). */
     void* m_RasterGBufferPipelineLayout = nullptr;
     /** Set1 layout for `PipelineLayoutKind::RasterForwardMinimal` (PerObject SSBO + directional light UBO). */

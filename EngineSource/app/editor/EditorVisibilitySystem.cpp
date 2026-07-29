@@ -20,22 +20,49 @@ inline float PlaneDistance(const EditorVisibilitySystem::Plane& p, const eyelib:
 
 void EditorVisibilitySystem::BeginFrame(const eyelib::api::world::World::RenderSnapshot& snapshot) {
     m_candidates.clear();
-    m_visibleEntities.clear();
+    std::fill(m_visibilityMask.begin(), m_visibilityMask.end(), 0);
 
     m_candidates.reserve(snapshot.renderables.size() + snapshot.meshRenderers.size());
 
-    std::unordered_set<EntityId, EntityIdHash> seen;
-    seen.reserve(snapshot.renderables.size() + snapshot.meshRenderers.size());
+    uint32_t maxIndex = 0;
+    for (const auto& t : snapshot.transforms) {
+        if (t.entity.index > maxIndex) maxIndex = t.entity.index;
+    }
+    for (const auto& r : snapshot.renderables) {
+        if (r.entity.index > maxIndex) maxIndex = r.entity.index;
+    }
+    for (const auto& mr : snapshot.meshRenderers) {
+        if (mr.entity.index > maxIndex) maxIndex = mr.entity.index;
+    }
+
+    const size_t reqSize = static_cast<size_t>(maxIndex) + 1;
+    if (m_transformPositions.size() < reqSize) {
+        m_transformPositions.resize(reqSize);
+        m_transformGenerations.resize(reqSize, 0);
+    }
+    
+    // Clear generations for this frame so missing transforms are caught
+    std::fill(m_transformGenerations.begin(), m_transformGenerations.end(), 0);
+
+    for (const auto& t : snapshot.transforms) {
+        m_transformPositions[t.entity.index] = t.component.position;
+        m_transformGenerations[t.entity.index] = t.entity.generation;
+    }
+
+    std::vector<uint8_t> seen(reqSize, 0);
 
     const auto addCandidate = [&](EntityId entity, bool visible) {
         if (!visible) return;
-        if (!seen.emplace(entity).second) return;
-        const auto t = snapshot.GetTransform(entity);
-        if (!t) return;
+        if (entity.index >= reqSize) return;
+        if (seen[entity.index]) return;
+        seen[entity.index] = 1;
+
+        if (m_transformGenerations[entity.index] != entity.generation) return;
+
         Candidate c{};
         c.entity = entity;
-        c.position = t->position;
-        c.radius = 1.0f; // conservative default until per-mesh bounds are wired.
+        c.position = m_transformPositions[entity.index];
+        c.radius = -1.0f; // -1 indicates bounds unknown, bypass pre-cull.
         m_candidates.push_back(c);
     };
 
@@ -64,6 +91,7 @@ void EditorVisibilitySystem::BuildFrustumPlanes(const eyelib::math::Mat4& vp, Pl
 }
 
 bool EditorVisibilitySystem::SphereIntersectsFrustum(const Plane planes[6], const eyelib::math::Vec3& center, float radius) {
+    if (radius < 0.0f) return true; // Bypass pre-cull if bounds are unknown.
     for (int i = 0; i < 6; ++i) {
         if (PlaneDistance(planes[i], center) < -radius)
             return false;
@@ -72,22 +100,30 @@ bool EditorVisibilitySystem::SphereIntersectsFrustum(const Plane planes[6], cons
 }
 
 void EditorVisibilitySystem::BuildCameraVisibility(const eyelib::api::rendering::CameraView& camera) {
-    m_visibleEntities.clear();
+    std::fill(m_visibilityMask.begin(), m_visibilityMask.end(), 0);
+    
     Plane planes[6];
     const auto vp = camera.projection * camera.view;
     BuildFrustumPlanes(vp, planes);
 
-    m_visibleEntities.reserve(m_candidates.size());
+    uint32_t maxIndex = 0;
+    for (const auto& c : m_candidates) {
+        if (c.entity.index > maxIndex) maxIndex = c.entity.index;
+    }
+    if (m_visibilityMask.size() <= maxIndex) {
+        m_visibilityMask.resize(maxIndex + 1, 0);
+    }
+
     for (const auto& c : m_candidates) {
         if (SphereIntersectsFrustum(planes, c.position, c.radius))
-            m_visibleEntities.emplace(c.entity);
+            m_visibilityMask[c.entity.index] = 1;
     }
 }
 
 bool EditorVisibilitySystem::IsVisible(EntityId entity) const {
-    if (m_visibleEntities.empty())
-        return true;
-    return m_visibleEntities.find(entity) != m_visibleEntities.end();
+    if (entity.index >= m_visibilityMask.size())
+        return false;
+    return m_visibilityMask[entity.index] == 1;
 }
 
 } // namespace openeye::editor

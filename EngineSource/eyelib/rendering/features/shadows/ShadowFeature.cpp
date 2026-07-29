@@ -262,6 +262,43 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
     }
   }
 
+  // Populate shadow caster transforms buffer for instancing
+  if (!m_shadowCasterList->items.empty()) {
+      const size_t byteSize = sizeof(math::Mat4) * m_shadowCasterList->items.size();
+      if (!m_shadowCasterTransformsBuffer || m_shadowCasterTransformsBuffer->GetSize() < byteSize) {
+          if (m_shadowCasterTransformsBuffer) {
+              render.device->DestroyBuffer(m_shadowCasterTransformsBuffer);
+          }
+          rhi::BufferDesc desc{};
+          desc.sizeInBytes = std::max(byteSize, size_t(65536));
+          desc.usage = rhi::BufferUsage::Storage;
+          desc.memoryHint = rhi::BufferMemoryHint::HostVisible;
+          desc.debugName = "ShadowCasterTransforms";
+          m_shadowCasterTransformsBuffer = render.device->CreateBuffer(desc, nullptr);
+      }
+      if (m_shadowCasterTransformsBuffer) {
+          std::vector<math::Mat4> transforms;
+          transforms.reserve(m_shadowCasterList->items.size());
+          for (const auto& item : m_shadowCasterList->items) {
+              transforms.push_back(item.worldMatrix);
+          }
+          m_shadowCasterTransformsBuffer->Update(transforms.data(), 0, byteSize);
+          
+          const uint64_t dataKey = reinterpret_cast<uint64_t>(m_shadowCasterTransformsBuffer);
+          if (!m_shadowDataSet || m_shadowDataSetBufferKey != dataKey) {
+              if (!m_shadowDataSet) {
+                  if (rhi::IPipelineLayout* layout = render.device->GetResourceSetLayout(rhi::IDevice::ResourceSetType::RasterShadowData)) {
+                      m_shadowDataSet = render.device->CreateDescriptorSet(layout);
+                  }
+              }
+              if (m_shadowDataSet) {
+                  m_shadowDataSet->UpdateStorageBuffer(0, m_shadowCasterTransformsBuffer, 0, 0);
+                  m_shadowDataSetBufferKey = dataKey;
+              }
+          }
+      }
+  }
+
   if (!m_directionalShadowRt) {
     m_directionalShadowRt =
         render.device->CreateDepthOnlyRenderTargetArray(2048u, 2048u, 3u);
@@ -271,7 +308,7 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
     gp.assetPath = "raster/shadow/directional_depth";
     gp.vertexLayout = Mesh::GetVertexLayoutRHI();
     gp.topology = rhi::PrimitiveTopology::TriangleList;
-    gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
+    gp.layoutKind = rhi::PipelineLayoutKind::RasterShadow;
     gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
     gp.useDepthStencilOverride = true;
     gp.depthStencilOverride.depthTest = true;
@@ -350,7 +387,7 @@ void ShadowFeature::OnUpload(FrameContext &frame, const RenderContext &render) {
       gp.assetPath = "raster/shadow/directional_depth";
       gp.vertexLayout = Mesh::GetVertexLayoutRHI();
       gp.topology = rhi::PrimitiveTopology::TriangleList;
-      gp.layoutKind = rhi::PipelineLayoutKind::PushOnly;
+      gp.layoutKind = rhi::PipelineLayoutKind::RasterShadow;
       gp.sourcePolicy = rhi::ShaderSourcePolicy::PreferSpirv;
       gp.useDepthStencilOverride = true;
       gp.depthStencilOverride.depthTest = true;
@@ -488,18 +525,21 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
                              m_shadowParamsBuffer);
   }
 
-  if (m_directionalShadowRt && m_shadowPipeline && m_meshResolver &&
-      m_shadowCasterList) {
-    if (!m_directionalShadowPass)
-      m_directionalShadowPass = std::make_unique<DirectionalShadowPass>(
-          m_directionalShadowRt, m_shadowPipeline, m_meshResolver,
-          m_shadowCasterList, &m_lightViewProj);
-    else
-      m_directionalShadowPass->Reconfigure(
-          m_directionalShadowRt, m_shadowPipeline, m_meshResolver,
-          m_shadowCasterList, &m_lightViewProj);
-    graph.AddPassBorrowed(m_directionalShadowPass.get());
-  }
+    if (m_directionalShadowRt && m_shadowPipeline && m_meshResolver && m_shadowCasterList && !m_shadowCasterList->items.empty()) {
+      if (!m_directionalShadowPass)
+        m_directionalShadowPass = std::make_unique<DirectionalShadowPass>(
+            m_directionalShadowRt, m_shadowPipeline, m_meshResolver,
+            m_shadowCasterList, m_shadowDataSet, &m_lightViewProj);
+      else
+        m_directionalShadowPass->Reconfigure(
+        m_directionalShadowRt,
+        m_shadowPipeline,
+        m_meshResolver,
+        m_shadowCasterList,
+        m_shadowDataSet,
+        &m_lightViewProj);
+      graph.AddPassBorrowed(m_directionalShadowPass.get());
+    }
 
   if (m_spotLightUniformBuffer) {
       blackboard.PublishBuffer(BlackboardSlot::SpotLightUniformBuffer, writer_names::kShadowFeature, m_spotLightUniformBuffer);
@@ -510,7 +550,7 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
 
   if (hasSpotShadowPass) {
       if (!m_spotShadowPass) m_spotShadowPass = std::make_unique<SpotShadowPass>();
-      m_spotShadowPass->Setup(m_spotShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList, m_spotShadowViewProjs);
+      m_spotShadowPass->Setup(m_spotShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList, m_shadowDataSet, m_spotShadowViewProjs);
       graph.AddPassBorrowed(m_spotShadowPass.get());
   }
 
@@ -537,7 +577,7 @@ void ShadowFeature::OnSchedulePasses(FrameGraph &graph,
     if (!m_pointShadowPass)
       m_pointShadowPass = std::make_unique<PointShadowPass>();
     m_pointShadowPass->Setup(m_pointShadowRt, m_spotShadowPipeline, m_meshResolver, m_shadowCasterList,
-                             m_pointShadowFaceViewProjs);
+                             m_shadowDataSet, m_pointShadowFaceViewProjs);
     graph.AddPassBorrowed(m_pointShadowPass.get());
   }
 
@@ -587,6 +627,14 @@ void ShadowFeature::OnShutdown() {
     if (m_pointShadowRt) {
       m_device->DestroyRenderTarget(m_pointShadowRt);
       m_pointShadowRt = nullptr;
+    }
+    if (m_shadowCasterTransformsBuffer) {
+      m_device->DestroyBuffer(m_shadowCasterTransformsBuffer);
+      m_shadowCasterTransformsBuffer = nullptr;
+    }
+    if (m_shadowDataSet) {
+      m_device->DestroyDescriptorSet(m_shadowDataSet);
+      m_shadowDataSet = nullptr;
     }
   }
   m_shadowPipeline = nullptr;

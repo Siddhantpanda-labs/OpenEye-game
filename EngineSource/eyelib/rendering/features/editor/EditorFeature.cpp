@@ -93,6 +93,7 @@ void EditorFeature::OnSchedulePasses(FrameGraph& graph, FrameGraphBlackboard& bl
 
     m_debugDrawPass->SetLines(m_pendingLines.data(), m_pendingLines.size());
     graph.AddPassBorrowed(m_debugDrawPass.get());
+    m_pendingLines.clear();
 }
 
 void EditorFeature::OnShutdown() {

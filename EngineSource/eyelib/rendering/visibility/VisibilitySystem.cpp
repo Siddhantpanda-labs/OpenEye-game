@@ -68,8 +68,8 @@ void VisibilitySystem::BuildCpuDrawList(const IRenderSceneView* scene, DrawList&
         const math::AABB worldAabb = src.localBounds.Transform(src.worldTransform);
         // Diagnostic mode: bypass frustum reject to isolate visibility-vs-rendering issues.
         // If geometry appears with this enabled, culling/projection conventions are mismatched.
-        // if (frustum.Contains(worldAabb) == 0)
-        //     continue;
+        if (frustum.Contains(worldAabb) == 0)
+            continue;
 
         const math::Vec3 center = worldAabb.GetCenter();
         const float dist = glm::length(center - viewPos);
@@ -92,6 +92,7 @@ void VisibilitySystem::BuildCpuDrawList(const IRenderSceneView* scene, DrawList&
                   if (a.materialId != b.materialId) return a.materialId < b.materialId;
                   if (a.layer == DrawLayer::Opaque || a.layer == DrawLayer::AlphaTest) {
                       if (a.meshHandle != b.meshHandle) return a.meshHandle < b.meshHandle;
+                      if (a.submeshIndex != b.submeshIndex) return a.submeshIndex < b.submeshIndex;
                   }
                   return a.sortKey < b.sortKey;
               });

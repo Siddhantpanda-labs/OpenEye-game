@@ -30,41 +30,38 @@ public:
 
 private:
     using EntityId = ::eyelib::world::EntityId;
-    struct EntityIdHash {
-        size_t operator()(const EntityId& id) const noexcept {
-            return (static_cast<size_t>(id.generation) << 32u) ^ static_cast<size_t>(id.index);
-        }
-    };
-
-    void MarkDirty(EntityId entity, uint32_t flags);
-
     struct TransformState {
         ::eyelib::world::components::Transform component;
+        uint32_t generation = 0xFFFFFFFF;
         uint64_t lastVisitedFrame = 0;
     };
     struct RenderableState {
         ::eyelib::world::components::Renderable component;
+        uint32_t generation = 0xFFFFFFFF;
         uint64_t lastVisitedFrame = 0;
     };
     struct MeshRendererState {
         ::eyelib::world::components::MeshRenderer component;
+        uint32_t generation = 0xFFFFFFFF;
         uint64_t lastVisitedFrame = 0;
     };
     struct LightState {
         ::eyelib::world::components::Light component;
+        uint32_t generation = 0xFFFFFFFF;
         uint64_t lastVisitedFrame = 0;
     };
 
-    std::unordered_map<EntityId, TransformState, EntityIdHash> m_prevTransforms;
-    std::unordered_map<EntityId, RenderableState, EntityIdHash> m_prevRenderables;
-    std::unordered_map<EntityId, MeshRendererState, EntityIdHash> m_prevMeshRenderers;
-    std::unordered_map<EntityId, LightState, EntityIdHash> m_prevLights;
+    std::vector<TransformState> m_prevTransforms;
+    std::vector<RenderableState> m_prevRenderables;
+    std::vector<MeshRendererState> m_prevMeshRenderers;
+    std::vector<LightState> m_prevLights;
 
     uint64_t m_frameCount = 0;
 
-    std::unordered_map<EntityId, uint32_t, EntityIdHash> m_dirtyFlagsByEntity;
+    std::vector<uint32_t> m_dirtyFlagsByEntity;
     std::vector<EntityId> m_dirtyEntities;
     std::vector<EntityId> m_cacheInvalidationEntities;
 };
 
 } // namespace openeye::editor
+

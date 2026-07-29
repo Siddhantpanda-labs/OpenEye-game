@@ -2,11 +2,17 @@
 
 layout(location = 0) in vec3 aPosition;
 
+layout(std430, set = 1, binding = 0) readonly buffer ShadowCasterTransformsSsbo {
+    mat4 transforms[];
+} gTransforms;
+
 layout(push_constant) uniform ShadowPushConstants {
     mat4 uLightViewProj;
-    mat4 uModel;
+    uint baseObjectIndex;
 } pc;
 
 void main() {
-    gl_Position = pc.uLightViewProj * pc.uModel * vec4(aPosition, 1.0);
+    uint objIdx = pc.baseObjectIndex + gl_InstanceIndex;
+    mat4 uModel = gTransforms.transforms[objIdx];
+    gl_Position = pc.uLightViewProj * uModel * vec4(aPosition, 1.0);
 }

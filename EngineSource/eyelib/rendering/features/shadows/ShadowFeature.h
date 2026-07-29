@@ -52,6 +52,9 @@ private:
     const IMeshHandleResolver* m_meshResolver = nullptr;
     ShadowCasterList* m_shadowCasterList = nullptr;
     std::unique_ptr<ShadowCasterList> m_ownedShadowCasterList;
+    rhi::IBuffer* m_shadowCasterTransformsBuffer = nullptr;
+    rhi::IDescriptorSet* m_shadowDataSet = nullptr;
+    uint64_t m_shadowDataSetBufferKey = 0;
     std::array<math::Mat4, 3> m_lightViewProj = {math::Mat4{1.0f}, math::Mat4{1.0f}, math::Mat4{1.0f}};
     std::unique_ptr<DirectionalShadowPass> m_directionalShadowPass;
     rhi::IRenderTarget* m_spotShadowRt = nullptr;

@@ -11,9 +11,9 @@ namespace eyelib {
 namespace rendering {
 
 namespace {
-struct PointShadowPushConstants {
+struct ShadowPushConstants {
     math::Mat4 lightViewProj{1.0f};
-    math::Mat4 model{1.0f};
+    uint32_t baseObjectIndex = 0;
 };
 }  // namespace
 
@@ -21,11 +21,13 @@ void PointShadowPass::Setup(rhi::IRenderTarget* pointShadowRt,
                             rhi::IPipeline* shadowPipeline,
                             const IMeshHandleResolver* meshResolver,
                             const ShadowCasterList* casterList,
+                            rhi::IDescriptorSet* shadowDataSet,
                             const std::vector<math::Mat4>& pointFaceViewProjs) noexcept {
     m_pointShadowRt = pointShadowRt;
     m_shadowPipeline = shadowPipeline;
     m_meshResolver = meshResolver;
     m_casterList = casterList;
+    m_shadowDataSet = shadowDataSet;
     m_pointFaceViewProjs = pointFaceViewProjs;
 }
 
@@ -100,6 +102,10 @@ void PointShadowPass::Execute(rhi::ICommandList* cmd) {
         math::Frustum lightFrustum;
         lightFrustum.FromMatrix(m_pointFaceViewProjs[layer]);
 
+        if (m_shadowDataSet) {
+            cmd->BindDescriptorSets(1, 1, &m_shadowDataSet);
+        }
+
         const uint32_t n = m_casterList->Count();
         for (uint32_t i = 0; i < n; ++i) {
             const ShadowCasterItem& it = m_casterList->items[i];
@@ -123,10 +129,10 @@ void PointShadowPass::Execute(rhi::ICommandList* cmd) {
                 lastIB = hMesh.indexBuffer;
             }
 
-            PointShadowPushConstants pc{};
+            ShadowPushConstants pc{};
             pc.lightViewProj = m_pointFaceViewProjs[layer];
-            pc.model = it.worldMatrix;
-            cmd->SetPushConstants(0, sizeof(PointShadowPushConstants), &pc);
+            pc.baseObjectIndex = i;
+            cmd->SetPushConstants(0, sizeof(ShadowPushConstants), &pc);
 
             if (!hMesh.submeshes.empty()) {
                 for (const Submesh& sm : hMesh.submeshes)

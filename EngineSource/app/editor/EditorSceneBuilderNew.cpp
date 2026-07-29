@@ -169,7 +169,8 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
     auto resolveHandles = [&](const std::string& meshKey, const std::string& materialAssetId,
                               int32_t submeshIndex, uint32_t layerFlags,
                               ::eyelib::world::EntityId entity,
-                              uint32_t& meshHandleOut, uint32_t& materialIdOut) {
+                              uint32_t& meshHandleOut, uint32_t& materialIdOut,
+                              eyelib::math::AABB& boundsOut) {
         if (sceneCacheNew) {
             EditorPersistentSceneCache::DrawableKey key{};
             key.entity = entity;
@@ -179,18 +180,25 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
                 key, meshKey, materialAssetId, assetRegistry, gpuResolverNew, builtinManagerNew);
             meshHandleOut = handles.meshHandle;
             materialIdOut = handles.materialId;
+            boundsOut = handles.bounds;
             return;
         }
         // Fallback path when persistent cache is not available.
         meshHandleOut = 0u;
         materialIdOut = 0u;
+        boundsOut = eyelib::math::AABB{};
         if (eyelib::api::geometry::IsBuiltinMeshId(meshKey) && builtinManagerNew) {
             auto entry = builtinManagerNew->GetPrimitiveEntry(meshKey);
             meshHandleOut = entry.mesh.GetMeshHandle();
             materialIdOut = entry.material.GetMaterialId();
+            boundsOut = entry.mesh.GetAABB();
         } else if (gpuResolverNew && assetRegistry && !meshKey.empty()) {
             const eyelib::api::AssetId mid = assetRegistry->GetId(meshKey);
-            if (mid.IsValid()) meshHandleOut = gpuResolverNew->GetMesh(mid).GetMeshHandle();
+            if (mid.IsValid()) {
+                auto mesh = gpuResolverNew->GetMesh(mid);
+                meshHandleOut = mesh.GetMeshHandle();
+                boundsOut = mesh.GetAABB();
+            }
         }
         if (!materialAssetId.empty() && gpuResolverNew && assetRegistry) {
             const eyelib::api::AssetId matId = assetRegistry->GetId(materialAssetId);
@@ -210,11 +218,10 @@ void EditorSceneBuilderNew::Build(eyelib::api::rendering::RenderScene& scene,
         if (!transform) return;
 
         eyelib::api::rendering::DrawableInstance instance{};
-        resolveHandles(meshAssetId, materialAssetId, submeshIndex, 0u, entity, instance.meshHandle, instance.materialId);
+        resolveHandles(meshAssetId, materialAssetId, submeshIndex, 0u, entity, instance.meshHandle, instance.materialId, instance.localBounds);
         instance.submeshIndex = submeshIndex;
 
         instance.worldTransform = TransformToMatrix(*transform);
-        instance.localBounds = eyelib::math::AABB{};
         instance.layer = eyelib::api::rendering::DrawLayer::Opaque;
         instance.flags = eyelib::api::rendering::draw_instance_flags::kCastShadow;
 

@@ -43,110 +43,126 @@ inline bool LightEqual(const ::eyelib::world::components::Light& a, const ::eyel
 
 } // namespace
 
-void EditorSceneDirtyTracker::MarkDirty(EntityId entity, uint32_t flags) {
-    auto it = m_dirtyFlagsByEntity.find(entity);
-    if (it == m_dirtyFlagsByEntity.end()) {
-        m_dirtyFlagsByEntity.emplace(entity, flags);
-        m_dirtyEntities.push_back(entity);
-    } else {
-        it->second |= flags;
-    }
-}
-
 void EditorSceneDirtyTracker::BeginFrame(const eyelib::api::world::World::RenderSnapshot& snapshot) {
-    m_dirtyFlagsByEntity.clear();
     m_dirtyEntities.clear();
     m_cacheInvalidationEntities.clear();
+    std::fill(m_dirtyFlagsByEntity.begin(), m_dirtyFlagsByEntity.end(), 0);
 
     m_frameCount++;
 
+    auto markDirty = [&](EntityId entity, uint32_t flags) {
+        if (entity.index >= m_dirtyFlagsByEntity.size()) {
+            m_dirtyFlagsByEntity.resize(entity.index + 1, 0);
+        }
+        if (m_dirtyFlagsByEntity[entity.index] == 0) {
+            m_dirtyEntities.push_back(entity);
+        }
+        m_dirtyFlagsByEntity[entity.index] |= flags;
+    };
+
+    auto ensureSize = [](auto& vec, size_t index) {
+        if (index >= vec.size()) vec.resize(index + 1);
+    };
+
     for (const auto& entry : snapshot.transforms) {
-        auto it = m_prevTransforms.find(entry.entity);
-        if (it == m_prevTransforms.end()) {
-            m_prevTransforms.insert({entry.entity, {entry.component, m_frameCount}});
-            MarkDirty(entry.entity, TransformDirty);
+        const uint32_t idx = entry.entity.index;
+        ensureSize(m_prevTransforms, idx);
+        auto& state = m_prevTransforms[idx];
+        if (state.generation != entry.entity.generation) {
+            state.component = entry.component;
+            state.generation = entry.entity.generation;
+            state.lastVisitedFrame = m_frameCount;
+            markDirty(entry.entity, TransformDirty);
         } else {
-            it->second.lastVisitedFrame = m_frameCount;
-            if (!TransformEqual(it->second.component, entry.component)) {
-                it->second.component = entry.component;
-                MarkDirty(entry.entity, TransformDirty);
+            state.lastVisitedFrame = m_frameCount;
+            if (!TransformEqual(state.component, entry.component)) {
+                state.component = entry.component;
+                markDirty(entry.entity, TransformDirty);
             }
         }
     }
 
     for (const auto& entry : snapshot.renderables) {
-        auto it = m_prevRenderables.find(entry.entity);
-        if (it == m_prevRenderables.end()) {
-            m_prevRenderables.insert({entry.entity, {entry.component, m_frameCount}});
-            MarkDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+        const uint32_t idx = entry.entity.index;
+        ensureSize(m_prevRenderables, idx);
+        auto& state = m_prevRenderables[idx];
+        if (state.generation != entry.entity.generation) {
+            state.component = entry.component;
+            state.generation = entry.entity.generation;
+            state.lastVisitedFrame = m_frameCount;
+            markDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
         } else {
-            it->second.lastVisitedFrame = m_frameCount;
-            if (!RenderableEqual(it->second.component, entry.component)) {
-                it->second.component = entry.component;
-                MarkDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+            state.lastVisitedFrame = m_frameCount;
+            if (!RenderableEqual(state.component, entry.component)) {
+                state.component = entry.component;
+                markDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
             }
         }
     }
 
     for (const auto& entry : snapshot.meshRenderers) {
-        auto it = m_prevMeshRenderers.find(entry.entity);
-        if (it == m_prevMeshRenderers.end()) {
-            m_prevMeshRenderers.insert({entry.entity, {entry.component, m_frameCount}});
-            MarkDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+        const uint32_t idx = entry.entity.index;
+        ensureSize(m_prevMeshRenderers, idx);
+        auto& state = m_prevMeshRenderers[idx];
+        if (state.generation != entry.entity.generation) {
+            state.component = entry.component;
+            state.generation = entry.entity.generation;
+            state.lastVisitedFrame = m_frameCount;
+            markDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
         } else {
-            it->second.lastVisitedFrame = m_frameCount;
-            if (!MeshRendererEqual(it->second.component, entry.component)) {
-                it->second.component = entry.component;
-                MarkDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+            state.lastVisitedFrame = m_frameCount;
+            if (!MeshRendererEqual(state.component, entry.component)) {
+                state.component = entry.component;
+                markDirty(entry.entity, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
             }
         }
     }
 
     for (const auto& entry : snapshot.lights) {
-        auto it = m_prevLights.find(entry.entity);
-        if (it == m_prevLights.end()) {
-            m_prevLights.insert({entry.entity, {entry.component, m_frameCount}});
-            MarkDirty(entry.entity, LightDirty | VisibilityDirty);
+        const uint32_t idx = entry.entity.index;
+        ensureSize(m_prevLights, idx);
+        auto& state = m_prevLights[idx];
+        if (state.generation != entry.entity.generation) {
+            state.component = entry.component;
+            state.generation = entry.entity.generation;
+            state.lastVisitedFrame = m_frameCount;
+            markDirty(entry.entity, LightDirty | VisibilityDirty);
         } else {
-            it->second.lastVisitedFrame = m_frameCount;
-            if (!LightEqual(it->second.component, entry.component)) {
-                it->second.component = entry.component;
-                MarkDirty(entry.entity, LightDirty | VisibilityDirty);
+            state.lastVisitedFrame = m_frameCount;
+            if (!LightEqual(state.component, entry.component)) {
+                state.component = entry.component;
+                markDirty(entry.entity, LightDirty | VisibilityDirty);
             }
         }
     }
 
     // Prune stale components and mark dirty
-    for (auto it = m_prevTransforms.begin(); it != m_prevTransforms.end(); ) {
-        if (it->second.lastVisitedFrame != m_frameCount) {
-            MarkDirty(it->first, TransformDirty | VisibilityDirty);
-            it = m_prevTransforms.erase(it);
-        } else {
-            ++it;
+    for (uint32_t i = 0; i < m_prevTransforms.size(); ++i) {
+        auto& state = m_prevTransforms[i];
+        if (state.generation != 0xFFFFFFFF && state.lastVisitedFrame != m_frameCount) {
+            markDirty({i, state.generation}, TransformDirty | VisibilityDirty);
+            state.generation = 0xFFFFFFFF;
         }
     }
-    for (auto it = m_prevRenderables.begin(); it != m_prevRenderables.end(); ) {
-        if (it->second.lastVisitedFrame != m_frameCount) {
-            MarkDirty(it->first, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
-            it = m_prevRenderables.erase(it);
-        } else {
-            ++it;
+    for (uint32_t i = 0; i < m_prevRenderables.size(); ++i) {
+        auto& state = m_prevRenderables[i];
+        if (state.generation != 0xFFFFFFFF && state.lastVisitedFrame != m_frameCount) {
+            markDirty({i, state.generation}, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+            state.generation = 0xFFFFFFFF;
         }
     }
-    for (auto it = m_prevMeshRenderers.begin(); it != m_prevMeshRenderers.end(); ) {
-        if (it->second.lastVisitedFrame != m_frameCount) {
-            MarkDirty(it->first, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
-            it = m_prevMeshRenderers.erase(it);
-        } else {
-            ++it;
+    for (uint32_t i = 0; i < m_prevMeshRenderers.size(); ++i) {
+        auto& state = m_prevMeshRenderers[i];
+        if (state.generation != 0xFFFFFFFF && state.lastVisitedFrame != m_frameCount) {
+            markDirty({i, state.generation}, RenderableDirty | MeshDirty | MaterialDirty | VisibilityDirty);
+            state.generation = 0xFFFFFFFF;
         }
     }
-    for (auto it = m_prevLights.begin(); it != m_prevLights.end(); ) {
-        if (it->second.lastVisitedFrame != m_frameCount) {
-            MarkDirty(it->first, LightDirty | VisibilityDirty);
-            it = m_prevLights.erase(it);
-        } else {
-            ++it;
+    for (uint32_t i = 0; i < m_prevLights.size(); ++i) {
+        auto& state = m_prevLights[i];
+        if (state.generation != 0xFFFFFFFF && state.lastVisitedFrame != m_frameCount) {
+            markDirty({i, state.generation}, LightDirty | VisibilityDirty);
+            state.generation = 0xFFFFFFFF;
         }
     }
 
@@ -159,10 +175,8 @@ void EditorSceneDirtyTracker::BeginFrame(const eyelib::api::world::World::Render
 }
 
 uint32_t EditorSceneDirtyTracker::GetEntityFlags(EntityId entity) const {
-    const auto it = m_dirtyFlagsByEntity.find(entity);
-    if (it == m_dirtyFlagsByEntity.end())
-        return None;
-    return it->second;
+    if (entity.index >= m_dirtyFlagsByEntity.size()) return None;
+    return m_dirtyFlagsByEntity[entity.index];
 }
 
 bool EditorSceneDirtyTracker::HasAnyDirty(EntityId entity) const {

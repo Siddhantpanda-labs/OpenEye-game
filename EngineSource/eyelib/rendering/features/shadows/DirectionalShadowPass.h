@@ -31,6 +31,7 @@ namespace rhi {
 struct IPipeline;
 struct IRenderTarget;
 struct ITexture;
+struct IDescriptorSet;
 }
 
 /**
@@ -43,6 +44,7 @@ public:
                           rhi::IPipeline* shadowPipeline,
                           const IMeshHandleResolver* meshResolver,
                           const ShadowCasterList* casterList,
+                          rhi::IDescriptorSet* shadowDataSet,
                           const std::array<math::Mat4, 3>* lightViewProj) noexcept;
 
     const char* DebugName() const noexcept override { return pass_names::kDirectionalShadow; }
@@ -51,6 +53,7 @@ public:
                      rhi::IPipeline* shadowPipeline,
                      const IMeshHandleResolver* meshResolver,
                      const ShadowCasterList* casterList,
+                     rhi::IDescriptorSet* shadowDataSet,
                      const std::array<math::Mat4, 3>* lightViewProj) noexcept;
     void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) override;
     bool DescribeRenderAttachmentOps(const FrameGraphBlackboard& blackboard, rhi::IRenderTarget*& outRt, RenderAttachmentOps& outOps) const override;
@@ -61,6 +64,7 @@ private:
     rhi::IPipeline* m_shadowPipeline = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
     const ShadowCasterList* m_casterList = nullptr;
+    rhi::IDescriptorSet* m_shadowDataSet = nullptr;
     const std::array<math::Mat4, 3>* m_lightViewProj = nullptr;
 };
 

@@ -374,6 +374,8 @@ enum class PipelineLayoutKind : uint32_t {
     RasterGBuffer,
     /** set0 Frame, set1 GBuffer/depth textures + directional light UBO. Deferred lighting raster pass. */
     RasterDeferredLighting,
+    /** set0 Frame, set1 ShadowCasterTransforms SSBO. Shadow raster pass. */
+    RasterShadow,
 };
 
 /** Vulkan: how to obtain SPIR-V for a shader asset. OpenGL/Diligent ignore where not applicable. */

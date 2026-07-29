@@ -563,6 +563,33 @@ VkPipelineLayout CreateRasterForwardMinimalPipelineLayout(VkDevice device, VkDes
     return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
 }
 
+VkDescriptorSetLayout CreateRasterShadowDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
+    const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
+    VkDescriptorSetLayoutBinding bindings[1] = {};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = st;
+
+    VkDescriptorSetLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = 1;
+    info.pBindings = bindings;
+    VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+    VkResult res = vkCreateDescriptorSetLayout(device, &info, nullptr, &layout);
+    if (res != VK_SUCCESS) {
+        core::Log::ErrorF("VulkanResourceSpaces: CreateRasterShadowDataSetLayout failed (0x%x)", res);
+        return VK_NULL_HANDLE;
+    }
+    return layout;
+}
+
+VkPipelineLayout CreateRasterShadowPipelineLayout(VkDevice device, VkDescriptorSetLayout frameLayout,
+    VkDescriptorSetLayout rasterShadowDataLayout, bool includeMeshPushStages) {
+    VkDescriptorSetLayout layouts[2] = { frameLayout, rasterShadowDataLayout };
+    return createPipelineLayoutCommon(device, layouts, 2, GraphicsPushStagesForPipelineLayout(includeMeshPushStages), 0u);
+}
+
 VkDescriptorSetLayout CreateRasterGBufferDataSetLayout(VkDevice device, bool includeMeshShaderStages) {
     const VkShaderStageFlags st = GraphicsBindingStages(includeMeshShaderStages);
     VkDescriptorSetLayoutBinding bindings[2] = {};
@@ -653,9 +680,11 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
     VkPipelineLayout computeLightCull, VkPipelineLayout computeGpuCull,
     VkPipelineLayout ibl, VkPipelineLayout outlinePost, VkPipelineLayout composeBootstrap,
     VkPipelineLayout RasterForwardMinimal, VkPipelineLayout rasterGBuffer, VkPipelineLayout rasterDeferredLighting,
+    VkPipelineLayout rasterShadow,
     VkPipelineLayout pushOnly,
     PipelineLayoutKind kind) {
     switch (kind) {
+        case PipelineLayoutKind::PushOnly: return pushOnly;
         case PipelineLayoutKind::Forward: return forward;
         case PipelineLayoutKind::Post: return post;
         case PipelineLayoutKind::Shadow: return shadow;
@@ -669,13 +698,14 @@ VkPipelineLayout GetPipelineLayoutForKind(VkPipelineLayout forward, VkPipelineLa
         case PipelineLayoutKind::RasterForwardMinimal: return RasterForwardMinimal;
         case PipelineLayoutKind::RasterGBuffer: return rasterGBuffer;
         case PipelineLayoutKind::RasterDeferredLighting: return rasterDeferredLighting;
-        case PipelineLayoutKind::PushOnly: return pushOnly; /* Legacy aliases PushOnly (same enum value) */
+        case PipelineLayoutKind::RasterShadow: return rasterShadow;
+        default: return VK_NULL_HANDLE;
     }
-    return VK_NULL_HANDLE;
 }
 
 uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
     switch (kind) {
+        case PipelineLayoutKind::PushOnly: return 0; // Legacy / PushOnly
         case PipelineLayoutKind::Forward: return 5;
         case PipelineLayoutKind::Post: return 2;
         case PipelineLayoutKind::Shadow: return 3;
@@ -686,12 +716,12 @@ uint32_t GetRequiredDescriptorSetCount(PipelineLayoutKind kind) {
         case PipelineLayoutKind::IBL: return 1;
         case PipelineLayoutKind::OutlinePost: return 1;
         case PipelineLayoutKind::ComposeBootstrap: return 1;
-        case PipelineLayoutKind::RasterForwardMinimal: return 2;
+        case PipelineLayoutKind::RasterForwardMinimal: return 2; // set0=Frame, set1=RasterForwardData
         case PipelineLayoutKind::RasterGBuffer: return 3; // set0=Frame, set1=RasterGBufferData, set2=Bindless
         case PipelineLayoutKind::RasterDeferredLighting: return 2; // set0=Frame, set1=RasterDeferredLightingData
-        case PipelineLayoutKind::PushOnly: return 0; /* Legacy aliases PushOnly (same enum value) */
+        case PipelineLayoutKind::RasterShadow: return 2; // set0=Frame, set1=RasterShadowData
+        default: return 0;
     }
-    return 0;
 }
 
 } // namespace vkres

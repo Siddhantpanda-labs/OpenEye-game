@@ -128,7 +128,7 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthTest(true);
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
-    cmd->SetCullFace(false);
+    cmd->SetCullFace(true);
 
     cmd->BindPipeline(m_pipeline);
     rhi::IDescriptorSet* sets[2] = {m_frameSets[frameIdx], m_forwardDataSets[frameIdx]};
@@ -137,12 +137,14 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
     rhi::IBuffer* lastVB = nullptr;
     rhi::IBuffer* lastIB = nullptr;
 
-    for (uint32_t i = 0; i < n; ++i) {
+    uint32_t i = 0;
+    while (i < n) {
         const DrawItem& it = m_drawList->items[i];
         const MeshHandle h = m_meshResolver->TryResolveMesh(it.meshHandle);
-        if (!h.IsValid())
+        if (!h.IsValid()) {
+            ++i;
             continue;
-        cmd->SetPushConstants(0, sizeof(uint32_t), &i);
+        }
 
         if (lastVB != h.vertexBuffer) {
             cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
@@ -152,12 +154,31 @@ void ForwardOpaquePass::Execute(rhi::ICommandList* cmd) {
             cmd->BindIndexBuffer(h.indexBuffer, h.indexType, 0);
             lastIB = h.indexBuffer;
         }
-        if (!h.submeshes.empty()) {
-            for (const Submesh& sm : h.submeshes)
-                cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
-        } else {
-            cmd->DrawIndexed(h.totalIndexCount, 0, 0);
+
+        uint32_t instanceCount = 1;
+        while (i + instanceCount < n) {
+            const DrawItem& nextIt = m_drawList->items[i + instanceCount];
+            if (nextIt.meshHandle != it.meshHandle ||
+                nextIt.materialId != it.materialId ||
+                nextIt.submeshIndex != it.submeshIndex) {
+                break;
+            }
+            ++instanceCount;
         }
+
+        cmd->SetPushConstants(0, sizeof(uint32_t), &i);
+
+        if (it.submeshIndex >= 0 && it.submeshIndex < static_cast<int32_t>(h.submeshes.size())) {
+            const Submesh& sm = h.submeshes[it.submeshIndex];
+            cmd->DrawIndexedInstanced(sm.indexCount, sm.indexOffset, 0, instanceCount);
+        } else if (!h.submeshes.empty()) {
+            for (const Submesh& sm : h.submeshes)
+                cmd->DrawIndexedInstanced(sm.indexCount, sm.indexOffset, 0, instanceCount);
+        } else {
+            cmd->DrawIndexedInstanced(h.totalIndexCount, 0, 0, instanceCount);
+        }
+
+        i += instanceCount;
     }
 }
 

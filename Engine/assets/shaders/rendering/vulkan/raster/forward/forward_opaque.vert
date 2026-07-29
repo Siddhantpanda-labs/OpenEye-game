@@ -38,7 +38,8 @@ layout(location = 2) out vec2 vUv;
 layout(location = 3) flat out uint vMaterialId;
 
 void main() {
-    PerObjectRow row = gPerObject.items[pc.objectIndex];
+    uint objIdx = pc.objectIndex + gl_InstanceIndex;
+    PerObjectRow row = gPerObject.items[objIdx];
     vec4 worldPos = row.model * vec4(inPosition, 1.0);
     mat3 nMat = mat3(transpose(inverse(row.model)));
     vWorldPos = worldPos.xyz;

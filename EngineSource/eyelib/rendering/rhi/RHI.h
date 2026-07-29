@@ -250,6 +250,7 @@ struct IDevice {
         IBLPass,
         OutlinePost,
         RasterForwardData,
+        RasterShadowData,
         RasterGBufferData,
         RasterDeferredLightingData,
     };

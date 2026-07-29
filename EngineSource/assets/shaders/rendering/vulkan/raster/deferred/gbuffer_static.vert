@@ -69,7 +69,8 @@ layout(location = 8) flat out uvec4 vTextureHandles01;
 layout(location = 9) flat out uvec4 vTextureHandles23;
 
 void main() {
-    PerObjectRow row = gPerObject.items[pc.objectIndex];
+    uint objIdx = pc.objectIndex + gl_InstanceIndex;
+    PerObjectRow row = gPerObject.items[objIdx];
     uint matId = (pc.materialIdOverride != 0xFFFFFFFFu) ? pc.materialIdOverride : row.materialId;
     MaterialRow mat = gMaterialTable.rows[matId];
     vec4 worldPos = row.model * vec4(inPosition, 1.0);

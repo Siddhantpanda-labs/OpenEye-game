@@ -13,6 +13,7 @@ class IMeshHandleResolver;
 namespace rhi {
 struct IRenderTarget;
 struct IPipeline;
+struct IDescriptorSet;
 }
 
 /**
@@ -31,6 +32,7 @@ public:
                rhi::IPipeline* shadowPipeline,
                const IMeshHandleResolver* meshResolver,
                const ShadowCasterList* casterList,
+               rhi::IDescriptorSet* shadowDataSet,
                const std::vector<math::Mat4>& pointFaceViewProjs) noexcept;
 
     void CollectTextureBarriers(const FrameGraphBlackboard& blackboard, FrameGraphBarrierList& out) override;
@@ -43,6 +45,7 @@ private:
     rhi::IPipeline* m_shadowPipeline = nullptr;
     const IMeshHandleResolver* m_meshResolver = nullptr;
     const ShadowCasterList* m_casterList = nullptr;
+    rhi::IDescriptorSet* m_shadowDataSet = nullptr;
     std::vector<math::Mat4> m_pointFaceViewProjs;
 };
 

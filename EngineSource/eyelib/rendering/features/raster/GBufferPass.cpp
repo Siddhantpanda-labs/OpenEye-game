@@ -128,7 +128,7 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     cmd->SetDepthTest(true);
     cmd->SetDepthWrite(true);
     cmd->SetDepthFuncLess(true);
-    cmd->SetCullFace(false);
+    cmd->SetCullFace(true);
 
     cmd->BindPipeline(m_pipeline);
     rhi::IBindlessHeap* bindless = m_device->GetOrCreateSharedBindlessHeap();
@@ -141,13 +141,19 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
     rhi::IBuffer* lastVB = nullptr;
     rhi::IBuffer* lastIB = nullptr;
 
-    for (uint32_t i = 0; i < n; ++i) {
+    uint32_t i = 0;
+    while (i < n) {
         const DrawItem& it = m_drawList->items[i];
-        if (it.layer != DrawLayer::Opaque) continue; // Only draw opaque in GBuffer
+        if (it.layer != DrawLayer::Opaque) {
+            ++i;
+            continue; // Only draw opaque in GBuffer
+        }
 
         const MeshHandle h = m_meshResolver->TryResolveMesh(it.meshHandle);
-        if (!h.IsValid())
+        if (!h.IsValid()) {
+            ++i;
             continue;
+        }
 
         if (lastVB != h.vertexBuffer) {
             cmd->BindVertexBuffer(h.vertexBuffer, 0, 0);
@@ -158,12 +164,25 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
             lastIB = h.indexBuffer;
         }
 
+        // Count instances of this identical mesh+submesh+material
+        uint32_t instanceCount = 1;
+        while (i + instanceCount < n) {
+            const DrawItem& nextIt = m_drawList->items[i + instanceCount];
+            if (nextIt.layer != DrawLayer::Opaque ||
+                nextIt.meshHandle != it.meshHandle ||
+                nextIt.materialId != it.materialId ||
+                nextIt.submeshIndex != it.submeshIndex) {
+                break;
+            }
+            ++instanceCount;
+        }
+
         auto drawSubmesh = [&](const Submesh& sm) {
             GBufferPushConstants pc{};
-            pc.objectIndex = i;
+            pc.objectIndex = i; // This is now baseObjectIndex
             pc.materialIdOverride = it.materialId;
             cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
-            cmd->DrawIndexedSubmesh(sm.indexCount, sm.indexOffset, 0);
+            cmd->DrawIndexedInstanced(sm.indexCount, sm.indexOffset, 0, instanceCount);
         };
 
         if (it.submeshIndex >= 0 && it.submeshIndex < static_cast<int32_t>(h.submeshes.size())) {
@@ -174,11 +193,13 @@ void GBufferPass::Execute(rhi::ICommandList* cmd) {
             }
         } else {
             GBufferPushConstants pc{};
-            pc.objectIndex = i;
+            pc.objectIndex = i; // This is now baseObjectIndex
             pc.materialIdOverride = it.materialId;
             cmd->SetPushConstants(0, sizeof(GBufferPushConstants), &pc);
-            cmd->DrawIndexed(h.totalIndexCount, 0, 0);
+            cmd->DrawIndexedInstanced(h.totalIndexCount, 0, 0, instanceCount);
         }
+
+        i += instanceCount;
     }
 }
 
