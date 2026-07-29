@@ -257,7 +257,7 @@ endif()
 # Game Application (Final Runtime)
 # --------------------------------------
 if(OPENEYE_BUILD_GAME)
-    add_subdirectory(app/openmeta)
+    # add_subdirectory(app/openmeta)
 endif()
 
 # --------------------------------------

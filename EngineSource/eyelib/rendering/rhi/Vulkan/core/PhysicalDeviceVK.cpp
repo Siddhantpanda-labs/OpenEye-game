@@ -40,14 +40,21 @@ bool PhysicalDeviceVK::Select(PhysicalDeviceVK* out, void* instance) {
         return false;
     }
     VkPhysicalDevice chosen = VK_NULL_HANDLE;
+    VkPhysicalDevice fallback = VK_NULL_HANDLE;
     for (VkPhysicalDevice pd : devices) {
         VkPhysicalDeviceProperties props = {};
         vkGetPhysicalDeviceProperties(pd, &props);
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
-            props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
             chosen = pd;
             break;
+        } else if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+            if (fallback == VK_NULL_HANDLE) {
+                fallback = pd;
+            }
         }
+    }
+    if (chosen == VK_NULL_HANDLE) {
+        chosen = fallback;
     }
     if (chosen == VK_NULL_HANDLE)
         chosen = devices[0];
